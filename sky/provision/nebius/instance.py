@@ -45,7 +45,6 @@ def _filter_instances(project_id: str,
             continue
         if instance.get('name') in possible_names:
             filtered_instances[instance_id] = instance
-    # print('_filter_instances :: ', instances, filtered_instances)
     return filtered_instances
 
 

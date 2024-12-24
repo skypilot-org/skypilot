@@ -81,7 +81,6 @@ def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
             name=name,
         )).wait()
         cluster_id = cluster.metadata.id
-        print('cluster1', cluster)
     except RequestError:
         cluster = service.create(CreateGpuClusterRequest(
             metadata=ResourceMetadata(
@@ -92,7 +91,6 @@ def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
                 infiniband_fabric='fabric-4'
             )
         )).wait()
-        print(cluster)
         cluster_id = cluster.resource_id
     return cluster_id
 

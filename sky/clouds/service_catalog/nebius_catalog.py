@@ -77,7 +77,6 @@ def get_instance_type_for_accelerator(
     Returns a list of instance types satisfying the required count of
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
-    print('get_instance_type_for_accelerator')
     if zone is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Nebius does not support zones.')
