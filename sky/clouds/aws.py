@@ -2,6 +2,8 @@
 import enum
 import fnmatch
 import functools
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -16,6 +18,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.clouds.service_catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -624,14 +627,10 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
-        proc = subprocess.run('aws configure list',
-                              shell=True,
-                              check=False,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-        if proc.returncode != 0:
+        stdout = cls._aws_configure_list()
+        if stdout is None:
             return None
-        stdout = proc.stdout.decode()
+        output = stdout.decode()
 
         # We determine the identity type by looking at the output of
         # `aws configure list`. The output looks like:
@@ -646,10 +645,10 @@ class AWS(clouds.Cloud):
 
         def _is_access_key_of_type(type_str: str) -> bool:
             # The dot (.) does not match line separators.
-            results = re.findall(fr'access_key.*{type_str}', stdout)
+            results = re.findall(fr'access_key.*{type_str}', output)
             if len(results) > 1:
                 raise RuntimeError(
-                    f'Unexpected `aws configure list` output:\n{stdout}')
+                    f'Unexpected `aws configure list` output:\n{output}')
             return len(results) == 1
 
         if _is_access_key_of_type(AWSIdentityType.SSO.value):
@@ -664,8 +663,20 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
+    @functools.lru_cache(maxsize=1)
+    def _aws_configure_list(cls) -> Optional[bytes]:
+        proc = subprocess.run('aws configure list',
+                              shell=True,
+                              check=False,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            return None
+        return proc.stdout
+
+    @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
-    def get_user_identities(cls) -> Optional[List[List[str]]]:
+    def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
         These fields come from `aws sts get-caller-identity`. We permit the same
@@ -772,6 +783,38 @@ class AWS(clouds.Cloud):
         # TODO: Return a list of identities in the profile when we support
         #   automatic switching for AWS. Currently we only support one identity.
         return [user_ids]
+
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        stdout = cls._aws_configure_list()
+        if stdout is None:
+            # `aws configure list` is not available, possible reasons:
+            # - awscli is not installed but credentials are valid, e.g. run from
+            #   an EC2 instance with IAM role
+            # - aws credentials are not set, proceed anyway to get unified error
+            #   message for users
+            return cls._sts_get_caller_identity()
+        config_hash = hashlib.md5(stdout).hexdigest()[:8]
+        # Getting aws identity cost ~1s, so we cache the result with the output of
+        # `aws configure list` as cache key. Different `aws configure list` output
+        # can have same aws identity, our assumption is the output would be stable
+        # in real world, so the number of cache files would be limited.
+        # TODO(aylei): consider using a more stable cache key and evalute eviction.
+        cache_path = catalog_common.get_catalog_path(
+            f'aws/user-identity-{config_hash}.txt')
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    return json.loads(f.read())
+            except json.JSONDecodeError:
+                # cache is invalid, ignore it and fetch identity again
+                pass
+
+        result = cls._sts_get_caller_identity()
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            f.write(json.dumps(result))
+        return result
 
     @classmethod
     def get_active_user_identity_str(cls) -> Optional[str]:
