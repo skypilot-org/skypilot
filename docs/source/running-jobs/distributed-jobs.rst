@@ -56,6 +56,7 @@ In the above,
 
         ulimit -n 65535
 
+You can find more `distributed training examples <https://github.com/skypilot-org/skypilot/tree/master/examples/distributed-pytorch>`_ in our `GitHub repository <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
 
 Environment variables
 -----------------------------------------
