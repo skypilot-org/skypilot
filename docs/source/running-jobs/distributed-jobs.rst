@@ -6,39 +6,40 @@ Distributed Multi-Node Jobs
 SkyPilot supports multi-node cluster
 provisioning and distributed execution on many nodes.
 
-For example, here is a simple PyTorch Distributed training example:
+For example, here is a simple example to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) across 2 nodes with Distributed Data Parallel (DDP) in PyTorch.
 
 .. code-block:: yaml
-   :emphasize-lines: 6-6,21-21,23-26
+  :emphasize-lines: 6,19,23-24,26
 
-   name: resnet-distributed-app
+  name: minGPT-ddp
 
-   resources:
-     accelerators: A100:8
+  resources:
+      accelerators: A100:8
 
-   num_nodes: 2
+  num_nodes: 2
 
-   setup: |
-     pip3 install --upgrade pip
-     git clone https://github.com/michaelzhiluo/pytorch-distributed-resnet
-     cd pytorch-distributed-resnet
-     # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
-     pip3 install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
-     mkdir -p data  && mkdir -p saved_models && cd data && \
-       wget -c --quiet https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz
-     tar -xvzf cifar-10-python.tar.gz
+  setup: |
+      git clone --depth 1 https://github.com/pytorch/examples || true
+      cd examples
+      git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp
+      # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
+      uv pip install -r requirements.txt "numpy<2" "torch==1.12.1+cu113" --extra-index-url https://download.pytorch.org/whl/cu113
 
-   run: |
-     cd pytorch-distributed-resnet
+  run: |
+      cd examples/mingpt
+      export LOGLEVEL=INFO
 
-     MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
-     torchrun \
+      MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+      echo "Starting distributed training, head node: $MASTER_ADDR"
+
+      torchrun \
       --nnodes=$SKYPILOT_NUM_NODES \
-      --master_addr=$MASTER_ADDR \
       --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
-      --node_rank=$SKYPILOT_NODE_RANK \
-      --master_port=12375 \
-       resnet_ddp.py --num_epochs 20
+      --master_addr=$MASTER_ADDR \
+      --node_rank=${SKYPILOT_NODE_RANK} \
+      --master_port=8008 \
+      main.py
+
 
 In the above,
 
