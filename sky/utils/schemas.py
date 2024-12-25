@@ -797,6 +797,15 @@ def get_config_schema():
                 'resource_group_vm': {
                     'type': 'string',
                 },
+                'subnet_id': {
+                    'type': 'string',
+                },
+                'use_internal_ips': {
+                    'type': 'boolean',
+                },
+                'msi_id': {
+                    'type': 'string',
+                },
             }
         },
         'kubernetes': {
