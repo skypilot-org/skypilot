@@ -111,7 +111,6 @@ class AWSIdentityType(enum.Enum):
         """
         expirable_types = {
             AWSIdentityType.ENV, AWSIdentityType.IAM_ROLE,
-            AWSIdentityType.CONTAINER_ROLE,
             AWSIdentityType.SHARED_CREDENTIALS_FILE
         }
         return self in expirable_types
