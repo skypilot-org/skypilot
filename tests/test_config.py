@@ -7,6 +7,7 @@ import pytest
 
 import sky
 from sky import skypilot_config
+import sky.exceptions
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
@@ -83,6 +84,39 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
                             annotations:
                                 abc: def
                         spec:
+                            imagePullSecrets:
+                                - name: my-secret-2
+                    provision_timeout: 100
+                gcp:
+                    managed_instance_group:
+                        run_duration: {RUN_DURATION_OVERRIDE}
+                nvidia_gpus:
+                    disable_ecc: true
+        resources:
+            image_id: docker:ubuntu:latest
+
+        setup: echo 'Setting up...'
+        run: echo 'Running...'
+        """))
+
+def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
+    task_file_path.write_text(
+        textwrap.dedent(f"""\
+        experimental:
+            config_overrides:
+                docker:
+                    run_options:
+                        - -v /tmp:/tmp
+                kubernetes:
+                    pod_config:
+                        metadata:
+                            labels:
+                                test-key: test-value
+                            annotations:
+                                abc: def
+                        spec:
+                            containers:
+                                - name:
                             imagePullSecrets:
                                 - name: my-secret-2
                     provision_timeout: 100
@@ -334,6 +368,26 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
                    'imagePullSecrets'][0]['name'] == 'my-secret-2'
     assert cluster_pod_config['spec']['runtimeClassName'] == 'nvidia'
 
+def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
+                                        enable_all_clouds) -> None:
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+
+    _reload_config()
+    task_path = tmp_path / 'task.yaml'
+    _create_invalid_config_yaml_file(task_path)
+    task = sky.Task.from_yaml(task_path)
+
+    # Test Kubernetes pod_config invalid
+    cluster_name = 'test-kubernetes-config-with-override'
+    task.set_resources_override({'cloud': sky.Kubernetes()})
+    exception = None
+    try:
+        sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    except sky.exceptions.ResourcesUnavailableError as e:
+        exception = e
+    assert not exception
 
 def test_gcp_config_with_override(monkeypatch, tmp_path,
                                   enable_all_clouds) -> None:
