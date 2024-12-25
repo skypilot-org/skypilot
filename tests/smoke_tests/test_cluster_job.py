@@ -556,6 +556,7 @@ def test_tpu_vm_pod():
 
 
 # ---------- TPU Pod Slice on GKE. ----------
+@pytest.mark.gke
 @pytest.mark.kubernetes
 def test_tpu_pod_slice_gke():
     name = smoke_tests_utils.get_cluster_name()
@@ -865,6 +866,7 @@ def test_add_and_remove_pod_annotations_with_autostop():
 
 
 # ---------- Container logs from task on Kubernetes ----------
+@pytest.mark.gke
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -1414,6 +1416,7 @@ def test_aws_custom_image():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.gke
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
     'image_id',
