@@ -534,7 +534,7 @@ def initialize_images_csv(csv_saving_path: str, vc_object,
                         gpu_name = tag_name.split('-')[1]
                         if gpu_name not in gpu_tags:
                             gpu_tags.append(gpu_name)
-                if len(gpu_tags) > 0:
+                if gpu_tags:
                     gpu_tags_str = str(gpu_tags).replace('\'', '\"')
                     f.write(f'{item.id},{vcenter_name},{item_cpu},{item_memory}'
                             f',,,\'{gpu_tags_str}\'\n')
