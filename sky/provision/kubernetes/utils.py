@@ -903,7 +903,9 @@ def check_pod_config(pod_config: dict) \
         str: Error message about why the pod_config is invalid, None otherwise.
     """
     errors = []
-    api_client = kubernetes.api_client()
+    # This api_client won't be used to send any requests, so there is no need to
+    # load kubeconfig
+    api_client = kubernetes.kubernetes.client.ApiClient()
 
     # Used for kubernetes api_client deserialize function, the function will use
     # data attr, the detail ref:
