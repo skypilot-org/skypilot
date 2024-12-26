@@ -384,12 +384,12 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     # Test Kubernetes pod_config invalid
     cluster_name = 'test_k8s_config_with_invalid_config'
     task.set_resources_override({'cloud': sky.Kubernetes()})
-    exception = None
+    exception_occurred = False
     try:
         sky.launch(task, cluster_name=cluster_name, dryrun=True)
-    except sky.exceptions.ResourcesUnavailableError as e:
-        exception = e
-    assert not exception
+    except sky.exceptions.ResourcesUnavailableError:
+        exception_occurred = True
+    assert exception_occurred
 
 
 def test_gcp_config_with_override(monkeypatch, tmp_path,
