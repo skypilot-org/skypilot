@@ -922,7 +922,7 @@ def write_cluster_config(
         valid, message = kubernetes_utils.check_pod_config(pod_config)
         if not valid:
             raise exceptions.InvalidCloudConfigs(
-                f'There are invalid config in pod_config, deatil: {message}')
+                f'Invalid pod_config. Deatil: {message}')
 
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
