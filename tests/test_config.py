@@ -99,6 +99,7 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
         run: echo 'Running...'
         """))
 
+
 def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
     task_file_path.write_text(
         textwrap.dedent(f"""\
@@ -368,6 +369,7 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
                    'imagePullSecrets'][0]['name'] == 'my-secret-2'
     assert cluster_pod_config['spec']['runtimeClassName'] == 'nvidia'
 
+
 def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
                                         enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
@@ -380,7 +382,7 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     task = sky.Task.from_yaml(task_path)
 
     # Test Kubernetes pod_config invalid
-    cluster_name = 'test-kubernetes-config-with-override'
+    cluster_name = 'test_k8s_config_with_invalid_config'
     task.set_resources_override({'cloud': sky.Kubernetes()})
     exception = None
     try:
@@ -388,6 +390,7 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     except sky.exceptions.ResourcesUnavailableError as e:
         exception = e
     assert not exception
+
 
 def test_gcp_config_with_override(monkeypatch, tmp_path,
                                   enable_all_clouds) -> None:
