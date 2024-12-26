@@ -27,6 +27,7 @@ html[data-theme="light"] {
   --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
   --pst-color-text-base: #4c4c4d;
+  --logo-text-color: #0E2E65;
 }
 
 html[data-theme="dark"] {
@@ -34,6 +35,7 @@ html[data-theme="dark"] {
   --pst-color-primary: #176de8;
   --pst-color-secondary: var(--pst-color-primary);
   --pst-color-text-base: #d8d8d8;
+  --logo-text-color: #D8D8D8;
   
   .bd-sidebar::-webkit-scrollbar {
     width: 6px;

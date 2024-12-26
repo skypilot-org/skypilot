@@ -37,12 +37,13 @@ if typing.TYPE_CHECKING:
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    name: Optional[str] = None,
-    stream_logs: bool = True,
-    detach_run: bool = False,
-    retry_until_up: bool = False,
-    fast: bool = False,
+        task: Union['sky.Task', 'sky.Dag'],
+        name: Optional[str] = None,
+        stream_logs: bool = True,
+        detach_run: bool = False,
+        retry_until_up: bool = False,
+        # TODO(cooperc): remove fast arg before 0.8.0
+        fast: bool = True,  # pylint: disable=unused-argument for compatibility
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
@@ -54,9 +55,8 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
-        fast: Whether to use sky.launch(fast=True) for the jobs controller. If
-          True, the SkyPilot wheel and the cloud credentials may not be updated
-          on the jobs controller.
+        fast: [Deprecated] Does nothing, and will be removed soon. We will
+          always use fast mode as it's fully safe now.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -149,7 +149,7 @@ def launch(
                    idle_minutes_to_autostop=skylet_constants.
                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
                    retry_until_up=True,
-                   fast=fast,
+                   fast=True,
                    _disable_controller_check=True)
 
 
@@ -347,8 +347,8 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'job_ids={job_id_str}' if job_ids else ''
         argument_str += f' name={name}' if name is not None else ''
         argument_str += ' all' if all else ''
         with ux_utils.print_exception_no_traceback():

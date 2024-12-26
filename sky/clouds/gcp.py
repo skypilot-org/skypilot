@@ -167,7 +167,7 @@ class GCP(clouds.Cloud):
         # ~/.config/gcloud/application_default_credentials.json.
         f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
     _APPLICATION_CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -175,7 +175,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
         'to the path of your service account key file.\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -830,13 +830,13 @@ class GCP(clouds.Cloud):
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if len(diffs) > 0:
+        if diffs:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
