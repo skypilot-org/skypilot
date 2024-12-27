@@ -3950,7 +3950,7 @@ class OciStore(AbstractStore):
         if remote_path.startswith(f'/{self.name}'):
             # If the remote path is /bucket_name, we need to
             # remove the leading /
-            remote_path = remote_path.lstrip()
+            remote_path = remote_path.lstrip('/')
 
         filename = os.path.basename(remote_path)
         if not local_path.endswith(filename):
