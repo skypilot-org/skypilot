@@ -362,7 +362,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
             # separated by `-`.
             (f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
-            smoke_tests_utils.zJOB_WAIT_NOT_RUNNING.format(job_name=name),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
