@@ -162,7 +162,8 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str,
+                       auto_retry: bool = False) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file)
@@ -179,14 +180,18 @@ def _generate_pipeline(test_file: str) -> Dict[str, Any]:
                 },
                 'if': f'build.env("{cloud}") == "1"'
             }
+            if auto_retry:
+                step['retry'] = {
+                    # Automatically retry 2 times on any failure by default.
+                    'automatic': True
+                }
             steps.append(step)
     return {'steps': steps}
 
 
 def _dump_pipeline_to_file(yaml_file_path: str,
                            pipelines: List[Dict[str, Any]],
-                           extra_env: Optional[Dict[str, str]] = None,
-                           extra_config: Optional[Dict[str, Any]] = None):
+                           extra_env: Optional[Dict[str, str]] = None):
     default_env = {'LOG_TO_STDOUT': '1', 'PYTHONPATH': '${PYTHONPATH}:$(pwd)'}
     if extra_env:
         default_env.update(extra_env)
@@ -199,8 +204,6 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         # kind of test may fail for requiring locks on the same resources.
         random.shuffle(all_steps)
         final_pipeline = {'steps': all_steps, 'env': default_env}
-        if extra_config:
-            final_pipeline.update(extra_config)
         yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
@@ -209,23 +212,13 @@ def _convert_release(test_files: List[str]):
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file)
+        pipeline = _generate_pipeline(test_file, auto_retry=True)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(
-        yaml_file_path,
-        output_file_pipelines,
-        extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP},
-        extra_config={
-            'retry': {
-                'automatic': {
-                    'exit_status': -1,  # Retry on any failure
-                    'limit': 3,  # Retry up to 3 times
-                    'interval': 60  # Retry every 60 seconds
-                }
-            }
-        })
+    _dump_pipeline_to_file(yaml_file_path,
+                           output_file_pipelines,
+                           extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP})
 
 
 def _convert_quick_tests_core(test_files: List[str]):
