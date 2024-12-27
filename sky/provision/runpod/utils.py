@@ -141,10 +141,17 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     # Use base64 to deal with the tricky quoting issues caused by runpod API.
     encoded = base64.b64encode(setup_cmd.encode('utf-8')).decode('utf-8')
 
+    docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
+                   f'bash init.sh\'')
+
     # Port 8081 is occupied for nginx in the base image.
     custom_ports_str = ''
     if ports is not None:
         custom_ports_str = ''.join([f'{p}/tcp,' for p in ports])
+    ports_str = (f'22/tcp,'
+                 f'{custom_ports_str}'
+                 f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
+                 f'{constants.SKY_REMOTE_RAY_PORT}/http')
 
     template_id = None
     if docker_login_config is not None:
@@ -167,13 +174,6 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         )
         template_id = create_template_resp['id']
 
-    docker_args = (f'bash -c \'echo {encoded} | base64 --decode > init.sh; '
-                   f'bash init.sh\'')
-    ports = (f'22/tcp,'
-             f'{custom_ports_str}'
-             f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
-             f'{constants.SKY_REMOTE_RAY_PORT}/http')
-
     params = {
         'name': name,
         'image_name': image_name,
@@ -184,7 +184,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
         'gpu_count': gpu_quantity,
         'country_code': region,
-        'ports': ports,
+        'ports': ports_str,
         'support_public_ip': True,
         'docker_args': docker_args,
         'template_id': template_id,
