@@ -37,7 +37,7 @@ if __name__ == '__main__':
     mapped_keys = (('gpu_name', 'InstanceType'), ('gpu_name',
                                                   'AcceleratorName'),
                    ('num_gpus', 'AcceleratorCount'), ('cpu_cores', 'vCPUs'),
-                   ('gpu_total_ram', 'MemoryGiB'), ('gpu_name', 'GpuInfo'),
+                   ('cpu_ram', 'MemoryGiB'), ('gpu_name', 'GpuInfo'),
                    ('search.totalHour', 'Price'),
                    ('search.totalHour', 'SpotPrice'), ('geolocation', 'Region'))
     writer = csv.DictWriter(sys.stdout, fieldnames=[x[1] for x in mapped_keys])
