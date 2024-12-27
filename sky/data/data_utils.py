@@ -557,6 +557,7 @@ class Rclone:
     """Provides methods to manage and generate Rclone configuration profile."""
 
     class RcloneStores(enum.Enum):
+        """Rclone supporting storage types and supporting methods."""
         S3 = 'S3'
         GCS = 'GCS'
         IBM = 'IBM'
@@ -590,8 +591,8 @@ class Rclone:
                        storage_account_key: Optional[str] = None) -> str:
             """Generates an Rclone configuration for a specific storage type.
 
-            This method creates an Rclone configuration string based on the storage
-            type and the provided parameters.
+            This method creates an Rclone configuration string based on the
+            storage type and the provided parameters.
 
             Args:
                 bucket_name: The name of the bucket.
@@ -644,8 +645,7 @@ class Rclone:
             elif self is Rclone.RcloneStores.R2:
                 cloudflare_session = cloudflare.session()
                 cloudflare_credentials = (
-                    cloudflare.get_r2_credentials(cloudflare_session)
-                )
+                    cloudflare.get_r2_credentials(cloudflare_session))
                 endpoint = cloudflare.create_endpoint()
                 access_key_id = cloudflare_credentials.access_key
                 secret_access_key = cloudflare_credentials.secret_key
@@ -780,7 +780,7 @@ class Rclone:
     @staticmethod
     def _remove_bucket_profile_rclone(bucket_name: str,
                                       cloud: RcloneStores) -> List[str]:
-        """Returns rclone profiles without profiles matching [profile_prefix+bucket_name].
+        """Returns rclone profiles without ones matching [prefix+bucket_name].
 
         Args:
             bucket_name: Name of the bucket.

@@ -841,13 +841,14 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
         if (storage_obj.mode == storage_lib.StorageMode.MOUNT or
-            storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED):
+                storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED):
             if storage_obj.source is None:
                 # Construct source URL with first store type and storage name
                 # E.g., s3://my-storage-name
                 store_types = list(storage_obj.stores.keys())
                 assert len(store_types) == 1, (
-                    'We only support one store type for now.', storage_obj.stores)
+                    'We only support one store type for now.',
+                    storage_obj.stores)
                 store_type = store_types[0]
                 store_object = storage_obj.stores[store_type]
                 source = storage_lib.StoreType.get_endpoint_url(

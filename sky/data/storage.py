@@ -28,7 +28,6 @@ from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
 from sky.data import storage_utils
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -1940,8 +1939,8 @@ class GcsStore(AbstractStore):
 
     def mount_cached_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
-        rclone_profile_name = data_utils.Rclone.RcloneStores.GCS.get_profile_name(
-            self.name)
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.GCS.get_profile_name(self.name))
         rclone_config = data_utils.Rclone.RcloneStores.GCS.get_config(
             rclone_profile_name=rclone_profile_name)
         mount_cached_cmd = mounting_utils.get_mount_cached_cmd(
@@ -3143,7 +3142,6 @@ class R2Store(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
-
     def mount_cached_command(self, mount_path: str) -> str:
         install_cmd = mounting_utils.get_rclone_install_cmd()
         rclone_profile_name = (
@@ -3154,7 +3152,6 @@ class R2Store(AbstractStore):
             rclone_config, rclone_profile_name, self.bucket.name, mount_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cached_cmd)
-
 
     def _create_r2_bucket(self,
                           bucket_name: str,
@@ -3511,7 +3508,8 @@ class IBMCosStore(AbstractStore):
                 'sky storage delete' or 'sky start'
         """
 
-        bucket_profile_name = data_utils.Rclone.RcloneStores.IBM.value + self.name
+        bucket_profile_name = (data_utils.Rclone.RcloneStores.IBM.value +
+                               self.name)
         try:
             bucket_region = data_utils.get_ibm_cos_bucket_region(self.name)
         except exceptions.StorageBucketGetError as e:

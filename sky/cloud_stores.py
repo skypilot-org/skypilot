@@ -20,7 +20,6 @@ from sky.adaptors import cloudflare
 from sky.adaptors import ibm
 from sky.clouds import gcp
 from sky.data import data_utils
-from sky.data.data_utils import Rclone
 from sky.skylet import constants
 from sky.utils import ux_utils
 
@@ -438,8 +437,8 @@ class IBMCosCloudStorage(CloudStorage):
     def _get_rclone_sync_command(self, source: str, destination: str):
         bucket_name, data_path, bucket_region = data_utils.split_cos_path(
             source)
-        rclone_profile_name = data_utils.Rclone.RcloneStores.IBM.get_profile_name(
-            bucket_name)
+        rclone_profile_name = (
+            data_utils.Rclone.RcloneStores.IBM.get_profile_name(bucket_name))
         data_path_in_bucket = f'{bucket_name}{data_path}'
         rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
             rclone_profile_name=rclone_profile_name, region=bucket_region)
