@@ -42,8 +42,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX}  $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
         # pylint: disable=line-too-long
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
-    )
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _PROJECT_HINT = (
         'Create a project and then set it as the default project,:\n'
@@ -51,8 +50,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX} $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
         # pylint: disable=line-too-long
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
-    )
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
@@ -196,6 +194,7 @@ class Cudo(clouds.Cloud):
         cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         del zones, cluster_name  # unused

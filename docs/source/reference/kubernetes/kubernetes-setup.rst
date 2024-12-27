@@ -260,7 +260,7 @@ You can also check the GPUs available on your nodes by running:
 
 .. code-block:: console
 
-    $ sky show-gpus --cloud kubernetes
+    $ sky show-gpus --cloud k8s
     Kubernetes GPUs
     GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
     L4    1, 2, 4                   12          12

@@ -308,6 +308,9 @@ def get_storage_schema():
 
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import load_balancing_policies
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -381,6 +384,11 @@ def get_service_schema():
             },
             'replicas': {
                 'type': 'integer',
+            },
+            'load_balancing_policy': {
+                'type': 'string',
+                'case_insensitive_enum': list(
+                    load_balancing_policies.LB_POLICIES.keys())
             },
         }
     }
@@ -655,6 +663,7 @@ class RemoteIdentityOptions(enum.Enum):
     """
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+    NO_UPLOAD = 'NO_UPLOAD'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -675,7 +684,14 @@ _REMOTE_IDENTITY_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     'remote_identity': {
-        'type': 'string'
+        'anyOf': [{
+            'type': 'string'
+        }, {
+            'type': 'object',
+            'additionalProperties': {
+                'type': 'string'
+            }
+        }]
     },
 }
 

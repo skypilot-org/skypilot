@@ -90,8 +90,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 image_name=config.node_config['ImageId'],
                 ports=config.ports_to_open_on_launch,
                 public_key=config.node_config['PublicKey'],
+                preemptible=config.node_config['Preemptible'],
+                bid_per_gpu=config.node_config['BidPerGPU'],
                 docker_login_config=config.provider_config.get(
-                    'docker_login_config'))
+                    'docker_login_config'),
+            )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -234,7 +237,12 @@ def query_ports(
         instances = _filter_instances(cluster_name_on_cloud,
                                       None,
                                       head_only=True)
-        assert len(instances) == 1
+        assert len(instances) <= 1
+        # It is possible that the instance is terminated on console by
+        # the user. In this case, the instance will not be found and we
+        # should return an empty dict.
+        if not instances:
+            return {}
         head_inst = list(instances.values())[0]
         ready_ports: Dict[int, List[common.Endpoint]] = {
             port: [common.SocketEndpoint(**endpoint)]
