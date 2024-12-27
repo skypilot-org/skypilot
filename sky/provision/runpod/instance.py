@@ -79,10 +79,11 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                       created_instance_ids=[])
 
     created_instance_ids = []
+    ephemeral_resources = []
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
-            instance_id = utils.launch(
+            instance_id, ers = utils.launch(
                 cluster_name=cluster_name_on_cloud,
                 node_type=node_type,
                 instance_type=config.node_config['InstanceType'],
@@ -96,6 +97,9 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 docker_login_config=config.provider_config.get(
                     'docker_login_config'),
             )
+            for er in ers:
+                if er is not None:
+                    ephemeral_resources.append(er)
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -124,7 +128,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                                   zone=None,
                                   head_instance_id=head_instance_id,
                                   resumed_instance_ids=[],
-                                  created_instance_ids=created_instance_ids)
+                                  created_instance_ids=created_instance_ids,
+                                  ephemeral_resources=ephemeral_resources)
 
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
@@ -146,7 +151,8 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    del provider_config  # unused
+    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    ephemeral_resources = provider_config.get('ephemeral_resources', [])
     instances = _filter_instances(cluster_name_on_cloud, None)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
@@ -160,6 +166,12 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
+    if ephemeral_resources:
+        # See sky/provision/runpod/utils.py::launch for details
+        assert len(ephemeral_resources) == 2, ephemeral_resources
+        template_name, registry_auth_id = ephemeral_resources
+        utils.delete_pod_template(template_name)
+        utils.delete_register_auth(registry_auth_id)
 
 
 def get_cluster_info(

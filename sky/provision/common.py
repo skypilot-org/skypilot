@@ -78,6 +78,7 @@ class ProvisionRecord:
     resumed_instance_ids: List[InstanceId]
     # The IDs of all just created instances.
     created_instance_ids: List[InstanceId]
+    ephemeral_resources: List[Any] = dataclasses.field(default_factory=list)
 
     def is_instance_just_booted(self, instance_id: InstanceId) -> bool:
         """Whether or not the instance is just booted.
