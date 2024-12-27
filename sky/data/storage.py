@@ -1011,8 +1011,11 @@ class Storage(object):
             # to state.
             logger.error(f'Could not create {store_type} store '
                          f'with name {self.name}.')
-            global_user_state.set_storage_status(self.name,
-                                                 StorageStatus.INIT_FAILED)
+            try:
+                global_user_state.set_storage_status(self.name,
+                                                     StorageStatus.INIT_FAILED)
+            except ValueError as e:
+                logger.error(f'Error setting storage status: {e}')
             raise
         except exceptions.StorageBucketGetError:
             # Bucket get failed, so this is not sky managed. Do not update state
