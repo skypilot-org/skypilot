@@ -2,7 +2,8 @@
 
 import base64
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
+import uuid
 
 from sky import sky_logging
 from sky.adaptors import runpod
@@ -101,15 +102,60 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
     return instance_dict
 
 
-def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str, ports: Optional[List[int]], public_key: str,
-           preemptible: Optional[bool], bid_per_gpu: float,
+def _create_template_for_docker_login(
+        cluster_name: str, image_name: str,
+        docker_login_config: Optional[Dict[str,
+                                           str]]) -> Tuple[str, Optional[str]]:
+    if docker_login_config is None:
+        return image_name, None
+    # We add a uuid here to avoid the name conflict for terminating and
+    # launching with the same cluster name. Please see the comments below
+    # for reason we cannot cleanup the old resources.
+    name = f'{cluster_name}-{str(uuid.uuid4())[:4]}'
+    login_config = docker_utils.DockerLoginConfig(**docker_login_config)
+    container_registry_auth_name = f'{name}-registry-auth'
+    container_template_name = f'{name}-docker-login-template'
+    # The `name` argument is only for display purpose and the registry server
+    # will be splitted from the docker image name (Tested with AWS ECR).
+    # Here we only need the username and password to create the registry auth.
+    # TODO(tian): RunPod python API does not provide a way to get the registry
+    # auth and template ID by the name, and the only way to get the ID is when
+    # we create it. So we use a separate auth and template per cluster. This
+    # also assumes that every cluster has only one node, so no extra worker
+    # nodes will reuse the same auth and template name.
+    # TODO(tian): RunPod python API does not provide a way to delete the
+    # template. So we skip the deletion of template for now. We should
+    # implement this once they provide the API.
+    # TODO(tian): We also skipped the deletion of the auth for now, as the
+    # RunPod python API does not provide a way to delete the auth with the
+    # name (nor to get the id by the name), which requires we store the id
+    # at creation somewhere, and returning this value to outer caller will
+    # increase the call chain complexity. We should implement this once they
+    # provide the API.
+    create_auth_resp = runpod.runpod.create_container_registry_auth(
+        name=container_registry_auth_name,
+        username=login_config.username,
+        password=login_config.password,
+    )
+    registry_auth_id = create_auth_resp['id']
+    create_template_resp = runpod.runpod.create_template(
+        name=container_template_name,
+        image_name=None,
+        registry_auth_id=registry_auth_id,
+    )
+    return login_config.format_image(image_name), create_template_resp['id']
+
+
+def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
+           disk_size: int, image_name: str, ports: Optional[List[int]],
+           public_key: str, preemptible: Optional[bool], bid_per_gpu: float,
            docker_login_config: Optional[Dict[str, str]]) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
     GPU, and launches the instance.
     """
+    name = f'{cluster_name}-{node_type}'
     gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
     gpu_quantity = int(instance_type.split('_')[0].replace('x', ''))
     cloud_type = instance_type.split('_')[2]
@@ -153,30 +199,12 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
                  f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                  f'{constants.SKY_REMOTE_RAY_PORT}/http')
 
-    template_id = None
-    if docker_login_config is not None:
-        login_config = docker_utils.DockerLoginConfig(**docker_login_config)
-        # TODO(tian): The `name` argument seems only for display purpose but
-        # not specifying the registry server. Double check if that works for
-        # registries other than Docker Hub.
-        # TODO(tian): Delete the registry auth and template after the instance
-        # is terminated.
-        create_auth_resp = runpod.runpod.create_container_registry_auth(
-            name=f'{name}-registry-auth',
-            username=login_config.username,
-            password=login_config.password,
-        )
-        registry_auth_id = create_auth_resp['id']
-        create_template_resp = runpod.runpod.create_template(
-            name=f'{name}-template',
-            image_name=image_name,
-            registry_auth_id=registry_auth_id,
-        )
-        template_id = create_template_resp['id']
+    image_name_formatted, template_id = (_create_template_for_docker_login(
+        cluster_name, image_name, docker_login_config))
 
     params = {
         'name': name,
-        'image_name': image_name,
+        'image_name': image_name_formatted,
         'gpu_type_id': gpu_type,
         'cloud_type': cloud_type,
         'container_disk_in_gb': disk_size,

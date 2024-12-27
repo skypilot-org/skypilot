@@ -83,7 +83,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
             instance_id = utils.launch(
-                name=f'{cluster_name_on_cloud}-{node_type}',
+                cluster_name=cluster_name_on_cloud,
+                node_type=node_type,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 disk_size=config.node_config['DiskSize'],
