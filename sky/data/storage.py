@@ -3664,6 +3664,9 @@ class OciStore(AbstractStore):
                 assert self.name == data_utils.split_oci_path(self.source)[0], (
                     'OCI Bucket is specified as path, the name should be '
                     'the same as OCI bucket.')
+            elif not re.search(r'^\w+://', self.source):
+                # Treat it as local path.
+                pass
             else:
                 raise NotImplementedError(
                     f'Moving data from {self.source} to OCI is not supported.')
@@ -3826,7 +3829,7 @@ class OciStore(AbstractStore):
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--object-prefix "{dest_dir_name}" --src-dir "{src_dir_path}" '
-                f'{excludes}" ')
+                f'{excludes} ')
 
             return sync_command
 

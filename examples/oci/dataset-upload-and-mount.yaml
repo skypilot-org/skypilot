@@ -16,6 +16,13 @@ file_mounts:
     persistent: True  # Defaults to True; can be set to false. Optional.
     mode: MOUNT  # Either MOUNT or COPY. Optional.
 
+  /datasets-storage2:
+    name: skybucket2  # Name of storage, optional when source is bucket URI
+    source: './examples/oci'  # Source path, can be local or bucket URL. Optional, do not specify to create an empty bucket.
+    store: oci  # E.g 'oci', 's3', 'gcs'...; default: None. Optional.
+    persistent: True  # Defaults to True; can be set to false. Optional.
+    mode: MOUNT  # Either MOUNT or COPY. Optional.
+
 # Working directory (optional) containing the project codebase.
 # Its contents are synced to ~/sky_workdir/ on the cluster.
 workdir: .
@@ -34,3 +41,7 @@ run: |
   ls -lthr /datasets-storage
   echo "hi" >> /datasets-storage/foo.txt
   ls -lthr /datasets-storage
+
+  ls -lthr /datasets-storage2
+  echo "hi" >> /datasets-storage2/foo2.txt
+  ls -lthr /datasets-storage2
