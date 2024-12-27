@@ -180,6 +180,35 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                     f'{role_name}{colorama.Style.RESET_ALL} in AWS.')
                 raise exc
 
+    def _ensure_instance_profile_role(profile: Any, role: Any):
+        try:
+            profile.add_role(RoleName=role.name)
+        except aws.botocore_exceptions().ClientError as exc:
+            # AddRoleToInstanceProfile is not idempotent. Adding a role to an
+            # InstanceProfile that already has an associated role will cause
+            # LimitExceeded error, even if the two roles are identical.
+            # see also: https://docs.aws.amazon.com/IAM/latest/APIReference/API_AddRoleToInstanceProfile.html # pylint: disable=line-too-long
+            if exc.response.get('Error', {}).get('Code') == 'LimitExceeded':
+                # If the associated role is not the role we expect, error out
+                # to user instead of silently overriding the role.
+                if profile.roles and profile.roles[0].name != role.name:
+                    utils.handle_boto_error(
+                        exc, f'The instance profile {profile.name} already has '
+                        f'an associated role {profile.roles[0].name}, but the '
+                        f'role {role.name} is not the same as the expected '
+                        f'role. Please remove the existing role from the '
+                        f'instance profile and try again.')
+                    raise exc
+                # If the associated role is the role we expect, do nothing.
+                return
+            else:
+                utils.handle_boto_error(
+                    exc, f'Failed to add role {colorama.Style.BRIGHT}'
+                    f'{role.name}{colorama.Style.RESET_ALL} to instance '
+                    f'profile {colorama.Style.BRIGHT}{profile.name}'
+                    f'{colorama.Style.RESET_ALL} in AWS.')
+                raise exc
+
     instance_profile_name = DEFAULT_SKYPILOT_INSTANCE_PROFILE
     profile = _get_instance_profile(instance_profile_name)
 
@@ -193,6 +222,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
         time.sleep(15)  # wait for propagation
     assert profile is not None, 'Failed to create instance profile'
 
+    # TODO(aylei): check if the role associated is the one we expect.
     if not profile.roles:
         role_name = DEFAULT_SKYPILOT_IAM_ROLE
         role = _get_role(role_name)
@@ -247,7 +277,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             role.Policy('SkyPilotPassRolePolicy').put(
                 PolicyDocument=json.dumps(skypilot_pass_role_policy_doc))
 
-        profile.add_role(RoleName=role.name)
+        _ensure_instance_profile_role(profile, role)
         time.sleep(15)  # wait for propagation
     return {'Arn': profile.arn}
 
