@@ -180,6 +180,17 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                     f'{role_name}{colorama.Style.RESET_ALL} in AWS.')
                 raise exc
 
+    def _check_instance_profile_role(profile: Any, role_name: str):
+        if profile.roles and profile.roles[0].name != role_name:
+            # If the associated role is not the role we expect, error out
+            # to user instead of silently overriding the role.
+            logger.fatal(f'The instance profile {profile.name} already has '
+                         f'an associated role {profile.roles[0].name}, but the '
+                         f'role {role.name} is not the same as the expected '
+                         f'role. Please remove the existing role from the '
+                         f'instance profile and try again.')
+            raise SystemExit(1)
+
     def _ensure_instance_profile_role(profile: Any, role: Any):
         try:
             profile.add_role(RoleName=role.name)
@@ -189,17 +200,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
             # LimitExceeded error, even if the two roles are identical.
             # see also: https://docs.aws.amazon.com/IAM/latest/APIReference/API_AddRoleToInstanceProfile.html # pylint: disable=line-too-long
             if exc.response.get('Error', {}).get('Code') == 'LimitExceeded':
-                # If the associated role is not the role we expect, error out
-                # to user instead of silently overriding the role.
-                if profile.roles and profile.roles[0].name != role.name:
-                    utils.handle_boto_error(
-                        exc, f'The instance profile {profile.name} already has '
-                        f'an associated role {profile.roles[0].name}, but the '
-                        f'role {role.name} is not the same as the expected '
-                        f'role. Please remove the existing role from the '
-                        f'instance profile and try again.')
-                    raise exc
-                # If the associated role is the role we expect, do nothing.
+                _check_instance_profile_role(profile, role)
                 return
             else:
                 utils.handle_boto_error(
@@ -222,9 +223,11 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
         time.sleep(15)  # wait for propagation
     assert profile is not None, 'Failed to create instance profile'
 
-    # TODO(aylei): check if the role associated is the one we expect.
-    if not profile.roles:
-        role_name = DEFAULT_SKYPILOT_IAM_ROLE
+    role_name = DEFAULT_SKYPILOT_IAM_ROLE
+    if profile.roles:
+        _check_instance_profile_role(profile, role_name)
+    else:
+        # there is no role associated, ensure the role and associate
         role = _get_role(role_name)
         if role is None:
             logger.info(
