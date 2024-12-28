@@ -3,7 +3,7 @@
 Cloud Object Storage
 ====================
 
-SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2 or IBM COS.
+SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, OCI Object Storage or IBM COS.
 
 Buckets are made available to each task at a local path on the remote VM, so
 the task can access bucket objects as if they were local files.
@@ -28,7 +28,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           # Mount an existing S3 bucket
           file_mounts:
             /my_data:
-              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+              source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>, oci://<bucket_name>
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
@@ -45,7 +45,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               name: my-sky-bucket
-              store: gcs  # Optional: either of s3, gcs, azure, r2, ibm
+              store: gcs  # Optional: either of s3, gcs, azure, r2, ibm, oci
 
         SkyPilot will create an empty GCS bucket called ``my-sky-bucket`` and mount it at ``/my_data``.
         This bucket can be used to write checkpoints, logs or other outputs directly to the cloud.
@@ -68,7 +68,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
             /my_data:
               name: my-sky-bucket
               source: ~/dataset  # Optional: path to local data to upload to the bucket
-              store: s3  # Optional: either of s3, gcs, azure, r2, ibm
+              store: s3  # Optional: either of s3, gcs, azure, r2, ibm, oci
               mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
 
         SkyPilot will create a S3 bucket called ``my-sky-bucket`` and upload the
@@ -290,12 +290,13 @@ Storage YAML reference
             - https://<azure_storage_account>.blob.core.windows.net/<container_name>
             - r2://<bucket_name>
             - cos://<region_name>/<bucket_name>
+            - oci://<bucket_name>
 
           If the source is local, data is uploaded to the cloud to an appropriate
-          bucket (s3, gcs, azure, r2, or ibm). If source is bucket URI,
+          bucket (s3, gcs, azure, r2, oci, or ibm). If source is bucket URI,
           the data is copied or mounted directly (see mode flag below).
 
-        store: str; either of 's3', 'gcs', 'azure', 'r2', 'ibm'
+        store: str; either of 's3', 'gcs', 'azure', 'r2', 'ibm', 'oci'
           If you wish to force sky.Storage to be backed by a specific cloud object
           storage, you can specify it here. If not specified, SkyPilot chooses the
           appropriate object storage based on the source path and task's cloud provider.
