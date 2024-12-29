@@ -4195,8 +4195,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # that successfully call this function but do not first call
         # teardown_cluster or terminate_instances. See
         # https://github.com/skypilot-org/skypilot/pull/4443#discussion_r1872798032
-        # If purge is set, we do not care about instance status and can skip
-        # the check.
+        # If purge is set, we do not care about instance status and should skip
+        # the check because it may fail if the cluster is not reachable.
         attempts = 0
         if not purge:
             while True:
