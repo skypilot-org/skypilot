@@ -15,6 +15,11 @@ setup: |
   {{cmd}}
   {%- endfor %}
 
+  {% if controller_envs.get('SKYPILOT_DEV') != '0' %}
+  grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
+  {% endif %}
+
   # Install serve dependencies.
   # TODO(tian): Gather those into serve constants.
   pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
