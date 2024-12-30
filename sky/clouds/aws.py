@@ -105,7 +105,8 @@ class AWSIdentityType(enum.Enum):
 
         SSO,IAM_ROLE and CONTAINER_ROLE are temporary credentials and refreshed
         automatically. ENV and SHARED_CREDENTIALS_FILE are short-lived
-        credentials without refresh. IAM ROLE:
+        credentials without refresh.
+        IAM ROLE:
         https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html
         SSO/Container-role refresh token:
         https://docs.aws.amazon.com/solutions/latest/dea-api/auth-refreshtoken.html
