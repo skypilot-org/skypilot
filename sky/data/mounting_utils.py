@@ -106,7 +106,8 @@ def get_az_mount_cmd(container_name: str,
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
-    mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
+    mount_cmd = (f'rm -rf {cache_path} && mkdir -p {cache_path} && '
+                 f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  '-o umask=022 -o default_permissions '
@@ -209,7 +210,7 @@ def get_mounting_script(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
-                             
+
         {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
