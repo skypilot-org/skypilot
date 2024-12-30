@@ -730,3 +730,14 @@ class Rclone():
                 lines_to_keep.append(line)
 
         return lines_to_keep
+
+
+def split_oci_path(oci_path: str) -> Tuple[str, str]:
+    """Splits OCI Path into Bucket name and Relative Path to Bucket
+    Args:
+      oci_path: str; OCI Path, e.g. oci://imagenet/train/
+    """
+    path_parts = oci_path.replace('oci://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key

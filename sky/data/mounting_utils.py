@@ -19,6 +19,7 @@ BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
+RCLONE_VERSION = 'v1.68.2'
 
 
 def get_s3_mount_install_cmd() -> str:
@@ -191,6 +192,48 @@ def get_cos_mount_cmd(rclone_config_data: str,
                  f'{bucket_rclone_profile}:{sub_path_arg} {mount_path} '
                  '--daemon')
     return mount_cmd
+
+
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-amd64.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-amd64.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.rpm))')
+    return install_cmd
+
+
+def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
+                      namespace: str, compartment: str, config_file: str,
+                      config_profile: str) -> str:
+    """ OCI specific RClone mount command for oci object storage. """
+    # pylint: disable=line-too-long
+    mount_cmd = (
+        f'sudo chown -R `whoami` {mount_path}'
+        f' && rclone config create oos_{store_name} oracleobjectstorage'
+        f' provider user_principal_auth namespace {namespace}'
+        f' compartment {compartment} region {region}'
+        f' oci-config-file {config_file}'
+        f' oci-config-profile {config_profile}'
+        f' && sed -i "s/oci-config-file/config_file/g;'
+        f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
+        f' && ([ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true)'
+        f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{store_name}:{store_name} {mount_path} --daemon --allow-non-empty)'
+    )
+    return mount_cmd
+
+
+def get_rclone_version_check_cmd() -> str:
+    """ RClone version check. This would be common command. """
+    return f'rclone --version | grep -q {RCLONE_VERSION}'
 
 
 def _get_mount_binary(mount_cmd: str) -> str:

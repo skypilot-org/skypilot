@@ -1048,6 +1048,16 @@ class Task:
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({mnt_path: blob_path})
+                elif store_type is storage_lib.StoreType.OCI:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('oci://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'oci://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '

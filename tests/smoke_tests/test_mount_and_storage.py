@@ -87,6 +87,23 @@ def test_scp_file_mounts():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.oci  # For OCI object storage mounts and file mounts.
+def test_oci_mounts():
+    name = smoke_tests_utils.get_cluster_name()
+    test_commands = [
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        f'sky launch -y -c {name} --cloud oci --num-nodes 2 examples/oci/oci-mounts.yaml',
+        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
+    ]
+    test = smoke_tests_utils.Test(
+        'oci_mounts',
+        test_commands,
+        f'sky down -y {name}',
+        timeout=20 * 60,  # 20 mins
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
