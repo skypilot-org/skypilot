@@ -200,6 +200,45 @@ class StoreType(enum.Enum):
             bucket_endpoint_url = f'{store_type.store_prefix()}{path}'
         return bucket_endpoint_url
 
+    @classmethod
+    def get_fields_from_store_url(
+        cls, store_url: str
+    ) -> Tuple['StoreType', Type['AbstractStore'], str, str, Optional[str],
+               Optional[str]]:
+        """Returns the store type, store class, bucket name, and sub path from
+        a store URL, and the storage account name and region if applicable.
+
+        Args:
+            store_url: str; The store URL.
+        """
+        # The full path from the user config of IBM COS contains the region,
+        # and Azure Blob Storage contains the storage account name, we need to
+        # pass these information to the store constructor.
+        storage_account_name = None
+        region = None
+        for store_type in StoreType:
+            if store_url.startswith(store_type.store_prefix()):
+                if store_type == StoreType.AZURE:
+                    storage_account_name, bucket_name, sub_path = \
+                        data_utils.split_az_path(store_url)
+                    store_cls: Type['AbstractStore'] = AzureBlobStore
+                elif store_type == StoreType.IBM:
+                    bucket_name, sub_path, region = data_utils.split_cos_path(
+                        store_url)
+                    store_cls = IBMCosStore
+                elif store_type == StoreType.R2:
+                    bucket_name, sub_path = data_utils.split_r2_path(store_url)
+                    store_cls = R2Store
+                elif store_type == StoreType.GCS:
+                    bucket_name, sub_path = data_utils.split_gcs_path(store_url)
+                    store_cls = GcsStore
+                elif store_type == StoreType.S3:
+                    bucket_name, sub_path = data_utils.split_s3_path(store_url)
+                    store_cls = S3Store
+                return store_type, store_cls,bucket_name, \
+                    sub_path, storage_account_name, region
+        raise ValueError(f'Unknown store URL: {store_url}')
+
 
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
@@ -226,25 +265,29 @@ class AbstractStore:
                      name: str,
                      source: Optional[SourceType],
                      region: Optional[str] = None,
-                     is_sky_managed: Optional[bool] = None):
+                     is_sky_managed: Optional[bool] = None,
+                     _bucket_sub_path: Optional[str] = None):
             self.name = name
             self.source = source
             self.region = region
             self.is_sky_managed = is_sky_managed
+            self._bucket_sub_path = _bucket_sub_path
 
         def __repr__(self):
             return (f'StoreMetadata('
                     f'\n\tname={self.name},'
                     f'\n\tsource={self.source},'
                     f'\n\tregion={self.region},'
-                    f'\n\tis_sky_managed={self.is_sky_managed})')
+                    f'\n\tis_sky_managed={self.is_sky_managed},'
+                    f'\n\t_bucket_sub_path={self._bucket_sub_path})')
 
     def __init__(self,
                  name: str,
                  source: Optional[SourceType],
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 _bucket_sub_path: Optional[str] = None):  # pylint: disable=invalid-name
         """Initialize AbstractStore
 
         Args:
@@ -258,7 +301,11 @@ class AbstractStore:
               there. This is set to false when the Storage object is created not
               for direct use, e.g. for 'sky storage delete', or the storage is
               being re-used, e.g., for `sky start` on a stopped cluster.
-
+            _bucket_sub_path: str; The prefix of the bucket directory to be
+              created in the store, e.g. if _bucket_sub_path=my-dir, the files
+              will be uploaded to s3://<bucket>/my-dir/.
+              This only works if source is a local directory.
+              # TODO(zpoint): Add support for non-local source.
         Raises:
             StorageBucketCreateError: If bucket creation fails
             StorageBucketGetError: If fetching existing bucket fails
@@ -269,9 +316,28 @@ class AbstractStore:
         self.region = region
         self.is_sky_managed = is_sky_managed
         self.sync_on_reconstruction = sync_on_reconstruction
+
+        # To avoid mypy error
+        self._bucket_sub_path: Optional[str] = None
+        # Trigger the setter to strip any leading/trailing slashes.
+        self.bucket_sub_path = _bucket_sub_path
         # Whether sky is responsible for the lifecycle of the Store.
         self._validate()
         self.initialize()
+
+    @property
+    def bucket_sub_path(self) -> Optional[str]:
+        """Get the bucket_sub_path."""
+        return self._bucket_sub_path
+
+    @bucket_sub_path.setter
+    # pylint: disable=invalid-name
+    def bucket_sub_path(self, bucket_sub_path: Optional[str]) -> None:
+        """Set the bucket_sub_path, stripping any leading/trailing slashes."""
+        if bucket_sub_path is not None:
+            self._bucket_sub_path = bucket_sub_path.strip('/')
+        else:
+            self._bucket_sub_path = None
 
     @classmethod
     def from_metadata(cls, metadata: StoreMetadata, **override_args):
@@ -280,19 +346,26 @@ class AbstractStore:
         Used when reconstructing Storage and Store objects from
         global_user_state.
         """
-        return cls(name=override_args.get('name', metadata.name),
-                   source=override_args.get('source', metadata.source),
-                   region=override_args.get('region', metadata.region),
-                   is_sky_managed=override_args.get('is_sky_managed',
-                                                    metadata.is_sky_managed),
-                   sync_on_reconstruction=override_args.get(
-                       'sync_on_reconstruction', True))
+        return cls(
+            name=override_args.get('name', metadata.name),
+            source=override_args.get('source', metadata.source),
+            region=override_args.get('region', metadata.region),
+            is_sky_managed=override_args.get('is_sky_managed',
+                                             metadata.is_sky_managed),
+            sync_on_reconstruction=override_args.get('sync_on_reconstruction',
+                                                     True),
+            # backward compatibility
+            _bucket_sub_path=override_args.get(
+                '_bucket_sub_path',
+                metadata._bucket_sub_path  # pylint: disable=protected-access
+            ) if hasattr(metadata, '_bucket_sub_path') else None)
 
     def get_metadata(self) -> StoreMetadata:
         return self.StoreMetadata(name=self.name,
                                   source=self.source,
                                   region=self.region,
-                                  is_sky_managed=self.is_sky_managed)
+                                  is_sky_managed=self.is_sky_managed,
+                                  _bucket_sub_path=self._bucket_sub_path)
 
     def initialize(self):
         """Initializes the Store object on the cloud.
@@ -320,7 +393,11 @@ class AbstractStore:
         raise NotImplementedError
 
     def delete(self) -> None:
-        """Removes the Storage object from the cloud."""
+        """Removes the Storage from the cloud."""
+        raise NotImplementedError
+
+    def _delete_sub_path(self) -> None:
+        """Removes objects from the sub path in the bucket."""
         raise NotImplementedError
 
     def get_handle(self) -> StorageHandle:
@@ -464,13 +541,19 @@ class Storage(object):
             if storetype in self.sky_stores:
                 del self.sky_stores[storetype]
 
-    def __init__(self,
-                 name: Optional[str] = None,
-                 source: Optional[SourceType] = None,
-                 stores: Optional[Dict[StoreType, AbstractStore]] = None,
-                 persistent: Optional[bool] = True,
-                 mode: StorageMode = StorageMode.MOUNT,
-                 sync_on_reconstruction: bool = True) -> None:
+    def __init__(
+        self,
+        name: Optional[str] = None,
+        source: Optional[SourceType] = None,
+        stores: Optional[Dict[StoreType, AbstractStore]] = None,
+        persistent: Optional[bool] = True,
+        mode: StorageMode = StorageMode.MOUNT,
+        sync_on_reconstruction: bool = True,
+        # pylint: disable=invalid-name
+        _is_sky_managed: Optional[bool] = None,
+        # pylint: disable=invalid-name
+        _bucket_sub_path: Optional[str] = None
+    ) -> None:
         """Initializes a Storage object.
 
         Three fields are required: the name of the storage, the source
@@ -508,6 +591,18 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
+          _is_sky_managed: Optional[bool]; Indicates if the storage is managed
+            by Sky. Without this argument, the controller's behavior differs
+            from the local machine. For example, if a bucket does not exist:
+            Local Machine (is_sky_managed=True) →
+            Controller (is_sky_managed=False).
+            With this argument, the controller aligns with the local machine,
+            ensuring it retains the is_sky_managed information from the YAML.
+            During teardown, if is_sky_managed is True, the controller should
+            delete the bucket. Otherwise, it might mistakenly delete only the
+            sub-path, assuming is_sky_managed is False.
+          _bucket_sub_path: Optional[str]; The subdirectory to use for the
+            storage object.
         """
         self.name: str
         self.source = source
@@ -515,6 +610,8 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
+        self._is_sky_managed = _is_sky_managed
+        self._bucket_sub_path = _bucket_sub_path
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
         # for spot. Once sky storage supports forced management for external
@@ -576,6 +673,12 @@ class Storage(object):
                         self.add_store(StoreType.IBM)
                     elif self.source.startswith('oci://'):
                         self.add_store(StoreType.OCI)
+
+    def get_bucket_sub_path_prefix(self, blob_path: str) -> str:
+        """Adds the bucket sub path prefix to the blob path."""
+        if self._bucket_sub_path is not None:
+            return f'{blob_path}/{self._bucket_sub_path}'
+        return blob_path
 
     @staticmethod
     def _validate_source(
@@ -787,34 +890,40 @@ class Storage(object):
                     store = S3Store.from_metadata(
                         s_metadata,
                         source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.GCS:
                     store = GcsStore.from_metadata(
                         s_metadata,
                         source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.AZURE:
                     assert isinstance(s_metadata,
                                       AzureBlobStore.AzureBlobStoreMetadata)
                     store = AzureBlobStore.from_metadata(
                         s_metadata,
                         source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.R2:
                     store = R2Store.from_metadata(
                         s_metadata,
                         source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.IBM:
                     store = IBMCosStore.from_metadata(
                         s_metadata,
                         source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
                 elif s_type == StoreType.OCI:
                     store = OciStore.from_metadata(
                         s_metadata,
                         source=self.source,
-                        sync_on_reconstruction=self.sync_on_reconstruction)
+                        sync_on_reconstruction=self.sync_on_reconstruction,
+                        _bucket_sub_path=self._bucket_sub_path)
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Unknown store type: {s_type}')
@@ -834,7 +943,6 @@ class Storage(object):
                                  'to be reconstructed while the corresponding '
                                  'bucket was externally deleted.')
                 continue
-
             self._add_store(store, is_reconstructed=True)
 
     @classmethod
@@ -890,6 +998,7 @@ class Storage(object):
                             f'storage account {storage_account_name!r}.')
             else:
                 logger.info(f'Storage type {store_type} already exists.')
+
             return self.stores[store_type]
 
         store_cls: Type[AbstractStore]
@@ -909,21 +1018,24 @@ class Storage(object):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageSpecError(
                     f'{store_type} not supported as a Store.')
-
-        # Initialize store object and get/create bucket
         try:
             store = store_cls(
                 name=self.name,
                 source=self.source,
                 region=region,
-                sync_on_reconstruction=self.sync_on_reconstruction)
+                sync_on_reconstruction=self.sync_on_reconstruction,
+                is_sky_managed=self._is_sky_managed,
+                _bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
             # to state.
             logger.error(f'Could not create {store_type} store '
                          f'with name {self.name}.')
-            global_user_state.set_storage_status(self.name,
-                                                 StorageStatus.INIT_FAILED)
+            try:
+                global_user_state.set_storage_status(self.name,
+                                                     StorageStatus.INIT_FAILED)
+            except ValueError as e:
+                logger.error(f'Error setting storage status: {e}')
             raise
         except exceptions.StorageBucketGetError:
             # Bucket get failed, so this is not sky managed. Do not update state
@@ -1039,12 +1151,15 @@ class Storage(object):
     def from_yaml_config(cls, config: Dict[str, Any]) -> 'Storage':
         common_utils.validate_schema(config, schemas.get_storage_schema(),
                                      'Invalid storage YAML: ')
-
         name = config.pop('name', None)
         source = config.pop('source', None)
         store = config.pop('store', None)
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
+        # pylint: disable=invalid-name
+        _is_sky_managed = config.pop('_is_sky_managed', None)
+        # pylint: disable=invalid-name
+        _bucket_sub_path = config.pop('_bucket_sub_path', None)
         if force_delete is None:
             force_delete = False
 
@@ -1064,7 +1179,9 @@ class Storage(object):
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
-                          mode=mode)
+                          mode=mode,
+                          _is_sky_managed=_is_sky_managed,
+                          _bucket_sub_path=_bucket_sub_path)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
 
@@ -1072,7 +1189,7 @@ class Storage(object):
         storage_obj.force_delete = force_delete
         return storage_obj
 
-    def to_yaml_config(self) -> Dict[str, str]:
+    def to_yaml_config(self) -> Dict[str, Any]:
         config = {}
 
         def add_if_not_none(key: str, value: Optional[Any]):
@@ -1088,13 +1205,18 @@ class Storage(object):
         add_if_not_none('source', self.source)
 
         stores = None
+        is_sky_managed = self._is_sky_managed
         if self.stores:
             stores = ','.join([store.value for store in self.stores])
+            is_sky_managed = list(self.stores.values())[0].is_sky_managed
         add_if_not_none('store', stores)
+        add_if_not_none('_is_sky_managed', is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
             config['_force_delete'] = True
+        if self._bucket_sub_path is not None:
+            config['_bucket_sub_path'] = self._bucket_sub_path
         return config
 
 
@@ -1116,7 +1238,8 @@ class S3Store(AbstractStore):
                  source: str,
                  region: Optional[str] = _DEFAULT_REGION,
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True):
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
         # TODO(romilb): This is purely a stopgap fix for
@@ -1129,7 +1252,7 @@ class S3Store(AbstractStore):
                            f'{self._DEFAULT_REGION} for bucket {name!r}.')
             region = self._DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1293,12 +1416,28 @@ class S3Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted S3 bucket {self.name}.'
         else:
             msg_str = f'S3 bucket {self.name} may have been deleted ' \
                       f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_s3_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Removed objects from S3 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'Failed to remove objects from S3 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -1332,9 +1471,11 @@ class S3Store(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
-                            f's3://{self.name}')
+                            f's3://{self.name}{sub_path}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -1346,9 +1487,11 @@ class S3Store(AbstractStore):
                 for file_name in excluded_list
             ])
             src_dir_path = shlex.quote(src_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name}')
+                            f's3://{self.name}{sub_path}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1466,7 +1609,8 @@ class S3Store(AbstractStore):
         """
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
         mount_cmd = mounting_utils.get_s3_mount_cmd(self.bucket.name,
-                                                    mount_path)
+                                                    mount_path,
+                                                    self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -1516,6 +1660,27 @@ class S3Store(AbstractStore):
                 ) from e
         return aws.resource('s3').Bucket(bucket_name)
 
+    def _execute_s3_remove_command(self, command: str, bucket_name: str,
+                                   hint_operating: str,
+                                   hint_failed: str) -> bool:
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
     def _delete_s3_bucket(self, bucket_name: str) -> bool:
         """Deletes S3 bucket, including all objects in bucket
 
@@ -1533,28 +1698,27 @@ class S3Store(AbstractStore):
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
         remove_command = f'aws s3 rb s3://{bucket_name} --force'
-        try:
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message(
-                        f'Deleting S3 bucket [green]{bucket_name}')):
-                subprocess.check_output(remove_command.split(' '),
-                                        stderr=subprocess.STDOUT)
-        except subprocess.CalledProcessError as e:
-            if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(
-                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name=bucket_name))
-                return False
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete S3 bucket {bucket_name}.'
-                        f'Detailed error: {e.output}')
+        success = self._execute_s3_remove_command(
+            remove_command, bucket_name,
+            f'Deleting S3 bucket [green]{bucket_name}[/]',
+            f'Failed to delete S3 bucket {bucket_name}.')
+        if not success:
+            return False
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_s3_bucket(bucket_name):
             time.sleep(0.1)
         return True
+
+    def _delete_s3_bucket_sub_path(self, bucket_name: str,
+                                   sub_path: str) -> bool:
+        """Deletes the sub path from the bucket."""
+        remove_command = f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive'
+        return self._execute_s3_remove_command(
+            remove_command, bucket_name, f'Removing objects from S3 bucket '
+            f'[green]{bucket_name}/{sub_path}[/]',
+            f'Failed to remove objects from S3 bucket {bucket_name}/{sub_path}.'
+        )
 
 
 class GcsStore(AbstractStore):
@@ -1569,11 +1733,12 @@ class GcsStore(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-central1',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: StorageHandle
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -1736,12 +1901,28 @@ class GcsStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_gcs_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted GCS bucket {self.name}.'
         else:
             msg_str = f'GCS bucket {self.name} may have been deleted ' \
                       f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_gcs_bucket(self.name,
+                                                      self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Deleted objects in GCS bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'GCS bucket {self.name} may have ' \
+                      'been deleted externally.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -1818,9 +1999,11 @@ class GcsStore(AbstractStore):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -x \'^(?!{sync_format}$).*\' '
-                            f'{base_dir_path} gs://{self.name}')
+                            f'{base_dir_path} gs://{self.name}{sub_path}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name):
@@ -1830,9 +2013,11 @@ class GcsStore(AbstractStore):
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
-                            f'gs://{self.name}/{dest_dir_name}')
+                            f'gs://{self.name}{sub_path}/{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
@@ -1937,7 +2122,8 @@ class GcsStore(AbstractStore):
         """
         install_cmd = mounting_utils.get_gcs_mount_install_cmd()
         mount_cmd = mounting_utils.get_gcs_mount_cmd(self.bucket.name,
-                                                     mount_path)
+                                                     mount_path,
+                                                     self._bucket_sub_path)
         version_check_cmd = (
             f'gcsfuse --version | grep -q {mounting_utils.GCSFUSE_VERSION}')
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
@@ -1977,19 +2163,33 @@ class GcsStore(AbstractStore):
             f'{new_bucket.storage_class}{colorama.Style.RESET_ALL}')
         return new_bucket
 
-    def _delete_gcs_bucket(self, bucket_name: str) -> bool:
-        """Deletes GCS bucket, including all objects in bucket
+    def _delete_gcs_bucket(
+        self,
+        bucket_name: str,
+        # pylint: disable=invalid-name
+        _bucket_sub_path: Optional[str] = None
+    ) -> bool:
+        """Deletes objects in GCS bucket
 
         Args:
           bucket_name: str; Name of bucket
+          _bucket_sub_path: str; Sub path in the bucket, if provided only
+            objects in the sub path will be deleted, else the whole bucket will
+            be deleted
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
         """
-
+        if _bucket_sub_path is not None:
+            command_suffix = f'/{_bucket_sub_path}'
+            hint_text = 'objects in '
+        else:
+            command_suffix = ''
+            hint_text = ''
         with rich_utils.safe_status(
                 ux_utils.spinner_message(
-                    f'Deleting GCS bucket [green]{bucket_name}')):
+                    f'Deleting {hint_text}GCS bucket '
+                    f'[green]{bucket_name}{command_suffix}[/]')):
             try:
                 self.client.get_bucket(bucket_name)
             except gcp.forbidden_exception() as e:
@@ -2007,8 +2207,9 @@ class GcsStore(AbstractStore):
                 return False
             try:
                 gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-                remove_obj_command = (f'{alias_gen};{gsutil_alias} '
-                                      f'rm -r gs://{bucket_name}')
+                remove_obj_command = (
+                    f'{alias_gen};{gsutil_alias} '
+                    f'rm -r gs://{bucket_name}{command_suffix}')
                 subprocess.check_output(remove_obj_command,
                                         stderr=subprocess.STDOUT,
                                         shell=True,
@@ -2017,7 +2218,8 @@ class GcsStore(AbstractStore):
             except subprocess.CalledProcessError as e:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete GCS bucket {bucket_name}.'
+                        f'Failed to delete {hint_text}GCS bucket '
+                        f'{bucket_name}{command_suffix}.'
                         f'Detailed error: {e.output}')
 
 
@@ -2069,7 +2271,8 @@ class AzureBlobStore(AbstractStore):
                  storage_account_name: str = '',
                  region: Optional[str] = 'eastus',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True):
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
         self.storage_client: 'storage.Client'
         self.resource_client: 'storage.Client'
         self.container_name: str
@@ -2081,7 +2284,7 @@ class AzureBlobStore(AbstractStore):
         if region is None:
             region = 'eastus'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     @classmethod
     def from_metadata(cls, metadata: AbstractStore.StoreMetadata,
@@ -2231,6 +2434,17 @@ class AzureBlobStore(AbstractStore):
         """
         self.storage_client = data_utils.create_az_client('storage')
         self.resource_client = data_utils.create_az_client('resource')
+        self._update_storage_account_name_and_resource()
+
+        self.container_name, is_new_bucket = self._get_bucket()
+        if self.is_sky_managed is None:
+            # If is_sky_managed is not specified, then this is a new storage
+            # object (i.e., did not exist in global_user_state) and we should
+            # set the is_sky_managed property.
+            # If is_sky_managed is specified, then we take no action.
+            self.is_sky_managed = is_new_bucket
+
+    def _update_storage_account_name_and_resource(self):
         self.storage_account_name, self.resource_group_name = (
             self._get_storage_account_and_resource_group())
 
@@ -2241,13 +2455,13 @@ class AzureBlobStore(AbstractStore):
                 self.storage_account_name, self.resource_group_name,
                 self.storage_client, self.resource_client)
 
-        self.container_name, is_new_bucket = self._get_bucket()
-        if self.is_sky_managed is None:
-            # If is_sky_managed is not specified, then this is a new storage
-            # object (i.e., did not exist in global_user_state) and we should
-            # set the is_sky_managed property.
-            # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+    def update_storage_attributes(self, **kwargs: Dict[str, Any]):
+        assert 'storage_account_name' in kwargs, (
+            'only storage_account_name supported')
+        assert isinstance(kwargs['storage_account_name'],
+                          str), ('storage_account_name must be a string')
+        self.storage_account_name = kwargs['storage_account_name']
+        self._update_storage_account_name_and_resource()
 
     @staticmethod
     def get_default_storage_account_name(region: Optional[str]) -> str:
@@ -2518,6 +2732,9 @@ class AzureBlobStore(AbstractStore):
 
     def delete(self) -> None:
         """Deletes the storage."""
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_az_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = (f'Deleted AZ Container {self.name!r} under storage '
@@ -2527,6 +2744,32 @@ class AzureBlobStore(AbstractStore):
                        'been deleted externally. Removing from local state.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        try:
+            container_url = data_utils.AZURE_CONTAINER_URL.format(
+                storage_account_name=self.storage_account_name,
+                container_name=self.name)
+            container_client = data_utils.create_az_client(
+                client_type='container',
+                container_url=container_url,
+                storage_account_name=self.storage_account_name,
+                resource_group_name=self.resource_group_name)
+            # List and delete blobs in the specified directory
+            blobs = container_client.list_blobs(
+                name_starts_with=self._bucket_sub_path + '/')
+            for blob in blobs:
+                container_client.delete_blob(blob.name)
+            logger.info(
+                f'Deleted objects from sub path {self._bucket_sub_path} '
+                f'in container {self.name}.')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(
+                f'Failed to delete objects from sub path '
+                f'{self._bucket_sub_path} in container {self.name}. '
+                f'Details: {common_utils.format_exception(e, use_bracket=True)}'
+            )
 
     def get_handle(self) -> StorageHandle:
         """Returns the Storage Handle object."""
@@ -2554,13 +2797,15 @@ class AzureBlobStore(AbstractStore):
             includes_list = ';'.join(file_names)
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
+            container_path = (f'{self.container_name}/{self._bucket_sub_path}'
+                              if self._bucket_sub_path else self.container_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
                             f'{includes} '
                             '--delete-destination false '
                             f'--source {base_dir_path} '
-                            f'--container {self.container_name}')
+                            f'--container {container_path}')
             return sync_command
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
@@ -2571,8 +2816,11 @@ class AzureBlobStore(AbstractStore):
                 [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            container_path = (f'{self.container_name}/{dest_dir_name}'
-                              if dest_dir_name else self.container_name)
+            container_path = (f'{self.container_name}/{self._bucket_sub_path}'
+                              if self._bucket_sub_path else
+                              f'{self.container_name}')
+            if dest_dir_name:
+                container_path = f'{container_path}/{dest_dir_name}'
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
@@ -2695,6 +2943,7 @@ class AzureBlobStore(AbstractStore):
                         f'{self.storage_account_name!r}.'
                         'Details: '
                         f'{common_utils.format_exception(e, use_bracket=True)}')
+
         # If the container cannot be found in both private and public settings,
         # the container is to be created by Sky. However, creation is skipped
         # if Store object is being reconstructed for deletion or re-mount with
@@ -2725,7 +2974,8 @@ class AzureBlobStore(AbstractStore):
         mount_cmd = mounting_utils.get_az_mount_cmd(self.container_name,
                                                     self.storage_account_name,
                                                     mount_path,
-                                                    self.storage_account_key)
+                                                    self.storage_account_key,
+                                                    self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -2824,11 +3074,12 @@ class R2Store(AbstractStore):
                  source: str,
                  region: Optional[str] = 'auto',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, _bucket_sub_path)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -2933,12 +3184,28 @@ class R2Store(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         deleted_by_skypilot = self._delete_r2_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted R2 bucket {self.name}.'
         else:
             msg_str = f'R2 bucket {self.name} may have been deleted ' \
                       f'externally. Removing from local state.'
+        logger.info(f'{colorama.Fore.GREEN}{msg_str}'
+                    f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        deleted_by_skypilot = self._delete_r2_bucket_sub_path(
+            self.name, self._bucket_sub_path)
+        if deleted_by_skypilot:
+            msg_str = f'Removed objects from R2 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
+        else:
+            msg_str = f'Failed to remove objects from R2 bucket ' \
+                      f'{self.name}/{self._bucket_sub_path}.'
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -2973,11 +3240,13 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
-                            f's3://{self.name} '
+                            f's3://{self.name}{sub_path} '
                             f'--endpoint {endpoint_url} '
                             f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
@@ -2992,11 +3261,13 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
-                            f's3://{self.name}/{dest_dir_name} '
+                            f's3://{self.name}{sub_path}/{dest_dir_name} '
                             f'--endpoint {endpoint_url} '
                             f'--profile={cloudflare.R2_PROFILE_NAME}')
             return sync_command
@@ -3127,11 +3398,9 @@ class R2Store(AbstractStore):
         endpoint_url = cloudflare.create_endpoint()
         r2_credential_path = cloudflare.R2_CREDENTIALS_PATH
         r2_profile_name = cloudflare.R2_PROFILE_NAME
-        mount_cmd = mounting_utils.get_r2_mount_cmd(r2_credential_path,
-                                                    r2_profile_name,
-                                                    endpoint_url,
-                                                    self.bucket.name,
-                                                    mount_path)
+        mount_cmd = mounting_utils.get_r2_mount_cmd(
+            r2_credential_path, r2_profile_name, endpoint_url, self.bucket.name,
+            mount_path, self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -3164,6 +3433,43 @@ class R2Store(AbstractStore):
                     f'{self.name} but failed.') from e
         return cloudflare.resource('s3').Bucket(bucket_name)
 
+    def _execute_r2_remove_command(self, command: str, bucket_name: str,
+                                   hint_operating: str,
+                                   hint_failed: str) -> bool:
+        try:
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message(hint_operating)):
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT,
+                                        shell=True)
+        except subprocess.CalledProcessError as e:
+            if 'NoSuchBucket' in e.output.decode('utf-8'):
+                logger.debug(
+                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
+                        bucket_name=bucket_name))
+                return False
+            else:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketDeleteError(
+                        f'{hint_failed}'
+                        f'Detailed error: {e.output}')
+        return True
+
+    def _delete_r2_bucket_sub_path(self, bucket_name: str,
+                                   sub_path: str) -> bool:
+        """Deletes the sub path from the bucket."""
+        endpoint_url = cloudflare.create_endpoint()
+        remove_command = (
+            f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} '
+            f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive '
+            f'--endpoint {endpoint_url} '
+            f'--profile={cloudflare.R2_PROFILE_NAME}')
+        return self._execute_r2_remove_command(
+            remove_command, bucket_name,
+            f'Removing objects from R2 bucket {bucket_name}/{sub_path}',
+            f'Failed to remove objects from R2 bucket {bucket_name}/{sub_path}.'
+        )
+
     def _delete_r2_bucket(self, bucket_name: str) -> bool:
         """Deletes R2 bucket, including all objects in bucket
 
@@ -3186,24 +3492,12 @@ class R2Store(AbstractStore):
             f'aws s3 rb s3://{bucket_name} --force '
             f'--endpoint {endpoint_url} '
             f'--profile={cloudflare.R2_PROFILE_NAME}')
-        try:
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message(
-                        f'Deleting R2 bucket {bucket_name}')):
-                subprocess.check_output(remove_command,
-                                        stderr=subprocess.STDOUT,
-                                        shell=True)
-        except subprocess.CalledProcessError as e:
-            if 'NoSuchBucket' in e.output.decode('utf-8'):
-                logger.debug(
-                    _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE.format(
-                        bucket_name=bucket_name))
-                return False
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.StorageBucketDeleteError(
-                        f'Failed to delete R2 bucket {bucket_name}.'
-                        f'Detailed error: {e.output}')
+
+        success = self._execute_r2_remove_command(
+            remove_command, bucket_name, f'Deleting R2 bucket {bucket_name}',
+            f'Failed to delete R2 bucket {bucket_name}.')
+        if not success:
+            return False
 
         # Wait until bucket deletion propagates on AWS servers
         while data_utils.verify_r2_bucket(bucket_name):
@@ -3222,11 +3516,12 @@ class IBMCosStore(AbstractStore):
                  source: str,
                  region: Optional[str] = 'us-east',
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: bool = True):
+                 sync_on_reconstruction: bool = True,
+                 _bucket_sub_path: Optional[str] = None):
         self.client: 'storage.Client'
         self.bucket: 'StorageHandle'
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, _bucket_sub_path)
         self.bucket_rclone_profile = \
           Rclone.generate_rclone_bucket_profile_name(
             self.name, Rclone.RcloneClouds.IBM)
@@ -3371,9 +3666,21 @@ class IBMCosStore(AbstractStore):
                 f'Upload failed for store {self.name}') from e
 
     def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
+            return self._delete_sub_path()
+
         self._delete_cos_bucket()
         logger.info(f'{colorama.Fore.GREEN}Deleted COS bucket {self.name}.'
                     f'{colorama.Style.RESET_ALL}')
+
+    def _delete_sub_path(self) -> None:
+        assert self._bucket_sub_path is not None, 'bucket_sub_path is not set'
+        bucket = self.s3_resource.Bucket(self.name)
+        try:
+            self._delete_cos_bucket_objects(bucket, self._bucket_sub_path + '/')
+        except ibm.ibm_botocore.exceptions.ClientError as e:
+            if e.__class__.__name__ == 'NoSuchBucket':
+                logger.debug('bucket already removed')
 
     def get_handle(self) -> StorageHandle:
         return self.s3_resource.Bucket(self.name)
@@ -3415,10 +3722,13 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
             sync_command = (
                 'rclone copy --exclude ".git/*" '
                 f'{src_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}/{dest_dir_name}')
+                f'{self.bucket_rclone_profile}:{self.name}{sub_path}'
+                f'/{dest_dir_name}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -3444,9 +3754,12 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = ('rclone copy '
-                            f'{includes} {base_dir_path} '
-                            f'{self.bucket_rclone_profile}:{self.name}')
+            sub_path = (f'/{self._bucket_sub_path}'
+                        if self._bucket_sub_path else '')
+            sync_command = (
+                'rclone copy '
+                f'{includes} {base_dir_path} '
+                f'{self.bucket_rclone_profile}:{self.name}{sub_path}')
             return sync_command
 
         # Generate message for upload
@@ -3531,6 +3844,7 @@ class IBMCosStore(AbstractStore):
             Rclone.RcloneClouds.IBM,
             self.region,  # type: ignore
         )
+
         if not bucket_region and self.sync_on_reconstruction:
             # bucket doesn't exist
             return self._create_cos_bucket(self.name, self.region), True
@@ -3577,7 +3891,8 @@ class IBMCosStore(AbstractStore):
                                                      Rclone.RCLONE_CONFIG_PATH,
                                                      self.bucket_rclone_profile,
                                                      self.bucket.name,
-                                                     mount_path)
+                                                     mount_path,
+                                                     self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -3615,15 +3930,27 @@ class IBMCosStore(AbstractStore):
 
         return self.bucket
 
+    def _delete_cos_bucket_objects(self,
+                                   bucket: Any,
+                                   prefix: Optional[str] = None):
+        bucket_versioning = self.s3_resource.BucketVersioning(bucket.name)
+        if bucket_versioning.status == 'Enabled':
+            if prefix is not None:
+                res = list(
+                    bucket.object_versions.filter(Prefix=prefix).delete())
+            else:
+                res = list(bucket.object_versions.delete())
+        else:
+            if prefix is not None:
+                res = list(bucket.objects.filter(Prefix=prefix).delete())
+            else:
+                res = list(bucket.objects.delete())
+        logger.debug(f'Deleted bucket\'s content:\n{res}, prefix: {prefix}')
+
     def _delete_cos_bucket(self):
         bucket = self.s3_resource.Bucket(self.name)
         try:
-            bucket_versioning = self.s3_resource.BucketVersioning(self.name)
-            if bucket_versioning.status == 'Enabled':
-                res = list(bucket.object_versions.delete())
-            else:
-                res = list(bucket.objects.delete())
-            logger.debug(f'Deleted bucket\'s content:\n{res}')
+            self._delete_cos_bucket_objects(bucket)
             bucket.delete()
             bucket.wait_until_not_exists()
         except ibm.ibm_botocore.exceptions.ClientError as e:
@@ -3644,7 +3971,8 @@ class OciStore(AbstractStore):
                  source: str,
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
-                 sync_on_reconstruction: Optional[bool] = True):
+                 sync_on_reconstruction: Optional[bool] = True,
+                 _bucket_sub_path: Optional[str] = None):
         self.client: Any
         self.bucket: StorageHandle
         self.oci_config_file: str
@@ -3656,7 +3984,8 @@ class OciStore(AbstractStore):
         region = oci.get_oci_config()['region']
 
         super().__init__(name, source, region, is_sky_managed,
-                         sync_on_reconstruction)
+                         sync_on_reconstruction, _bucket_sub_path)
+        # TODO(zpoint): add _bucket_sub_path to the sync/mount/delete commands
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
