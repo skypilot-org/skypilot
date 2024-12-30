@@ -182,11 +182,9 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
 
     def _check_instance_profile_role(profile: Any, role_name: str):
         if profile.roles and profile.roles[0].name != role_name:
-            # If the associated role is not the role we expect, error out
-            # to user instead of silently overriding the role.
             logger.fatal(f'The instance profile {profile.name} already has '
                          f'an associated role {profile.roles[0].name}, but the '
-                         f'role {role.name} is not the same as the expected '
+                         f'role {role_name} is not the same as the expected '
                          f'role. Please remove the existing role from the '
                          f'instance profile and try again.')
             raise SystemExit(1)
