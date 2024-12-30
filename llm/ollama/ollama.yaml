@@ -47,13 +47,9 @@ service:
 
 setup: |
   # Install Ollama
-  if [ "$(uname -m)" == "aarch64" ]; then
-    # For apple silicon support
-    sudo curl -L https://ollama.com/download/ollama-linux-arm64 -o /usr/bin/ollama
-  else
-    sudo curl -L https://ollama.com/download/ollama-linux-amd64 -o /usr/bin/ollama
-  fi
-  sudo chmod +x /usr/bin/ollama
+  # official installation reference: https://ollama.com/download/linux
+  curl -fsSL https://ollama.com/install.sh | sh
+  sudo chmod +x /usr/local/bin/ollama
   
   # Start `ollama serve` and capture PID to kill it after pull is done
   ollama serve &
