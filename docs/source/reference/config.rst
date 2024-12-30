@@ -204,6 +204,20 @@ Available fields and semantics:
     # Default: false.
     disk_encrypted: false
 
+    # Enable EFA (optional).
+    #
+    # Set to true to enable EFA. Currently, it is only effective for P5/P5e
+    # instances.
+    #
+    # When enable_efa is set to true, use_internal_ips must also be set to true
+    # due to the limitation of EFA.
+    #
+    # This is useful for high-performance distributed training, see:
+    # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/efa-acc-inst-types.html
+    #
+    # Default: false.
+    enable_efa: false
+
     # Reserved capacity (optional).
     #
     # Whether to prioritize capacity reservations (considered as 0 cost) in the
