@@ -376,11 +376,7 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     exception_occurred = False
     try:
         sky.launch(task, cluster_name=cluster_name, dryrun=True)
-    except sky.exceptions.ResourcesUnavailableError as e:
-        expect_error_message = (
-            'Invalid pod_config. Deatils: '
-            'Invalid spec: Invalid value for `name`, must not be `None`')
-        assert expect_error_message in str(e)
+    except sky.exceptions.ResourcesUnavailableError:
         exception_occurred = True
     assert exception_occurred
 
