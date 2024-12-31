@@ -106,6 +106,10 @@ def get_az_mount_cmd(container_name: str,
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
+    # The line below ensures the cache directory is cleared before mounting to
+    # avoid "config error in file_cache [temp directory not empty]" error, which
+    # can occur after stopping and starting the same cluster on Azure.
+    # This helps ensure a clean state for blobfuse2 operations.
     mount_cmd = (f'rm -rf {cache_path} && mkdir -p {cache_path} && '
                  f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
@@ -285,3 +289,26 @@ def get_mounting_command(
                f'bash {script_path} && '
                f'rm {script_path}')
     return command
+
+
+def _get_bucket_mount_command(bucket_name: str,
+                              mount_path: str,
+                              region: Optional[str] = None,
+                              endpoint_url: Optional[str] = None) -> str:
+    """Returns the command to mount a bucket using gcsfuse or s3fs.
+
+    Args:
+        bucket_name: Name of the bucket to mount.
+        mount_path: Path where the bucket should be mounted.
+        region: Region where the bucket is located.
+        endpoint_url: Endpoint URL for the storage service.
+    """
+    # Break long lines into multiple lines for better readability
+    mount_cmd = (f'mkdir -p {mount_path} && '
+                 f'gcsfuse --implicit-dirs {bucket_name} {mount_path}')
+    if endpoint_url is not None:
+        mount_cmd = (f'mkdir -p {mount_path} && '
+                     f's3fs {bucket_name} {mount_path} '
+                     f'-o url={endpoint_url} '
+                     f'-o endpoint={region} -o allow_other')
+    return mount_cmd
