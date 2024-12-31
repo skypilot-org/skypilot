@@ -7,7 +7,7 @@ import re
 import sys
 from typing import Any, Dict
 
-from vastai_sdk import VastAI
+from sky.adaptors import vast
 
 _map = {
     'TeslaV100': 'V100',
@@ -43,7 +43,7 @@ if __name__ == '__main__':
     writer = csv.DictWriter(sys.stdout, fieldnames=[x[1] for x in mapped_keys])
     writer.writeheader()
 
-    offerList = VastAI().search_offers(limit=10000)
+    offerList = vast.vast().search_offers(limit=10000)
     for offer in offerList:
         entry = {}
         for ours, theirs in mapped_keys:
