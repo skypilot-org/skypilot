@@ -998,8 +998,10 @@ def cli():
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
-              default=False,
-              help='If used, runs locally inside a docker container.')
+              hidden=True,
+              help=('(Deprecated) Local docker support is deprecated. '
+                    'To run locally, create a local Kubernetes cluster with '
+                    '``sky local up``.'))
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
@@ -1142,6 +1144,11 @@ def launch(
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
+        click.secho(
+            'WARNING: LocalDockerBackend is deprecated and will be '
+            'removed in a future release. To run locally, create a local '
+            'Kubernetes cluster with `sky local up`.',
+            fg='yellow')
     elif backend_name == backends.CloudVmRayBackend.NAME:
         backend = backends.CloudVmRayBackend()
     else:
