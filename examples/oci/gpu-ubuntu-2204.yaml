@@ -1,0 +1,34 @@
+name: gpu-task
+
+resources:
+  # Optional; if left out, automatically pick the cheapest cloud.
+  cloud: oci
+
+  accelerators: A10:1
+
+  disk_size: 1024
+
+  disk_tier: high
+
+  #image_id: skypilot:gpu-oraclelinux8-cuda126
+  image_id: skypilot:gpu-ubuntu-2204
+
+
+# Working directory (optional) containing the project codebase.
+# Its contents are synced to ~/sky_workdir/ on the cluster.
+workdir: .
+
+num_nodes: 1
+
+# Typical use: pip install -r requirements.txt
+# Invoked under the workdir (i.e., can use its files).
+setup: |
+  echo "*** Running setup. ***"
+
+# Typical use: make use of resources, such as running training.
+# Invoked under the workdir (i.e., can use its files).
+run: |
+  echo "*** Running the task on OCI ***"
+  echo "hello, world"
+  nvidia-smi
+  echo "The task is completed."
