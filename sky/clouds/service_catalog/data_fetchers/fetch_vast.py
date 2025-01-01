@@ -1,5 +1,9 @@
 """A script that generates the Vast Cloud catalog. """
 
+#
+# Due to the design of the sdk, pylint has a false
+# positive for the fnctions.
+#
 # pylint: disable=assignment-from-no-return
 import csv
 import json
