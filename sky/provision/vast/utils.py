@@ -46,6 +46,9 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          size or greater than it. For instance, `disk_size=100` might
          return something with `disk_size` at 102 or even 1000.
 
+         The disk size {xx} GB is not exactly matched the requested 
+         size {yy} GB. It is possible to charge extra cost on disk.
+
       *  `geolocation`: Geolocation on Vast can be as specific as the
          host chooses to be. They can say, for instance, "Yutakachō,
          Shinagawa District, Tokyo, JP." Such a specific geolocation
