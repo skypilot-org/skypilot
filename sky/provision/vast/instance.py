@@ -206,6 +206,12 @@ def get_cluster_info(
         provider_config=provider_config,
     )
 
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    raise NotImplementedError('open_ports is not supported for Vast')
 
 def query_instances(
     cluster_name_on_cloud: str,
