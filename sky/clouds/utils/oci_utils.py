@@ -6,6 +6,8 @@ History:
    configuration.
  - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add the constant
    SERVICE_PORT_RULE_TAG
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Set the default gpu
+   image from skypilot:gpu-ubuntu-2004 to skypilot:gpu-ubuntu-2204
 """
 import os
 
@@ -117,7 +119,7 @@ class OCIConfig:
         # the sky's user-config file (if not specified, use the hardcode one at
         # last)
         return skypilot_config.get_nested(('oci', 'default', 'image_tag_gpu'),
-                                          'skypilot:gpu-ubuntu-2004')
+                                          'skypilot:gpu-ubuntu-2204')
 
     @classmethod
     def get_default_image_tag(cls) -> str:
