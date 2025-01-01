@@ -31,6 +31,11 @@ class Vast(clouds.Cloud):
         clouds.CloudImplementationFeatures.STORAGE_MOUNTING:
             ('Mounting object stores is not supported on Vast.'),
     }
+    #
+    # Vast doesn't have a max cluster name limit. This number
+    # is reasonably large and exists to play nicely with the
+    # other providers
+    #
     _MAX_CLUSTER_NAME_LEN_LIMIT = 120
     _regions: List[clouds.Region] = []
 
