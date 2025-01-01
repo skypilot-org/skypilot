@@ -10,7 +10,6 @@ resources:
 
   disk_tier: high
 
-  #image_id: skypilot:gpu-oraclelinux8-cuda126
   image_id: skypilot:gpu-ubuntu-2204
 
 
