@@ -283,7 +283,7 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
                   rdma/rdma_shared_device_a: 1
 
 
-Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., a `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) directly to your SkyPilot pods:
+Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) directly to your SkyPilot pods:
 
 .. code-block:: yaml
 
