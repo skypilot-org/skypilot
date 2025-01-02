@@ -158,7 +158,7 @@ This is typically achieved by reloading the latest checkpoint at the beginning o
 Intermediate storage for files
 ~~~~~~~~~~~~~~~~~~~~
 
-For managed jobs, SkyPilot requires a bucket to store intermediate files, such as local file mounts, temporary files, and the workdir.
+For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
 If you do not configure a bucket, SkyPilot will automatically create a default temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch.
 
 Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`. If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
