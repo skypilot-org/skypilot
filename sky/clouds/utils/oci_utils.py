@@ -6,8 +6,10 @@ History:
    configuration.
  - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add the constant
    SERVICE_PORT_RULE_TAG
- - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Set the default gpu
-   image from skypilot:gpu-ubuntu-2004 to skypilot:gpu-ubuntu-2204
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Set the default image
+   from ubuntu 20.04 to ubuntu 22.04, including:
+   - GPU: skypilot:gpu-ubuntu-2004 -> skypilot:gpu-ubuntu-2204
+   - CPU: skypilot:cpu-ubuntu-2004 -> skypilot:cpu-ubuntu-2204
 """
 import os
 
