@@ -764,7 +764,6 @@ def write_cluster_config(
     # running required checks.
     assert cluster_name is not None
     excluded_clouds = set()
-
     remote_identity_config = skypilot_config.get_nested(
         (str(cloud).lower(), 'remote_identity'), None)
     remote_identity = schemas.get_default_remote_identity(str(cloud).lower())
@@ -774,6 +773,7 @@ def write_cluster_config(
         # Some clouds (e.g., AWS) support specifying multiple service accounts
         # chosen based on the cluster name. Do the matching here to pick the
         # correct one.
+        
         for profile in remote_identity_config:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
