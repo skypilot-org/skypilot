@@ -152,6 +152,39 @@ The :code:`MOUNT` mode in :ref:`SkyPilot bucket mounting <sky-storage>` ensures 
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
+
+.. _intermediate-bucket:
+
+Intermediate Bucket
+~~~~~~~~~~~~~~~~~~~~
+
+For managed jobs, SkyPilot requires a bucket to store intermediate files, such as local file mounts, temporary files, and the workdir.
+If you do not configure a bucket, SkyPilot will automatically create a default temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch.
+Alternatively, you can specify a persistent bucket using :code:`jobs.bucket` in :code:`~/.sky/config.yaml`. If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
+
+.. code-block:: yaml
+
+  # ~/.sky/config.yaml
+  jobs:
+    bucket: s3://my-bucket  # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+
+When using :code:`jobs.bucket`, SkyPilot organizes files in the following structure:
+
+.. code-block:: text
+
+  # cloud bucket, s3://my-bucket/ for example
+  my-bucket/
+  ├── job-15891b25/            # Job-specific directory
+  │   ├── local-file-mounts/   # Files from local file mounts
+  │   ├── tmp-files/           # Temporary files
+  │   └── workdir/             # Files from workdir
+  └── job-cae228be/            # Another job's directory
+      ├── local-file-mounts/
+      ├── tmp-files/
+      └── workdir/
+
+SkyPilot automatically deletes the entire bucket after the job completes if no bucket is specified. When using a custom bucket (:code:`jobs.bucket`), only the job-specific directories (e.g., :code:`job-15891b25/`) are cleaned up after job completion, while the bucket itself persists.
+
 .. _spot-jobs-end-to-end:
 
 An End-to-End Example
@@ -505,4 +538,3 @@ The :code:`resources` field has the same spec as a normal SkyPilot job; see `her
   These settings will not take effect if you have an existing controller (either
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
-
