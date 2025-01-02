@@ -153,39 +153,6 @@ Note that the application code should save program checkpoints periodically and 
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
 
-.. _intermediate-bucket:
-
-Intermediate storage for files
-~~~~~~~~~~~~~~~~~~~~
-
-For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
-If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
-
-Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`. If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
-
-.. code-block:: yaml
-
-  # ~/.sky/config.yaml
-  jobs:
-    bucket: s3://my-bucket  # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
-
-When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under the bucket root to store files. They are organized in the following structure:
-
-.. code-block:: text
-
-  # cloud bucket, s3://my-bucket/ for example
-  my-bucket/
-  ├── job-15891b25/            # Job-specific directory
-  │   ├── local-file-mounts/   # Files from local file mounts
-  │   ├── tmp-files/           # Temporary files
-  │   └── workdir/             # Files from workdir
-  └── job-cae228be/            # Another job's directory
-      ├── local-file-mounts/
-      ├── tmp-files/
-      └── workdir/
-
-When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (e.g., :code:`job-15891b25/`) created by SkyPilot are removed when the job completes.
-
 .. _spot-jobs-end-to-end:
 
 An End-to-End Example
@@ -487,6 +454,43 @@ This automatically opens a browser tab to show the dashboard:
 The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
 especially useful when there are many in-progress jobs to monitor, which the
 terminal-based CLI may need more than one page to display.
+
+
+.. _intermediate-bucket:
+
+Intermediate storage for files
+------------------------------
+
+For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
+If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
+
+Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`. If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
+
+.. code-block:: yaml
+
+  # ~/.sky/config.yaml
+  jobs:
+    bucket: s3://my-bucket  # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+
+When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under the bucket root to store files. They are organized in the following structure:
+
+.. code-block:: text
+
+  # cloud bucket, s3://my-bucket/ for example
+  my-bucket/
+  ├── job-15891b25/            # Job-specific directory
+  │   ├── local-file-mounts/   # Files from local file mounts
+  │   ├── tmp-files/           # Temporary files
+  │   └── workdir/             # Files from workdir
+  └── job-cae228be/            # Another job's directory
+      ├── local-file-mounts/
+      ├── tmp-files/
+      └── workdir/
+
+When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (e.g., :code:`job-15891b25/`) created by SkyPilot are removed when the job completes.
+
+.. tip::
+  Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
 
 Concept: Jobs Controller
