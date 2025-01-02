@@ -155,7 +155,7 @@ This is typically achieved by reloading the latest checkpoint at the beginning o
 
 .. _intermediate-bucket:
 
-Intermediate Bucket
+Intermediate storage for files
 ~~~~~~~~~~~~~~~~~~~~
 
 For managed jobs, SkyPilot requires a bucket to store intermediate files, such as local file mounts, temporary files, and the workdir.
