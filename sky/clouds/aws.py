@@ -677,35 +677,6 @@ class AWS(clouds.Cloud):
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
-        """Returns a [UserId, Account] list that uniquely identifies the user.
-
-        These fields come from `aws sts get-caller-identity`. We permit the same
-        actual user to:
-
-          - switch between different root accounts (after which both elements
-            of the list will be different) and have their clusters owned by
-            each account be protected; or
-
-          - within the same root account, switch between different IAM
-            users, and treat [user_id=1234, account=A] and
-            [user_id=4567, account=A] to be the *same*. Namely, switching
-            between these IAM roles within the same root account will cause
-            the first element of the returned list to differ, and will allow
-            the same actual user to continue to interact with their clusters.
-            Note: this is not 100% safe, since the IAM users can have very
-            specific permissions, that disallow them to access the clusters
-            but it is a reasonable compromise as that could be rare.
-
-        Returns:
-            A list of strings that uniquely identifies the user on this cloud.
-            For identity check, we will fallback through the list of strings
-            until we find a match, and print a warning if we fail for the
-            first string.
-
-        Raises:
-            exceptions.CloudUserIdentityError: if the user identity cannot be
-                retrieved.
-        """
         try:
             sts = aws.client('sts')
             # The caller identity contains 3 fields: UserId, Account, Arn.
@@ -787,6 +758,42 @@ class AWS(clouds.Cloud):
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """Returns a [UserId, Account] list that uniquely identifies current AWS
+        principal (user, role or federated identity) whose credentials are used
+        to run current `sky` process. These identities are assumed to be stable
+        for the duration of the `sky` process. Modifying the credentials while
+        the `sky` process is running will not affect the identity returned by
+        this function.
+
+        These fields come from `aws sts get-caller-identity` and are cached
+        locally by `aws configure list` output.
+
+        We permit the same actual user to:
+
+          - switch between different root accounts (after which both elements
+            of the list will be different) and have their clusters owned by
+            each account be protected; or
+
+          - within the same root account, switch between different IAM
+            users, and treat [user_id=1234, account=A] and
+            [user_id=4567, account=A] to be the *same*. Namely, switching
+            between these IAM roles within the same root account will cause
+            the first element of the returned list to differ, and will allow
+            the same actual user to continue to interact with their clusters.
+            Note: this is not 100% safe, since the IAM users can have very
+            specific permissions, that disallow them to access the clusters
+            but it is a reasonable compromise as that could be rare.
+
+        Returns:
+            A list of strings that uniquely identifies the user on this cloud.
+            For identity check, we will fallback through the list of strings
+            until we find a match, and print a warning if we fail for the
+            first string.
+
+        Raises:
+            exceptions.CloudUserIdentityError: if the user identity cannot be
+                retrieved.
+        """
         stdout = cls._aws_configure_list()
         if stdout is None:
             # `aws configure list` is not available, possible reasons:
