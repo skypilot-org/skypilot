@@ -650,6 +650,42 @@ def _replace_yaml_dicts(
     return common_utils.dump_yaml_str(new_config)
 
 
+def get_expirable_clouds(
+        enabled_clouds: Sequence[clouds.Cloud]) -> List[clouds.Cloud]:
+    """Returns a list of clouds that use local credentials and whose credentials can expire.
+
+    This function checks each cloud in the provided sequence to determine if it uses local credentials
+    and if its credentials can expire. If both conditions are met, the cloud is added to the list of
+    expirable clouds.
+
+    Args:
+        enabled_clouds (Sequence[clouds.Cloud]): A sequence of cloud objects to check.
+
+    Returns:
+        list[clouds.Cloud]: A list of cloud objects that use local credentials and whose credentials can expire.
+    """
+    expirable_clouds = []
+    local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+    for cloud in enabled_clouds:
+        remote_identities = skypilot_config.get_nested(
+            (str(cloud).lower(), 'remote_identity'), None)
+        if remote_identities is None:
+            remote_identities = schemas.get_default_remote_identity(
+                str(cloud).lower())
+
+        local_credential_expiring = cloud.can_credential_expire()
+        if isinstance(remote_identities, str):
+            if remote_identities == local_credentials_value and local_credential_expiring:
+                expirable_clouds.append(cloud)
+        elif isinstance(remote_identities, list):
+            for profile in remote_identities:
+                if list(profile.values(
+                ))[0] == local_credentials_value and local_credential_expiring:
+                    expirable_clouds.append(cloud)
+                    break
+    return expirable_clouds
+
+
 @functools.lru_cache(maxsize=1)
 def get_remote_identity(cloud: Optional[clouds.Cloud],
                         cluster_name: str) -> str:
@@ -787,7 +823,6 @@ def write_cluster_config(
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
-
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
 
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}

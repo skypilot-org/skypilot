@@ -27,6 +27,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
@@ -62,7 +63,6 @@ from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
-from sky.utils import schemas
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -1998,20 +1998,21 @@ class RetryingVmProvisioner(object):
                                        skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
-
-        cloud = to_provision.cloud
+        # When jobs controller/server using the local credentials which are
+        # expiring it may cause the cluster to be leaked. So, checking the
+        # enabled clouds and expiring credentials and warning the user to use
+        # the credentials that never expire or a service account.
         if task.is_controller_task():
-            remote_identity = backend_utils.get_remote_identity(
-                cloud, cluster_name)
-            local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value  # pylint: disable=line-too-long
-            use_local_cred = remote_identity == local_credentials_value
-            expirable_cred = to_provision.cloud.can_credential_expire()
-            if use_local_cred and expirable_cred:
-                warnings = (
-                    f'\nWarning: Expiring credentials detected for {cloud}.'
-                    'Clusters may be leaked if the credentials expire while '
-                    'jobs are running. It is recommended to use credentials '
-                    'that never expire or a service account.')
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            expirable_clouds = backend_utils.get_expirable_clouds(
+                enabled_clouds)
+
+            if len(expirable_clouds) > 0:
+                warnings = (f'\nWarning: Expiring credentials detected for '
+                            f'{expirable_clouds}. Clusters may be leaked if '
+                            f'the credentials expire while jobs are running. '
+                            f'It is recommended to use credentials that never'
+                            f' expire or a service account.')
                 click.secho(warnings, fg='yellow')
 
         # Retrying launchable resources.
