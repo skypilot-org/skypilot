@@ -169,7 +169,7 @@ Alternatively, you can pre-provision a bucket and use it as an intermediate for 
   jobs:
     bucket: s3://my-bucket  # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
 
-When using :code:`jobs.bucket`, SkyPilot organizes files in the following structure:
+When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under the bucket root to store files. They are organized in the following structure:
 
 .. code-block:: text
 
