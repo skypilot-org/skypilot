@@ -150,7 +150,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
                     f'{role_name}{colorama.Style.RESET_ALL} from AWS.')
                 raise exc
 
-    def _create_instance_profile_if_not_exists(instance_profile_name: str):
+    def _create_instance_profile_if_not_exists(instance_profile_name: str) -> None:
         try:
             iam.meta.client.create_instance_profile(
                 InstanceProfileName=instance_profile_name)
