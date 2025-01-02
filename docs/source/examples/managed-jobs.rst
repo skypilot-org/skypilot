@@ -184,7 +184,7 @@ When using :code:`jobs.bucket`, SkyPilot organizes files in the following struct
       ├── tmp-files/
       └── workdir/
 
-SkyPilot automatically deletes the entire bucket after the job completes if no bucket is specified. When using a custom bucket (:code:`jobs.bucket`), only the job-specific directories (e.g., :code:`job-15891b25/`) are cleaned up after job completion, while the bucket itself persists.
+When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (e.g., :code:`job-15891b25/`) created by SkyPilot are removed when the job completes.
 
 .. _spot-jobs-end-to-end:
 
