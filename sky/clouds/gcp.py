@@ -74,7 +74,8 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }}; }}; \
     [[ -z "$GOOGLE_APPLICATION_CREDENTIALS" && -f ~/.config/gcloud/application_default_credentials.json ]] && \
-    export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json; \
+    export GOOGLE_APPLICATION_CREDENTIALS=~/.config/gcloud/application_default_credentials.json;&& \
+    [[ -d ~/.config/gcloud/legacy_credentials/ ]] && rm -rf ~/.config/gcloud/legacy_credentials/; \
     popd &>/dev/null'
 
 # TODO(zhwu): Move the default AMI size to the catalog instead.
