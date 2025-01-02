@@ -304,7 +304,7 @@ Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concep
 
 .. tip::
 
-    You can set the ``pod_config`` on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <task-yaml-experimental>`.
+    As an alternative to setting ``pod_config`` globally, you can also set it on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <task-yaml-experimental>`.
 
     .. code-block:: yaml
 
