@@ -773,7 +773,6 @@ def write_cluster_config(
         # Some clouds (e.g., AWS) support specifying multiple service accounts
         # chosen based on the cluster name. Do the matching here to pick the
         # correct one.
-        
         for profile in remote_identity_config:
             if fnmatch.fnmatchcase(cluster_name, list(profile.keys())[0]):
                 remote_identity = list(profile.values())[0]
@@ -809,7 +808,6 @@ def write_cluster_config(
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
-
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     region_name = resources_vars.get('region')
 
