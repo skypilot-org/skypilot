@@ -5735,7 +5735,14 @@ def api_ls(request_id: Optional[str], all_status: bool):
 @usage_lib.entrypoint
 def api_server_logs(follow: bool, tail: str):
     """Shows the SkyPilot server logs."""
-    sdk.api_server_logs(follow, tail)
+    tail_num = None
+    if tail != 'all':
+        try:
+            tail_num = int(tail)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Invalid tail argument: {tail}') from e
+    sdk.api_server_logs(follow, tail_num)
 
 
 @api.command('login', cls=_DocumentedCodeCommand)

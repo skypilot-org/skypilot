@@ -793,21 +793,23 @@ def api_stop():
 # Use the same args as `docker logs`
 @usage_lib.entrypoint
 @annotations.public_api
-def api_server_logs(follow: bool = True, tail: str = 'all'):
-    """Stream the API server logs."""
+def api_server_logs(follow: bool = True, tail: Optional[int] = None):
+    """Stream the API server logs.
+
+    Args:
+        tail: the number of lines to show from the end of the logs.
+            If None, show all logs.
+    """
     if api_common.is_api_server_local():
         tail_args = ['-f'] if follow else []
-        if tail == 'all':
+        if tail is None:
             tail_args.extend(['-n', '+1'])
         else:
-            try:
-                tail_args.extend(['-n', f'{int(tail)}'])
-            except ValueError as e:
-                raise ValueError(f'Invalid tail argument: {tail}') from e
+            tail_args.extend(['-n', f'{tail}'])
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
-        stream_and_get(log_path=constants.API_SERVER_LOGS)
+        stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
 
 
 @usage_lib.entrypoint
