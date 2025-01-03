@@ -506,8 +506,11 @@ class QueryHelper:
             raise exceptions.ResourcesUnavailableError(
                 'The VCN is not available')
 
-        # Get the primary vnic.
-        assert len(list_vcns_resp.data) > 0
+        # Get the primary vnic. The vnic might be none for the
+        # corner case when the cluster was exited during provision.
+        if not list_vcns_resp.data:
+            return None
+
         vcn = list_vcns_resp.data[0]
 
         list_nsg_resp = net_client.list_network_security_groups(
