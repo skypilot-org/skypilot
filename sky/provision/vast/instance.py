@@ -245,34 +245,3 @@ def cleanup_ports(
 ) -> None:
     del cluster_name_on_cloud, ports, provider_config  # Unused.
 
-
-def query_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    head_ip: Optional[str] = None,
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> Dict[int, List[common.Endpoint]]:
-    """See sky/provision/__init__.py"""
-    del head_ip, provider_config  # Unused.
-
-    start_time = time.time()
-    ports_to_query = resources_utils.port_ranges_to_set(ports)
-    while True:
-        instances = _filter_instances(cluster_name_on_cloud,
-                                      None,
-                                      head_only=True)
-        assert len(instances) == 1
-        head_inst = list(instances.values())[0]
-        ready_ports: Dict[int, List[common.Endpoint]] = {
-            port: [common.SocketEndpoint(**endpoint)]
-            for port, endpoint in head_inst['port2endpoint'].items()
-            if port in ports_to_query
-        }
-        not_ready_ports = ports_to_query - set(ready_ports.keys())
-        if not not_ready_ports:
-            return ready_ports
-        if time.time() - start_time > QUERY_PORTS_TIMEOUT_SECONDS:
-            logger.warning(f'Querying ports {ports} timed out. Ports '
-                           f'{not_ready_ports} are not ready.')
-            return ready_ports
-        time.sleep(1)
