@@ -111,7 +111,8 @@ class AWSIdentityType(enum.Enum):
         SSO/Container-role refresh token:
         https://docs.aws.amazon.com/solutions/latest/dea-api/auth-refreshtoken.html
         """
-        # TODO(hong): Add a CLI based check for the expiration of the temporary credentials
+        # TODO(hong): Add a CLI based check for the expiration of the temporary
+        #  credentials
         expirable_types = {
             AWSIdentityType.ENV, AWSIdentityType.SHARED_CREDENTIALS_FILE
         }
