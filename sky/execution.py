@@ -329,7 +329,7 @@ def _execute(
                           (task.file_mounts is not None or
                            task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
-            logger.info(ux_utils.starting_message('Mounting files.'))
+            logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
             backend.sync_workdir(handle, task.workdir)

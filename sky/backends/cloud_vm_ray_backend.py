@@ -3194,7 +3194,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ux_utils.spinner_message('Syncing workdir', log_path)):
             subprocess_utils.run_in_parallel(_sync_workdir_node, runners,
                                              num_threads)
-        logger.info(ux_utils.finishing_message('Workdir synced.', log_path))
+        logger.info(ux_utils.finishing_message('Synced workdir.', log_path))
 
     def _sync_file_mounts(
         self,
@@ -4674,7 +4674,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                              num_threads)
         end = time.time()
         logger.debug(f'File mount sync took {end - start} seconds.')
-        logger.info(ux_utils.finishing_message('Files synced.', log_path))
+        logger.info(ux_utils.finishing_message('Synced file_mounts.', log_path))
 
     def _execute_storage_mounts(
             self, handle: CloudVmRayResourceHandle,
