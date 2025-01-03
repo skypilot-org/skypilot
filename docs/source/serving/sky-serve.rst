@@ -242,6 +242,9 @@ Under the hood, :code:`sky serve up`:
 #. Meanwhile, the controller provisions replica VMs which later run the services;
 #. Once any replica is ready, the requests sent to the Service Endpoint will be distributed to one of the endpoint replicas.
 
+.. note::
+  SkyServe uses least load load balancing to distribute the traffic to the replicas. It keeps track of the number of requests each replica has handled and routes the next request to the replica with the least load.
+
 After the controller is provisioned, you'll see the following in :code:`sky serve status` output:
 
 .. image:: ../images/sky-serve-status-output-provisioning.png
@@ -515,7 +518,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Specify the disk_size in GB of the SkyServe controller.
         disk_size: 1024
 
-The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://docs.skypilot.co/en/latest/reference/yaml-spec.html>`__.
 
 .. note::
   These settings will not take effect if you have an existing controller (either

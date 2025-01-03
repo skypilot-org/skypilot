@@ -50,7 +50,7 @@ class Metadata:
         if value is None:
             if instance_id in metadata:
                 metadata.pop(instance_id)  # del entry
-            if len(metadata) == 0:
+            if not metadata:
                 if os.path.exists(self.path):
                     os.remove(self.path)
                 return
@@ -69,7 +69,7 @@ class Metadata:
         for instance_id in list(metadata.keys()):
             if instance_id not in instance_ids:
                 del metadata[instance_id]
-        if len(metadata) == 0:
+        if not metadata:
             os.remove(self.path)
             return
         with open(self.path, 'w', encoding='utf-8') as f:
@@ -150,7 +150,7 @@ class LambdaCloudClient:
                              ['regions_with_capacity_available'])
         available_regions = [reg['name'] for reg in available_regions]
         if region not in available_regions:
-            if len(available_regions) > 0:
+            if available_regions:
                 aval_reg = ' '.join(available_regions)
             else:
                 aval_reg = 'None'

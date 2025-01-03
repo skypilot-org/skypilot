@@ -22,8 +22,12 @@ Available fields and semantics:
   #
   # These take effects only when a managed jobs controller does not already exist.
   #
-  # Ref: https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
+  # Ref: https://docs.skypilot.co/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
   jobs:
+    # Bucket to store managed jobs mount files and tmp files. Bucket must already exist. 
+    # Optional. If not set, SkyPilot will create a new bucket for each managed job launch.
+    # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+    bucket: s3://my-bucket/
     controller:
       resources:  # same spec as 'resources' in a task YAML
         cloud: gcp
@@ -478,13 +482,13 @@ Available fields and semantics:
     # This must be either: 'loadbalancer', 'ingress' or 'podip'.
     #
     # loadbalancer: Creates services of type `LoadBalancer` to expose ports.
-    # See https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
+    # See https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html#loadbalancer-service.
     # This mode is supported out of the box on most cloud managed Kubernetes
     # environments (e.g., GKE, EKS).
     #
     # ingress: Creates an ingress and a ClusterIP service for each port opened.
     # Requires an Nginx ingress controller to be configured on the Kubernetes cluster.
-    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
+    # Refer to https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html#nginx-ingress
     # for details on deploying the NGINX ingress controller.
     #
     # podip: Directly returns the IP address of the pod. This mode does not
@@ -513,7 +517,7 @@ Available fields and semantics:
     #
     # <string>: The name of a service account to use for all Kubernetes pods.
     # This service account must exist in the user's namespace and have all
-    # necessary permissions. Refer to https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/kubernetes.html
+    # necessary permissions. Refer to https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/kubernetes.html
     # for details on the roles required by the service account.
     #
     # Using SERVICE_ACCOUNT or a custom service account only affects Kubernetes
@@ -581,7 +585,7 @@ Available fields and semantics:
     #   gke: uses cloud.google.com/gke-accelerator label to identify GPUs on nodes
     #   karpenter: uses karpenter.k8s.aws/instance-gpu-name label to identify GPUs on nodes
     #   generic: uses skypilot.co/accelerator labels to identify GPUs on nodes
-    # Refer to https://skypilot.readthedocs.io/en/latest/reference/kubernetes/kubernetes-setup.html#setting-up-gpu-support
+    # Refer to https://docs.skypilot.co/en/latest/reference/kubernetes/kubernetes-setup.html#setting-up-gpu-support
     # for more details on setting up labels for GPU support.
     #
     # Default: null (no autoscaler, autodetect label format for GPU nodes)

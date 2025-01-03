@@ -397,7 +397,7 @@ def _check_firewall_rules(cluster_name: str, vpc_name: str, project_id: str,
     operation = compute.networks().getEffectiveFirewalls(project=project_id,
                                                          network=vpc_name)
     response = operation.execute()
-    if len(response) == 0:
+    if not response:
         return False
     effective_rules = response['firewalls']
 
@@ -515,7 +515,7 @@ def _create_rules(project_id: str, compute, rules, vpc_name):
         rule_list = _list_firewall_rules(project_id,
                                          compute,
                                          filter=f'(name={rule_name})')
-        if len(rule_list) > 0:
+        if rule_list:
             _delete_firewall_rule(project_id, compute, rule_name)
 
         body = rule.copy()
@@ -624,7 +624,7 @@ def get_usable_vpc_and_subnet(
     vpc_list = _list_vpcnets(project_id,
                              compute,
                              filter=f'name={constants.SKYPILOT_VPC_NAME}')
-    if len(vpc_list) == 0:
+    if not vpc_list:
         body = constants.VPC_TEMPLATE.copy()
         body['name'] = body['name'].format(VPC_NAME=constants.SKYPILOT_VPC_NAME)
         body['selfLink'] = body['selfLink'].format(

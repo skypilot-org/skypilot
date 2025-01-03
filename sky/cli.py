@@ -114,7 +114,7 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-        if len(glob_cluster) == 0 and not silent:
+        if not glob_cluster and not silent:
             click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
@@ -125,7 +125,7 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     glob_storages = []
     for storage_object in storages:
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
-        if len(glob_storage) == 0:
+        if not glob_storage:
             click.echo(f'Storage {storage_object} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
@@ -830,7 +830,7 @@ class _NaturalOrderGroup(click.Group):
     Reference: https://github.com/pallets/click/issues/513
     """
 
-    def list_commands(self, ctx):
+    def list_commands(self, ctx):  # pylint: disable=unused-argument
         return self.commands.keys()
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
@@ -998,8 +998,10 @@ def cli():
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
-              default=False,
-              help='If used, runs locally inside a docker container.')
+              hidden=True,
+              help=('(Deprecated) Local docker support is deprecated. '
+                    'To run locally, create a local Kubernetes cluster with '
+                    '``sky local up``.'))
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
@@ -1142,6 +1144,11 @@ def launch(
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
+        click.secho(
+            'WARNING: LocalDockerBackend is deprecated and will be '
+            'removed in a future release. To run locally, create a local '
+            'Kubernetes cluster with `sky local up`.',
+            fg='yellow')
     elif backend_name == backends.CloudVmRayBackend.NAME:
         backend = backends.CloudVmRayBackend()
     else:
@@ -1473,7 +1480,7 @@ def _get_services(service_names: Optional[List[str]],
             if len(service_records) != 1:
                 plural = 's' if len(service_records) > 1 else ''
                 service_num = (str(len(service_records))
-                               if len(service_records) > 0 else 'No')
+                               if service_records else 'No')
                 raise click.UsageError(
                     f'{service_num} service{plural} found. Please specify '
                     'an existing service to show its endpoint. Usage: '
@@ -1696,8 +1703,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
-                    cluster_num = (str(len(clusters))
-                                   if len(clusters) > 0 else 'No')
+                    cluster_num = (str(len(clusters)) if clusters else 'No')
                     cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
@@ -1722,9 +1728,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
-                                   if len(cluster_records) > 0 else
-                                   f'{clusters[0]!r}')
-                    verb = 'found' if len(cluster_records) > 0 else 'not found'
+                                   if cluster_records else f'{clusters[0]!r}')
+                    verb = 'found' if cluster_records else 'not found'
                     cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
@@ -2470,7 +2475,7 @@ def start(
                 '(see `sky status`), or the -a/--all flag.')
 
     if all:
-        if len(clusters) > 0:
+        if clusters:
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
@@ -2800,7 +2805,7 @@ def _down_or_stop_clusters(
             option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
-    if len(names) > 0:
+    if names:
         controllers = [
             name for name in names
             if controller_utils.Controllers.from_name(name) is not None
@@ -2814,7 +2819,7 @@ def _down_or_stop_clusters(
         # Make sure the controllers are explicitly specified without other
         # normal clusters.
         if controllers:
-            if len(names) != 0:
+            if names:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
                     f'{operation} controller(s) '
@@ -2867,7 +2872,7 @@ def _down_or_stop_clusters(
 
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
-        if len(names) > 0:
+        if names:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
                 'Letting --all take effect.')
@@ -2894,7 +2899,7 @@ def _down_or_stop_clusters(
         click.echo('Cluster(s) not found (tip: see `sky status`).')
         return
 
-    if not no_confirm and len(clusters) > 0:
+    if not no_confirm and clusters:
         cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
         cluster_list = ', '.join(clusters)
         click.confirm(
@@ -3003,7 +3008,7 @@ def check(clouds: Tuple[str], verbose: bool):
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
     """
-    clouds_arg = clouds if len(clouds) > 0 else None
+    clouds_arg = clouds if clouds else None
     sky_check.check(verbose=verbose, clouds=clouds_arg)
 
 
@@ -3138,7 +3143,7 @@ def show_gpus(
                                  f'capacity ({list(capacity.keys())}), '
                                  f'and available ({list(available.keys())}) '
                                  'must be same.')
-        if len(counts) == 0:
+        if not counts:
             err_msg = 'No GPUs found in Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check '
             if name_filter is not None:
@@ -3282,7 +3287,7 @@ def show_gpus(
             for tpu in service_catalog.get_tpus():
                 if tpu in result:
                     tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
-            if len(tpu_table.get_string()) > 0:
+            if tpu_table.get_string():
                 yield '\n\n'
             yield from tpu_table.get_string()
 
@@ -3393,7 +3398,7 @@ def show_gpus(
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
-        if len(result) == 0:
+        if not result:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
             cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
@@ -3522,7 +3527,7 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         # Delete all storage objects.
         sky storage delete -a
     """
-    if sum([len(names) > 0, all]) != 1:
+    if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
         storages = sky.storage_ls()
@@ -3601,15 +3606,12 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(cooperc): remove this flag once --fast can robustly detect cluster
-# yaml config changes
+# TODO(cooperc): remove this flag before releasing 0.8.0
 @click.option('--fast',
               default=False,
               is_flag=True,
-              help='[Experimental] Launch the job faster by skipping '
-              'controller initialization steps. If you update SkyPilot or '
-              'your local cloud credentials, they will not be reflected until '
-              'you run `sky jobs launch` at least once without this flag.')
+              help=('[Deprecated] Does nothing. Previous flag behavior is now '
+                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3634,7 +3636,7 @@ def jobs_launch(
     disk_tier: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
-    retry_until_up: bool,
+    retry_until_up: Optional[bool],
     yes: bool,
     fast: bool,
 ):
@@ -3692,6 +3694,16 @@ def jobs_launch(
     else:
         retry_until_up = True
 
+    # Deprecation. The default behavior is fast, and the flag will be removed.
+    # The flag was not present in 0.7.x (only nightly), so we will remove before
+    # 0.8.0 so that it never enters a stable release.
+    if fast:
+        click.secho(
+            'Flag --fast is deprecated, as the behavior is now default. The '
+            'flag will be removed soon. Please do not use it, so that you '
+            'avoid "No such option" errors.',
+            fg='yellow')
+
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
         with sky.Dag() as dag:
@@ -3733,8 +3745,7 @@ def jobs_launch(
     managed_jobs.launch(dag,
                         name,
                         detach_run=detach_run,
-                        retry_until_up=retry_until_up,
-                        fast=fast)
+                        retry_until_up=retry_until_up)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -3875,8 +3886,8 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
             exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'--job-ids {job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'--job-ids {job_id_str}' if job_ids else ''
         argument_str += f' --name {name}' if name is not None else ''
         argument_str += ' --all' if all else ''
         raise click.UsageError(
@@ -4517,9 +4528,9 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         # Forcefully tear down a specific replica, even in failed status.
         sky serve down my-service --replica-id 1 --purge
     """
-    if sum([len(service_names) > 0, all]) != 1:
-        argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
-            service_names) > 0 else ''
+    if sum([bool(service_names), all]) != 1:
+        argument_str = (f'SERVICE_NAMES={",".join(service_names)}'
+                        if service_names else '')
         argument_str += ' --all' if all else ''
         raise click.UsageError(
             'Can only specify one of SERVICE_NAMES or --all. '
@@ -4892,7 +4903,7 @@ def benchmark_launch(
     if idle_minutes_to_autostop is None:
         idle_minutes_to_autostop = 5
     commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
-    if len(env) > 0:
+    if env:
         commandline_args['env'] = [f'{k}={v}' for k, v in env]
 
     # Launch the benchmarking clusters in detach mode in parallel.
@@ -5171,7 +5182,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         raise click.BadParameter(
             'Either specify benchmarks or use --all to delete all benchmarks.')
     to_delete = []
-    if len(benchmarks) > 0:
+    if benchmarks:
         for benchmark in benchmarks:
             record = benchmark_state.get_benchmark_from_name(benchmark)
             if record is None:
@@ -5180,7 +5191,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                 to_delete.append(record)
     if all:
         to_delete = benchmark_state.get_benchmarks()
-        if len(benchmarks) > 0:
+        if benchmarks:
             print('Both --all and benchmark(s) specified '
                   'for sky bench delete. Letting --all take effect.')
 
@@ -5282,7 +5293,7 @@ def _deploy_local_cluster(gpus: bool):
     run_command = shlex.split(run_command)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_up.log')
     tail_cmd = 'tail -n100 -f ' + log_path
@@ -5396,7 +5407,7 @@ def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
     deploy_command = shlex.split(deploy_command)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_up.log')
     tail_cmd = 'tail -n100 -f ' + log_path
@@ -5511,7 +5522,7 @@ def local_down():
     run_command = shlex.split(down_script_path)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_down.log')
     tail_cmd = 'tail -n100 -f ' + log_path

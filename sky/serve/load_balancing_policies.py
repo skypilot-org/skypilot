@@ -1,7 +1,9 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
+import collections
 import random
+import threading
 import typing
-from typing import List, Optional
+from typing import Dict, List, Optional
 
 from sky import sky_logging
 
@@ -13,6 +15,10 @@ logger = sky_logging.init_logger(__name__)
 # Define a registry for load balancing policies
 LB_POLICIES = {}
 DEFAULT_LB_POLICY = None
+# Prior to #4439, the default policy was round_robin. We store the legacy
+# default policy here to maintain backwards compatibility. Remove this after
+# 2 minor release, i.e., 0.9.0.
+LEGACY_DEFAULT_POLICY = 'round_robin'
 
 
 def _request_repr(request: 'fastapi.Request') -> str:
@@ -38,11 +44,17 @@ class LoadBalancingPolicy:
             DEFAULT_LB_POLICY = name
 
     @classmethod
+    def make_policy_name(cls, policy_name: Optional[str]) -> str:
+        """Return the policy name."""
+        assert DEFAULT_LB_POLICY is not None, 'No default policy set.'
+        if policy_name is None:
+            return DEFAULT_LB_POLICY
+        return policy_name
+
+    @classmethod
     def make(cls, policy_name: Optional[str] = None) -> 'LoadBalancingPolicy':
         """Create a load balancing policy from a name."""
-        if policy_name is None:
-            policy_name = DEFAULT_LB_POLICY
-
+        policy_name = cls.make_policy_name(policy_name)
         if policy_name not in LB_POLICIES:
             raise ValueError(f'Unknown load balancing policy: {policy_name}')
         return LB_POLICIES[policy_name]()
@@ -65,8 +77,16 @@ class LoadBalancingPolicy:
     def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
         raise NotImplementedError
 
+    def pre_execute_hook(self, replica_url: str,
+                         request: 'fastapi.Request') -> None:
+        pass
 
-class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
+    def post_execute_hook(self, replica_url: str,
+                          request: 'fastapi.Request') -> None:
+        pass
+
+
+class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
     """Round-robin load balancing policy."""
 
     def __init__(self) -> None:
@@ -90,3 +110,43 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin', default=True):
         ready_replica_url = self.ready_replicas[self.index]
         self.index = (self.index + 1) % len(self.ready_replicas)
         return ready_replica_url
+
+
+class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
+    """Least load load balancing policy."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.load_map: Dict[str, int] = collections.defaultdict(int)
+        self.lock = threading.Lock()
+
+    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        with self.lock:
+            self.ready_replicas = ready_replicas
+            for r in self.ready_replicas:
+                if r not in ready_replicas:
+                    del self.load_map[r]
+            for replica in ready_replicas:
+                self.load_map[replica] = self.load_map.get(replica, 0)
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        del request  # Unused.
+        if not self.ready_replicas:
+            return None
+        with self.lock:
+            return min(self.ready_replicas,
+                       key=lambda replica: self.load_map.get(replica, 0))
+
+    def pre_execute_hook(self, replica_url: str,
+                         request: 'fastapi.Request') -> None:
+        del request  # Unused.
+        with self.lock:
+            self.load_map[replica_url] += 1
+
+    def post_execute_hook(self, replica_url: str,
+                          request: 'fastapi.Request') -> None:
+        del request  # Unused.
+        with self.lock:
+            self.load_map[replica_url] -= 1

@@ -340,14 +340,15 @@ class GFDLabelFormatter(GPULabelFormatter):
         """
         canonical_gpu_names = [
             'A100-80GB', 'A100', 'A10G', 'H100', 'K80', 'M60', 'T4g', 'T4',
-            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L4'
+            'V100', 'A10', 'P4000', 'P100', 'P40', 'P4', 'L40', 'L4'
         ]
         for canonical_name in canonical_gpu_names:
             # A100-80G accelerator is A100-SXM-80GB or A100-PCIE-80GB
             if canonical_name == 'A100-80GB' and re.search(
                     r'A100.*-80GB', value):
                 return canonical_name
-            elif canonical_name in value:
+            # Use word boundary matching to prevent substring matches
+            elif re.search(rf'\b{re.escape(canonical_name)}\b', value):
                 return canonical_name
 
         # If we didn't find a canonical name:
@@ -438,7 +439,7 @@ def detect_accelerator_resource(
     nodes = get_kubernetes_nodes(context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
-    has_accelerator = (GPU_RESOURCE_KEY in cluster_resources or
+    has_accelerator = (get_gpu_resource_key() in cluster_resources or
                        TPU_RESOURCE_KEY in cluster_resources)
 
     return has_accelerator, cluster_resources
@@ -583,7 +584,7 @@ def check_instance_fits(context: Optional[str],
             node for node in nodes if gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] == gpu_label_val
         ]
-        assert len(gpu_nodes) > 0, 'GPU nodes not found'
+        assert gpu_nodes, 'GPU nodes not found'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
@@ -972,7 +973,7 @@ def is_kubeconfig_exec_auth(
                     '~/.sky/config.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
-                    '    More: https://skypilot.readthedocs.io/en/latest/'
+                    '    More: https://docs.skypilot.co/en/latest/'
                     'reference/config.html')
         return True, exec_msg
     return False, None
@@ -1234,7 +1235,8 @@ def construct_ssh_jump_command(
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
                               f'-o IdentitiesOnly=yes '
-                              f'-W %h:%p {ssh_jump_user}@{ssh_jump_ip}')
+                              r'-W \[%h\]:%p '
+                              f'{ssh_jump_user}@{ssh_jump_ip}')
     if ssh_jump_port is not None:
         ssh_jump_proxy_command += f' -p {ssh_jump_port} '
     if proxy_cmd_path is not None:
@@ -1525,7 +1527,7 @@ def clean_zombie_ssh_jump_pod(namespace: str, context: Optional[str],
     def find(l, predicate):
         """Utility function to find element in given list"""
         results = [x for x in l if predicate(x)]
-        return results[0] if len(results) > 0 else None
+        return results[0] if results else None
 
     # Get the SSH jump pod name from the head pod
     try:
@@ -2253,10 +2255,11 @@ def get_node_accelerator_count(attribute_dict: dict) -> int:
         Number of accelerators allocated or available from the node. If no
             resource is found, it returns 0.
     """
-    assert not (GPU_RESOURCE_KEY in attribute_dict and
+    gpu_resource_name = get_gpu_resource_key()
+    assert not (gpu_resource_name in attribute_dict and
                 TPU_RESOURCE_KEY in attribute_dict)
-    if GPU_RESOURCE_KEY in attribute_dict:
-        return int(attribute_dict[GPU_RESOURCE_KEY])
+    if gpu_resource_name in attribute_dict:
+        return int(attribute_dict[gpu_resource_name])
     elif TPU_RESOURCE_KEY in attribute_dict:
         return int(attribute_dict[TPU_RESOURCE_KEY])
     return 0
@@ -2415,3 +2418,18 @@ def process_skypilot_pods(
         num_pods = len(cluster.pods)
         cluster.resources_str = f'{num_pods}x {cluster.resources}'
     return list(clusters.values()), jobs_controllers, serve_controllers
+
+
+def get_gpu_resource_key():
+    """Get the GPU resource name to use in kubernetes.
+    The function first checks for an environment variable.
+    If defined, it uses its value; otherwise, it returns the default value.
+    Args:
+        name (str): Default GPU resource name, default is "nvidia.com/gpu".
+    Returns:
+        str: The selected GPU resource name.
+    """
+    # Retrieve GPU resource name from environment variable, if set.
+    # Else use default.
+    # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
+    return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
