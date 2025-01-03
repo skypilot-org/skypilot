@@ -305,7 +305,7 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
-        if not os_type:
+        if os_type is None:
             # OS type is not determined yet. So try to get it from vms.csv
             image_str = self._get_image_str(
                 image_id=resources.image_id,
