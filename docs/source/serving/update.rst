@@ -38,8 +38,8 @@ SkyServe will launch new replicas described by ``new_service.yaml`` with the fol
   by applying the new service spec and bumping its version (See :code:`sky serve status` for the versions). This will significantly reduce the time to
   update the service and avoid potential quota issues.
 
-Example
-~~~~~~~~
+Rolling Update Example
+~~~~~~~~~~~~~~~~~~~~~~
 
 We first launch a `simple HTTP service <https://github.com/skypilot-org/skypilot/blob/master/examples/serve/http_server/task.yaml>`_:
 
@@ -177,7 +177,7 @@ SkyServe also supports blue-green updates, by the following command:
 
     $ sky serve update --mode blue_green service-name new_service.yaml
 
-  
+
 In this update mode, SkyServe will launch new replicas described by ``new_service.yaml`` with the following behavior:
 
 * An update is initiated, and traffic will continue to be redirected to existing (old) replicas.
@@ -190,8 +190,8 @@ During an update, traffic is entirely serviced by either old-versioned or
 new-versioned replicas.  :code:`sky serve status` shows the latest service
 version and each replica's version.
 
-Example
-~~~~~~~
+Blue-Green Update Example
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 We use the same service ``http-server`` as an example. We can then use :code:`sky serve update --mode blue_green` to update the service:
 
@@ -271,6 +271,3 @@ Eventually, same as the rolling update, we will only have new replicas ready to 
     http-server   3   2        3.93.241.163   3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
     http-server   4   2        18.206.226.82  3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
     http-server   5   2        3.26.232.31    1 min ago   1x AWS(vCPU=4)  READY   us-east-1
-
-
-
