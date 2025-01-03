@@ -2008,9 +2008,9 @@ class RetryingVmProvisioner(object):
 
             if len(expirable_clouds) > 0:
                 warnings = (f'\033[93mWarning: Credentials used for '
-                            f'{expirable_clouds} may expire.Clusters may be '
+                            f'{expirable_clouds} may expire. Clusters may be '
                             f'leaked if the credentials expire while jobs '
-                            f'are running.It is recommended to use credentials'
+                            f'are running. It is recommended to use credentials'
                             f' that never expire or a service account.\033[0m')
                 logger.warning(warnings)
 
