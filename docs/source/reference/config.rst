@@ -17,7 +17,7 @@ Syntax
 .. parsed-literal::
 
     :ref:`jobs <config-yaml-jobs>`:
-        bucket: s3://my-bucket/
+        :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
         :ref:`controller <config-yaml-jobs-controller>`:
             resources:  # same spec as 'resources' in a task YAML
                 cloud: gcp
@@ -97,14 +97,14 @@ Syntax
                 runtimeClassName: nvidia
 
     :ref:`oci <config-yaml-oci>`:
-        :ref:`default <config-yaml-oci-region>`:
+        :ref:`default <config-yaml-oci>`:
             oci_config_profile: DEFAULT
             compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
             image_tag_general: skypilot:cpu-ubuntu-2004
             image_tag_gpu: skypilot:gpu-ubuntu-2004
-        :ref:`ap-seoul-1 <config-yaml-oci-region>`:
+        :ref:`ap-seoul-1 <config-yaml-oci>`:
             vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
-        :ref:`us-ashburn-1 <config-yaml-oci-region>`:
+        :ref:`us-ashburn-1 <config-yaml-oci>`:
             vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
 
 Properties
@@ -122,7 +122,7 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
-Ref: https://docs.skypilot.co/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
+Ref: managed-jobs.html#managed-jobs
 
 .. _config-yaml-jobs-bucket:
 
@@ -131,7 +131,17 @@ Ref: https://docs.skypilot.co/en/latest/examples/managed-jobs.html#customizing-j
 
 Bucket to store managed jobs mount files and tmp files. Bucket must already exist.
 Optional. If not set, SkyPilot will create a new bucket for each managed job launch.
-Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+
+Supported bucket types:
+
+.. code-block:: yaml
+
+    jobs:
+        bucket: s3://my-bucket/
+        # bucket: gs://my-bucket/
+        # bucket: https://<azure_storage_account>.blob.core.windows.net/<container>
+        # bucket: r2://my-bucket/
+        # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-controller:
 
@@ -154,8 +164,8 @@ Example:
 
 .. _config-yaml-allowed-clouds:
 
-Allowed Clouds
-~~~~~~~~~~~~~~
+``allowed_clouds``
+~~~~~~~~~~~~~~~~~~
 
 Allow list for clouds to be used in `sky check`
 
@@ -168,7 +178,7 @@ Default: null (use all supported clouds).
 
 .. _config-yaml-docker:
 
-Docker Configuration
+``docker``
 ~~~~~~~~~~~~~~~~~~~~
 
 Additional Docker run options (optional).
@@ -193,11 +203,7 @@ The following run options are applied by default and cannot be overridden:
 This field can be useful for mounting volumes and other advanced Docker
 configurations. You can specify a list of arguments or a string, where the
 former will be combined into a single string with spaces. The following is
-an example option for allowing running Docker inside Docker and increase
-the size of /dev/shm.:
-.. code-block:: bash
-
-    sky launch --cloud aws --image-id docker:continuumio/miniconda3 "apt update; apt install -y docker.io; docker run hello-world"
+an example option for mounting the Docker socket and increasing the size of /dev/shm:
 
 Example:
 
@@ -209,6 +215,9 @@ Example:
             - --shm-size=2g
 
 .. _config-yaml-nvidia-gpus:
+
+``nvidia_gpus``
+~~~~~~~~~~~~~~~~
 
 NVIDIA GPUs Configuration
 ~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -236,8 +245,8 @@ Default: false.
 
 .. _config-yaml-admin-policy:
 
-Admin Policy Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+``admin_policy``
+~~~~~~~~~~~~~~~~
 
 Admin policy to be applied to all tasks. (optional).
 
@@ -251,8 +260,8 @@ The policy class should implement the sky.AdminPolicy interface.
 
 .. _config-yaml-aws:
 
-AWS Configuration
-~~~~~~~~~~~~~~~~~
+``aws``
+~~~~~~~
 
 Advanced AWS configurations (optional).
 Apply to all new instances but not existing ones.
@@ -465,45 +474,54 @@ Example:
 
 Identity to use for AWS instances (optional).
 
-LOCAL_CREDENTIALS: The user's local credential files will be uploaded to
-AWS instances created by SkyPilot. They are used for accessing cloud
-resources (e.g., private buckets) or launching new instances (e.g., for
-jobs/serve controllers).
+Supported values:
 
-SERVICE_ACCOUNT: Local credential files are not uploaded to AWS
-instances. SkyPilot will auto-create and reuse a service account (IAM
-role) for AWS instances.
+1. **LOCAL_CREDENTIALS**:
+   The user's local credential files will be uploaded to AWS instances created by SkyPilot.
+   These credentials are used for:
+   - Accessing cloud resources (e.g., private buckets).
+   - Launching new instances (e.g., for jobs/serve controllers).
 
-NO_UPLOAD: No credentials will be uploaded to the pods. Useful for
-avoiding overriding any existing credentials that may be automounted on
-the cluster.
+2. **SERVICE_ACCOUNT**:
+   Local credential files are **not** uploaded to AWS instances. Instead:
+   - SkyPilot will auto-create and reuse a service account (IAM role) for AWS instances.
 
-Customized service account (IAM role): `<string>` or `<list of single-element dict>`
+3. **NO_UPLOAD**:
+   No credentials will be uploaded to instances.
+   This is useful to avoid overriding any existing credentials that may already be automounted on the cluster.
 
-- `<string>`: Apply the service account with the specified name to all instances.
+4. **Customized service account (IAM role)**:
+   Specify this as either a `<string>` or a `<list of single-element dict>`:
 
-- `<list of single-element dict>`: A list of single-element dictionaries mapping
-  from the cluster name (pattern) to the service account name to use. The matching
-  of the cluster name is done in the same order as the list.
+   - **<string>**: Apply the service account with the specified name to all instances.
+   - **<list of single-element dict>**: A list of single-element dictionaries mapping cluster names (patterns) to service account names.
+     - Matching of cluster names is done in the same order as the list.
+     - If no wildcard expression matches the cluster name, `LOCAL_CREDENTIALS` will be used.
+     - To specify a default, use `*` as the wildcard expression.
 
-  **NOTE**: If none of the wildcard expressions in the dictionary match the cluster
-  name, `LOCAL_CREDENTIALS` will be used. To specify your default, use `*` as the
-  wildcard expression.
+     **Note**:
+     If none of the wildcard expressions in the dictionary match the cluster name, `LOCAL_CREDENTIALS` will be used. To specify your default, use `*` as the wildcard expression.
 
-Two caveats of SERVICE_ACCOUNT for multicloud users:
+---
 
-- This only affects AWS instances. Local AWS credentials will still be
-  uploaded to non-AWS instances (since those instances may need to access
-  AWS resources). To fully disable credential upload, set
-  `remote_identity: NO_UPLOAD`.
-- If the SkyPilot jobs/serve controller is on AWS, this setting will make
-  non-AWS managed jobs / non-AWS service replicas fail to access any
-  resources on AWS (since the controllers don't have AWS credential
-  files to assign to these non-AWS instances).
+**Caveats for SERVICE_ACCOUNT with Multicloud Users**
 
-Default: 'LOCAL_CREDENTIALS'.
+1. This setting only affects AWS instances.
+   Local AWS credentials will still be uploaded to **non-AWS instances** (since those may need access to AWS resources).
+   To fully disable credential uploads, set `remote_identity: NO_UPLOAD`.
 
-Example:
+2. If the SkyPilot jobs/serve controller is on AWS:
+   - Non-AWS managed jobs or non-AWS service replicas will fail to access AWS resources.
+   - This occurs because the controllers won't have AWS credential files to assign to these non-AWS instances.
+
+---
+
+**Default**:
+``LOCAL_CREDENTIALS``
+
+---
+
+**Example Configuration**
 
 .. code-block:: yaml
 
@@ -517,10 +535,11 @@ Example:
             - sky-serve-controller-*: my-service-account-2
             - "*": my-default-service-account
 
+
 .. _config-yaml-gcp:
 
-GCP Configuration
-~~~~~~~~~~~~~~~~~
+``gcp``
+~~~~~~~
 
 Advanced GCP configurations (optional).
 Apply to all new instances but not existing ones.
@@ -714,7 +733,7 @@ Identity to use for GCP instances (optional).
 
 Please refer to the aws.remote_identity section above for more details.
 
-Default: 'LOCAL_CREDENTIALS'.
+Default: ``LOCAL_CREDENTIALS``.
 
 .. _config-yaml-gcp-enable-gvnic:
 
@@ -730,8 +749,8 @@ Default: false.
 
 .. _config-yaml-azure:
 
-Azure Configuration
-~~~~~~~~~~~~~~~~~~~
+``azure``
+~~~~~~~~~~~
 
 Advanced Azure configurations (optional).
 
@@ -765,8 +784,8 @@ Example:
 
 .. _config-yaml-kubernetes:
 
-Kubernetes Configuration
-~~~~~~~~~~~~~~~~~~~~~~~~
+``kubernetes``
+~~~~~~~~~~~~~~~
 
 Advanced Kubernetes configurations (optional).
 
@@ -902,21 +921,14 @@ Example:
 
 .. _config-yaml-oci:
 
-OCI Configuration
-~~~~~~~~~~~~~~~~~~~
+``oci``
+~~~~~~~
 
 Advanced OCI configurations (optional).
 
-.. _config-yaml-oci-region:
-
-Region Configuration Structure
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Each region configuration (including default) supports the following fields:
-
 ``oci_config_profile``
     Profile name in OCI config file.
-    Default: "DEFAULT"
+    Default: ``DEFAULT``
 
 ``compartment_ocid``
     OCID of the compartment to use.
@@ -924,11 +936,11 @@ Each region configuration (including default) supports the following fields:
 
 ``image_tag_general``
     Image tag for CPU instances.
-    Default: "skypilot:cpu-ubuntu-2004"
+    Default: ``skypilot:cpu-ubuntu-2004``
 
 ``image_tag_gpu``
     Image tag for GPU instances.
-    Default: "skypilot:gpu-ubuntu-2004"
+    Default: ``skypilot:gpu-ubuntu-2004``
 
 ``vcn_subnet``
     VCN subnet OCID for the region.
