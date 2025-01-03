@@ -238,7 +238,7 @@ class OCI(clouds.Cloud):
             # custom image's ocid provided in the --image-id parameter.
             #  - ocid1.image...aaa:oraclelinux (os type is oraclelinux)
             #  - ocid1.image...aaa (OS not provided)
-            image_id, os_type = image_id.split(':')
+            image_id, os_type = image_id.replace(' ', '').split(':')
 
         cpus = resources.cpus
         instance_type_arr = resources.instance_type.split(
