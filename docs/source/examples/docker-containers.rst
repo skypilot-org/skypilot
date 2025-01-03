@@ -42,8 +42,8 @@ For example, to run a HuggingFace TGI serving container:
     # `docker run` is blocking, so any commands after it
     # will NOT be run inside the container.
 
-Private Registries
-^^^^^^^^^^^^^^^^^^
+Private Registries for Tasks
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 When using this mode, to access Docker images hosted on private registries,
 simply add a :code:`setup` section to your task YAML file to authenticate with
@@ -174,8 +174,8 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
   to limitations in the RunPod API, so ensure that you choose a container with a
   default entrypoint (i.e. :code:`/bin/bash`).
 
-Private Registries
-^^^^^^^^^^^^^^^^^^
+Private Registries for Runtime Environments
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. note::
 
