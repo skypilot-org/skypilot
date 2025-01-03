@@ -176,7 +176,7 @@ Available fields:
       # tpu_vm: True  # True to use TPU VM (the default); False to use TPU node.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS,GCP and OCI (for non-docker image).
+      # instances. Only supported for AWS, GCP and OCI (for non-docker image).
       # If not specified, SkyPilot will use the default debian-based image
       # suitable for machine learning tasks.
       #
