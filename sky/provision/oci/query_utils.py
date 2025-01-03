@@ -506,7 +506,7 @@ class QueryHelper:
             raise exceptions.ResourcesUnavailableError(
                 'The VCN is not available')
 
-        # Get the primary vnic. The vnic might be none for the
+        # Get the primary vnic. The vnic might be an empty list for the
         # corner case when the cluster was exited during provision.
         if not list_vcns_resp.data:
             return None
