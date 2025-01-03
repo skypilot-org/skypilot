@@ -21,7 +21,6 @@ import typing
 from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
-import click
 import colorama
 import filelock
 
@@ -2008,12 +2007,12 @@ class RetryingVmProvisioner(object):
                 enabled_clouds)
 
             if len(expirable_clouds) > 0:
-                warnings = (f'\nWarning: Expiring credentials detected for '
-                            f'{expirable_clouds}. Clusters may be leaked if '
-                            f'the credentials expire while jobs are running. '
-                            f'It is recommended to use credentials that never'
-                            f' expire or a service account.')
-                click.secho(warnings, fg='yellow')
+                warnings = (f'\n\033[93m Warning: Credentials used for '
+                            f'{expirable_clouds} may expire.Clusters may be '
+                            f'leaked if the credentials expire while jobs '
+                            f'are running.It is recommended to use credentials'
+                            f' that never expire or a service account.\033[0m')
+                logger.warning(warnings)
 
         # Retrying launchable resources.
         while True:
