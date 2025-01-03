@@ -38,6 +38,13 @@ class DockerLoginConfig:
     password: str
     server: str
 
+    def format_image(self, image: str) -> str:
+        """Format the image name with the server prefix."""
+        server_prefix = f'{self.server}/'
+        if not image.startswith(server_prefix):
+            return f'{server_prefix}{image}'
+        return image
+
     @classmethod
     def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
         return cls(
@@ -220,9 +227,7 @@ class DockerInitializer:
                 wait_for_docker_daemon=True)
             # We automatically add the server prefix to the image name if
             # the user did not add it.
-            server_prefix = f'{docker_login_config.server}/'
-            if not specific_image.startswith(server_prefix):
-                specific_image = f'{server_prefix}{specific_image}'
+            specific_image = docker_login_config.format_image(specific_image)
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +

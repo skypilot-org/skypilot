@@ -25,7 +25,7 @@ def docker_start_cmds(
     docker_cmd,
 ):
     """Generating docker start command without --rm.
-    
+
     The code is borrowed from `ray.autoscaler._private.docker`.
 
     Changes we made:
@@ -159,19 +159,17 @@ class SkyDockerCommandRunner(DockerCommandRunner):
             return True
 
         # SkyPilot: Docker login if user specified a private docker registry.
-        if "docker_login_config" in self.docker_config:
+        if 'docker_login_config' in self.docker_config:
             # TODO(tian): Maybe support a command to get the login password?
-            docker_login_config: docker_utils.DockerLoginConfig = self.docker_config[
-                "docker_login_config"]
+            docker_login_config: docker_utils.DockerLoginConfig = (
+                self.docker_config['docker_login_config'])
             self._run_with_retry(
                 f'{self.docker_cmd} login --username '
                 f'{docker_login_config.username} --password '
                 f'{docker_login_config.password} {docker_login_config.server}')
             # We automatically add the server prefix to the image name if
             # the user did not add it.
-            server_prefix = f'{docker_login_config.server}/'
-            if not specific_image.startswith(server_prefix):
-                specific_image = f'{server_prefix}{specific_image}'
+            specific_image = docker_login_config.format_image(specific_image)
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if '
