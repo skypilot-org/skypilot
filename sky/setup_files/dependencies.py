@@ -51,6 +51,7 @@ install_requires = [
     'python-multipart',
     'aiofiles',
     'httpx',
+    'setproctitle',
 ]
 
 local_ray = [

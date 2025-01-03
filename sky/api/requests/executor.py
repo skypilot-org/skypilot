@@ -15,6 +15,7 @@ import typing
 from typing import Any, Callable, List, Optional, Union
 
 import psutil
+import setproctitle
 
 from sky import global_user_state
 from sky import models
@@ -298,6 +299,8 @@ def request_worker(worker: RequestWorker, max_parallel_size: int):
     """
     logger.info(f'Starting {worker} with pid '
                 f'{multiprocessing.current_process().pid}')
+    setproctitle.setproctitle(
+        f'SkyPilot:worker:{worker.schedule_type.value}-{worker.id}')
     queue = _get_queue(worker.schedule_type)
     # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
     # because the former is more efficient with the support of lazy creation of
