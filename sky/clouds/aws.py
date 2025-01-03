@@ -758,15 +758,13 @@ class AWS(clouds.Cloud):
     @classmethod
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
-        """Returns a [UserId, Account] list that uniquely identifies current AWS
-        principal (user, role or federated identity) whose credentials are used
-        to run current `sky` process. These identities are assumed to be stable
-        for the duration of the `sky` process. Modifying the credentials while
-        the `sky` process is running will not affect the identity returned by
-        this function.
+        """Returns a [UserId, Account] list that uniquely identifies the user.
 
         These fields come from `aws sts get-caller-identity` and are cached
-        locally by `aws configure list` output.
+        locally by `aws configure list` output. The identities are assumed to
+        be stable for the duration of the `sky` process. Modifying the
+        credentials while the `sky` process is running will not affect the
+        identity returned by this function.
 
         We permit the same actual user to:
 
@@ -809,7 +807,7 @@ class AWS(clouds.Cloud):
         # in real world, so the number of cache files would be limited.
         # TODO(aylei): consider using a more stable cache key and evalute eviction.
         cache_path = catalog_common.get_catalog_path(
-            f'aws/user-identity-{config_hash}.txt')
+            f'aws/.cache/user-identity-{config_hash}.txt')
         if os.path.exists(cache_path):
             try:
                 with open(cache_path, 'r', encoding='utf-8') as f:
