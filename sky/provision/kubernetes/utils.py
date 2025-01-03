@@ -893,6 +893,52 @@ def check_credentials(context: Optional[str],
         return True, None
 
 
+def check_pod_config(pod_config: dict) \
+    -> Tuple[bool, Optional[str]]:
+    """Check if the pod_config is a valid pod config
+
+    Using deserialize api to check the pod_config is valid or not.
+
+    Returns:
+        bool: True if pod_config is valid.
+        str: Error message about why the pod_config is invalid, None otherwise.
+    """
+    errors = []
+    # This api_client won't be used to send any requests, so there is no need to
+    # load kubeconfig
+    api_client = kubernetes.kubernetes.client.ApiClient()
+
+    # Used for kubernetes api_client deserialize function, the function will use
+    # data attr, the detail ref:
+    # https://github.com/kubernetes-client/python/blob/master/kubernetes/client/api_client.py#L244
+    class InnerResponse():
+
+        def __init__(self, data: dict):
+            self.data = json.dumps(data)
+
+    try:
+        # Validate metadata if present
+        if 'metadata' in pod_config:
+            try:
+                value = InnerResponse(pod_config['metadata'])
+                api_client.deserialize(
+                    value, kubernetes.kubernetes.client.V1ObjectMeta)
+            except ValueError as e:
+                errors.append(f'Invalid metadata: {str(e)}')
+        # Validate spec if present
+        if 'spec' in pod_config:
+            try:
+                value = InnerResponse(pod_config['spec'])
+                api_client.deserialize(value,
+                                       kubernetes.kubernetes.client.V1PodSpec)
+            except ValueError as e:
+                errors.append(f'Invalid spec: {str(e)}')
+        return len(errors) == 0, '.'.join(errors)
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append(f'Validation error: {str(e)}')
+        return False, '.'.join(errors)
+
+
 def is_kubeconfig_exec_auth(
         context: Optional[str] = None) -> Tuple[bool, Optional[str]]:
     """Checks if the kubeconfig file uses exec-based authentication
