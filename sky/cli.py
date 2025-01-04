@@ -3933,17 +3933,28 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     required=False,
     help='Query the latest job logs, restarting the jobs controller if stopped.'
 )
+@click.option('--sync-down',
+              '-d',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool):
-    """Tail the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool):
+    """Tail or sync down the log of a managed job."""
     try:
-        managed_jobs.tail_logs(name=name,
-                               job_id=job_id,
-                               follow=follow,
-                               controller=controller,
-                               refresh=refresh)
+        if sync_down:
+            managed_jobs.sync_down_logs(name=name,
+                                        job_id=job_id,
+                                        refresh=refresh)
+        else:
+            managed_jobs.tail_logs(name=name,
+                                   job_id=job_id,
+                                   follow=follow,
+                                   controller=controller,
+                                   refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
