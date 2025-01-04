@@ -526,7 +526,8 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
     returncode, stdout, stderr = log_lib.run_with_log(command,
                                                       log_path,
                                                       shell=True,
-                                                      require_outputs=True)
+                                                      require_outputs=True,
+                                                      executable='/bin/bash')
     if access_denied_message in stderr:
         with ux_utils.print_exception_no_traceback():
             raise PermissionError('Failed to upload files to '
