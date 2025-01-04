@@ -365,7 +365,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
             # separated by `-`.
             (f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
-            smoke_tests_utils.zJOB_WAIT_NOT_RUNNING.format(job_name=name),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -698,7 +698,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         output_check_cmd = f'{gcs_check_file_count} | grep 1'
     elif generic_cloud == 'azure':
-        region = 'westus2'
+        region = 'centralus'
         region_flag = f' --region {region}'
         storage_account_name = (
             storage_lib.AzureBlobStore.get_default_storage_account_name(region))

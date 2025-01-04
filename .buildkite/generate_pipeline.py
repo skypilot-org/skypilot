@@ -36,7 +36,7 @@ PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'
-QUEUE_KUBERNETES_SERVE = 'kubernetes_serve'
+QUEUE_GKE = 'gke'
 # Only aws, gcp, azure, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
@@ -52,7 +52,9 @@ SERVE_CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD_SERVE,
     'gcp': QUEUE_GENERIC_CLOUD_SERVE,
     'azure': QUEUE_GENERIC_CLOUD_SERVE,
-    'kubernetes': QUEUE_KUBERNETES_SERVE
+    # Now we run kubernetes on local cluster, so it should be find if we run
+    # serve tests on same queue as kubernetes.
+    'kubernetes': QUEUE_KUBERNETES
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
@@ -103,6 +105,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
             clouds_to_include = []
             clouds_to_exclude = []
             is_serve_test = False
+            run_on_gke = False
             for decorator in node.decorator_list:
                 if isinstance(decorator, ast.Call):
                     # We only need to consider the decorator with no arguments
@@ -117,6 +120,9 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                     else:
                         if suffix == 'serve':
                             is_serve_test = True
+                            continue
+                        elif suffix == 'gke':
+                            run_on_gke = True
                             continue
                         if suffix not in PYTEST_TO_CLOUD_KEYWORD:
                             # This mark does not specify a cloud, so we skip it.
@@ -150,12 +156,14 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
             function_name = (f'{class_name}::{node.name}'
                              if class_name else node.name)
             function_cloud_map[function_name] = (final_clouds_to_include, [
-                cloud_queue_map[cloud] for cloud in final_clouds_to_include
+                QUEUE_GKE if run_on_gke else cloud_queue_map[cloud]
+                for cloud in final_clouds_to_include
             ])
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str,
+                       auto_retry: bool = False) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file)
@@ -172,6 +180,11 @@ def _generate_pipeline(test_file: str) -> Dict[str, Any]:
                 },
                 'if': f'build.env("{cloud}") == "1"'
             }
+            if auto_retry:
+                step['retry'] = {
+                    # Automatically retry 2 times on any failure by default.
+                    'automatic': True
+                }
             steps.append(step)
     return {'steps': steps}
 
@@ -199,7 +212,7 @@ def _convert_release(test_files: List[str]):
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file)
+        pipeline = _generate_pipeline(test_file, auto_retry=True)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
