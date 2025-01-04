@@ -498,7 +498,7 @@ class QueryHelper:
 
         compartment = cls.find_compartment(region)
 
-        vcn_id = oci_utils.oci_config.get_vcn_ocid()
+        vcn_id = oci_utils.oci_config.get_vcn_ocid(region)
         if vcn_id is None:
             list_vcns_resp = net_client.list_vcns(
                 compartment_id=compartment,
