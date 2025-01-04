@@ -630,19 +630,19 @@ Available fields and semantics:
     # A dict mapping region names to region-specific configurations, or
     # `default` for the default/global configuration.
     default:
-      # The profile name in ~/.oci/config to use for launching instances.
-      # If not set, the default is DEFAULT (optional).
+      # The profile name in ~/.oci/config to use for launching instances. If not
+      # set, the one named DEFAULT will be used (optional).
       oci_config_profile: SKY_PROVISION_PROFILE
-      # The OCID of the compartment to use for launching instances (optional).
+      # The OCID of the compartment to use for launching instances. If not set,
+      # the root compartment will be used (optional).
       compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
-      # The default image tag to use for launching general instances (CPU) if
-      # image_id parameter is not specified (optional). If not set, the default
-      # is skypilot:cpu-ubuntu-2204
+      # The default image tag to use for launching general instances (CPU) if the
+      # image_id parameter is not specified. If not set, the default is
+      # skypilot:cpu-ubuntu-2204 (optional).
       image_tag_general: skypilot:cpu-oraclelinux8
-      # The image tag to use for launching GPU instances (optional).
-      # The default image tag to use for launching GPU instances if image_id
-      # parameter is not specified (optional). If not set, the default
-      # is skypilot:gpu-ubuntu-2204
+      # The default image tag to use for launching GPU instances if the image_id
+      # parameter is not specified. If not set, the default is
+      # skypilot:gpu-ubuntu-2204 (optional).
       image_tag_gpu: skypilot:gpu-oraclelinux8
 
     # Region-specific configurations
