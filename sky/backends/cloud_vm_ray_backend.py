@@ -3874,6 +3874,18 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stdin=subprocess.DEVNULL,
         )
 
+    def sync_down_managed_job_logs(
+            self,
+            handle: CloudVmRayResourceHandle,
+            job_id: Optional[int] = None,
+            job_name: Optional[str] = None,
+            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+        # if job_name is not None, job_id should be None
+        assert job_name is None or job_id is None, (job_name, job_id)
+        return self.sync_down_logs(handle,
+                                   job_ids=[str(job_id)],
+                                   local_dir=local_dir)
+
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_name: str, target: serve_lib.ServiceComponent,
                         replica_id: Optional[int], follow: bool) -> None:
