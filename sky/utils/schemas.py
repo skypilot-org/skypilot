@@ -396,6 +396,24 @@ def get_service_schema():
                 'case_insensitive_enum': list(
                     load_balancing_policies.LB_POLICIES.keys())
             },
+            'expose_service': {
+                'type': 'boolean',
+            },
+        }
+    }
+
+
+def get_vpn_schema():
+    """Schema for top-level `vpn:` field."""
+    return {
+        '$schema': 'https://json-schema.org/draft/2020-12/schema',
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'tailscale': {
+                'type': 'boolean',
+            },
         }
     }
 
@@ -497,6 +515,10 @@ def get_task_schema():
             },
             # service config is validated separately using SERVICE_SCHEMA
             'service': {
+                'type': 'object',
+            },
+            # vpn config is validated separately using VPN_SCHEMA
+            'vpn': {
                 'type': 'object',
             },
             'setup': {
