@@ -55,7 +55,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     instances: Dict[str, Any] = {}
 
     while True:
-        instances = _filter_instances(cluster_name_on_cloud)
+        instances = _filter_instances(cluster_name_on_cloud, None)
         if not status_filter(instances, pending_status):
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
