@@ -7,6 +7,8 @@ History:
    find_compartment: allow search subtree when find a compartment.
  - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add methods to
    Add/remove security rules: create_nsg_rules & remove_nsg
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Support reuse existing
+   VCN for SkyServe.
 """
 from datetime import datetime
 import functools
@@ -496,26 +498,25 @@ class QueryHelper:
 
         compartment = cls.find_compartment(region)
 
-        list_vcns_resp = net_client.list_vcns(
-            compartment_id=compartment,
-            display_name=oci_utils.oci_config.VCN_NAME,
-            lifecycle_state='AVAILABLE',
-        )
+        vcn_id = oci_utils.oci_config.get_vcn_ocid()
+        if vcn_id is None:
+            list_vcns_resp = net_client.list_vcns(
+                compartment_id=compartment,
+                display_name=oci_utils.oci_config.VCN_NAME,
+                lifecycle_state='AVAILABLE',
+            )
 
-        if not list_vcns_resp:
-            raise exceptions.ResourcesUnavailableError(
-                'The VCN is not available')
+            # Get the primary vnic. The vnic might be an empty list for the
+            # corner case when the cluster was exited during provision.
+            if not list_vcns_resp.data:
+                return None
 
-        # Get the primary vnic. The vnic might be an empty list for the
-        # corner case when the cluster was exited during provision.
-        if not list_vcns_resp.data:
-            return None
-
-        vcn = list_vcns_resp.data[0]
+            vcn = list_vcns_resp.data[0]
+            vcn_id = vcn.id
 
         list_nsg_resp = net_client.list_network_security_groups(
             compartment_id=compartment,
-            vcn_id=vcn.id,
+            vcn_id=vcn_id,
             limit=1,
             display_name=nsg_name,
         )
@@ -532,7 +533,7 @@ class QueryHelper:
             create_network_security_group_details=oci_adaptor.oci.core.models.
             CreateNetworkSecurityGroupDetails(
                 compartment_id=compartment,
-                vcn_id=vcn.id,
+                vcn_id=vcn_id,
                 display_name=nsg_name,
             ))
         get_nsg_resp = net_client.get_network_security_group(
