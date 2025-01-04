@@ -1997,9 +1997,9 @@ class RetryingVmProvisioner(object):
                                        skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
-        # If the user is using local credentials which may expire, the 
-        # controller may leak resources if the credentials expire while a job 
-        # is running. Here we check the enabled clouds and expiring credentials 
+        # If the user is using local credentials which may expire, the
+        # controller may leak resources if the credentials expire while a job
+        # is running. Here we check the enabled clouds and expiring credentials
         # and raise a warning to the user.
         if task.is_controller_task():
             enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
