@@ -116,7 +116,8 @@ class GcsCloudStorage(CloudStorage):
         return (f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
                 f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
                 'gcloud auth activate-service-account '
-                '--key-file=$GOOGLE_APPLICATION_CREDENTIALS || true; '
+                '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+                '2> /dev/null || true; '
                 f'{gsutil_alias}')
 
     def is_directory(self, url: str) -> bool:
