@@ -227,8 +227,7 @@ def _get_cloud_dependencies_installation_commands(
         elif isinstance(cloud, clouds.GCP):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
-                            f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND} && '
-                            f'{{ {gcp.ACTIVATE_SERVICE_ACCOUNT_COMMAND}; }}')
+                            f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
         elif isinstance(cloud, clouds.Kubernetes):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(

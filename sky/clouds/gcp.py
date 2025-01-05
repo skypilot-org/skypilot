@@ -75,13 +75,6 @@ GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     source ~/google-cloud-sdk/path.bash.inc >> {_GCLOUD_INSTALLATION_LOG} 2>&1; }}; }} && \
     popd &>/dev/null'
 
-ACTIVATE_SERVICE_ACCOUNT_COMMAND: str = (
-    'GOOGLE_APPLICATION_CREDENTIALS='
-    f'{DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} && '
-    'gcloud auth activate-service-account '
-    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
-    '2> /dev/null || true')
-
 # TODO(zhwu): Move the default AMI size to the catalog instead.
 DEFAULT_GCP_IMAGE_GB = 50
 
