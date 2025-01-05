@@ -71,7 +71,8 @@ def _get_full_decorator_path(decorator: ast.AST) -> str:
     raise ValueError(f'Unknown decorator type: {type(decorator)}')
 
 
-def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
+def _extract_marked_tests(file_path: str,
+                          filter_flag: List[str]) -> Dict[str, List[str]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -103,26 +104,30 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
             clouds_to_include = []
             clouds_to_exclude = []
             is_serve_test = False
-            for decorator in node.decorator_list:
-                if isinstance(decorator, ast.Call):
-                    # We only need to consider the decorator with no arguments
-                    # to extract clouds.
+            all_pytest_marks = [
+                d for d in node.decorator_list
+                if not isinstance(d, ast.Call) and
+                _get_full_decorator_path(d).startswith('pytest.mark.')
+            ]
+            if filter_flag:
+                filter_flag_matched = set(
+                    d.attr for d in all_pytest_marks) & set(filter_flag)
+                if not filter_flag_matched:
                     continue
-                full_path = _get_full_decorator_path(decorator)
-                if full_path.startswith('pytest.mark.'):
-                    assert isinstance(decorator, ast.Attribute)
-                    suffix = decorator.attr
-                    if suffix.startswith('no_'):
-                        clouds_to_exclude.append(suffix[3:])
-                    else:
-                        if suffix == 'serve':
-                            is_serve_test = True
-                            continue
-                        if suffix not in PYTEST_TO_CLOUD_KEYWORD:
-                            # This mark does not specify a cloud, so we skip it.
-                            continue
-                        clouds_to_include.append(
-                            PYTEST_TO_CLOUD_KEYWORD[suffix])
+            for decorator in all_pytest_marks:
+                assert isinstance(decorator, ast.Attribute)
+                suffix = decorator.attr
+                if suffix.startswith('no_'):
+                    clouds_to_exclude.append(suffix[3:])
+                else:
+                    if suffix == 'serve':
+                        is_serve_test = True
+                        continue
+                    if suffix not in PYTEST_TO_CLOUD_KEYWORD:
+                        # This mark does not specify a cloud, so we skip it.
+                        continue
+                    clouds_to_include.append(PYTEST_TO_CLOUD_KEYWORD[suffix])
+
             clouds_to_include = (clouds_to_include if clouds_to_include else
                                  DEFAULT_CLOUDS_TO_RUN)
             clouds_to_include = [
@@ -155,10 +160,11 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
     return function_cloud_map
 
 
-def _generate_pipeline(test_file: str) -> Dict[str, Any]:
+def _generate_pipeline(test_file: str,
+                       filter_flag: List[str]) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
-    function_cloud_map = _extract_marked_tests(test_file)
+    function_cloud_map = _extract_marked_tests(test_file, filter_flag)
     for test_function, clouds_and_queues in function_cloud_map.items():
         for cloud, queue in zip(*clouds_and_queues):
             step = {
@@ -194,12 +200,12 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
-def _convert_release(test_files: List[str]):
+def _convert_release(test_files: List[str], filter_flag: List[str]):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file)
+        pipeline = _generate_pipeline(test_file, filter_flag)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
@@ -208,7 +214,7 @@ def _convert_release(test_files: List[str]):
                            extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP})
 
 
-def _convert_quick_tests_core(test_files: List[str]):
+def _convert_quick_tests_core(test_files: List[str], filter_flag: List[str]):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -216,7 +222,7 @@ def _convert_quick_tests_core(test_files: List[str]):
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        pipeline = _generate_pipeline(test_file)
+        pipeline = _generate_pipeline(test_file, filter_flag)
         pipeline['steps'].append({
             'label': 'Backward compatibility test',
             'command': 'bash tests/backward_compatibility_tests.sh',
@@ -231,7 +237,15 @@ def _convert_quick_tests_core(test_files: List[str]):
                            extra_env={'SKYPILOT_SUPPRESS_SENSITIVE_LOG': '1'})
 
 
-def main():
+import click
+
+
+@click.command()
+@click.option(
+    '--filter-flag',
+    type=str,
+    help='Filter to include specific types of jobs, e.g., managed_jobs')
+def main(filter_flag):
     test_files = os.listdir('tests/smoke_tests')
     release_files = []
     quick_tests_core_files = []
@@ -244,8 +258,14 @@ def main():
         else:
             release_files.append(test_file_path)
 
-    _convert_release(release_files)
-    _convert_quick_tests_core(quick_tests_core_files)
+    if filter_flag:
+        filter_flag = filter_flag.split(',')
+        print(f'Filter flag: {filter_flag}')
+    else:
+        filter_flag = []
+
+    _convert_release(release_files, filter_flag)
+    _convert_quick_tests_core(quick_tests_core_files, filter_flag)
 
 
 if __name__ == '__main__':
