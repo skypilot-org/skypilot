@@ -244,7 +244,8 @@ import click
 @click.option(
     '--filter-flag',
     type=str,
-    help='Filter to include specific types of jobs, e.g., managed_jobs')
+    help='Filter to include only a subset of pytest marks, e.g., managed_jobs',
+    default='all')
 def main(filter_flag):
     test_files = os.listdir('tests/smoke_tests')
     release_files = []
@@ -258,11 +259,11 @@ def main(filter_flag):
         else:
             release_files.append(test_file_path)
 
-    if filter_flag:
-        filter_flag = filter_flag.split(',')
-        print(f'Filter flag: {filter_flag}')
-    else:
+    if filter_flag == 'all':
         filter_flag = []
+    else:
+        filter_flag = filter_flag.split(',')
+    print(f'Filter flag: {filter_flag}')
 
     _convert_release(release_files, filter_flag)
     _convert_quick_tests_core(quick_tests_core_files, filter_flag)
