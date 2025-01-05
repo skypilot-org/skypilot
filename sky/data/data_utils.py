@@ -523,11 +523,14 @@ def get_gsutil_command() -> Tuple[str, str]:
 
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
                    log_path: str):
-    returncode, stdout, stderr = log_lib.run_with_log(command,
-                                                      log_path,
-                                                      shell=True,
-                                                      require_outputs=True,
-                                                      executable='/bin/bash')
+    returncode, stdout, stderr = log_lib.run_with_log(
+        command,
+        log_path,
+        shell=True,
+        require_outputs=True,
+        # We need to use bash as some of the cloud commands uses bash syntax,
+        # such as [[ ... ]]
+        executable='/bin/bash')
     if access_denied_message in stderr:
         with ux_utils.print_exception_no_traceback():
             raise PermissionError('Failed to upload files to '

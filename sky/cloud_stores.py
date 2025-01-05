@@ -115,6 +115,9 @@ class GcsCloudStorage(CloudStorage):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
         return (f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
                 f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+                # Explicitly activate service account. Unlike the gcp packages
+                # and other GCP commands, gsutil does not automatically pick up
+                # the default credential keys when it is a service account.
                 'gcloud auth activate-service-account '
                 '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
                 '2> /dev/null || true; '
