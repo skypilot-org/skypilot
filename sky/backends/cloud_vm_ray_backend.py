@@ -3879,6 +3879,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             handle: CloudVmRayResourceHandle,
             job_id: Optional[int] = None,
             job_name: Optional[str] = None,
+            controller: bool = False,
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
@@ -3909,7 +3910,88 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{colorama.Style.RESET_ALL}')
         else:
             job_ids = [job_id]
-        return self.sync_down_logs(handle, job_ids=job_ids, local_dir=local_dir)
+        
+        
+        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
+        returncode, run_timestamps, stderr = self.run_on_head(
+            handle,
+            code,
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to sync logs.', stderr)
+        run_timestamps = common_utils.decode_payload(run_timestamps)
+        if not run_timestamps:
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        'No matching log directories found'
+                        f'{colorama.Style.RESET_ALL}')
+            return {}
+
+        job_ids = list(run_timestamps.keys())
+        run_timestamps = list(run_timestamps.values())
+
+        remote_log_dirs = []
+        local_log_dirs = []
+        if controller:
+            remote_log_dirs.extend([
+                os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+                for run_timestamp in run_timestamps
+            ])
+            local_log_dirs.extend([
+                os.path.expanduser(os.path.join(local_dir, run_timestamp))
+                for run_timestamp in run_timestamps
+            ])
+        
+        if job_ids is not None:
+            remote_log_dirs.extend([
+                os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs', run_timestamp)
+                for run_timestamp in run_timestamps
+            ])
+            local_log_dirs.extend([
+                os.path.expanduser(os.path.join(local_dir, 'managed_jobs', run_timestamp))
+                for run_timestamp in run_timestamps
+            ])
+
+        style = colorama.Style
+        fore = colorama.Fore
+        for job_id, log_dir in zip(job_ids, local_log_dirs):
+            logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
+                        f'{style.RESET_ALL}')
+
+        runners = handle.get_command_runners()
+
+        def _rsync_down(args) -> None:
+            """Rsync down logs from remote nodes.
+
+            Args:
+                args: A tuple of (runner, local_log_dir, remote_log_dir)
+            """
+            (runner, local_log_dir, remote_log_dir) = args
+            try:
+                os.makedirs(local_log_dir, exist_ok=True)
+                runner.rsync(
+                    # Require a `/` at the end to make sure the parent dir
+                    # are not created locally. We do not add additional '*' as
+                    # kubernetes's rsync does not work with an ending '*'.
+                    source=f'{remote_log_dir}/',
+                    target=local_log_dir,
+                    up=False,
+                    stream_logs=False,
+                )
+            except exceptions.CommandError as e:
+                if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+                    # Raised by rsync_down. Remote log dir may not exist, since
+                    # the job can be run on some part of the nodes.
+                    logger.debug(f'{runner.node_id} does not have the tasks/*.')
+                else:
+                    raise
+
+        parallel_args = [[runner, *item]
+                         for item in zip(local_log_dirs, remote_log_dirs)
+                         for runner in runners]
+        subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
+        return dict(zip(job_ids, local_log_dirs))
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_name: str, target: serve_lib.ServiceComponent,

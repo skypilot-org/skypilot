@@ -3948,6 +3948,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         if sync_down:
             managed_jobs.sync_down_logs(name=name,
                                         job_id=job_id,
+                                        controller=controller,
                                         refresh=refresh)
         else:
             managed_jobs.tail_logs(name=name,

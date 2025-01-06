@@ -432,6 +432,7 @@ def sync_down_logs(
         name: Optional[str],
         job_id: Optional[int],
         refresh: bool,
+        controller: bool,
         local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
     """Sync down logs of managed jobs.
 
@@ -468,6 +469,7 @@ def sync_down_logs(
     backend.sync_down_managed_job_logs(handle,
                                        job_id=job_id,
                                        job_name=name,
+                                       controller=controller,
                                        local_dir=local_dir)
 
 
