@@ -4198,37 +4198,52 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # If purge is set, we do not care about instance status and should skip
         # the check because it may fail if the cluster is not reachable.
         attempts = 0
-        if not purge:
-            while True:
-                logger.debug(f'instance statuses attempt {attempts + 1}')
+        while True:
+            logger.debug(f'instance statuses attempt {attempts + 1}')
+            try:
                 node_status_dict = provision_lib.query_instances(
                     repr(cloud),
                     cluster_name_on_cloud,
                     config['provider'],
                     non_terminated_only=False)
-
-                unexpected_node_state: Optional[Tuple[str, str]] = None
-                for node_id, node_status in node_status_dict.items():
-                    logger.debug(f'{node_id} status: {node_status}')
-                    # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
-                    # between "stopping/stopped" and "terminating/terminated",
-                    # so we allow for either status instead of casing
-                    # on `terminate`.
-                    if node_status not in [
-                            None, status_lib.ClusterStatus.STOPPED
-                    ]:
-                        unexpected_node_state = (node_id, node_status)
-
-                if unexpected_node_state is None:
+            except Exception as e:
+                if purge:
+                    logger.warning(
+                        f'Failed to query instances. Skipping since purge is '
+                        f'set. Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
                     break
-
-                attempts += 1
-                if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
-                    time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
                 else:
-                    (node_id, node_status) = unexpected_node_state
+                    raise
+
+            unexpected_node_state: Optional[Tuple[str, str]] = None
+            for node_id, node_status in node_status_dict.items():
+                logger.debug(f'{node_id} status: {node_status}')
+                # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
+                # between "stopping/stopped" and "terminating/terminated",
+                # so we allow for either status instead of casing
+                # on `terminate`.
+                if node_status not in [
+                        None, status_lib.ClusterStatus.STOPPED
+                ]:
+                    unexpected_node_state = (node_id, node_status)
+
+            if unexpected_node_state is None:
+                break
+
+            attempts += 1
+            if attempts < _TEARDOWN_WAIT_MAX_ATTEMPTS:
+                time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
+            else:
+                (node_id, node_status) = unexpected_node_state
+                if purge:
+                    logger.warning(f'Instance {node_id} in unexpected '
+                                    'state {node_status}. Skipping since purge '
+                                    'is set.')
+                    break
+                else:
                     raise RuntimeError(f'Instance {node_id} in unexpected '
-                                       'state {node_status}.')
+                                        'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
