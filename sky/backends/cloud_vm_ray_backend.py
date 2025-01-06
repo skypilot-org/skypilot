@@ -4216,11 +4216,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         attempts = 0
         while True:
             logger.debug(f'instance statuses attempt {attempts + 1}')
-            node_status_dict = provision_lib.query_instances(
-                repr(cloud),
-                cluster_name_on_cloud,
-                config['provider'],
-                non_terminated_only=False)
+            try:
+                node_status_dict = provision_lib.query_instances(
+                    repr(cloud),
+                    cluster_name_on_cloud,
+                    config['provider'],
+                    non_terminated_only=False)
+            except Exception as e:  # pylint: disable=broad-except
+                if purge:
+                    logger.warning(
+                        f'Failed to query instances. Skipping since purge is '
+                        f'set. Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    break
+                raise
 
             unexpected_node_state: Optional[Tuple[str, str]] = None
             for node_id, node_status in node_status_dict.items():
@@ -4239,8 +4248,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
             else:
                 (node_id, node_status) = unexpected_node_state
-                raise RuntimeError(f'Instance {node_id} in unexpected state '
-                                   f'{node_status}.')
+                if purge:
+                    logger.warning(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}. Skipping since purge '
+                                   'is set.')
+                    break
+                raise RuntimeError(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
