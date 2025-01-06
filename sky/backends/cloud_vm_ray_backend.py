@@ -3896,12 +3896,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-            
-            # job_table looks like  {"_job_id": 12, "_task_name": null, "resources": "1x[CPU:1+][Spot]", "submitted_at": 1736141634.638419, "status": "SUCCEEDED", "run_timestamp": "sky-2025-01-06-05-33-54-638419", "start_at": 1736141836.3156621, "end_at": 1736142085.1023917, "last_recovered_at": 1736141836.3156621, "recovery_count": 0, "job_duration": 248.7867295742035, "failure_reason": null, "job_id": 12, "task_id": 0, "task_name": "minimaltest", "specs": "{\"max_restarts_on_errors\": 0}"
+
             job_table = common_utils.decode_payload(run_timestamps)
-            job_ids = [job['_job_id'] for job in job_table 
-                      if job['_job_id'] is not None and 
-                      job['job_name'] == job_name]
+            job_ids = [
+                job['_job_id']
+                for job in job_table
+                if job['_job_id'] is not None and job['job_name'] == job_name
+            ]
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
@@ -3915,8 +3916,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'{colorama.Style.RESET_ALL}')
         else:
             job_ids = [job_id]
-        
-        
+
         code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
         returncode, run_timestamps, stderr = self.run_on_head(
             handle,
@@ -3947,14 +3947,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 os.path.expanduser(os.path.join(local_dir, run_timestamp))
                 for run_timestamp in run_timestamps
             ])
-        
+
         if job_ids is not None:
             remote_log_dirs.extend([
-                os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs', run_timestamp)
-                for run_timestamp in run_timestamps
+                os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
+                             run_timestamp) for run_timestamp in run_timestamps
             ])
             local_log_dirs.extend([
-                os.path.expanduser(os.path.join(local_dir, 'managed_jobs', run_timestamp))
+                os.path.expanduser(
+                    os.path.join(local_dir, 'managed_jobs', run_timestamp))
                 for run_timestamp in run_timestamps
             ])
 
