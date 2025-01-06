@@ -150,6 +150,7 @@ class SSHConfigHelper(object):
             ip = 'localhost'
 
         config_path = os.path.expanduser(cls.ssh_conf_path)
+        os.makedirs(os.path.dirname(config_path), exist_ok=True, mode=0o700)
 
         if not os.path.exists(config_path):
             config = ['\n']
