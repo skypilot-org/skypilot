@@ -886,6 +886,9 @@ def get_config_schema():
                     'image_tag_gpu': {
                         'type': 'string',
                     },
+                    'vcn_ocid': {
+                        'type': 'string',
+                    },
                     'vcn_subnet': {
                         'type': 'string',
                     },
