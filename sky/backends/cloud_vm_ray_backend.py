@@ -4206,7 +4206,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     cluster_name_on_cloud,
                     config['provider'],
                     non_terminated_only=False)
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-except
                 if purge:
                     logger.warning(
                         f'Failed to query instances. Skipping since purge is '
@@ -4223,9 +4223,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # between "stopping/stopped" and "terminating/terminated",
                 # so we allow for either status instead of casing
                 # on `terminate`.
-                if node_status not in [
-                        None, status_lib.ClusterStatus.STOPPED
-                ]:
+                if node_status not in [None, status_lib.ClusterStatus.STOPPED]:
                     unexpected_node_state = (node_id, node_status)
 
             if unexpected_node_state is None:
@@ -4238,12 +4236,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (node_id, node_status) = unexpected_node_state
                 if purge:
                     logger.warning(f'Instance {node_id} in unexpected '
-                                    'state {node_status}. Skipping since purge '
-                                    'is set.')
+                                   'state {node_status}. Skipping since purge '
+                                   'is set.')
                     break
                 else:
                     raise RuntimeError(f'Instance {node_id} in unexpected '
-                                        'state {node_status}.')
+                                       'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
