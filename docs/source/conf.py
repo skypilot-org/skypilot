@@ -42,6 +42,7 @@ extensions = [
     'sphinx_design',
     'myst_parser',
     'notfound.extension',
+    'sphinx.ext.autosectionlabel',
 ]
 
 intersphinx_mapping = {
@@ -165,6 +166,8 @@ exclude_patterns = ['_gallery_original']
 myst_heading_anchors = 3
 
 googleanalytics_id = 'G-92WF3MDCJV'
+
+autosectionlabel_prefix_document = True
 
 
 def setup(app):
