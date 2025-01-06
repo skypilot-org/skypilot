@@ -358,7 +358,8 @@ def test_gcp_force_enable_external_ips():
     is_gcp = subprocess.run(f'{is_gcp_command}',
                             shell=True,
                             check=True,
-                            capture_output=True).stdout.decode().strip()
+                            text=True,
+                            capture_output=True).stdout.strip()
     if not is_gcp:
         pytest.skip('Not on GCP, skipping test')
 
