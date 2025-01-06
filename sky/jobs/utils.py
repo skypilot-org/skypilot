@@ -120,9 +120,9 @@ def update_managed_job_status(job_id: Optional[int] = None):
     """
     if job_id is None:
         # Warning: it's totally possible for the controller job to transition to
-        # a terminal state during the course of this function. We will see that
-        # as an abnormal failure. However, set_failed() will not update the
-        # state in this case.
+        # a terminal state during the course of this function. The set_failed()
+        # called below will not update the state for jobs that already have a
+        # terminal status, so it should be fine.
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
     else:
         job_ids = [job_id]
@@ -132,8 +132,8 @@ def update_managed_job_status(job_id: Optional[int] = None):
         schedule_state = tasks[0]['schedule_state']
         if schedule_state is None:
             # Backwards compatibility: this job was submitted when ray was still
-            # used for managing the parallelism of job controllers. This code
-            # path can be removed before 0.11.0.
+            # used for managing the parallelism of job controllers.
+            # TODO(cooperc): Remove before 0.11.0.
             controller_status = job_lib.get_status(job_id_)
             if controller_status is None or controller_status.is_terminal():
                 logger.error(f'Controller for legacy job {job_id_} is in an '
@@ -143,7 +143,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                 # Still running.
                 continue
         else:
-            pid = tasks[0]['pid']
+            pid = tasks[0]['controller_pid']
             if pid is None:
                 if schedule_state in (
                         managed_job_state.ManagedJobScheduleState.INACTIVE,
@@ -781,7 +781,7 @@ def format_job_table(
         'STATUS',
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE', 'SCHED. STATE']
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'DESCRIPTION']
     if tasks_have_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -800,7 +800,25 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
+    def generate_description(failure_reason: Optional[str],
+                             schedule_state: Optional[str]) -> str:
+        description = ''
+        if schedule_state is not None:
+            description += f'Scheduler: {schedule_state}'
+            if failure_reason is not None:
+                description += ', '
+        if failure_reason is not None:
+            description += f'Failure: {failure_reason}'
+
+        if description == '':
+            return '-'
+
+        return description
+
     for job_hash, job_tasks in jobs.items():
+        if show_all:
+            schedule_state = job_tasks[0]['schedule_state']
+
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
@@ -823,7 +841,6 @@ def format_job_table(
                     end_at = None
                 recovery_cnt += task['recovery_count']
 
-            failure_reason = job_tasks[current_task_id]['failure_reason']
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
                                                             absolute=True)
@@ -850,12 +867,12 @@ def format_job_table(
             ]
             if show_all:
                 schedule_state = job_tasks[0]['schedule_state']
+                failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
-                    failure_reason if failure_reason is not None else '-',
-                    schedule_state,
+                    generate_description(failure_reason, schedule_state),
                 ])
             if tasks_have_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -885,16 +902,15 @@ def format_job_table(
             if show_all:
                 # schedule_state is only set at the job level, so if we have
                 # more than one task, only display on the aggregated row.
-                schedule_state = task['schedule_state'] if (len(job_tasks)
-                                                            == 1) else '-'
+                schedule_state = (task['schedule_state']
+                                  if len(job_tasks) == 1 else None)
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
                     task['cluster_resources'],
                     task['region'],
-                    task['failure_reason']
-                    if task['failure_reason'] is not None else '-',
-                    schedule_state,
+                    generate_description(task['failure_reason'],
+                                         schedule_state),
                 ])
             if tasks_have_user:
                 values.insert(0, task.get('user', '-'))

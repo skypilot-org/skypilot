@@ -50,6 +50,8 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 
 # The _MANAGED_JOB_SCHEDULER_LOCK should be held whenever we are checking the
 # parallelism control or updating the schedule_state of any job.
+# Any code that takes this lock must conclude by calling
+# maybe_start_waiting_jobs.
 _MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
@@ -66,16 +68,21 @@ def maybe_start_waiting_jobs() -> None:
     is, if we can start any jobs, we will, but if not, we will exit (almost)
     immediately. It's expected that if some WAITING or ALIVE_WAITING jobs cannot
     be started now (either because the lock is held, or because there are not
-    enough resources), another call to schedule_step() will be made whenever
-    that situation is resolved. (If the lock is held, the lock holder should
-    start the jobs. If there aren't enough resources, the next controller to
-    exit and free up resources should call schedule_step().)
+    enough resources), another call to this function will be made whenever that
+    situation is resolved. (If the lock is held, the lock holder should start
+    the jobs. If there aren't enough resources, the next controller to exit and
+    free up resources should start the jobs.)
+
+    If this function obtains the lock, it will launch as many jobs as possible
+    before releasing the lock. This is what allows other calls to exit
+    immediately if the lock is held, while ensuring that all jobs are started as
+    soon as possible.
 
     This uses subprocess_utils.launch_new_process_tree() to start the controller
     processes, which should be safe to call from pretty much any code running on
-    the jobs controller. New job controller processes will be detached from the
-    current process and there will not be a parent/child relationship - see
-    launch_new_process_tree for more.
+    the jobs controller instance. New job controller processes will be detached
+    from the current process and there will not be a parent/child relationship.
+    See launch_new_process_tree for more.
     """
     try:
         # We must use a global lock rather than a per-job lock to ensure correct
@@ -254,4 +261,3 @@ if __name__ == '__main__':
                         help='The path to the user job yaml file.')
     args = parser.parse_args()
     submit_job(args.job_id, args.dag_yaml)
-    maybe_start_waiting_jobs()

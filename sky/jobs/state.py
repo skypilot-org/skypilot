@@ -114,13 +114,13 @@ def create_table(cursor, conn):
         spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
         name TEXT,
         schedule_state TEXT,
-        pid INTEGER DEFAULT NULL,
+        controller_pid INTEGER DEFAULT NULL,
         dag_yaml_path TEXT)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
 
-    db_utils.add_column_to_table(cursor, conn, 'job_info', 'pid',
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'controller_pid',
                                  'INTEGER DEFAULT NULL')
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'dag_yaml_path',
@@ -178,7 +178,7 @@ columns = [
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
     'schedule_state',
-    'pid',
+    'controller_pid',
     'dag_yaml_path',
 ]
 
@@ -333,11 +333,20 @@ class ManagedJobScheduleState(enum.Enum):
     There is no well-defined mapping from the managed job status to schedule
     state or vice versa. (In fact, schedule state is defined on the job and
     status on the task.)
+    - INACTIVE or WAITING should only be seen when a job is PENDING
+    - ALIVE_WAITING should only be seen when a job is RECOVERING, or has
+      multiple tasks
+    - LAUNCHING and ALIVE can be seen in many different statuses.
+    - DONE should only be seen when a job is in a terimnal status.
+    Since state and status transitions are not atomic, it may be possible to
+    briefly observe inconsistent states, like a job that just finished but
+    hasn't yet transitioned to DONE.
     """
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
-    # The job is waiting to transition to LAUNCHING. The scheduler should try to
-    # transition it.
+    # The job is waiting to transition to LAUNCHING for the first time. The
+    # scheduler should try to transition it, and when it does, it should start
+    # the job controller.
     WAITING = 'WAITING'
     # The job is already alive, but wants to transition back to LAUNCHING,
     # e.g. for recovery, or launching later tasks in the DAG. The scheduler
@@ -829,7 +838,7 @@ def set_job_controller_pid(job_id: int, pid: int):
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
-            'pid = (?) '
+            'controller_pid = (?) '
             'WHERE spot_job_id = (?)', (pid, job_id)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
