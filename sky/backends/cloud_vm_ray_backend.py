@@ -4195,8 +4195,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # that successfully call this function but do not first call
         # teardown_cluster or terminate_instances. See
         # https://github.com/skypilot-org/skypilot/pull/4443#discussion_r1872798032
-        # If purge is set, we do not care about instance status and should skip
-        # the check because it may fail if the cluster is not reachable.
         attempts = 0
         while True:
             logger.debug(f'instance statuses attempt {attempts + 1}')
@@ -4220,9 +4218,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             for node_id, node_status in node_status_dict.items():
                 logger.debug(f'{node_id} status: {node_status}')
                 # FIXME(cooperc): Some clouds (e.g. GCP) do not distinguish
-                # between "stopping/stopped" and "terminating/terminated",
-                # so we allow for either status instead of casing
-                # on `terminate`.
+                # between "stopping/stopped" and "terminating/terminated", so we
+                # allow for either status instead of casing on `terminate`.
                 if node_status not in [None, status_lib.ClusterStatus.STOPPED]:
                     unexpected_node_state = (node_id, node_status)
 
@@ -4236,12 +4233,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 (node_id, node_status) = unexpected_node_state
                 if purge:
                     logger.warning(f'Instance {node_id} in unexpected '
-                                   'state {node_status}. Skipping since purge '
+                                   f'state {node_status}. Skipping since purge '
                                    'is set.')
                     break
                 else:
                     raise RuntimeError(f'Instance {node_id} in unexpected '
-                                       'state {node_status}.')
+                                       f'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
