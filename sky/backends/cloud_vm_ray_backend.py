@@ -4211,8 +4211,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         f'set. Details: '
                         f'{common_utils.format_exception(e, use_bracket=True)}')
                     break
-                else:
-                    raise
+                raise
 
             unexpected_node_state: Optional[Tuple[str, str]] = None
             for node_id, node_status in node_status_dict.items():
@@ -4236,9 +4235,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                    f'state {node_status}. Skipping since purge '
                                    'is set.')
                     break
-                else:
-                    raise RuntimeError(f'Instance {node_id} in unexpected '
-                                       f'state {node_status}.')
+                raise RuntimeError(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)
