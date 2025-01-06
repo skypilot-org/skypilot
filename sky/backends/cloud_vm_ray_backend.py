@@ -3881,6 +3881,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_name: Optional[str] = None,
             controller: bool = False,
             local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+        """Sync down logs for a managed job.
+
+        Args:
+            handle: The handle to the cluster.
+            job_id: The job ID to sync down logs for.
+            job_name: The job name to sync down logs for.
+            controller: Whether to sync down logs for the controller.
+            local_dir: The local directory to sync down logs to.
+        """
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_id is None:
