@@ -3907,6 +3907,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Multiple jobs IDs found under the name {job_name}. '
                     'Syncing down logs for all of them.'
                     f'{colorama.Style.RESET_ALL}')
+        else:
+            job_ids = [job_id]
         return self.sync_down_logs(handle, job_ids=job_ids, local_dir=local_dir)
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
