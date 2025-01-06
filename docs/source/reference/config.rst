@@ -628,20 +628,30 @@ Available fields and semantics:
   # Advanced OCI configurations (optional).
   oci:
     # A dict mapping region names to region-specific configurations, or
-    # `default` for the default configuration.
+    # `default` for the default/global configuration.
     default:
-      # The OCID of the profile to use for launching instances (optional).
-      oci_config_profile: DEFAULT
-      # The OCID of the compartment to use for launching instances (optional).
+      # The profile name in ~/.oci/config to use for launching instances. If not
+      # set, the one named DEFAULT will be used (optional).
+      oci_config_profile: SKY_PROVISION_PROFILE
+      # The OCID of the compartment to use for launching instances. If not set,
+      # the root compartment will be used (optional).
       compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
-      # The image tag to use for launching general instances (optional).
-      image_tag_general: skypilot:cpu-ubuntu-2004
-      # The image tag to use for launching GPU instances (optional).
-      image_tag_gpu: skypilot:gpu-ubuntu-2004
+      # The default image tag to use for launching general instances (CPU) if the
+      # image_id parameter is not specified. If not set, the default is
+      # skypilot:cpu-ubuntu-2204 (optional).
+      image_tag_general: skypilot:cpu-oraclelinux8
+      # The default image tag to use for launching GPU instances if the image_id
+      # parameter is not specified. If not set, the default is
+      # skypilot:gpu-ubuntu-2204 (optional).
+      image_tag_gpu: skypilot:gpu-oraclelinux8
 
+    # Region-specific configurations
     ap-seoul-1:
+      # The OCID of the VCN to use for instances (optional).
+      vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       # The OCID of the subnet to use for instances (optional).
       vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
 
     us-ashburn-1:
+      vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.iad.aaaaaaaafbj7i3aqc4ofjaapa5edakde6g4ea2yaslcsay32cthp7qo55pxa
