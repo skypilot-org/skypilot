@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
 import os
+import subprocess
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -354,7 +355,10 @@ def test_gcp_force_enable_external_ips():
         '"http://metadata.google.internal/computeMetadata/v1/instance/name"')
 
     # Run the GCP check
-    is_gcp = os.popen(f'{is_gcp_command}').read().strip()
+    is_gcp = subprocess.run(f'{is_gcp_command}',
+                            shell=True,
+                            check=True,
+                            capture_output=True).stdout.decode().strip()
     if not is_gcp:
         pytest.skip('Not on GCP, skipping test')
 

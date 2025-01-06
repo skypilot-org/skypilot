@@ -180,7 +180,7 @@ def test_skyserve_azure_http():
 
 @pytest.mark.kubernetes
 @pytest.mark.serve
-@pytest.mark.gke
+@pytest.mark.requires_gke
 def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()

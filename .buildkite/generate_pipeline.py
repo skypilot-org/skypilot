@@ -121,7 +121,7 @@ def _extract_marked_tests(file_path: str) -> Dict[str, List[str]]:
                         if suffix == 'serve':
                             is_serve_test = True
                             continue
-                        elif suffix == 'gke':
+                        elif suffix == 'requires_gke':
                             run_on_gke = True
                             continue
                         if suffix not in PYTEST_TO_CLOUD_KEYWORD:
