@@ -270,6 +270,8 @@ class HeartbeatMessageToReport(MessageToReport):
 
     def __init__(self, interval_seconds: int = 600):
         super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        # This interval_seconds is mainly for recording the heartbeat interval
+        # in the heartbeat message, so that the collector can use it.
         self.interval_seconds = interval_seconds
 
     def get_properties(self) -> Dict[str, Any]:
