@@ -563,6 +563,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
 
+
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get all job ids by name."""
     name_filter = ''
@@ -574,7 +575,6 @@ def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
         name_filter = ('WHERE (job_info.name=(?) OR '
                        '(job_info.name IS NULL AND spot.task_name=(?)))')
         field_values = [name, name]
-
 
     # Left outer join is used here instead of join, because the job_info does
     # not contain the managed jobs submitted before #1982.

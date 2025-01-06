@@ -3885,18 +3885,29 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if job_id is None:
             # generate code to get the job_id
             code = managed_jobs.ManagedJobCodeGen.get_job_ids_by_name(job_name)
-            returncode, run_timestamps, stderr = self.run_on_head(handle, code, stream_logs=False, require_outputs=True, separate_stderr=True)
-            subprocess_utils.handle_returncode(returncode, code, 'Failed to sync down logs.', stderr)
+            returncode, run_timestamps, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync down logs.',
+                                               stderr)
             # str'ed list to list
             job_ids = common_utils.decode_payload(run_timestamps)
             if not job_ids:
-                logger.info(f'{colorama.Fore.YELLOW}No matching job found{colorama.Style.RESET_ALL}')
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching job found'
+                            f'{colorama.Style.RESET_ALL}')
                 return {}
             elif len(job_ids) > 1:
-                logger.info(f'{colorama.Fore.YELLOW}Multiple jobs IDs found under the name {job_name}. Syncing down logs for all of them.{colorama.Style.RESET_ALL}')
-        return self.sync_down_logs(handle,
-                                   job_ids=job_ids,
-                                   local_dir=local_dir)
+                logger.info(
+                    f'{colorama.Fore.YELLOW}'
+                    f'Multiple jobs IDs found under the name {job_name}. '
+                    'Syncing down logs for all of them.'
+                    f'{colorama.Style.RESET_ALL}')
+        return self.sync_down_logs(handle, job_ids=job_ids, local_dir=local_dir)
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_name: str, target: serve_lib.ServiceComponent,
