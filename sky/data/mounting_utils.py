@@ -123,15 +123,15 @@ def get_az_mount_cmd(container_name: str,
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
         container_name=container_name)
+    # The line below ensures the cache directory is new before mounting to
+    # avoid "config error in file_cache [temp directory not empty]" error, which
+    # can occur after stopping and starting the same cluster on Azure.
+    # This helps ensure a clean state for blobfuse2 operations.
     cache_path += f'_{int(time.time())}'
     if _bucket_sub_path is None:
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
-    # The line below ensures the cache directory is cleared before mounting to
-    # avoid "config error in file_cache [temp directory not empty]" error, which
-    # can occur after stopping and starting the same cluster on Azure.
-    # This helps ensure a clean state for blobfuse2 operations.
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
