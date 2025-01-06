@@ -3885,7 +3885,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_id is None:
             # generate code to get the job_id
-            code = managed_jobs.ManagedJobCodeGen.get_job_ids_by_name(job_name)
+            code = managed_jobs.ManagedJobCodeGen.get_job_table()
+
             returncode, run_timestamps, stderr = self.run_on_head(
                 handle,
                 code,
@@ -3895,8 +3896,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-            # str'ed list to list
-            job_ids = common_utils.decode_payload(run_timestamps)
+            
+            # job_table looks like  {"_job_id": 12, "_task_name": null, "resources": "1x[CPU:1+][Spot]", "submitted_at": 1736141634.638419, "status": "SUCCEEDED", "run_timestamp": "sky-2025-01-06-05-33-54-638419", "start_at": 1736141836.3156621, "end_at": 1736142085.1023917, "last_recovered_at": 1736141836.3156621, "recovery_count": 0, "job_duration": 248.7867295742035, "failure_reason": null, "job_id": 12, "task_id": 0, "task_name": "minimaltest", "specs": "{\"max_restarts_on_errors\": 0}"
+            job_table = common_utils.decode_payload(run_timestamps)
+            job_ids = [job['_job_id'] for job in job_table 
+                      if job['_job_id'] is not None and 
+                      job['job_name'] == job_name]
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
