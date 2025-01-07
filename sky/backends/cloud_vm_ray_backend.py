@@ -31,7 +31,6 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
-from sky.jobs import state as managed_job_state
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
@@ -45,6 +44,7 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.jobs import state as managed_job_state
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -3896,9 +3896,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         """
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
-        if job_id is None:
+        if job_id is None and job_name is not None:
             # generate code to get the job_id
-            code = managed_jobs.ManagedJobCodeGen.get_job_ids_by_name(job_name)
+            code = managed_jobs.ManagedJobCodeGen.get_job_ids_by_name(
+                job_name=job_name)
             returncode, run_timestamps, stderr = self.run_on_head(
                 handle,
                 code,
@@ -3910,14 +3911,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                stderr)
             job_ids = common_utils.decode_payload(run_timestamps)
             if not job_ids:
-                logger.info(
-                    f'{colorama.Fore.YELLOW}No matching job found{colorama.Style.RESET_ALL}'
-                )
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching job found'
+                            f'{colorama.Style.RESET_ALL}')
                 return {}
             elif len(job_ids) > 1:
                 logger.info(
-                    f'{colorama.Fore.YELLOW}Multiple jobs IDs found under the name {job_name}.  Downloading the latest job logs.{colorama.Style.RESET_ALL}'
-                )
+                    f'{colorama.Fore.YELLOW}'
+                    f'Multiple jobs IDs found under the name {job_name}. '
+                    'Downloading the latest job logs.'
+                    f'{colorama.Style.RESET_ALL}')
                 job_ids = [job_ids[-1]]
         else:
             job_ids = [job_id]
@@ -3934,7 +3937,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
         # returns with a dict of {job_id: run_timestamp}
-        run_timestamps = common_utils.decode_payload(run_timestamps) 
+        run_timestamps = common_utils.decode_payload(run_timestamps)
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
@@ -3946,41 +3949,48 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         remote_log_dirs = []
         local_log_dirs = []
-        if controller: # download controller logs
-            remote_log_dirs.extend([
-                os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-            ])
-            local_log_dirs.extend([
-                os.path.expanduser(os.path.join(local_dir, run_timestamp))
-            ])
-        else: # download job logs
+        if controller:  # download controller logs
+            remote_log_dirs.extend(
+                [os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)])
+            local_log_dirs.extend(
+                [os.path.expanduser(os.path.join(local_dir, run_timestamp))])
+        else:  # download job logs
             managed_job_status = managed_job_state.get_status(job_id)
             # if managed_job_status is None or managed_job_status.is_terminal():
-            if managed_job_status is not None and managed_job_status.is_terminal():
+            if (managed_job_status is not None and
+                    managed_job_status.is_terminal()):
                 # for jobs that are terminated, download from controller
                 remote_log_dirs.extend([
                     os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
-                                run_timestamp)
+                                 run_timestamp)
                 ])
                 local_log_dirs.extend([
                     os.path.expanduser(
                         os.path.join(local_dir, 'managed_jobs', run_timestamp))
                 ])
             else:
-                logger.info(f'{colorama.Fore.YELLOW}Job {job_id} is {managed_job_status}. Downloading a snapshot of the log from the job node.{colorama.Style.RESET_ALL}')
+                logger.info(
+                    f'{colorama.Fore.YELLOW}'
+                    f'Job {job_id} is {managed_job_status}. '
+                    'Downloading a snapshot of the log from the job node.'
+                    f'{colorama.Style.RESET_ALL}')
                 log_dir = os.path.expanduser(
-                        os.path.join(local_dir, 'managed_jobs', run_timestamp))
+                    os.path.join(local_dir, 'managed_jobs', run_timestamp))
                 os.makedirs(os.path.dirname(log_dir), exist_ok=True)
 
                 log_file = os.path.join(log_dir, 'run.log')
 
                 code = managed_jobs.ManagedJobCodeGen.stream_logs(
-                    job_name=None, job_id=job_id, follow=False, controller=False)
+                    job_name=None,
+                    job_id=job_id,
+                    follow=False,
+                    controller=False)
 
-                # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+                # With the stdin=subprocess.DEVNULL, the ctrl-c will not
                 # kill the process, so we need to handle it manually here.
                 if threading.current_thread() is threading.main_thread():
-                    signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+                    signal.signal(signal.SIGINT,
+                                  backend_utils.interrupt_handler)
                     signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
                 # We redirect the output to the log file
@@ -3995,13 +4005,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     stdin=subprocess.DEVNULL,
                 )
 
+                
+                logger.info(f'{colorama.Fore.CYAN}'
+                            f'Job {job_id} logs: {log_dir}'
+                            f'{colorama.Style.RESET_ALL}')
                 return {str(job_id): log_dir}
 
-        style = colorama.Style
-        fore = colorama.Fore
-        for job_id, log_dir in zip(job_ids, local_log_dirs):
-            logger.info(f'{fore.CYAN}Job {job_id} logs: {log_dir}'
-                        f'{style.RESET_ALL}')
+        logger.info(f'{colorama.Fore.CYAN}'
+                    f'Job {job_ids} logs: {local_log_dirs}'
+                    f'{colorama.Style.RESET_ALL}')
 
         runners = handle.get_command_runners()
 
