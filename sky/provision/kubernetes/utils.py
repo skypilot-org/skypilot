@@ -138,6 +138,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                             e.status in (401, 403)):
                         raise
                     if attempt < max_retries - 1:
+                        logger.debug(f'Kubernetes API call {func.__name__} failed with {str(e)}. Retrying...')
                         time.sleep(retry_interval)
                         continue
             
@@ -154,7 +155,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             
             raise exceptions.ResourcesUnavailableError(
                 f'{error_msg}'
-                f' Please check if the cluster is healthy and retry. '
+                f' Please check if the cluster is healthy and retry.'
                 f'{debug_cmd}') from last_exception
         return wrapper
     return decorator
