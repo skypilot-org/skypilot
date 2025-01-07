@@ -13,6 +13,50 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+# Adapted from runpod.api.queries.pods.py::QUERY_POD.
+# Adding container registry auth id to the query.
+_QUERY_POD = """
+query myPods {
+    myself {
+        pods {
+            id
+            containerDiskInGb
+            containerRegistryAuthId
+            costPerHr
+            desiredStatus
+            dockerArgs
+            dockerId
+            env
+            gpuCount
+            imageName
+            lastStatusChange
+            machineId
+            memoryInGb
+            name
+            podType
+            port
+            ports
+            uptimeSeconds
+            vcpuCount
+            volumeInGb
+            volumeMountPath
+            runtime {
+                ports{
+                    ip
+                    isIpPublic
+                    privatePort
+                    publicPort
+                    type
+                }
+            }
+            machine {
+                gpuDisplayName
+            }
+        }
+    }
+}
+"""
+
 GPU_NAME_MAP = {
     'A100-80GB': 'NVIDIA A100 80GB PCIe',
     'A100-40GB': 'NVIDIA A100-PCIE-40GB',
@@ -48,6 +92,11 @@ GPU_NAME_MAP = {
 }
 
 
+def _construct_docker_login_template_name(cluster_name: str) -> str:
+    """Constructs the registry auth template name."""
+    return f'{cluster_name}-docker-login-template'
+
+
 def retry(func):
     """Decorator to retry a function."""
 
@@ -67,9 +116,38 @@ def retry(func):
     return wrapper
 
 
+def _sky_get_pods() -> dict:
+    """List all pods with extra registry auth information.
+
+    Adapted from runpod.get_pods() to include containerRegistryAuthId.
+    """
+    raw_return = runpod.runpod.api.graphql.run_graphql_query(_QUERY_POD)
+    cleaned_return = raw_return['data']['myself']['pods']
+    return cleaned_return
+
+
+_QUERY_POD_TEMPLATE_WITH_REGISTRY_AUTH = """
+query myself {
+    myself {
+        podTemplates {
+            name
+            containerRegistryAuthId
+        }
+    }
+}
+"""
+
+
+def _list_pod_templates() -> dict:
+    """List all pod templates."""
+    raw_return = runpod.runpod.api.graphql.run_graphql_query(
+        _QUERY_POD_TEMPLATE_WITH_REGISTRY_AUTH)
+    return raw_return['data']['myself']['podTemplates']
+
+
 def list_instances() -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
-    instances = runpod.runpod.get_pods()
+    instances = _sky_get_pods()
 
     instance_dict: Dict[str, Dict[str, Any]] = {}
     for instance in instances:
@@ -124,21 +202,20 @@ def _create_template_for_docker_login(
     cluster_name: str,
     image_name: str,
     docker_login_config: Optional[Dict[str, str]],
-) -> Tuple[str, Optional[str], Optional[str], Optional[str]]:
+) -> Tuple[str, Optional[str]]:
     """Creates a template for the given image with the docker login config.
 
     Returns:
         formatted_image_name: The formatted image name.
         # following fields are None for no docker login config.
         template_id: The template ID.
-        template_name: The template name.
-        registry_auth_id: The registry auth ID.
     """
     if docker_login_config is None:
-        return image_name, None, None, None
+        return image_name, None
     login_config = docker_utils.DockerLoginConfig(**docker_login_config)
     container_registry_auth_name = f'{cluster_name}-registry-auth'
-    container_template_name = f'{cluster_name}-docker-login-template'
+    container_template_name = _construct_docker_login_template_name(
+        cluster_name)
     # The `name` argument is only for display purpose and the registry server
     # will be splitted from the docker image name (Tested with AWS ECR).
     # Here we only need the username and password to create the registry auth.
@@ -158,15 +235,13 @@ def _create_template_for_docker_login(
         image_name=None,
         registry_auth_id=registry_auth_id,
     )
-    return (login_config.format_image(image_name), create_template_resp['id'],
-            container_template_name, registry_auth_id)
+    return login_config.format_image(image_name), create_template_resp['id']
 
 
-def launch(
-        cluster_name: str, node_type: str, instance_type: str, region: str,
-        disk_size: int, image_name: str, ports: Optional[List[int]],
-        public_key: str, preemptible: Optional[bool], bid_per_gpu: float,
-        docker_login_config: Optional[Dict[str, str]]) -> Tuple[str, List[Any]]:
+def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
+           disk_size: int, image_name: str, ports: Optional[List[int]],
+           public_key: str, preemptible: Optional[bool], bid_per_gpu: float,
+           docker_login_config: Optional[Dict[str, str]]) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the RunPod GPU name, finds the specs for the
@@ -174,7 +249,6 @@ def launch(
 
     Returns:
         instance_id: The instance ID.
-        ephemeral_resources: A list of ephemeral resources.
     """
     name = f'{cluster_name}-{node_type}'
     gpu_type = GPU_NAME_MAP[instance_type.split('_')[1]]
@@ -220,9 +294,8 @@ def launch(
                  f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                  f'{constants.SKY_REMOTE_RAY_PORT}/http')
 
-    image_name_formatted, template_id, template_name, registry_auth_id = (
-        _create_template_for_docker_login(cluster_name, image_name,
-                                          docker_login_config))
+    image_name_formatted, template_id = (_create_template_for_docker_login(
+        cluster_name, image_name, docker_login_config))
 
     params = {
         'name': name,
@@ -248,7 +321,25 @@ def launch(
             **params,
         )
 
-    return new_instance['id'], [template_name, registry_auth_id]
+    return new_instance['id']
+
+
+def get_registry_auth_resources(
+        cluster_name: str) -> Tuple[Optional[str], Optional[str]]:
+    """Gets the registry auth resources."""
+    container_registry_auth_name = _construct_docker_login_template_name(
+        cluster_name)
+    for template in _list_pod_templates():
+        if template['name'] == container_registry_auth_name:
+            return container_registry_auth_name, template[
+                'containerRegistryAuthId']
+    return None, None
+
+
+def cleanup_registry_auth(template_name: str, registry_auth_id: str) -> None:
+    """Cleans up the registry auth."""
+    delete_pod_template(template_name)
+    delete_register_auth(registry_auth_id)
 
 
 def remove(instance_id: str) -> None:

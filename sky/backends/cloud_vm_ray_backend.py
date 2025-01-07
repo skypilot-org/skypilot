@@ -1570,17 +1570,6 @@ class RetryingVmProvisioner(object):
                     config_dict['provision_record'] = provision_record
                     config_dict['resources_vars'] = resources_vars
                     config_dict['handle'] = handle
-                    if provision_record.ephemeral_resources:
-                        # Some ephemeral resources are created during the launch
-                        # process. Add them to the provider config so that they
-                        # can be cleaned up later.
-                        original_config_content = common_utils.read_yaml(
-                            cluster_config_file)
-                        original_config_content['provider'][
-                            'ephemeral_resources'] = (
-                                provision_record.ephemeral_resources)
-                        common_utils.dump_yaml(cluster_config_file,
-                                               original_config_content)
                     return config_dict
                 except provision_common.StopFailoverError:
                     with ux_utils.print_exception_no_traceback():
