@@ -286,6 +286,12 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
+# Used when an managed jobs are created and
+# files are synced up to the cloud.
+FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
+FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
+FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
+
 # The default idle timeout for SkyPilot controllers. This include spot
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
