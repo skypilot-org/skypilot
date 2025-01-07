@@ -3921,7 +3921,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Multiple jobs IDs found under the name {job_name}. '
                     'Downloading the latest job logs.'
                     f'{colorama.Style.RESET_ALL}')
-                job_ids = [job_ids[-1]]
+                job_ids = [job_ids[0]] # descending order
         else:
             job_ids = [job_id]
 
@@ -3954,7 +3954,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 os.path.join(local_dir, run_timestamp))
 
             logger.info(f'{colorama.Fore.CYAN}'
-                        f'Job {job_ids} logs: {local_log_dir}'
+                        f'Job {job_ids} local logs: {local_log_dir} remote logs: {remote_log_dir}'
                         f'{colorama.Style.RESET_ALL}')
 
             runners = handle.get_command_runners()
@@ -3984,7 +3984,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         raise
 
             parallel_args = [[runner, *item]
-                             for item in zip(local_log_dir, remote_log_dir)
+                             for item in zip([local_log_dir], [remote_log_dir])
                              for runner in runners]
             subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         else:  # download job logs
