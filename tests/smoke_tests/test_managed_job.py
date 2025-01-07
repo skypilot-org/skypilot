@@ -880,6 +880,11 @@ def test_managed_jobs_logs_sync_down():
         'test-managed-jobs-logs-sync-down',
         [
             f'sky jobs launch -n {name} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300 + smoke_tests_utils.BUMP_UP_SECONDS),
             f'sky jobs logs --controller 1 --sync-down',
             f'sky jobs logs 1 --sync-down',
             f'sky jobs logs --controller --name minimal --sync-down',
