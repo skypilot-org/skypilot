@@ -60,7 +60,7 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
 
-# TPU V6e price for us-central1 is missing in the SKUs.
+# TPU V6e price for us-central2 is missing in the SKUs.
 TPU_V6E_MISSING_REGIONS = ['us-central2']
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
