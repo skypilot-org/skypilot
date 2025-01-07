@@ -3946,7 +3946,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         run_timestamp = list(run_timestamps.values())[0]
         job_id = list(run_timestamps.keys())[0]
-        local_log_dir = ""
+        local_log_dir = ''
         if controller:  # download controller logs
             remote_log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                           run_timestamp)
@@ -3969,9 +3969,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 try:
                     os.makedirs(local_log_dir, exist_ok=True)
                     runner.rsync(
-                        # Require a `/` at the end to make sure the parent dir
-                        # are not created locally. We do not add additional '*' as
-                        # kubernetes's rsync does not work with an ending '*'.
                         source=f'{remote_log_dir}/',
                         target=local_log_dir,
                         up=False,
@@ -3979,8 +3976,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     )
                 except exceptions.CommandError as e:
                     if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
-                        # Raised by rsync_down. Remote log dir may not exist, since
-                        # the job can be run on some part of the nodes.
+                        # Raised by rsync_down. Remote log dir may not exist
+                        # since the job can be run on some part of the nodes.
                         logger.debug(
                             f'{runner.node_id} does not have the tasks/*.')
                     else:
