@@ -3988,11 +3988,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                              for runner in runners]
             subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         else:  # download job logs
-            managed_job_status = managed_job_state.get_status(job_id)
-            logger.info(f'{colorama.Fore.YELLOW}'
-                        f'Job {job_id} is {managed_job_status}. '
-                        'Downloading a snapshot of the log from the job node.'
-                        f'{colorama.Style.RESET_ALL}')
             local_log_dir = os.path.expanduser(
                 os.path.join(local_dir, 'managed_jobs', run_timestamp))
             os.makedirs(os.path.dirname(local_log_dir), exist_ok=True)
