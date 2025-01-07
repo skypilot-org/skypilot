@@ -57,5 +57,5 @@ jobs:
       - name: Check poetry lock time
         run: |
           cd foo
-          poetry lock --no-update
+          poetry lock
         timeout-minutes: 2
