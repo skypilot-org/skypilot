@@ -95,12 +95,12 @@ def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
     return cluster_id
 
 
-def delete_cluster(name: str) -> None:
-    """Creates a GPU cluster."""
+def delete_cluster(name: str, project_id: str) -> None:
+    """Delete a GPU cluster."""
     service = GpuClusterServiceClient(sdk)
     try:
         cluster = service.get_by_name(GetByNameRequest(
-            parent_id='',
+            parent_id=project_id,
             name=name,
         )).wait()
         cluster_id = cluster.metadata.id
@@ -110,7 +110,7 @@ def delete_cluster(name: str) -> None:
         )).wait()
         logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
     except RequestError as e:
-        logger.debug(f'GPU Cluster dose not exist or can not deleted {e}.')
+        logger.debug(f'GPU Cluster does not exist or can not deleted {e}.')
         pass
     return
 

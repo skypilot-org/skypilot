@@ -173,7 +173,7 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
-    delete_cluster(cluster_name_on_cloud)
+    delete_cluster(cluster_name_on_cloud, project_id)
 
 
 def get_cluster_info(
