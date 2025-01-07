@@ -646,7 +646,7 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         # The price shown for v5 & v6e TPU is per chip hour, so there is
         # no 'Pod' keyword in the description.
         is_pod = ((num_cores > 8 or tpu_version == 'v4') and
-                  not tpu_version.startswith('v5') and not tpu_version == 'v6e')
+                  not tpu_version.startswith('v5') and tpu_version != 'v6e')
 
         for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
