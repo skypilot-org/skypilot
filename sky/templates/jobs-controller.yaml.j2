@@ -29,24 +29,33 @@ setup: |
   pip list | grep flask > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
 
   # Create systemd service file
-  cat << EOF | sudo tee /etc/systemd/system/skypilot-dashboard.service
+  mkdir -p ~/.config/systemd/user/
+
+  # Create systemd user service file
+  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
   [Unit]
   Description=SkyPilot Jobs Dashboard
   After=network.target
 
   [Service]
   Environment="PATH={{ sky_python_env_path }}:\$PATH"
-  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
+  Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
+  Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
   Restart=always
+  # Redirect logs to the home directory
+  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
+  StandardError=append:/home/$USER/.sky/job-dashboard.log
+  # setup environment variable of controller name
+  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
 
   [Install]
   WantedBy=multi-user.target
   EOF
 
   # Reload systemd, enable and start the service
-  sudo systemctl daemon-reload
-  sudo systemctl enable skypilot-dashboard
-  sudo systemctl start skypilot-dashboard
+  systemctl --user daemon-reload
+  systemctl --user enable skypilot-dashboard
+  systemctl --user start skypilot-dashboard
 
 run: |
   {{ sky_activate_python_env }}
