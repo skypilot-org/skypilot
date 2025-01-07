@@ -146,7 +146,7 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    assert provider_config is not None, (cluster_name_on_cloud, provider_config)
+    del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
     template_name, registry_auth_id = utils.get_registry_auth_resources(
         cluster_name_on_cloud)

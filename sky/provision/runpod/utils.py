@@ -13,50 +13,6 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Adapted from runpod.api.queries.pods.py::QUERY_POD.
-# Adding container registry auth id to the query.
-_QUERY_POD = """
-query myPods {
-    myself {
-        pods {
-            id
-            containerDiskInGb
-            containerRegistryAuthId
-            costPerHr
-            desiredStatus
-            dockerArgs
-            dockerId
-            env
-            gpuCount
-            imageName
-            lastStatusChange
-            machineId
-            memoryInGb
-            name
-            podType
-            port
-            ports
-            uptimeSeconds
-            vcpuCount
-            volumeInGb
-            volumeMountPath
-            runtime {
-                ports{
-                    ip
-                    isIpPublic
-                    privatePort
-                    publicPort
-                    type
-                }
-            }
-            machine {
-                gpuDisplayName
-            }
-        }
-    }
-}
-"""
-
 GPU_NAME_MAP = {
     'A100-80GB': 'NVIDIA A100 80GB PCIe',
     'A100-40GB': 'NVIDIA A100-PCIE-40GB',
@@ -116,6 +72,51 @@ def retry(func):
     return wrapper
 
 
+# Adapted from runpod.api.queries.pods.py::QUERY_POD.
+# Adding containerRegistryAuthId to the query.
+_QUERY_POD = """
+query myPods {
+    myself {
+        pods {
+            id
+            containerDiskInGb
+            containerRegistryAuthId
+            costPerHr
+            desiredStatus
+            dockerArgs
+            dockerId
+            env
+            gpuCount
+            imageName
+            lastStatusChange
+            machineId
+            memoryInGb
+            name
+            podType
+            port
+            ports
+            uptimeSeconds
+            vcpuCount
+            volumeInGb
+            volumeMountPath
+            runtime {
+                ports{
+                    ip
+                    isIpPublic
+                    privatePort
+                    publicPort
+                    type
+                }
+            }
+            machine {
+                gpuDisplayName
+            }
+        }
+    }
+}
+"""
+
+
 def _sky_get_pods() -> dict:
     """List all pods with extra registry auth information.
 
@@ -138,7 +139,7 @@ query myself {
 """
 
 
-def _list_pod_templates() -> dict:
+def _list_pod_templates_with_container_registry() -> dict:
     """List all pod templates."""
     raw_return = runpod.runpod.api.graphql.run_graphql_query(
         _QUERY_POD_TEMPLATE_WITH_REGISTRY_AUTH)
@@ -207,8 +208,7 @@ def _create_template_for_docker_login(
 
     Returns:
         formatted_image_name: The formatted image name.
-        # following fields are None for no docker login config.
-        template_id: The template ID.
+        template_id: The template ID. None for no docker login config.
     """
     if docker_login_config is None:
         return image_name, None
@@ -219,11 +219,9 @@ def _create_template_for_docker_login(
     # The `name` argument is only for display purpose and the registry server
     # will be splitted from the docker image name (Tested with AWS ECR).
     # Here we only need the username and password to create the registry auth.
-    # TODO(tian): RunPod python API does not provide a way to get the registry
-    # auth and template ID by the name, and the only way to get the ID is when
-    # we create it. So we use a separate auth and template per cluster. This
-    # also assumes that every cluster has only one node, so no extra worker
-    # nodes will reuse the same auth and template name.
+    # TODO(tian): Now we create a template and a registry auth for each cluster.
+    # Consider create one for each server and reuse them. Challenges including
+    # calculate the reference count and delete them when no longer needed.
     create_auth_resp = runpod.runpod.create_container_registry_auth(
         name=container_registry_auth_name,
         username=login_config.username,
@@ -294,8 +292,8 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
                  f'{constants.SKY_REMOTE_RAY_DASHBOARD_PORT}/http,'
                  f'{constants.SKY_REMOTE_RAY_PORT}/http')
 
-    image_name_formatted, template_id = (_create_template_for_docker_login(
-        cluster_name, image_name, docker_login_config))
+    image_name_formatted, template_id = _create_template_for_docker_login(
+        cluster_name, image_name, docker_login_config)
 
     params = {
         'name': name,
@@ -329,17 +327,11 @@ def get_registry_auth_resources(
     """Gets the registry auth resources."""
     container_registry_auth_name = _construct_docker_login_template_name(
         cluster_name)
-    for template in _list_pod_templates():
+    for template in _list_pod_templates_with_container_registry():
         if template['name'] == container_registry_auth_name:
             return container_registry_auth_name, template[
                 'containerRegistryAuthId']
     return None, None
-
-
-def cleanup_registry_auth(template_name: str, registry_auth_id: str) -> None:
-    """Cleans up the registry auth."""
-    delete_pod_template(template_name)
-    delete_register_auth(registry_auth_id)
 
 
 def remove(instance_id: str) -> None:
