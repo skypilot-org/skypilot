@@ -871,3 +871,21 @@ def test_managed_jobs_inline_env(generic_cloud: str):
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_logs_sync_down():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-managed-jobs-logs-sync-down',
+        [
+            f'sky jobs launch -n {name} -y examples/managed_job.yaml -d',
+            f'sky jobs logs --controller 1 --sync-down',
+            f'sky jobs logs 1 --sync-down',
+            f'sky jobs logs --controller --name minimal --sync-down',
+            f'sky jobs logs --name minimal --sync-down',
+        ],
+        f'sky jobs cancel -y -n {name}',
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
