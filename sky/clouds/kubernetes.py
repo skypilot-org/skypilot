@@ -140,7 +140,7 @@ class Kubernetes(clouds.Cloud):
         use the service account mounted in the pod.
         """
         all_contexts = kubernetes_utils.get_all_kube_context_names()
-        if len(all_contexts) == 0:
+        if not all_contexts:
             return []
 
         all_contexts = set(all_contexts)
@@ -396,7 +396,7 @@ class Kubernetes(clouds.Cloud):
                 tpu_requested = True
                 k8s_resource_key = kubernetes_utils.TPU_RESOURCE_KEY
             else:
-                k8s_resource_key = kubernetes_utils.GPU_RESOURCE_KEY
+                k8s_resource_key = kubernetes_utils.get_gpu_resource_key()
 
         port_mode = network_utils.get_port_mode(None)
 

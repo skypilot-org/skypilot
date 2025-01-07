@@ -23,7 +23,7 @@ from sky.api import common as api_common
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
 ]
 default_clouds_to_run = ['aws', 'azure']
@@ -46,6 +46,7 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'do': 'do',
     'runpod': 'runpod'
 }
 

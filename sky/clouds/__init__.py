@@ -14,6 +14,7 @@ from sky.clouds.cloud import Zone
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.cudo import Cudo
+from sky.clouds.do import DO
 from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
@@ -33,6 +34,7 @@ __all__ = [
     'Cudo',
     'GCP',
     'Lambda',
+    'DO',
     'Paperspace',
     'SCP',
     'RunPod',

@@ -233,6 +233,14 @@ class OCI(clouds.Cloud):
             listing_id = None
             res_ver = None
 
+        os_type = None
+        if ':' in image_id:
+            # OS type provided in the --image-id. This is the case where
+            # custom image's ocid provided in the --image-id parameter.
+            #  - ocid1.image...aaa:oraclelinux (os type is oraclelinux)
+            #  - ocid1.image...aaa (OS not provided)
+            image_id, os_type = image_id.replace(' ', '').split(':')
+
         cpus = resources.cpus
         instance_type_arr = resources.instance_type.split(
             oci_utils.oci_config.INSTANCE_TYPE_RES_SPERATOR)
@@ -298,15 +306,18 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
-        image_str = self._get_image_str(image_id=resources.image_id,
-                                        instance_type=resources.instance_type,
-                                        region=region.name)
+        if os_type is None:
+            # OS type is not determined yet. So try to get it from vms.csv
+            image_str = self._get_image_str(
+                image_id=resources.image_id,
+                instance_type=resources.instance_type,
+                region=region.name)
 
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import oci_catalog
-        os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
-                                                    region=region.name)
-        logger.debug(f'OS type for the image {image_str} is {os_type}')
+            # pylint: disable=import-outside-toplevel
+            from sky.clouds.service_catalog import oci_catalog
+            os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
+                                                        region=region.name)
+        logger.debug(f'OS type for the image {image_id} is {os_type}')
 
         return {
             'instance_type': instance_type,
@@ -391,7 +402,7 @@ class OCI(clouds.Cloud):
         short_credential_help_str = (
             'For more details, refer to: '
             # pylint: disable=line-too-long
-            'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
+            'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
         credential_help_str = (
             'To configure credentials, go to: '

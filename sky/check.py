@@ -132,7 +132,7 @@ def check(
             '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
-    if len(all_enabled_clouds) == 0:
+    if not all_enabled_clouds:
         echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -151,7 +151,7 @@ def check(
                 dim=True) + click.style(f'sky check{clouds_arg}', bold=True) +
             '\n' + click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
         if disallowed_clouds_hint:

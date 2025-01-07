@@ -1,18 +1,22 @@
 """Logging utilities."""
 import builtins
 import contextlib
+from datetime import datetime
 import logging
+import os
 import sys
 import threading
 
 import colorama
 
+from sky.skylet import constants
 from sky.utils import env_options
 from sky.utils import rich_utils
 
 # UX: Should we show logging prefixes and some extra information in optimizer?
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
+_SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
 
 
 def _show_logging_prefix():
@@ -71,6 +75,23 @@ def _setup_logger():
     # Setting this will avoid the message
     # being propagated to the parent logger.
     _root_logger.propagate = False
+    if env_options.Options.SUPPRESS_SENSITIVE_LOG.get():
+        # If the sensitive log is enabled, we reinitialize a new handler
+        # and force set the level to INFO to suppress the debug logs
+        # for certain loggers.
+        for logger_name in _SENSITIVE_LOGGER:
+            logger = logging.getLogger(logger_name)
+            handler_to_logger = rich_utils.RichSafeStreamHandler(sys.stdout)
+            handler_to_logger.flush = sys.stdout.flush  # type: ignore
+            logger.addHandler(handler_to_logger)
+            logger.setLevel(logging.INFO)
+            if _show_logging_prefix():
+                handler_to_logger.setFormatter(FORMATTER)
+            else:
+                handler_to_logger.setFormatter(NO_PREFIX_FORMATTER)
+            # Do not propagate to the parent logger to avoid parent
+            # logger printing the logs.
+            logger.propagate = False
 
 
 def reload_logger():
@@ -91,7 +112,7 @@ def reload_logger():
 _setup_logger()
 
 
-def init_logger(name: str):
+def init_logger(name: str) -> logging.Logger:
     return logging.getLogger(name)
 
 
@@ -139,3 +160,16 @@ def is_silent():
         # threads.
         _logging_config.is_silent = False
     return _logging_config.is_silent
+
+
+def get_run_timestamp() -> str:
+    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
+
+
+def generate_tmp_logging_file_path(file_name: str) -> str:
+    """Generate an absolute path of a tmp file for logging."""
+    run_timestamp = get_run_timestamp()
+    log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
+    log_path = os.path.expanduser(os.path.join(log_dir, file_name))
+
+    return log_path

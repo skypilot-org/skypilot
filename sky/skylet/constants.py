@@ -271,9 +271,7 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
-WORKDIR_BUCKET_NAME = 'skypilot-workdir-{username}-{id}'
-FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-folder-{username}-{id}'
-FILE_MOUNTS_FILE_ONLY_BUCKET_NAME = 'skypilot-filemounts-files-{username}-{id}'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{id}'
 FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
 FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # For API server, the use a temporary directory in the same path as the upload
@@ -281,6 +279,12 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # linking. E.g., in our API server deployment on k8s, ~/.sky/ is mounted from a
 # persistent volume, so any contents in ~/.sky/ cannot be hard linked elsewhere.
 FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
+
+# Used when an managed jobs are created and
+# files are synced up to the cloud.
+FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
+FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
+FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
 # The default idle timeout for SkyPilot controllers. This include spot
 # controller and sky serve controller.

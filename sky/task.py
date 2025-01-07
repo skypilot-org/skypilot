@@ -975,10 +975,6 @@ class Task:
         store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
-    # def initialize_all_storage_stores(self):
-    #     for _, storage in self.storage_mounts.items():
-    #         storage.initialize_all_stores()
-
     def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
@@ -989,12 +985,15 @@ class Task:
         for storage in self.storage_mounts.values():
             storage.construct()
             assert storage.name is not None, storage
-            if len(storage.stores) == 0:
+            if not storage.stores:
                 store_type, store_region = self._get_preferred_store()
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
                 storage.sync_all_stores()
             else:
+                # We don't need to sync the storage here as if the stores are
+                # not empty, it measn the storage has been synced during
+                # construct() above
                 # We will download the first store that is added to remote.
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
@@ -1013,6 +1012,7 @@ class Task:
                     else:
                         assert storage.name is not None, storage
                         blob_path = 's3://' + storage.name
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
@@ -1023,6 +1023,7 @@ class Task:
                     else:
                         assert storage.name is not None, storage
                         blob_path = 'gs://' + storage.name
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
@@ -1041,6 +1042,7 @@ class Task:
                         blob_path = data_utils.AZURE_CONTAINER_URL.format(
                             storage_account_name=storage_account_name,
                             container_name=storage.name)
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
@@ -1051,6 +1053,7 @@ class Task:
                         blob_path = storage.source
                     else:
                         blob_path = 'r2://' + storage.name
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({
                         mnt_path: blob_path,
                     })
@@ -1066,7 +1069,18 @@ class Task:
                         cos_region = data_utils.Rclone.get_region_from_rclone(
                             storage.name, data_utils.Rclone.RcloneClouds.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
+                    blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({mnt_path: blob_path})
+                elif store_type is storage_lib.StoreType.OCI:
+                    if storage.source is not None and not isinstance(
+                            storage.source,
+                            list) and storage.source.startswith('oci://'):
+                        blob_path = storage.source
+                    else:
+                        blob_path = 'oci://' + storage.name
+                    self.update_file_mounts({
+                        mnt_path: blob_path,
+                    })
                 else:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(f'Storage Type {store_type} '

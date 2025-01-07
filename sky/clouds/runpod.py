@@ -254,7 +254,7 @@ class RunPod(clouds.Cloud):
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install runpod \n'
                     f'        $ runpod config\n'
-                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
                 )
 
             return True, None

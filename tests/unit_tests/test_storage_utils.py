@@ -46,7 +46,7 @@ def skyignore_dir():
 
 def test_get_excluded_files_from_skyignore_no_file():
     excluded_files = storage_utils.get_excluded_files_from_skyignore('.')
-    assert len(excluded_files) == 0
+    assert not excluded_files
 
 
 def test_get_excluded_files_from_skyignore(skyignore_dir):

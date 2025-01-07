@@ -108,7 +108,7 @@ ValueType = TypeVar('ValueType')
 class ThreadSafeDict(Generic[KeyType, ValueType]):
     """A thread-safe dict."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
         self._lock = threading.Lock()
 
@@ -381,7 +381,7 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    service_statuses = []
+    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
@@ -400,7 +400,7 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
     service_statuses_encoded = message_utils.decode_payload(
         payload, payload_type='service_status')
-    service_statuses = []
+    service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
@@ -432,7 +432,7 @@ def _terminate_failed_services(
         A message indicating potential resource leak (if any). If no
         resource leak is detected, return None.
     """
-    remaining_replica_clusters = []
+    remaining_replica_clusters: List[str] = []
     # The controller should have already attempted to terminate those
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
@@ -459,8 +459,8 @@ def _terminate_failed_services(
 
 def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
-    terminated_service_names = []
-    messages = []
+    terminated_service_names: List[str] = []
+    messages: List[str] = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False)
@@ -506,7 +506,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     f.write(UserSignal.TERMINATE.value)
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
-    if len(terminated_service_names) == 0:
+    if not terminated_service_names:
         messages.append('No service to terminate.')
     else:
         identity_str = f'Service {terminated_service_names[0]} is'
@@ -839,10 +839,12 @@ def format_service_table(service_records: List[Dict[str, Any]],
         'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
     ]
     if show_all:
-        service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
+        service_columns.extend([
+            'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
+        ])
     service_table = log_utils.create_table(service_columns)
 
-    replica_infos = []
+    replica_infos: List[Dict[str, Any]] = []
     for record in service_records:
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
@@ -860,6 +862,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         endpoint = get_endpoint(record)
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
+        load_balancing_policy = record['load_balancing_policy']
 
         service_values = [
             service_name,
@@ -870,7 +873,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            service_values.extend([policy, requested_resources_str])
+            service_values.extend(
+                [policy, load_balancing_policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
@@ -912,7 +916,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         region = '-'
         zone = '-'
 
-        replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
+        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
+            'handle']
         if replica_handle is not None:
             resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)

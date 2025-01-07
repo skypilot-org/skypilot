@@ -180,6 +180,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             #  case we will need to update this logic.
                             # TODO(Doyoung): Update the error message raised
                             # with the multi-host TPU support.
+                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key()  # pylint: disable=line-too-long
                             if 'Insufficient google.com/tpu' in event_message:
                                 extra_msg = (
                                     f'Verify if '
@@ -192,14 +193,15 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                                        pod,
                                                        extra_msg,
                                                        details=event_message))
-                            elif (('Insufficient nvidia.com/gpu'
+                            elif ((f'Insufficient {gpu_resource_key}'
                                    in event_message) or
                                   ('didn\'t match Pod\'s node affinity/selector'
                                    in event_message)):
                                 extra_msg = (
-                                    f'Verify if '
-                                    f'{pod.spec.node_selector[label_key]}'
-                                    ' is available in the cluster.')
+                                    f'Verify if any node matching label  '
+                                    f'{pod.spec.node_selector[label_key]} and '
+                                    f'sufficient resource {gpu_resource_key} '
+                                    f'is available in the cluster.')
                                 raise config_lib.KubernetesError(
                                     _lack_resource_msg('GPU',
                                                        pod,
@@ -722,13 +724,13 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        'Continuing without using nvidia RuntimeClass.\n'
                        'If you are on a K3s cluster, manually '
                        'override runtimeClassName in ~/.sky/config.yaml. '
-                       'For more details, refer to https://skypilot.readthedocs.io/en/latest/reference/config.html')  # pylint: disable=line-too-long
+                       'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
     needs_gpus = False
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
-        needs_gpus = limits.get(kubernetes_utils.GPU_RESOURCE_KEY, 0) > 0
+        needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(), 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
@@ -879,27 +881,62 @@ def _terminate_node(namespace: str, context: Optional[str],
                     pod_name: str) -> None:
     """Terminate a pod."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
-    try:
-        kubernetes.core_api(context).delete_namespaced_service(
-            pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT)
-        kubernetes.core_api(context).delete_namespaced_service(
-            f'{pod_name}-ssh',
-            namespace,
-            _request_timeout=config_lib.DELETION_TIMEOUT)
-    except kubernetes.api_exception():
-        pass
+
+    def _delete_k8s_resource_with_retry(delete_func: Callable,
+                                        resource_type: str,
+                                        resource_name: str) -> None:
+        """Helper to delete Kubernetes resources with 404 handling and retries.
+
+        Args:
+            delete_func: Function to call to delete the resource
+            resource_type: Type of resource being deleted (e.g. 'service'),
+                used in logging
+            resource_name: Name of the resource being deleted, used in logging
+        """
+        max_retries = 3
+        retry_delay = 5  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                delete_func()
+                return
+            except kubernetes.api_exception() as e:
+                if e.status == 404:
+                    logger.warning(
+                        f'terminate_instances: Tried to delete {resource_type} '
+                        f'{resource_name}, but the {resource_type} was not '
+                        'found (404).')
+                    return
+                elif attempt < max_retries - 1:
+                    logger.warning(f'terminate_instances: Failed to delete '
+                                   f'{resource_type} {resource_name} (attempt '
+                                   f'{attempt + 1}/{max_retries}). Error: {e}. '
+                                   f'Retrying in {retry_delay} seconds...')
+                    time.sleep(retry_delay)
+                else:
+                    raise
+
+    # Delete services for the pod
+    for service_name in [pod_name, f'{pod_name}-ssh']:
+        _delete_k8s_resource_with_retry(
+            delete_func=lambda name=service_name: kubernetes.core_api(
+                context).delete_namespaced_service(name=name,
+                                                   namespace=namespace,
+                                                   _request_timeout=config_lib.
+                                                   DELETION_TIMEOUT),
+            resource_type='service',
+            resource_name=service_name)
+
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
     # from within the pod, e.g., for autodown.
-    try:
-        kubernetes.core_api(context).delete_namespaced_pod(
-            pod_name, namespace, _request_timeout=config_lib.DELETION_TIMEOUT)
-    except kubernetes.api_exception() as e:
-        if e.status == 404:
-            logger.warning('terminate_instances: Tried to delete pod '
-                           f'{pod_name}, but the pod was not found (404).')
-        else:
-            raise
+    _delete_k8s_resource_with_retry(
+        delete_func=lambda: kubernetes.core_api(context).delete_namespaced_pod(
+            name=pod_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+        resource_type='pod',
+        resource_name=pod_name)
 
 
 def terminate_instances(

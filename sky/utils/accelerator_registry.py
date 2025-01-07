@@ -70,7 +70,7 @@ def canonicalize_accelerator_name(accelerator: str,
             return name
         if cloud_str is None or cloud_str in clouds:
             names.append(name)
-    if len(names) == 0:
+    if not names:
         return accelerator
     if len(names) == 1:
         return names[0]

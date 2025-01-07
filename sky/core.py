@@ -842,7 +842,7 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -891,7 +891,7 @@ def job_status(cluster_name: str,
             f'of type {backend.__class__.__name__!r}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     sky_logging.print(f'{colorama.Fore.YELLOW}'
@@ -1043,7 +1043,7 @@ def local_up(gpus: bool = False) -> None:
     run_command = shlex.split(run_command)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_up.log')
     tail_cmd = 'tail -n100 -f ' + log_path
@@ -1152,7 +1152,7 @@ def local_down() -> None:
     run_command = shlex.split(down_script_path)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_down.log')
     tail_cmd = 'tail -n100 -f ' + log_path

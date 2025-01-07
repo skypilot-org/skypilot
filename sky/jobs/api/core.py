@@ -49,6 +49,7 @@ def launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     retry_until_up: bool = False,
+    # TODO(cooperc): remove fast arg before 0.8.0
     fast: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -61,9 +62,8 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
-        fast: Whether to use sky.launch(fast=True) for the jobs controller. If
-          True, the SkyPilot wheel and the cloud credentials may not be updated
-          on the jobs controller.
+        fast: [Deprecated] Does nothing, and will be removed soon. We will
+          always use fast mode as it's fully safe now.
 
     Returns:
         - Job ID for the managed job
@@ -372,8 +372,8 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'job_ids={job_id_str}' if job_ids else ''
         argument_str += f' name={name}' if name is not None else ''
         argument_str += ' all' if all else ''
         with ux_utils.print_exception_no_traceback():

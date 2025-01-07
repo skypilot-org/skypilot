@@ -35,18 +35,20 @@ gcloud --version || conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 cd ../sky-master
 git pull origin master
-$UV pip uninstall skypilot
-$UV pip install --prerelease=allow azure-cli
-$UV pip install -e ".[all]"
+pip uninstall -y skypilot
+pip install uv
+uv pip install --prerelease=allow "azure-cli>=2.65.0"
+uv pip install -e ".[all]"
 cd -
 
 conda env list | grep sky-back-compat-current || conda create -n sky-back-compat-current -y python=3.9
 conda activate sky-back-compat-current
 gcloud --version || conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
-$UV pip uninstall skypilot
-$UV pip install --prerelease=allow azure-cli
-$UV pip install -e ".[all]"
+pip uninstall -y skypilot
+pip install uv
+uv pip install --prerelease=allow "azure-cli>=2.65.0"
+uv pip install -e ".[all]"
 
 
 # exec + launch

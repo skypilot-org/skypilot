@@ -171,6 +171,16 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.head.default', 'node_config',
      'azure_arm_parameters', 'cloudInitSetupCommands'),
 ]
+# These keys are expected to change when provisioning on an existing cluster,
+# but they don't actually represent a change that requires re-provisioning the
+# cluster.  If the cluster yaml is the same except for these keys, we can safely
+# skip reprovisioning. See _deterministic_cluster_yaml_hash.
+_RAY_YAML_KEYS_TO_REMOVE_FOR_HASH = [
+    # On first launch, availability_zones will include all possible zones. Once
+    # the cluster exists, it will only include the zone that the cluster is
+    # actually in.
+    ('provider', 'availability_zone'),
+]
 
 
 def is_ip(s: str) -> bool:
@@ -463,6 +473,42 @@ def _replace_yaml_dicts(
     return common_utils.dump_yaml_str(new_config)
 
 
+def get_expirable_clouds(
+        enabled_clouds: Sequence[clouds.Cloud]) -> List[clouds.Cloud]:
+    """Returns a list of clouds that use local credentials and whose credentials can expire.
+
+    This function checks each cloud in the provided sequence to determine if it uses local credentials
+    and if its credentials can expire. If both conditions are met, the cloud is added to the list of
+    expirable clouds.
+
+    Args:
+        enabled_clouds (Sequence[clouds.Cloud]): A sequence of cloud objects to check.
+
+    Returns:
+        list[clouds.Cloud]: A list of cloud objects that use local credentials and whose credentials can expire.
+    """
+    expirable_clouds = []
+    local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+    for cloud in enabled_clouds:
+        remote_identities = skypilot_config.get_nested(
+            (str(cloud).lower(), 'remote_identity'), None)
+        if remote_identities is None:
+            remote_identities = schemas.get_default_remote_identity(
+                str(cloud).lower())
+
+        local_credential_expiring = cloud.can_credential_expire()
+        if isinstance(remote_identities, str):
+            if remote_identities == local_credentials_value and local_credential_expiring:
+                expirable_clouds.append(cloud)
+        elif isinstance(remote_identities, list):
+            for profile in remote_identities:
+                if list(profile.values(
+                ))[0] == local_credentials_value and local_credential_expiring:
+                    expirable_clouds.append(cloud)
+                    break
+    return expirable_clouds
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -740,6 +786,13 @@ def write_cluster_config(
             tmp_yaml_path,
             cluster_config_overrides=to_provision.cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+        yaml_obj = common_utils.read_yaml(tmp_yaml_path)
+        pod_config = yaml_obj['available_node_types']['ray_head_default'][
+            'node_config']
+        valid, message = kubernetes_utils.check_pod_config(pod_config)
+        if not valid:
+            raise exceptions.InvalidCloudConfigs(
+                f'Invalid pod_config. Details: {message}')
 
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
@@ -814,6 +867,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.Cudo,
             clouds.Paperspace,
             clouds.Azure,
+            clouds.DO,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
@@ -831,10 +885,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     else:
         assert False, cloud
     common_utils.dump_yaml(cluster_config_file, config)
-
-
-def get_run_timestamp() -> str:
-    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
@@ -911,7 +961,7 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
     yaml file and all the files in the file mounts, then hash the byte sequence.
 
     The format of the byte sequence is:
-    32 bytes - sha256 hash of the yaml file
+    32 bytes - sha256 hash of the yaml
     for each file mount:
       file mount remote destination (UTF-8), \0
       if the file mount source is a file:
@@ -935,14 +985,29 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
     we construct it incrementally by using hash.update() to add new bytes.
     """
 
+    # Load the yaml contents so that we can directly remove keys.
+    yaml_config = common_utils.read_yaml(yaml_path)
+    for key_list in _RAY_YAML_KEYS_TO_REMOVE_FOR_HASH:
+        dict_to_remove_from = yaml_config
+        found_key = True
+        for key in key_list[:-1]:
+            if (not isinstance(dict_to_remove_from, dict) or
+                    key not in dict_to_remove_from):
+                found_key = False
+                break
+            dict_to_remove_from = dict_to_remove_from[key]
+        if found_key and key_list[-1] in dict_to_remove_from:
+            dict_to_remove_from.pop(key_list[-1])
+
     def _hash_file(path: str) -> bytes:
         return common_utils.hash_file(path, 'sha256').digest()
 
     config_hash = hashlib.sha256()
 
-    config_hash.update(_hash_file(yaml_path))
+    yaml_hash = hashlib.sha256(
+        common_utils.dump_yaml_str(yaml_config).encode('utf-8'))
+    config_hash.update(yaml_hash.digest())
 
-    yaml_config = common_utils.read_yaml(yaml_path)
     file_mounts = yaml_config.get('file_mounts', {})
     # Remove the file mounts added by the newline.
     if '' in file_mounts:
@@ -950,6 +1015,11 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
         file_mounts.pop('')
 
     for dst, src in sorted(file_mounts.items()):
+        if src == yaml_path:
+            # Skip the yaml file itself. We have already hashed a modified
+            # version of it. The file may include fields we don't want to hash.
+            continue
+
         expanded_src = os.path.expanduser(src)
         config_hash.update(dst.encode('utf-8') + b'\0')
 

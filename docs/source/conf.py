@@ -41,6 +41,7 @@ extensions = [
     'sphinxemoji.sphinxemoji',
     'sphinx_design',
     'myst_parser',
+    'notfound.extension',
 ]
 
 intersphinx_mapping = {

@@ -133,6 +133,9 @@ class GCPIdentityType(enum.Enum):
 
     SHARED_CREDENTIALS_FILE = ''
 
+    def can_credential_expire(self) -> bool:
+        return self == GCPIdentityType.SHARED_CREDENTIALS_FILE
+
 
 @registry.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
@@ -168,7 +171,7 @@ class GCP(clouds.Cloud):
         # ~/.config/gcloud/application_default_credentials.json.
         f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
     _APPLICATION_CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -176,7 +179,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
         'to the path of your service account key file.\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -831,13 +834,13 @@ class GCP(clouds.Cloud):
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if len(diffs) > 0:
+        if diffs:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -863,6 +866,12 @@ class GCP(clouds.Cloud):
             # Skip if the application key path is not found.
             pass
         return credentials
+
+    @functools.lru_cache(maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._get_identity_type()
+        return identity_type is not None and identity_type.can_credential_expire(
+        )
 
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
