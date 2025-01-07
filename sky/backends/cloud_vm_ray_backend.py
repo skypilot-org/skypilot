@@ -31,6 +31,7 @@ from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
+from sky.jobs import state as managed_job_state
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
@@ -3921,6 +3922,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         else:
             job_ids = [job_id]
 
+        # get the run_timestamp
+        # the function takes in [job_id]
         code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
         returncode, run_timestamps, stderr = self.run_on_head(
             handle,
@@ -3930,37 +3933,69 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             separate_stderr=True)
         subprocess_utils.handle_returncode(returncode, code,
                                            'Failed to sync logs.', stderr)
-        run_timestamps = common_utils.decode_payload(run_timestamps)
+        # returns with a dict of {job_id: run_timestamp}
+        run_timestamps = common_utils.decode_payload(run_timestamps) 
         if not run_timestamps:
             logger.info(f'{colorama.Fore.YELLOW}'
                         'No matching log directories found'
                         f'{colorama.Style.RESET_ALL}')
             return {}
 
-        job_ids = list(run_timestamps.keys())
-        run_timestamps = list(run_timestamps.values())
+        run_timestamp = list(run_timestamps.values())[0]
+        job_id = list(run_timestamps.keys())[0]
 
         remote_log_dirs = []
         local_log_dirs = []
-        if controller:
+        if controller: # download controller logs
             remote_log_dirs.extend([
                 os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-                for run_timestamp in run_timestamps
             ])
             local_log_dirs.extend([
                 os.path.expanduser(os.path.join(local_dir, run_timestamp))
-                for run_timestamp in run_timestamps
             ])
-        else:
-            remote_log_dirs.extend([
-                os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
-                             run_timestamp) for run_timestamp in run_timestamps
-            ])
-            local_log_dirs.extend([
-                os.path.expanduser(
-                    os.path.join(local_dir, 'managed_jobs', run_timestamp))
-                for run_timestamp in run_timestamps
-            ])
+        else: # download job logs
+            managed_job_status = managed_job_state.get_status(job_id)
+            # if managed_job_status is None or managed_job_status.is_terminal():
+            if managed_job_status is not None and managed_job_status.is_terminal():
+                # for jobs that are terminated, download from controller
+                remote_log_dirs.extend([
+                    os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
+                                run_timestamp)
+                ])
+                local_log_dirs.extend([
+                    os.path.expanduser(
+                        os.path.join(local_dir, 'managed_jobs', run_timestamp))
+                ])
+            else:
+                logger.info(f'{colorama.Fore.YELLOW}Job {job_id} is {managed_job_status}. Downloading a snapshot of the log from the job node.{colorama.Style.RESET_ALL}')
+                log_dir = os.path.expanduser(
+                        os.path.join(local_dir, 'managed_jobs', run_timestamp))
+                os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+
+                log_file = os.path.join(log_dir, 'run.log')
+
+                code = managed_jobs.ManagedJobCodeGen.stream_logs(
+                    job_name=None, job_id=job_id, follow=False, controller=False)
+
+                # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+                # kill the process, so we need to handle it manually here.
+                if threading.current_thread() is threading.main_thread():
+                    signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+                    signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+                # We redirect the output to the log file
+                # and disable the STDOUT and STDERR
+                self.run_on_head(
+                    handle,
+                    code,
+                    log_path=log_file,
+                    stream_logs=False,
+                    process_stream=False,
+                    ssh_mode=command_runner.SshMode.INTERACTIVE,
+                    stdin=subprocess.DEVNULL,
+                )
+
+                return {str(job_id): log_dir}
 
         style = colorama.Style
         fore = colorama.Fore

@@ -11,7 +11,7 @@ run: |
   import time
   import tqdm
 
-  for i in tqdm.trange(240):
+  for i in range(2400):
     time.sleep(1)
-  
+    print(f"progress: {i}")
   EOF
