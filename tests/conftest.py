@@ -22,7 +22,8 @@ import pytest
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
     'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod', 'vast'
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
+    'vast'
 ]
 default_clouds_to_run = ['aws', 'azure']
 

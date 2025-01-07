@@ -26,12 +26,12 @@ import textwrap
 import time
 
 import pytest
-
 from smoke_tests import smoke_tests_utils
 
 import sky
 from sky.skylet import events
 from sky.utils import common_utils
+
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
@@ -420,7 +420,7 @@ class TestYamlSpecs:
 
 
 # ---------- Testing Multiple Accelerators ----------
-@pytest.mark.no_vast        # Vast has low availability for K80 GPUs
+@pytest.mark.no_vast  # Vast has low availability for K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_do  # DO does not support K80s
@@ -438,7 +438,7 @@ def test_multiple_accelerators_ordered():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_vast        # Vast has low availability for T4 GPUs
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_do  # DO does not have multiple accelerators
@@ -456,7 +456,7 @@ def test_multiple_accelerators_ordered_with_default():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_vast        # Vast has low availability for T4 GPUs
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_do  # DO does not have multiple accelerators
@@ -473,7 +473,7 @@ def test_multiple_accelerators_unordered():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_vast        # Vast has low availability for T4 GPUs
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_do  # DO does not support multiple accelerators

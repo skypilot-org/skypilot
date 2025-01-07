@@ -7,7 +7,6 @@ from sky import status_lib
 from sky.provision import common
 from sky.provision.vast import utils
 from sky.utils import common_utils
-from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
@@ -206,12 +205,14 @@ def get_cluster_info(
         provider_config=provider_config,
     )
 
+
 def open_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     raise NotImplementedError('open_ports is not supported for Vast')
+
 
 def query_instances(
     cluster_name_on_cloud: str,
@@ -244,4 +245,3 @@ def cleanup_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     del cluster_name_on_cloud, ports, provider_config  # Unused.
-
