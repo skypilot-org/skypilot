@@ -3946,108 +3946,88 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         run_timestamp = list(run_timestamps.values())[0]
         job_id = list(run_timestamps.keys())[0]
-
-        remote_log_dirs = []
-        local_log_dirs = []
+        local_log_dir = ""
         if controller:  # download controller logs
-            remote_log_dirs.extend(
-                [os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)])
-            local_log_dirs.extend(
-                [os.path.expanduser(os.path.join(local_dir, run_timestamp))])
+            remote_log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                          run_timestamp)
+            local_log_dir = os.path.expanduser(
+                os.path.join(local_dir, run_timestamp))
+
+            logger.info(f'{colorama.Fore.CYAN}'
+                        f'Job {job_ids} logs: {local_log_dir}'
+                        f'{colorama.Style.RESET_ALL}')
+
+            runners = handle.get_command_runners()
+
+            def _rsync_down(args) -> None:
+                """Rsync down logs from remote nodes.
+
+                Args:
+                    args: A tuple of (runner, local_log_dir, remote_log_dir)
+                """
+                (runner, local_log_dir, remote_log_dir) = args
+                try:
+                    os.makedirs(local_log_dir, exist_ok=True)
+                    runner.rsync(
+                        # Require a `/` at the end to make sure the parent dir
+                        # are not created locally. We do not add additional '*' as
+                        # kubernetes's rsync does not work with an ending '*'.
+                        source=f'{remote_log_dir}/',
+                        target=local_log_dir,
+                        up=False,
+                        stream_logs=False,
+                    )
+                except exceptions.CommandError as e:
+                    if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+                        # Raised by rsync_down. Remote log dir may not exist, since
+                        # the job can be run on some part of the nodes.
+                        logger.debug(
+                            f'{runner.node_id} does not have the tasks/*.')
+                    else:
+                        raise
+
+            parallel_args = [[runner, *item]
+                             for item in zip(local_log_dir, remote_log_dir)
+                             for runner in runners]
+            subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         else:  # download job logs
             managed_job_status = managed_job_state.get_status(job_id)
-            # if managed_job_status is None or managed_job_status.is_terminal():
-            if (managed_job_status is not None and
-                    managed_job_status.is_terminal()):
-                # for jobs that are terminated, download from controller
-                remote_log_dirs.extend([
-                    os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
-                                 run_timestamp)
-                ])
-                local_log_dirs.extend([
-                    os.path.expanduser(
-                        os.path.join(local_dir, 'managed_jobs', run_timestamp))
-                ])
-            else:
-                logger.info(
-                    f'{colorama.Fore.YELLOW}'
-                    f'Job {job_id} is {managed_job_status}. '
-                    'Downloading a snapshot of the log from the job node.'
-                    f'{colorama.Style.RESET_ALL}')
-                log_dir = os.path.expanduser(
-                    os.path.join(local_dir, 'managed_jobs', run_timestamp))
-                os.makedirs(os.path.dirname(log_dir), exist_ok=True)
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        f'Job {job_id} is {managed_job_status}. '
+                        'Downloading a snapshot of the log from the job node.'
+                        f'{colorama.Style.RESET_ALL}')
+            local_log_dir = os.path.expanduser(
+                os.path.join(local_dir, 'managed_jobs', run_timestamp))
+            os.makedirs(os.path.dirname(local_log_dir), exist_ok=True)
+            log_file = os.path.join(local_log_dir, 'run.log')
 
-                log_file = os.path.join(log_dir, 'run.log')
+            code = managed_jobs.ManagedJobCodeGen.stream_logs(job_name=None,
+                                                              job_id=job_id,
+                                                              follow=False,
+                                                              controller=False)
 
-                code = managed_jobs.ManagedJobCodeGen.stream_logs(
-                    job_name=None,
-                    job_id=job_id,
-                    follow=False,
-                    controller=False)
+            # With the stdin=subprocess.DEVNULL, the ctrl-c will not
+            # kill the process, so we need to handle it manually here.
+            if threading.current_thread() is threading.main_thread():
+                signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+                signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
-                # With the stdin=subprocess.DEVNULL, the ctrl-c will not
-                # kill the process, so we need to handle it manually here.
-                if threading.current_thread() is threading.main_thread():
-                    signal.signal(signal.SIGINT,
-                                  backend_utils.interrupt_handler)
-                    signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
-
-                # We redirect the output to the log file
-                # and disable the STDOUT and STDERR
-                self.run_on_head(
-                    handle,
-                    code,
-                    log_path=log_file,
-                    stream_logs=False,
-                    process_stream=False,
-                    ssh_mode=command_runner.SshMode.INTERACTIVE,
-                    stdin=subprocess.DEVNULL,
-                )
-
-                
-                logger.info(f'{colorama.Fore.CYAN}'
-                            f'Job {job_id} logs: {log_dir}'
-                            f'{colorama.Style.RESET_ALL}')
-                return {str(job_id): log_dir}
+            # We redirect the output to the log file
+            # and disable the STDOUT and STDERR
+            self.run_on_head(
+                handle,
+                code,
+                log_path=log_file,
+                stream_logs=False,
+                process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+                stdin=subprocess.DEVNULL,
+            )
 
         logger.info(f'{colorama.Fore.CYAN}'
-                    f'Job {job_ids} logs: {local_log_dirs}'
+                    f'Job {job_id} logs: {local_log_dir}'
                     f'{colorama.Style.RESET_ALL}')
-
-        runners = handle.get_command_runners()
-
-        def _rsync_down(args) -> None:
-            """Rsync down logs from remote nodes.
-
-            Args:
-                args: A tuple of (runner, local_log_dir, remote_log_dir)
-            """
-            (runner, local_log_dir, remote_log_dir) = args
-            try:
-                os.makedirs(local_log_dir, exist_ok=True)
-                runner.rsync(
-                    # Require a `/` at the end to make sure the parent dir
-                    # are not created locally. We do not add additional '*' as
-                    # kubernetes's rsync does not work with an ending '*'.
-                    source=f'{remote_log_dir}/',
-                    target=local_log_dir,
-                    up=False,
-                    stream_logs=False,
-                )
-            except exceptions.CommandError as e:
-                if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
-                    # Raised by rsync_down. Remote log dir may not exist, since
-                    # the job can be run on some part of the nodes.
-                    logger.debug(f'{runner.node_id} does not have the tasks/*.')
-                else:
-                    raise
-
-        parallel_args = [[runner, *item]
-                         for item in zip(local_log_dirs, remote_log_dirs)
-                         for runner in runners]
-        subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
-        return dict(zip(job_ids, local_log_dirs))
+        return {str(job_id): local_log_dir}
 
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_name: str, target: serve_lib.ServiceComponent,
