@@ -3889,13 +3889,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             job_name: The job name to sync down logs for.
             controller: Whether to sync down logs for the controller.
             local_dir: The local directory to sync down logs to.
+
+        Returns:
+            A dictionary mapping job_id to log path.
         """
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_id is None:
             # generate code to get the job_id
-            code = managed_jobs.ManagedJobCodeGen.get_job_table()
-
+            code = managed_jobs.ManagedJobCodeGen.get_job_ids_by_name(job_name)
             returncode, run_timestamps, stderr = self.run_on_head(
                 handle,
                 code,
@@ -3905,24 +3907,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-
-            job_table = common_utils.decode_payload(run_timestamps)
-            job_ids = [
-                job['_job_id']
-                for job in job_table
-                if job['_job_id'] is not None and job['job_name'] == job_name
-            ]
+            job_ids = common_utils.decode_payload(run_timestamps)
             if not job_ids:
-                logger.info(f'{colorama.Fore.YELLOW}'
-                            'No matching job found'
-                            f'{colorama.Style.RESET_ALL}')
+                logger.info(
+                    f'{colorama.Fore.YELLOW}No matching job found{colorama.Style.RESET_ALL}'
+                )
                 return {}
             elif len(job_ids) > 1:
                 logger.info(
-                    f'{colorama.Fore.YELLOW}'
-                    f'Multiple jobs IDs found under the name {job_name}. '
-                    'Syncing down logs for all of them.'
-                    f'{colorama.Style.RESET_ALL}')
+                    f'{colorama.Fore.YELLOW}Multiple jobs IDs found under the name {job_name}.  Downloading the latest job logs.{colorama.Style.RESET_ALL}'
+                )
+                job_ids = [job_ids[-1]]
         else:
             job_ids = [job_id]
 
@@ -3956,8 +3951,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 os.path.expanduser(os.path.join(local_dir, run_timestamp))
                 for run_timestamp in run_timestamps
             ])
-
-        if job_ids is not None:
+        else:
             remote_log_dirs.extend([
                 os.path.join(constants.SKY_LOGS_DIRECTORY, 'managed_jobs',
                              run_timestamp) for run_timestamp in run_timestamps
