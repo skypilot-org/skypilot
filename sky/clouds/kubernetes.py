@@ -93,17 +93,7 @@ class Kubernetes(clouds.Cloud):
         context = resources.region
         if context is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
-        # Features to be disabled for exec auth
-        is_exec_auth, message = kubernetes_utils.is_kubeconfig_exec_auth(
-            context)
-        if is_exec_auth:
-            assert isinstance(message, str), message
-            # Controllers cannot spin up new pods with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to terminate itself with exec auth.
-            unsupported_features[
-                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+
         # Allow spot instances if supported by the cluster
         spot_label_key, _ = kubernetes_utils.get_spot_label(context)
         if spot_label_key is not None:
