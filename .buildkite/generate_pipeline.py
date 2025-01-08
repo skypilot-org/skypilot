@@ -92,7 +92,7 @@ def _extract_marked_tests(file_path: str,
     function_cloud_map = {}
     filter_marks = set(filter_marks)
     for function_name, marks in function_name_marks_map.items():
-        if not filter_marks & marks:
+        if filter_marks and not filter_marks & marks:
             continue
         clouds_to_include = []
         clouds_to_exclude = []
