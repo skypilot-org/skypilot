@@ -71,8 +71,10 @@ _JOB_CANCELLED_MESSAGE = (
 # The maximum time to wait for the managed job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
 # the managed job status fails to be updated and keep the `sky jobs logs`
-# blocking for a long time.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 25
+# blocking for a long time. This should be significantly longer than the
+# JOB_STATUS_CHECK_GAP_SECONDS to avoid timing out before the controller can
+# update the state.
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
 
 
 class UserSignal(enum.Enum):
@@ -563,7 +565,7 @@ def stream_logs(job_id: Optional[int],
                 for job in managed_jobs
                 if job['job_name'] == job_name
             }
-            if len(managed_job_ids) == 0:
+            if not managed_job_ids:
                 return f'No managed job found with name {job_name!r}.'
             if len(managed_job_ids) > 1:
                 job_ids_str = ', '.join(
@@ -579,6 +581,7 @@ def stream_logs(job_id: Optional[int],
         controller_log_path = os.path.join(
             os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
             f'{job_id}.log')
+        job_status = None
 
         # Wait for the log file to be written
         while not os.path.exists(controller_log_path):
@@ -588,9 +591,9 @@ def stream_logs(job_id: Optional[int],
                 return ''
 
             job_status = managed_job_state.get_status(job_id)
-            # We know that the job is present in the state table because of
-            # earlier checks, so it should not be None.
-            assert job_status is not None, (job_id, job_name)
+            if job_status is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Couldn\'t find job {job_id}.')
             # We shouldn't count CANCELLING as terminal here, the controller is
             # still cleaning up.
             if (job_status.is_terminal() and not job_status
@@ -614,14 +617,20 @@ def stream_logs(job_id: Optional[int],
 
             if follow:
                 while True:
+                    # Print all new lines, if there are any.
                     line = f.readline()
-                    if line is not None and line != '':
-                        print(line, end='', flush=True)
-                    else:
-                        job_status = managed_job_state.get_status(job_id)
-                        assert job_status is not None, (job_id, job_name)
-                        if job_status.is_terminal():
-                            break
+                    while line is not None and line != '':
+                        print(line, end='')
+                        line = f.readline()
+
+                    # Flush.
+                    print(end='', flush=True)
+
+                    # Check if the job if finished.
+                    job_status = managed_job_state.get_status(job_id)
+                    assert job_status is not None, (job_id, job_name)
+                    if job_status.is_terminal():
+                        break
 
                     time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
 
@@ -631,7 +640,9 @@ def stream_logs(job_id: Optional[int],
             # Print any remaining logs including incomplete line.
             print(f.read(), end='', flush=True)
 
-        # print job status if complete
+        if follow:
+            return ux_utils.finishing_message(
+                f'Job finished (status: {job_status}).')
 
         return ''
 
