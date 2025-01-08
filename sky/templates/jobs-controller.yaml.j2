@@ -54,8 +54,7 @@ setup: |
 
   if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; then
     systemctl --user daemon-reload
-    systemctl --user enable skypilot-dashboard
-    systemctl --user start skypilot-dashboard
+    systemctl --user enable --now skypilot-dashboard
   else
     echo "Systemd user services not found. Setting up SkyPilot dashboard manually."
     # Kill any old dashboard processes
