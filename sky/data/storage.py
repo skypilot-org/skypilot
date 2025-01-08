@@ -401,7 +401,7 @@ class AbstractStore:
         """Removes the Storage from the cloud."""
         raise NotImplementedError
 
-    def delete_sub_path(self) -> None:
+    def _delete_sub_path(self) -> None:
         """Removes objects from the sub path in the bucket."""
         raise NotImplementedError
 
