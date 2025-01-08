@@ -807,7 +807,9 @@ def write_cluster_config(
             if (remote_identity_config ==
                     schemas.RemoteIdentityOptions.NO_UPLOAD.value):
                 excluded_clouds.add(cloud_obj)
+
     credentials = sky_check.get_cloud_credential_file_mounts(excluded_clouds)
+
     auth_config = {'ssh_private_key': auth.PRIVATE_SSH_KEY_PATH}
     region_name = resources_vars.get('region')
 
