@@ -495,6 +495,9 @@ def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
+    # If no VPC is specified, use the default VPC.
+    if vpc_id_of_sg is None:
+        all_subnets = [s for s in all_subnets if s.vpc.is_default]
     subnets, vpc_id = _usable_subnets(
         ec2,
         user_specified_subnets=None,
