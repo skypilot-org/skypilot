@@ -392,11 +392,11 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def delete(self) -> None:
+    def delete(self, force_delete_bucket: bool = False) -> None:
         """Removes the Storage from the cloud."""
         raise NotImplementedError
 
-    def _delete_sub_path(self) -> None:
+    def delete_sub_path(self) -> None:
         """Removes objects from the sub path in the bucket."""
         raise NotImplementedError
 
@@ -550,8 +550,6 @@ class Storage(object):
         mode: StorageMode = StorageMode.MOUNT,
         sync_on_reconstruction: bool = True,
         # pylint: disable=invalid-name
-        _is_sky_managed: Optional[bool] = None,
-        # pylint: disable=invalid-name
         _bucket_sub_path: Optional[str] = None
     ) -> None:
         """Initializes a Storage object.
@@ -591,16 +589,6 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
-          _is_sky_managed: Optional[bool]; Indicates if the storage is managed
-            by Sky. Without this argument, the controller's behavior differs
-            from the local machine. For example, if a bucket does not exist:
-            Local Machine (is_sky_managed=True) →
-            Controller (is_sky_managed=False).
-            With this argument, the controller aligns with the local machine,
-            ensuring it retains the is_sky_managed information from the YAML.
-            During teardown, if is_sky_managed is True, the controller should
-            delete the bucket. Otherwise, it might mistakenly delete only the
-            sub-path, assuming is_sky_managed is False.
           _bucket_sub_path: Optional[str]; The subdirectory to use for the
             storage object.
         """
@@ -610,7 +598,6 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
-        self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -1024,7 +1011,6 @@ class Storage(object):
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
-                is_sky_managed=self._is_sky_managed,
                 _bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1100,7 +1086,7 @@ class Storage(object):
                 else:
                     global_user_state.set_storage_handle(self.name, self.handle)
             elif self.force_delete:
-                store.delete()
+                store.delete(force_delete_bucket=True)
             # Remove store from bookkeeping
             del self.stores[store_type]
         else:
@@ -1109,7 +1095,7 @@ class Storage(object):
                     self.handle.remove_store(store)
                     store.delete()
                 elif self.force_delete:
-                    store.delete()
+                    store.delete(force_delete_bucket=True)
             self.stores = {}
             # Remove storage from global_user_state if present
             global_user_state.remove_storage(self.name)
@@ -1157,8 +1143,6 @@ class Storage(object):
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         # pylint: disable=invalid-name
-        _is_sky_managed = config.pop('_is_sky_managed', None)
-        # pylint: disable=invalid-name
         _bucket_sub_path = config.pop('_bucket_sub_path', None)
         if force_delete is None:
             force_delete = False
@@ -1180,7 +1164,6 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode,
-                          _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
@@ -1205,12 +1188,9 @@ class Storage(object):
         add_if_not_none('source', self.source)
 
         stores = None
-        is_sky_managed = self._is_sky_managed
         if self.stores:
             stores = ','.join([store.value for store in self.stores])
-            is_sky_managed = list(self.stores.values())[0].is_sky_managed
         add_if_not_none('store', stores)
-        add_if_not_none('_is_sky_managed', is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
@@ -1415,8 +1395,9 @@ class S3Store(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
+    def delete(self, force_delete_bucket: bool = False) -> None:
+        if (not force_delete_bucket and self._bucket_sub_path is not None and
+                not self.is_sky_managed):
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
@@ -1900,8 +1881,9 @@ class GcsStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
+    def delete(self, force_delete_bucket: bool = False) -> None:
+        if (not force_delete_bucket and self._bucket_sub_path is not None and
+                not self.is_sky_managed):
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_gcs_bucket(self.name)
@@ -2730,9 +2712,10 @@ class AzureBlobStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self) -> None:
+    def delete(self, force_delete_bucket: bool = False) -> None:
         """Deletes the storage."""
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
+        if (not force_delete_bucket and self._bucket_sub_path is not None and
+                not self.is_sky_managed):
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_az_bucket(self.name)
@@ -3183,8 +3166,9 @@ class R2Store(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
+    def delete(self, force_delete_bucket: bool = False) -> None:
+        if (not force_delete_bucket and self._bucket_sub_path is not None and
+                not self.is_sky_managed):
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_r2_bucket(self.name)
@@ -3665,8 +3649,9 @@ class IBMCosStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self) -> None:
-        if self._bucket_sub_path is not None and not self.is_sky_managed:
+    def delete(self, force_delete_bucket: bool = False) -> None:
+        if (not force_delete_bucket and self._bucket_sub_path is not None and
+                not self.is_sky_managed):
             return self._delete_sub_path()
 
         self._delete_cos_bucket()
@@ -4100,7 +4085,7 @@ class OciStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self) -> None:
+    def delete(self, force_delete_bucket: bool = False) -> None:
         deleted_by_skypilot = self._delete_oci_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted OCI bucket {self.name}.'
