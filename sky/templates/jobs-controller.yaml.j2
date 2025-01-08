@@ -52,10 +52,19 @@ setup: |
   WantedBy=multi-user.target
   EOF
 
-  # Reload systemd, enable and start the service
-  systemctl --user daemon-reload
-  systemctl --user enable skypilot-dashboard
-  systemctl --user start skypilot-dashboard
+  if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; then
+    systemctl --user daemon-reload
+    systemctl --user enable skypilot-dashboard
+    systemctl --user start skypilot-dashboard
+  else
+    echo "Systemd user services not found. Setting up SkyPilot dashboard manually."
+    # Kill any old dashboard processes
+    ps aux | grep -v nohup | grep -v grep | grep -- '-m sky.jobs.dashboard.dashboard' \
+      | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
+    # Launch the dashboard in the background if not already running
+    (ps aux | grep -v nohup | grep -v grep | grep -q -- '-m sky.jobs.dashboard.dashboard') || \
+      (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &)
+  fi
 
 run: |
   {{ sky_activate_python_env }}
