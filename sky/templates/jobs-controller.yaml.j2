@@ -25,8 +25,6 @@ setup: |
   # Internal: disable logging for manually logging into the jobs controller for debugging.
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
-  # Install Flask if not present
-  pip list | grep flask > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
 
   # Create systemd service file
   mkdir -p ~/.config/systemd/user/
@@ -42,14 +40,12 @@ setup: |
   Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
   Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
   Restart=always
-  # Redirect logs to the home directory
   StandardOutput=append:/home/$USER/.sky/job-dashboard.log
   StandardError=append:/home/$USER/.sky/job-dashboard.log
-  # setup environment variable of controller name
   ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
 
   [Install]
-  WantedBy=multi-user.target
+  WantedBy=default.target
   EOF
 
   if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; then
