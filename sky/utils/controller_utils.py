@@ -700,11 +700,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # we store all these files in same bucket from config.
     bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
     store_kwargs: Dict[str, Any] = {}
-    # Controllers don't have the knowledge of whether the bucket is managed by
-    # sky or not, By default we consider the sky create and managed the
-    # intermediate bucket so we let controller delete the buckets after job
-    # finishes.
-    force_delete = True
     if bucket_wth_prefix is None:
         store_type = store_cls = sub_path = None
         storage_account_name = region = None
@@ -718,8 +713,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
             store_kwargs['region'] = region
-        # If the bucket is not managed by sky, we should not force delete it.
-        force_delete = False
+
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
     if task.workdir is not None:
@@ -751,7 +745,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                           mode=storage_lib.StorageMode.COPY,
                                           stores=stores,
                                           _bucket_sub_path=bucket_sub_path)
-        storage_obj.force_delete = force_delete
         new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -789,7 +782,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                           mode=storage_lib.StorageMode.COPY,
                                           stores=stores,
                                           _bucket_sub_path=bucket_sub_path)
-        storage_obj.force_delete = force_delete
         new_storage_mounts[dst] = storage_obj
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
@@ -829,7 +821,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             mode=storage_lib.StorageMode.MOUNT,
             stores=stores,
             _bucket_sub_path=file_mounts_tmp_subpath)
-        storage_obj.force_delete = force_delete
+
         new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():

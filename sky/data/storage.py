@@ -78,6 +78,11 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
 _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
 
 
+def _is_sky_managed_intermediate_bucket(bucket_name: str) -> bool:
+    return re.match(r'skypilot-filemounts-.+-[a-f0-9]{8}',
+                    bucket_name) is not None
+
+
 def get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
@@ -392,7 +397,7 @@ class AbstractStore:
         """
         raise NotImplementedError
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
+    def delete(self) -> None:
         """Removes the Storage from the cloud."""
         raise NotImplementedError
 
@@ -1086,7 +1091,7 @@ class Storage(object):
                 else:
                     global_user_state.set_storage_handle(self.name, self.handle)
             elif self.force_delete:
-                store.delete(force_delete_bucket=True)
+                store.delete()
             # Remove store from bookkeeping
             del self.stores[store_type]
         else:
@@ -1095,7 +1100,7 @@ class Storage(object):
                     self.handle.remove_store(store)
                     store.delete()
                 elif self.force_delete:
-                    store.delete(force_delete_bucket=True)
+                    store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
             global_user_state.remove_storage(self.name)
@@ -1364,7 +1369,9 @@ class S3Store(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1395,9 +1402,8 @@ class S3Store(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
-        if (not force_delete_bucket and self._bucket_sub_path is not None and
-                not self.is_sky_managed):
+    def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_s3_bucket(self.name)
@@ -1848,7 +1854,9 @@ class GcsStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1881,9 +1889,8 @@ class GcsStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
-        if (not force_delete_bucket and self._bucket_sub_path is not None and
-                not self.is_sky_managed):
+    def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_gcs_bucket(self.name)
@@ -2424,7 +2431,9 @@ class AzureBlobStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def _update_storage_account_name_and_resource(self):
         self.storage_account_name, self.resource_group_name = (
@@ -2712,10 +2721,9 @@ class AzureBlobStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
+    def delete(self) -> None:
         """Deletes the storage."""
-        if (not force_delete_bucket and self._bucket_sub_path is not None and
-                not self.is_sky_managed):
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_az_bucket(self.name)
@@ -3135,7 +3143,9 @@ class R2Store(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -3166,9 +3176,8 @@ class R2Store(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
-        if (not force_delete_bucket and self._bucket_sub_path is not None and
-                not self.is_sky_managed):
+    def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
 
         deleted_by_skypilot = self._delete_r2_bucket(self.name)
@@ -3615,7 +3624,9 @@ class IBMCosStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads files from local machine to bucket.
@@ -3649,9 +3660,8 @@ class IBMCosStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
-        if (not force_delete_bucket and self._bucket_sub_path is not None and
-                not self.is_sky_managed):
+    def delete(self) -> None:
+        if self._bucket_sub_path is not None and not self.is_sky_managed:
             return self._delete_sub_path()
 
         self._delete_cos_bucket()
@@ -4060,7 +4070,9 @@ class OciStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -4085,7 +4097,7 @@ class OciStore(AbstractStore):
             raise exceptions.StorageUploadError(
                 f'Upload failed for store {self.name}') from e
 
-    def delete(self, force_delete_bucket: bool = False) -> None:
+    def delete(self) -> None:
         deleted_by_skypilot = self._delete_oci_bucket(self.name)
         if deleted_by_skypilot:
             msg_str = f'Deleted OCI bucket {self.name}.'
