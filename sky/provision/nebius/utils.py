@@ -13,6 +13,7 @@ from nebius.api.nebius.compute.v1 import ListInstancesRequest, CreateInstanceReq
     DeleteInstanceRequest, \
     PublicIPAddress, StopInstanceRequest, StartInstanceRequest, DeleteDiskRequest, GetInstanceRequest, \
     GpuClusterServiceClient, CreateGpuClusterRequest, InstanceGpuClusterSpec, GpuClusterSpec, DeleteGpuClusterRequest
+from nebius.base.protos.unset import Unset
 
 from sky import sky_logging
 from sky.adaptors import nebius
@@ -128,9 +129,8 @@ def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
     for instance in instances.items:
         info = {}
         # FIX later
-        info['status'] = InstanceStatus.InstanceState(instance.status.state).name
+        info['status'] = instance.status.state.name
         info['name'] = instance.metadata.name
-        info['port2endpoint'] = {}
         if instance.status.network_interfaces:
             info['external_ip'] = instance.status.network_interfaces[0].public_ip_address.address.split('/')[0]
             info['internal_ip'] = instance.status.network_interfaces[0].ip_address.address.split('/')[0]
@@ -201,7 +201,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
                 parent_id=project_id,
                 name=disk_name,
             )).wait()
-            if DiskStatus.State(disk.status.state).name == "READY":
+            if disk.status.state.name == "READY":
                 break
             logger.debug(f'Waiting for disk {disk_name} to be ready.')
             time.sleep(POLL_INTERVAL)
@@ -228,7 +228,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
             spec=InstanceSpec(
                 gpu_cluster=InstanceGpuClusterSpec(
                     id=cluster_id,
-                ) if cluster_id else None,
+                ) if cluster_id else Unset,
                 boot_disk=AttachedDiskSpec(
                     attach_mode=AttachedDiskSpec.AttachMode(2),
                     existing_disk=ExistingDisk(
@@ -283,21 +283,3 @@ def remove(instance_id: str) -> None:
         except Exception as e:
             logger.debug(f'Waiting for disk deletion. {e}')
             time.sleep(POLL_INTERVAL)
-
-
-def get_ssh_ports(cluster_name) -> List[int]:
-    """Gets the SSH ports for the given cluster."""
-    logger.debug(f'Getting SSH ports for cluster {cluster_name}.')
-
-    instances = list_instances()
-    possible_names = [f'{cluster_name}-head', f'{cluster_name}-worker']
-
-    ssh_ports = []
-
-    for instance in instances.values():
-        if instance['name'] in possible_names:
-            ssh_ports.append(22)
-    assert ssh_ports, (
-        f'Could not find any instances for cluster {cluster_name}.')
-
-    return ssh_ports
