@@ -94,6 +94,8 @@ class AWSIdentityType(enum.Enum):
     IAM_ROLE = 'iam-role'
 
     CONTAINER_ROLE = 'container-role'
+    
+    CUSTOM_PROCESS = 'custom-process'
 
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
@@ -614,10 +616,16 @@ class AWS(clouds.Cloud):
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.CONTAINER_ROLE:
             # Similar to the IAM ROLE, an ECS container may not store credentials
-            # in the~/.aws/credentials file. So we don't check for the existence of
+            # in the ~/.aws/credentials file. So we don't check for the existence of
             # the file. i.e. the container will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS container-role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.CUSTOM_PROCESS:
+            # Similar to the IAM ROLE, a custom process may not store credentials
+            # in the ~/.aws/credentials file. So we don't check for the existence of
+            # the file. i.e. the custom process will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS custom-process is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -677,6 +685,8 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.CONTAINER_ROLE
         elif _is_access_key_of_type(AWSIdentityType.ENV.value):
             return AWSIdentityType.ENV
+        elif _is_access_key_of_type(AWSIdentityType.CUSTOM_PROCESS.value):
+            return AWSIdentityType.CUSTOM_PROCESS
         else:
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
