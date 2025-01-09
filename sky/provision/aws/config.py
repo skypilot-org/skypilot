@@ -385,7 +385,7 @@ def _usable_subnets(
     if not subnets:
         vpc_msg = (f'Does a default VPC exist in region '
                    f'{ec2.meta.client.meta.region_name}? ') if (
-                vpc_id_of_sg is None) else ''
+                       vpc_id_of_sg is None) else ''
         _skypilot_log_error_and_exit_for_failover(
             f'No usable subnets found. {vpc_msg}'
             'Try manually creating an instance in your specified region to '
