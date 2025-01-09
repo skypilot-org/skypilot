@@ -43,8 +43,8 @@ if __name__ == '__main__':
                                                   'AcceleratorName'),
                    ('num_gpus', 'AcceleratorCount'), ('cpu_cores', 'vCPUs'),
                    ('cpu_ram', 'MemoryGiB'), ('gpu_name', 'GpuInfo'),
-                   ('search.totalHour', 'Price'),
-                   ('search.totalHour', 'SpotPrice'), ('geolocation', 'Region'))
+                   ('search.totalHour', 'Price'), ('min_bid', 'SpotPrice'),
+                   ('geolocation', 'Region'))
     writer = csv.DictWriter(sys.stdout, fieldnames=[x[1] for x in mapped_keys])
     writer.writeheader()
 
@@ -54,8 +54,6 @@ if __name__ == '__main__':
         entry = {}
         for ours, theirs in mapped_keys:
             field = dot_get(offer, ours)
-            if theirs == 'SpotPrice':
-                field = '{:.2f}'.format(field)
             entry[theirs] = field
 
         instance_type = create_instance_type(offer)
@@ -100,7 +98,13 @@ if __name__ == '__main__':
         priceList = sorted([x['Price'] for x in instanceList])
         index = math.ceil(0.8 * len(priceList)) - 1
         priceTarget = priceList[index]
+        toList: List = []
         for instance in instanceList:
             if instance['Price'] <= priceTarget:
                 instance['Price'] = '{:.2f}'.format(priceTarget)
-                writer.writerow(instance)
+                toList.append(instance)
+
+        maxBid = max([x.get('SpotPrice') for x in toList])
+        for instance in toList:
+            instance['SpotPrice'] = '{:.2f}'.format(maxBid)
+            writer.writerow(instance)
