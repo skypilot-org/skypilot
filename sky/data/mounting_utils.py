@@ -135,7 +135,7 @@ def get_az_mount_cmd(container_name: str,
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
                  '-o umask=022 -o default_permissions '
-                 f'--tmp-path {cache_path}_$({remote_boot_time_cmd} '
+                 f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
                  f'{bucket_sub_path_arg}'
                  f'--container-name {container_name}')
     return mount_cmd
