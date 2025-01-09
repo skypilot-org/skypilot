@@ -9,8 +9,7 @@ from sky.provision.vast import utils
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
-POLL_INTERVAL = 5
-QUERY_PORTS_TIMEOUT_SECONDS = 30
+POLL_INTERVAL = 10
 
 logger = sky_logging.init_logger(__name__)
 # a much more convenient method
