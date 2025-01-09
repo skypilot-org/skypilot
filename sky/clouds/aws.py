@@ -94,7 +94,7 @@ class AWSIdentityType(enum.Enum):
     IAM_ROLE = 'iam-role'
 
     CONTAINER_ROLE = 'container-role'
-    
+
     CUSTOM_PROCESS = 'custom-process'
 
     #       Name                    Value             Type    Location
