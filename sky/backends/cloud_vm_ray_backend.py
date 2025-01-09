@@ -26,6 +26,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
@@ -1997,6 +1998,22 @@ class RetryingVmProvisioner(object):
                                        skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
+        # If the user is using local credentials which may expire, the
+        # controller may leak resources if the credentials expire while a job
+        # is running. Here we check the enabled clouds and expiring credentials
+        # and raise a warning to the user.
+        if task.is_controller_task():
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            expirable_clouds = backend_utils.get_expirable_clouds(
+                enabled_clouds)
+
+            if len(expirable_clouds) > 0:
+                warnings = (f'\033[93mWarning: Credentials used for '
+                            f'{expirable_clouds} may expire. Clusters may be '
+                            f'leaked if the credentials expire while jobs '
+                            f'are running. It is recommended to use credentials'
+                            f' that never expire or a service account.\033[0m')
+                logger.warning(warnings)
 
         # Retrying launchable resources.
         while True:
@@ -4346,11 +4363,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         attempts = 0
         while True:
             logger.debug(f'instance statuses attempt {attempts + 1}')
-            node_status_dict = provision_lib.query_instances(
-                repr(cloud),
-                cluster_name_on_cloud,
-                config['provider'],
-                non_terminated_only=False)
+            try:
+                node_status_dict = provision_lib.query_instances(
+                    repr(cloud),
+                    cluster_name_on_cloud,
+                    config['provider'],
+                    non_terminated_only=False)
+            except Exception as e:  # pylint: disable=broad-except
+                if purge:
+                    logger.warning(
+                        f'Failed to query instances. Skipping since purge is '
+                        f'set. Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    break
+                raise
 
             unexpected_node_state: Optional[Tuple[str, str]] = None
             for node_id, node_status in node_status_dict.items():
@@ -4369,8 +4395,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
             else:
                 (node_id, node_status) = unexpected_node_state
-                raise RuntimeError(f'Instance {node_id} in unexpected state '
-                                   f'{node_status}.')
+                if purge:
+                    logger.warning(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}. Skipping since purge '
+                                   'is set.')
+                    break
+                raise RuntimeError(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

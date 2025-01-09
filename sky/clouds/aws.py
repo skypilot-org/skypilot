@@ -95,6 +95,8 @@ class AWSIdentityType(enum.Enum):
 
     CONTAINER_ROLE = 'container-role'
 
+    CUSTOM_PROCESS = 'custom-process'
+
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
     #    profile                <not set>             None    None
@@ -102,6 +104,24 @@ class AWSIdentityType(enum.Enum):
     # secret_key     ****************abcd shared-credentials-file
     #     region                us-east-1      config-file    ~/.aws/config
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
+
+    def can_credential_expire(self) -> bool:
+        """Check if the AWS identity type can expire.
+
+        SSO,IAM_ROLE and CONTAINER_ROLE are temporary credentials and refreshed
+        automatically. ENV and SHARED_CREDENTIALS_FILE are short-lived
+        credentials without refresh.
+        IAM ROLE:
+        https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html
+        SSO/Container-role refresh token:
+        https://docs.aws.amazon.com/solutions/latest/dea-api/auth-refreshtoken.html
+        """
+        # TODO(hong): Add a CLI based check for the expiration of the temporary
+        #  credentials
+        expirable_types = {
+            AWSIdentityType.ENV, AWSIdentityType.SHARED_CREDENTIALS_FILE
+        }
+        return self in expirable_types
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -596,10 +616,16 @@ class AWS(clouds.Cloud):
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.CONTAINER_ROLE:
             # Similar to the IAM ROLE, an ECS container may not store credentials
-            # in the~/.aws/credentials file. So we don't check for the existence of
+            # in the ~/.aws/credentials file. So we don't check for the existence of
             # the file. i.e. the container will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS container-role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.CUSTOM_PROCESS:
+            # Similar to the IAM ROLE, a custom process may not store credentials
+            # in the ~/.aws/credentials file. So we don't check for the existence of
+            # the file. i.e. the custom process will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS custom-process is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -659,6 +685,8 @@ class AWS(clouds.Cloud):
             return AWSIdentityType.CONTAINER_ROLE
         elif _is_access_key_of_type(AWSIdentityType.ENV.value):
             return AWSIdentityType.ENV
+        elif _is_access_key_of_type(AWSIdentityType.CUSTOM_PROCESS.value):
+            return AWSIdentityType.CUSTOM_PROCESS
         else:
             return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
@@ -859,6 +887,12 @@ class AWS(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
+
+    @functools.lru_cache(maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._current_identity_type()
+        return identity_type is not None and identity_type.can_credential_expire(
+        )
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
