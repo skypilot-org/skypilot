@@ -7,9 +7,10 @@
 # pylint: disable=assignment-from-no-return
 import csv
 import json
+import math
 import re
 import sys
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from sky.adaptors import vast
 
@@ -48,15 +49,17 @@ if __name__ == '__main__':
     writer.writeheader()
 
     offerList = vast.vast().search_offers(limit=10000)
+    priceMap: Dict[Any, List] = {}
     for offer in offerList:
         entry = {}
         for ours, theirs in mapped_keys:
             field = dot_get(offer, ours)
-            if 'Price' in theirs:
+            if theirs == 'SpotPrice':
                 field = '{:.2f}'.format(field)
             entry[theirs] = field
 
-        entry['InstanceType'] = create_instance_type(offer)
+        instance_type = create_instance_type(offer)
+        entry['InstanceType'] = instance_type
 
         # the documentation says
         # "{'gpus': [{
@@ -88,4 +91,16 @@ if __name__ == '__main__':
             'TotalGpuMemoryInMiB': offer['gpu_total_ram']
         }).replace('"', '\'')
 
-        writer.writerow(entry)
+        if instance_type not in priceMap:
+            priceMap[instance_type] = []
+
+        priceMap[instance_type].append(entry)
+
+    for instanceList in priceMap.values():
+        priceList = sorted([x['Price'] for x in instanceList])
+        index = math.ceil(0.8 * len(priceList)) - 1
+        priceTarget = priceList[index]
+        for instance in instanceList:
+            if instance['Price'] <= priceTarget:
+                instance['Price'] = '{:.2f}'.format(priceTarget)
+                writer.writerow(instance)
