@@ -19,8 +19,6 @@ class Vast(clouds.Cloud):
     """
     _REPR = 'Vast'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as vast API does not implement spot.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on Vast.'),
@@ -69,8 +67,6 @@ class Vast(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'Vast does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
         regions = service_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'vast')
 
@@ -185,11 +181,6 @@ class Vast(clouds.Cloud):
         self, resources: 'resources_lib.Resources'
     ) -> 'resources_utils.FeasibleResources':
         """Returns a list of feasible resources for the given resources."""
-        if resources.use_spot:
-            # TODO(kristopolous/cjm): Add hints to all return values
-            #  in this method to help users understand why the
-            #  resources are not launchable.
-            return resources_utils.FeasibleResources([], [], None)
         if resources.instance_type is not None:
             assert resources.is_launchable(), resources
             resources = resources.copy(accelerators=None)

@@ -34,7 +34,7 @@ def list_instances() -> Dict[str, Dict[str, Any]]:
 
 
 def launch(name: str, instance_type: str, region: str, disk_size: int,
-           image_name: str) -> str:
+           image_name: str, preemptible: bool) -> str:
     """Launches an instance with the given parameters.
 
     Converts the instance_type to the Vast GPU name, finds the specs for the
@@ -86,14 +86,20 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     instance_touse = instance_list[0]
 
-    new_instance_contract = vast.vast().create_instance(
-        id=instance_touse['id'],
-        direct=True,
-        ssh=True,
-        env='-e __SOURCE=skypilot',
-        onstart_cmd='touch ~/.no_auto_tmux;apt install lsof',
-        label=name,
-        image=image_name)
+    launch_params = {
+        'id': instance_touse['id'],
+        'direct': True,
+        'ssh': True,
+        'env': '-e __SOURCE=skypilot',
+        'onstart_cmd': 'touch ~/.no_auto_tmux;apt install lsof',
+        'label': name,
+        'image': image_name
+    }
+
+    if preemptible:
+        launch_params['min_bid'] = instance_touse['min_bid']
+
+    new_instance_contract = vast.vast().create_instance(**launch_params)
 
     new_instance = vast.vast().show_instance(
         id=new_instance_contract['new_contract'])
