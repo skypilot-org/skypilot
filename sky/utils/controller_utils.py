@@ -206,6 +206,9 @@ def _get_cloud_dependencies_installation_commands(
     # installed, so we don't check that.
     python_packages: Set[str] = set()
 
+    # add flask to the controller dependencies for dashboard
+    python_packages.add('flask')
+
     step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
