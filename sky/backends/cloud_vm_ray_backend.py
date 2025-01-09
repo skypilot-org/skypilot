@@ -45,7 +45,6 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
-from sky.jobs import state as managed_job_state
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -3938,7 +3937,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     f'Multiple jobs IDs found under the name {job_name}. '
                     'Downloading the latest job logs.'
                     f'{colorama.Style.RESET_ALL}')
-                job_ids = [job_ids[0]] # descending order
+                job_ids = [job_ids[0]]  # descending order
         else:
             job_ids = [job_id]
 
@@ -3971,7 +3970,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 os.path.join(local_dir, run_timestamp))
 
             logger.info(f'{colorama.Fore.CYAN}'
-                        f'Job {job_ids} local logs: {local_log_dir} remote logs: {remote_log_dir}'
+                        f'Job {job_ids} local logs: {local_log_dir}'
                         f'{colorama.Style.RESET_ALL}')
 
             runners = handle.get_command_runners()
