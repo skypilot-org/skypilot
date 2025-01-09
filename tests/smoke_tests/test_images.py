@@ -350,17 +350,17 @@ def test_gcp_force_enable_external_ips():
     name = smoke_tests_utils.get_cluster_name()
 
     # Command to check if the instance is on GCP
-    is_gcp_command = (
+    is_on_gcp_command = (
         'curl -s -H "Metadata-Flavor: Google" '
         '"http://metadata.google.internal/computeMetadata/v1/instance/name"')
 
     # Run the GCP check
-    is_gcp = subprocess.run(f'{is_gcp_command}',
-                            shell=True,
-                            check=True,
-                            text=True,
-                            capture_output=True).stdout.strip()
-    if not is_gcp:
+    is_on_gcp = subprocess.run(f'{is_on_gcp_command}',
+                               shell=True,
+                               check=True,
+                               text=True,
+                               capture_output=True).stdout.strip()
+    if not is_on_gcp:
         pytest.skip('Not on GCP, skipping test')
 
     test_commands = [
