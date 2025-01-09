@@ -349,13 +349,6 @@ def setup_ibm_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     for node_type in config['available_node_types']:
         config['available_node_types'][node_type]['node_config'][
             'key_id'] = vpc_key_id
-
-    # Add public key path to file mounts
-    file_mounts = config['file_mounts']
-    # TODO(zhwu): check if this is required.
-    file_mounts['~/.ssh/sky-key.pub'] = public_key_path
-    config['file_mounts'] = file_mounts
-
     return config
 
 

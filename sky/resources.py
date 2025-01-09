@@ -1465,8 +1465,6 @@ class Resources:
 
         add_if_not_none('cloud', str(self.cloud))
         add_if_not_none('instance_type', self.instance_type)
-        # TODO(SKY-1048): do not call self.cpus or self.accelerators
-        # to prevent catalog pulling on client side.
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
         add_if_not_none('accelerators', self._accelerators)

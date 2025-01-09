@@ -329,7 +329,7 @@ def test_kubernetes_context_switch():
     smoke_tests_utils.run_one_test(test)
 
 
-# TODO (zhwu): These tests may fail as it can require access cloud credentials,
+# TODO (SKY-1119): These tests may fail as it can require access cloud credentials,
 # even though the API server is running remotely. We should fix this.
 @pytest.mark.parametrize(
     'image_id',
@@ -455,7 +455,7 @@ def test_ibm_storage_mounts():
 # Since these tests require cloud credentials to verify bucket operations,
 # they should not be run when the API server is remote and the user does not
 # have any credentials locally.
-# TODO(romilb): In the future, we should figure out a way to ship these tests
+# TODO(SKY-1219): In the future, we should figure out a way to ship these tests
 #  to the API server and run them there. Maybe these tests can be packaged as a
 #  SkyPilot task run on a remote cluster launched via the API server.
 @pytest.mark.local

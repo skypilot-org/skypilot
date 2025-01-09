@@ -253,8 +253,6 @@ def set_current_command(command: str):
     This is useful when we are on the SkyPilot server side and we have a command
     from the client.
     """
-    # TODO(cooperc): If we move toward a threading model on the SkyPilot server,
-    # this should be thread-local.
     global _current_command
     _current_command = command
 

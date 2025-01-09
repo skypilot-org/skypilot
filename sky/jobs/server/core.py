@@ -454,7 +454,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
     """Opens a dashboard for managed jobs (needs controller to be UP)."""
-    # TODO(zongheng): ideally, the controller/dashboard server should expose the
+    # TODO(SKY-1212): ideally, the controller/dashboard server should expose the
     # API perhaps via REST. Then here we would (1) not have to use SSH to try to
     # see if the controller is UP first, which is slow; (2) not have to run SSH
     # port forwarding first (we'd just launch a local dashboard which would make

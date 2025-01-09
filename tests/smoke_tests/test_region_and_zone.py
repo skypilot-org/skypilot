@@ -52,9 +52,6 @@ def test_aws_region():
     smoke_tests_utils.run_one_test(test)
 
 
-# TODO(zhwu): Fix this test -- the jump-{name} cluster cannot be found by ssh,
-# when API server is hosted remotely, since we don't add jump-{name} to the ssh
-# config on the API server.
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()

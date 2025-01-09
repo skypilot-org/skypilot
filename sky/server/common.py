@@ -90,6 +90,7 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
             f'{colorama.Style.RESET_ALL}')
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
+
     # The command to run uvicorn. Adjust the app:app to your application's
     # location.
     api_server_cmd = API_SERVER_CMD
@@ -101,26 +102,25 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
 
     # Start the uvicorn process in the background and don't wait for it.
     subprocess.Popen(cmd, shell=True)
+
+    # Wait for the server to start until timeout.
     server_url = get_server_url()
-    # Wait for the server to start.
-    retry_cnt = 0
+    # Conservative upper time bound for starting the server based on profiling.
+    timeout_sec = 12
+    start_time = time.time()
     while True:
         try:
-            # TODO: Should check the process is running as well.
             requests.get(f'{server_url}/health', timeout=1)
             break
         except requests.exceptions.ConnectionError as e:
-            # TODO(zhwu): this should be made as small as possible to avoid
-            # unnecessary delays.
-            if retry_cnt < 25:
-                retry_cnt += 1
+            if time.time() - start_time < timeout_sec:
+                time.sleep(0.5)
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'Failed to connect to SkyPilot server at '
                         f'{server_url}. '
                         f'\nView logs at: {constants.API_SERVER_LOGS}') from e
-            time.sleep(0.5)
 
 
 def handle_request_error(response):
@@ -193,7 +193,6 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
         file paths to the full path, so that on API server, the file paths can
         be retrieved by adding prefix to the full path.
     """
-    # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
     if is_api_server_local():
         return dag
 
