@@ -633,6 +633,42 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
+def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
+    """Get jobs from the database that have a live schedule_state.
+
+    This should return job(s) that are not INACTIVE, WAITING, or DONE.  So a
+    returned job should correspond to a live job controller process, with one
+    exception: the job may have just transitioned from WAITING to LAUNCHING, but
+    the controller process has not yet started.
+    """
+    job_filter = '' if job_id is None else 'AND spot_job_id=(?)'
+    job_value = (job_id,) if job_id is not None else ()
+
+    # Join spot and job_info tables to get the job name for each task.
+    # We use LEFT OUTER JOIN mainly for backward compatibility, as for an
+    # existing controller before #1982, the job_info table may not exist,
+    # and all the managed jobs created before will not present in the
+    # job_info.
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            f"""\
+            SELECT spot_job_id, schedule_state, controller_pid
+            FROM job_info
+            WHERE schedule_state not in (?, ?)
+            {job_filter}
+            ORDER BY spot_job_id DESC""",
+            (ManagedJobScheduleState.INACTIVE, *job_value)).fetchall()
+        jobs = []
+        for row in rows:
+            job_dict = {
+                'spot_job_id': row[0],
+                'schedule_state': ManagedJobScheduleState(row[1]),
+                'controller_pid': row[2],
+            }
+            jobs.append(job_dict)
+        return jobs
+
+
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:

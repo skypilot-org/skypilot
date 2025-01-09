@@ -109,6 +109,14 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     return status
 
 
+def _controller_process_alive(pid: int) -> bool:
+    """Check if the controller process is alive."""
+    try:
+        return psutil.Process(pid).is_running()
+    except psutil.NoSuchProcess:
+        return False
+
+
 def update_managed_job_status(job_id: Optional[int] = None):
     """Update managed job status if the controller job failed abnormally.
 
@@ -163,15 +171,11 @@ def update_managed_job_status(job_id: Optional[int] = None):
                     continue
                 # All other statuses are unexpected. Proceed to mark as failed.
             else:
-                try:
-                    logger.debug(f'Checking controller pid {pid}')
-                    if psutil.Process(pid).is_running():
-                        # The controller is still running.
-                        continue
-                    # Otherwise, proceed to mark the job as failed.
-                except psutil.NoSuchProcess:
-                    # Proceed to mark the job as failed.
-                    pass
+                logger.debug(f'Checking controller pid {pid}')
+                if _controller_process_alive(pid):
+                    # The controller is still running.
+                    continue
+                # Otherwise, proceed to mark the job as failed.
 
         logger.error(f'Controller for job {job_id_} has exited abnormally. '
                      'Setting the job status to FAILED_CONTROLLER.')
@@ -206,6 +210,23 @@ def update_managed_job_status(job_id: Optional[int] = None):
             'Controller process has exited abnormally. For more details, run: '
             f'sky jobs logs --controller {job_id_}')
         scheduler.job_done(job_id_, idempotent=True)
+
+    for job_info in managed_job_state.get_schedule_live_jobs(job_id):
+        if not job_info['controller_pid']:
+            # Technically, this can happen very briefly between when the job is
+            # set to LAUNCHING and before the controller actually is spawned.
+            # However, if we observe any state other than LAUNCHING, something
+            # is clearly wrong.
+            if (job_info['schedule_state'] !=
+                    managed_job_state.ManagedJobScheduleState.LAUNCHING):
+                logger.error(
+                    f'Missing controller PID for {job_info["spot_job_id"]}.'
+                    'Setting to DONE.')
+                scheduler.job_done(job_info['spot_job_id'])
+        elif not _controller_process_alive(job_info['controller_pid']):
+            logger.error(f'Controller for job {job_info["job_id"]} is missing. '
+                         'Marking the job as DONE.')
+            scheduler.job_done(job_info['job_id'])
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
