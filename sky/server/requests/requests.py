@@ -17,6 +17,7 @@ import filelock
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
@@ -379,6 +380,7 @@ def reset_db_and_logs():
     """Create the database."""
     common_utils.remove_file_if_exists(_DB_PATH)
     shutil.rmtree(REQUEST_LOG_PATH_PREFIX, ignore_errors=True)
+    shutil.rmtree(server_common.CLIENT_DIR, ignore_errors=True)
 
 
 def request_lock_path(request_id: str) -> str:

@@ -439,7 +439,7 @@ async def download_logs(request: fastapi.Request,
                         cluster_jobs_body: payloads.ClusterJobsBody) -> None:
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = common.api_server_logs_dir_prefix(user_hash)
+    logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
     cluster_job_download_logs_body = payloads.ClusterJobsDownloadLogsBody(
         cluster_name=cluster_jobs_body.cluster_name,
@@ -462,7 +462,7 @@ async def download(download_body: payloads.DownloadBody) -> None:
         pathlib.Path(folder_path) for folder_path in download_body.folder_paths
     ]
     user_hash = download_body.env_vars[constants.USER_ID_ENV_VAR]
-    logs_dir_on_api_server = common.api_server_logs_dir_prefix(user_hash)
+    logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     for folder_path in folder_paths:
         if not str(folder_path).startswith(str(logs_dir_on_api_server)):
             raise fastapi.HTTPException(

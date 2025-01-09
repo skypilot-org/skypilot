@@ -36,7 +36,7 @@ API_SERVER_CMD = 'python -m sky.server.server'
 # TODO(zhwu): This is a temporary fix for backend compatibility.
 # Remove this before merging to master.
 LEGACY_API_SERVER_CMD = 'python -m sky.api.rest'
-CLIENT_DIR = pathlib.Path('~/.sky/clients')
+CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
@@ -372,7 +372,8 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     return dag
 
 
-def api_server_logs_dir_prefix(user_hash: Optional[str] = None) -> pathlib.Path:
+def api_server_user_logs_dir_prefix(
+        user_hash: Optional[str] = None) -> pathlib.Path:
     if user_hash is None:
         user_hash = common_utils.get_user_hash()
     return CLIENT_DIR / user_hash / 'sky_logs'
