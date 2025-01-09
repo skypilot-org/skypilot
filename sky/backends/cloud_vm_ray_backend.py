@@ -37,7 +37,6 @@ from sky import resources as resources_lib
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky import task as task_lib
-from sky.api.requests import requests as requests_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
 from sky.clouds import service_catalog
@@ -49,6 +48,7 @@ from sky.provision import instance_setup
 from sky.provision import metadata_utils
 from sky.provision import provisioner
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server.requests import requests as requests_lib
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib

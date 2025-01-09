@@ -4,7 +4,7 @@ import textwrap
 from click import testing as cli_testing
 
 from sky import exceptions
-import sky.api.cli as cli
+import sky.cli as cli
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere'

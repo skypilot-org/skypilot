@@ -56,17 +56,17 @@ from sky import serve as serve_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
-from sky.api import common as api_common
-from sky.api import constants as api_constants
-from sky.api import sdk
-from sky.api.requests import requests
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
+from sky.client import sdk
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server.requests import requests
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -160,7 +160,7 @@ def _get_cluster_records_and_set_ssh_config(
                     # updating skypilot.
                     f'\'{sys.executable} {sky.__root_dir__}/templates/'
                     f'websocket_proxy.py '
-                    f'{api_common.get_server_url().split("://")[1]} '
+                    f'{server_common.get_server_url().split("://")[1]} '
                     f'{handle.cluster_name}\'')
                 credentials['ssh_proxy_command'] = proxy_command
             cluster_utils.SSHConfigHelper.add_cluster(
@@ -216,7 +216,8 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                 f'{colorama.Style.RESET_ALL}'
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
                 'visit: '
-                f'{api_common.get_server_url()}/stream?request_id={request_id}'
+                f'{server_common.get_server_url()}/stream?'
+                f'request_id={request_id}'
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To abort '
                 'the request, run: '
                 f'{ux_utils.BOLD}sky api abort {request_id}'
@@ -230,7 +231,7 @@ def _async_call_or_wait(request_id: str, async_call: bool,
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
             f'sky api get {request_id[:-8]}{colorama.Style.RESET_ALL}\n'
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
-            f'{api_common.get_server_url()}/stream?request_id={request_id}\n'
+            f'{server_common.get_server_url()}/stream?request_id={request_id}\n'
             f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To abort '
             'the request, run: '
             f'{ux_utils.BOLD}sky api abort {request_id}'
@@ -840,7 +841,7 @@ class _NaturalOrderGroup(click.Group):
     def list_commands(self, ctx):  # pylint: disable=unused-argument
         return self.commands.keys()
 
-    @usage_lib.entrypoint('sky.api.cli', fallback=True)
+    @usage_lib.entrypoint('sky.cli', fallback=True)
     def invoke(self, ctx):
         return super().invoke(ctx)
 
@@ -3061,7 +3062,7 @@ def _down_or_stop_clusters(
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,
-                    api_constants.REQUEST_NAME_PREFIX + operation)
+                    server_constants.REQUEST_NAME_PREFIX + operation)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -3090,7 +3091,7 @@ def _down_or_stop_clusters(
                 request_ids.append(request_id)
                 _async_call_or_wait(
                     request_id, async_call,
-                    api_constants.REQUEST_NAME_PREFIX + operation)
+                    server_constants.REQUEST_NAME_PREFIX + operation)
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -3160,7 +3161,7 @@ def check(clouds: Tuple[str], verbose: bool):
     clouds_arg = clouds if len(clouds) > 0 else None
     request_id = sdk.check(clouds=clouds_arg, verbose=verbose)
     sdk.stream_and_get(request_id)
-    api_server_url = api_common.get_server_url()
+    api_server_url = server_common.get_server_url()
     click.echo()
     click.echo(
         click.style(f'Using SkyPilot server: {api_server_url}', fg='green'))
@@ -5792,7 +5793,7 @@ def api_login(endpoint: Optional[str]):
 @usage_lib.entrypoint
 def api_info():
     """Shows the SkyPilot server URL."""
-    url = api_common.get_server_url()
+    url = server_common.get_server_url()
     api_server_info = sdk.stream_and_get(sdk.server_info())
     click.echo(f'Using SkyPilot server: {url} ({api_server_info})')
 

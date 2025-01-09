@@ -8,7 +8,7 @@ import pickle
 import typing
 from typing import Any, Dict, List, Optional, Tuple
 
-from sky.api import constants as api_constants
+from sky.server import constants as server_constants
 
 if typing.TYPE_CHECKING:
     from sky import backends
@@ -31,8 +31,8 @@ def register_handler(*names: str):
 
     def decorator(func):
         for name in names:
-            if name != api_constants.DEFAULT_HANDLER_NAME:
-                name = api_constants.REQUEST_NAME_PREFIX + name
+            if name != server_constants.DEFAULT_HANDLER_NAME:
+                name = server_constants.REQUEST_NAME_PREFIX + name
             handlers[name] = func
         return func
 
@@ -41,10 +41,10 @@ def register_handler(*names: str):
 
 def get_handler(name: str):
     """Get the handler for name."""
-    return handlers.get(name, handlers[api_constants.DEFAULT_HANDLER_NAME])
+    return handlers.get(name, handlers[server_constants.DEFAULT_HANDLER_NAME])
 
 
-@register_handler(api_constants.DEFAULT_HANDLER_NAME)
+@register_handler(server_constants.DEFAULT_HANDLER_NAME)
 def default_handler(return_value: Any) -> Any:
     """The default handler."""
     return return_value

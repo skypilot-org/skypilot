@@ -64,24 +64,10 @@ def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
     return converted_dag
 
 
-def load_chain_dag_from_yaml(
-    path: str,
-    env_overrides: Optional[List[Tuple[str, str]]] = None,
-) -> dag_lib.Dag:
-    """Loads a chain DAG from a YAML file.
-
-    Has special handling for an initial section in YAML that contains only the
-    'name' field, which is the DAG name.
-
-    'env_overrides' is a list of (key, value) pairs that will be used to update
-    the task's 'envs' section. If it is a chain dag, the envs will be updated
-    for all tasks in the chain.
-
-    Returns:
-      A chain Dag with 1 or more tasks (an empty entrypoint would create a
-      trivial task).
-    """
-    configs = common_utils.read_yaml_all(path)
+def _load_chain_dag(
+        configs: List[Dict[str, Any]],
+        env_overrides: Optional[List[Tuple[str, str]]] = None) -> dag_lib.Dag:
+    """Loads a chain DAG from a list of YAML configs."""
     dag_name = None
     if set(configs[0].keys()) == {'name'}:
         dag_name = configs[0]['name']
@@ -106,12 +92,74 @@ def load_chain_dag_from_yaml(
     return dag
 
 
-def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
+def load_chain_dag_from_yaml(
+    path: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Loads a chain DAG from a YAML file.
+
+    Has special handling for an initial section in YAML that contains only the
+    'name' field, which is the DAG name.
+
+    'env_overrides' is a list of (key, value) pairs that will be used to update
+    the task's 'envs' section. If it is a chain dag, the envs will be updated
+    for all tasks in the chain.
+
+    Returns:
+      A chain Dag with 1 or more tasks (an empty entrypoint would create a
+      trivial task).
+    """
+    configs = common_utils.read_yaml_all(path)
+    return _load_chain_dag(configs, env_overrides)
+
+
+def load_chain_dag_from_yaml_str(
+    yaml_str: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Loads a chain DAG from a YAML string.
+
+    Has special handling for an initial section in YAML that contains only the
+    'name' field, which is the DAG name.
+
+    'env_overrides' is a list of (key, value) pairs that will be used to update
+    the task's 'envs' section. If it is a chain dag, the envs will be updated
+    for all tasks in the chain.
+
+    Returns:
+      A chain Dag with 1 or more tasks (an empty entrypoint would create a
+      trivial task).
+    """
+    configs = common_utils.read_yaml_all_str(yaml_str)
+    return _load_chain_dag(configs, env_overrides)
+
+
+def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag) -> str:
+    """Dumps a chain DAG to a YAML string.
+
+    Args:
+        dag: the DAG to dump.
+
+    Returns:
+        The YAML string.
+    """
     assert dag.is_chain(), dag
     configs = [{'name': dag.name}]
     for task in dag.tasks:
         configs.append(task.to_yaml_config())
-    common_utils.dump_yaml(path, configs)
+    return common_utils.dump_yaml_str(configs)
+
+
+def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
+    """Dumps a chain DAG to a YAML file.
+
+    Args:
+        dag: the DAG to dump.
+        path: the path to the YAML file.
+    """
+    dag_str = dump_chain_dag_to_yaml_str(dag)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(dag_str)
 
 
 def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:

@@ -395,7 +395,7 @@ def launch(
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a cluster or task.
+    """Launches a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
     (when specified, it is synced to remote cluster).  The task undergoes job
@@ -563,7 +563,7 @@ def exec(  # pylint: disable=redefined-builtin
     backend: Optional[backends.Backend] = None,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Execute a task on an existing cluster.
+    """Executes a task on an existing cluster.
 
     This function performs two actions:
 

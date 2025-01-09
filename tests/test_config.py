@@ -9,8 +9,8 @@ import pytest
 
 import sky
 from sky import skypilot_config
-from sky.api.requests import payloads
 import sky.exceptions
+from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
@@ -456,7 +456,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
 @mock.patch('sky.skypilot_config.loaded_config_path',
             return_value='/path/to/config.yaml')
 def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
-    with mock.patch('sky.api.requests.payloads.logger') as mock_logger:
+    with mock.patch('sky.server.requests.payloads.logger') as mock_logger:
         # Call the function
         result = payloads.get_override_skypilot_config_from_client()
 

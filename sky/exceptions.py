@@ -365,7 +365,8 @@ class RequestAborted(Exception):
     pass
 
 
-class APIServerConnectionError(RuntimeError):
+class ApiServerConnectionError(RuntimeError):
+    """Raised when the API server cannot be connected."""
 
     def __init__(self, server_url: str):
         super().__init__(

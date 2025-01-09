@@ -32,7 +32,7 @@ def encode_payload(payload: Any, payload_type: Optional[str] = None) -> str:
 
 @typing.overload
 def decode_payload(payload_str: str,
-                   payload_type: Optional[str] = ...,
+                   payload_type: Optional[str] = None,
                    raise_for_mismatch: Literal[True] = True) -> Any:
     ...
 
@@ -40,7 +40,7 @@ def decode_payload(payload_str: str,
 @typing.overload
 def decode_payload(
         payload_str: str,
-        payload_type: Optional[str] = ...,
+        payload_type: Optional[str] = None,
         raise_for_mismatch: Literal[False] = False) -> Tuple[bool, Any]:
     ...
 
@@ -53,6 +53,9 @@ def decode_payload(
 
     Args:
         payload_str: A string that is encoded from a payload.
+        payload_type: The type of the payload.
+        raise_for_mismatch: Whether to raise an error if the payload string is
+            not valid.
 
     Returns:
         A tuple of (bool, Any). The bool indicates whether it is a payload

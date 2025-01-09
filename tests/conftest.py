@@ -3,7 +3,7 @@ from typing import List, Optional
 import common  # TODO(zongheng): for some reason isort places it here.
 import pytest
 
-from sky.api import common as api_common
+from sky.server import common as server_common
 
 # Usage: use
 #   @pytest.mark.slow
@@ -147,7 +147,7 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_marks['slow'])
-        if 'local' in item.keywords and not api_common.is_api_server_local():
+        if 'local' in item.keywords and not server_common.is_api_server_local():
             item.add_marker(skip_marks['local'])
         if _is_generic_test(
                 item) and f'no_{generic_cloud_keyword}' in item.keywords:

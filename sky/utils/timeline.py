@@ -81,6 +81,8 @@ class FileLockEvent:
 
     def __init__(self, lockfile: Union[str, os.PathLike], timeout: float = -1):
         self._lockfile = lockfile
+        os.makedirs(os.path.dirname(os.path.abspath(self._lockfile)),
+                    exist_ok=True)
         self._lock = filelock.FileLock(self._lockfile, timeout)
         self._hold_lock_event = Event(f'[FileLock.hold]:{self._lockfile}')
 

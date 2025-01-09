@@ -53,7 +53,7 @@ def launch(
     fast: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a managed job.
+    """Launches a managed job.
 
     Please refer to sky.cli.job_launch for documentation.
 
@@ -291,7 +291,7 @@ def _maybe_restart_controller(
 @usage_lib.entrypoint
 def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get statuses of managed jobs.
+    """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
 
@@ -358,7 +358,7 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel managed jobs.
+    """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
 

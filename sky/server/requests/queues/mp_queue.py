@@ -13,7 +13,7 @@ class QueueManager(managers.BaseManager):
 
 
 def start_queue_manager(queue_names: List[str],
-                        port: int = DEFAULT_QUEUE_MANAGER_PORT):
+                        port: int = DEFAULT_QUEUE_MANAGER_PORT) -> None:
     # Defining a local function instead of a lambda function
     # (e.g. lambda: q) because the lambda function captures q by
     # reference, so by the time lambda is called, the loop has already

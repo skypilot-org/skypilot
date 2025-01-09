@@ -3,7 +3,6 @@ import functools
 import getpass
 import json
 import os
-import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
@@ -11,7 +10,7 @@ import pydantic
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
-from sky.api import common
+from sky.server import common
 from sky.skylet import constants
 from sky.utils import common as common_lib
 from sky.utils import common_utils
@@ -108,13 +107,10 @@ class OptimizeBody(RequestBody):
 
         kwargs = super().to_kwargs()
 
-        with tempfile.NamedTemporaryFile(mode='w') as f:
-            f.write(self.dag)
-            f.flush()
-            dag = dag_utils.load_chain_dag_from_yaml(f.name)
-            # We should not validate the dag here, as the file mounts are not
-            # processed yet, but we need to validate the resources during the
-            # optimization to make sure the resources are available.
+        dag = dag_utils.load_chain_dag_from_yaml_str(self.dag)
+        # We should not validate the dag here, as the file mounts are not
+        # processed yet, but we need to validate the resources during the
+        # optimization to make sure the resources are available.
         kwargs['dag'] = dag
         return kwargs
 
@@ -142,9 +138,9 @@ class LaunchBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task(self.task,
-                                            self.env_vars,
-                                            workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
 
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
@@ -171,9 +167,9 @@ class ExecBody(RequestBody):
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task(self.task,
-                                            self.env_vars,
-                                            workdir_only=True)
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=True)
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
         kwargs['task'] = dag
@@ -261,7 +257,7 @@ class StorageBody(RequestBody):
     name: str
 
 
-class EndpointBody(RequestBody):
+class EndpointsBody(RequestBody):
     """The request body for the endpoint."""
     cluster: str
     port: Optional[Union[int, str]] = None
@@ -287,9 +283,8 @@ class JobsLaunchBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        kwargs['task'] = common.process_mounts_in_task(self.task,
-                                                       self.env_vars,
-                                                       workdir_only=False)
+        kwargs['task'] = common.process_mounts_in_task_on_api_server(
+            self.task, self.env_vars, workdir_only=False)
         return kwargs
 
 
@@ -329,9 +324,9 @@ class ServeUpBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task(self.task,
-                                            self.env_vars,
-                                            workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)
@@ -347,9 +342,9 @@ class ServeUpdateBody(RequestBody):
 
     def to_kwargs(self) -> Dict[str, Any]:
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task(self.task,
-                                            self.env_vars,
-                                            workdir_only=False)
+        dag = common.process_mounts_in_task_on_api_server(self.task,
+                                                          self.env_vars,
+                                                          workdir_only=False)
         assert len(
             dag.tasks) == 1, ('Must only specify one task in the DAG for '
                               'a service.', dag)

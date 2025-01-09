@@ -20,7 +20,7 @@ from sky import task
 import sky  # TODO(zongheng): import speed?
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
-from sky.jobs.api import core as managed_jobs_core
+from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -53,7 +53,7 @@ def status(
     all_users: bool = False,
 ) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get cluster statuses.
+    """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
     clusters.
@@ -132,7 +132,7 @@ def status_kubernetes(
 ) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
            List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
            List[Dict[str, Any]], Optional[str]]:
-    """Get all SkyPilot clusters and jobs in the Kubernetes cluster.
+    """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
     The caller must parse the controllers to identify which clusters are run
@@ -419,9 +419,44 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
 
 
 @usage_lib.entrypoint
+def down(cluster_name: str, purge: bool = False) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Tears down a cluster.
+
+    Tearing down a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.  Accelerators
+    (e.g., TPUs) that are part of the cluster will be deleted too.
+
+    Args:
+        cluster_name: name of the cluster to down.
+        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
+            table, even if the actual cluster termination failed on the cloud.
+            WARNING: This flag should only be set sparingly in certain manual
+            troubleshooting scenarios; with it set, it is the user's
+            responsibility to ensure there are no leaked instances and related
+            resources.
+
+    Raises:
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
+        RuntimeError: failed to tear down the cluster.
+        sky.exceptions.NotSupportedError: the specified cluster is the managed
+          jobs controller.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
+
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    backend.teardown(handle, terminate=True, purge=purge)
+
+
+@usage_lib.entrypoint
 def stop(cluster_name: str, purge: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Stop a cluster.
+    """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
     the instances will stop, while the disks will still be charged.  Those
@@ -479,48 +514,13 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
 
 @usage_lib.entrypoint
-def down(cluster_name: str, purge: bool = False) -> None:
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tear down a cluster.
-
-    Tearing down a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost.  Accelerators
-    (e.g., TPUs) that are part of the cluster will be deleted too.
-
-    Args:
-        cluster_name: name of the cluster to down.
-        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
-            table, even if the actual cluster termination failed on the cloud.
-            WARNING: This flag should only be set sparingly in certain manual
-            troubleshooting scenarios; with it set, it is the user's
-            responsibility to ensure there are no leaked instances and related
-            resources.
-
-    Raises:
-        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
-          exist.
-        RuntimeError: failed to tear down the cluster.
-        sky.exceptions.NotSupportedError: the specified cluster is the managed
-          jobs controller.
-    """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        raise exceptions.ClusterDoesNotExist(
-            f'Cluster {cluster_name!r} does not exist.')
-
-    usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    backend.teardown(handle, terminate=True, purge=purge)
-
-
-@usage_lib.entrypoint
 def autostop(
         cluster_name: str,
         idle_minutes: int,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Schedule an autostop/autodown for a cluster.
+    """Schedules an autostop/autodown for a cluster.
 
     Autostop/autodown will automatically stop or teardown a cluster when it
     becomes idle for a specified duration.  Idleness means there are no
@@ -627,7 +627,7 @@ def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get the job queue of a cluster.
+    """Gets the job queue of a cluster.
 
     Please refer to the sky.cli.queue for the document.
 
@@ -695,7 +695,7 @@ def cancel(
     try_cancel_if_cluster_is_init: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel jobs on a cluster.
+    """Cancels jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
 
@@ -785,7 +785,7 @@ def tail_logs(cluster_name: str,
               follow: bool = True,
               tail: int = 0) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tail the logs of a job.
+    """Tails the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
 
@@ -817,7 +817,7 @@ def download_logs(
         job_ids: Optional[List[str]],
         local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Download the logs of jobs.
+    """Downloads the logs of jobs.
 
     Args:
         cluster_name: (str) name of the cluster.
@@ -909,7 +909,7 @@ def job_status(cluster_name: str,
 @usage_lib.entrypoint
 def storage_ls() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get the storages.
+    """Gets the storages.
 
     Returns:
         [
@@ -931,7 +931,7 @@ def storage_ls() -> List[Dict[str, Any]]:
 @usage_lib.entrypoint
 def storage_delete(name: str) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Delete a storage.
+    """Deletes a storage.
 
     Raises:
         ValueError: If the storage does not exist.
@@ -1015,6 +1015,7 @@ def realtime_kubernetes_gpu_availability(
 
 @usage_lib.entrypoint
 def local_up(gpus: bool = False) -> None:
+    """Launches a Kubernetes cluster on local machines."""
     cluster_created = False
 
     # Check if GPUs are available on the host
@@ -1142,6 +1143,7 @@ def local_up(gpus: bool = False) -> None:
 
 
 def local_down() -> None:
+    """Tears down the Kubernetes cluster started by local_up."""
     cluster_removed = False
 
     path_to_package = os.path.dirname(__file__)

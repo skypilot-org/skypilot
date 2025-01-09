@@ -19,9 +19,9 @@ import requests
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.api import constants as api_constants
 from sky.data import data_utils
 from sky.data import storage_utils
+from sky.server import constants as server_constants
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
@@ -32,11 +32,15 @@ if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
 
 DEFAULT_SERVER_URL = 'http://0.0.0.0:46580'
-API_SERVER_CMD = 'python -m sky.api.rest'
+API_SERVER_CMD = 'python -m sky.server.server'
+# TODO(zhwu): This is a temporary fix for backend compatibility.
+# Remove this before merging to master.
+LEGACY_API_SERVER_CMD = 'python -m sky.api.rest'
 CLIENT_DIR = pathlib.Path('~/.sky/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
+RequestId = str
 
 logger = sky_logging.init_logger(__name__)
 
@@ -65,7 +69,7 @@ def is_api_server_running() -> bool:
         except requests.exceptions.Timeout as e:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.APIServerConnectionError(server_url) from e
+                    raise exceptions.ApiServerConnectionError(server_url) from e
             time_out_try_count += 1
             continue
         except requests.exceptions.ConnectionError:
@@ -77,11 +81,11 @@ def is_api_server_running() -> bool:
 def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
     # Check available memory before starting the server.
     avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
-    if avail_mem_size_gb <= api_constants.MIN_AVAIL_MEM_GB:
+    if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
         logger.warning(
             f'{colorama.Fore.YELLOW} Your SkyPilot server machine only has '
             f'{avail_mem_size_gb:.1f} GB of memory available. '
-            f'Recommend at least {api_constants.MIN_AVAIL_MEM_GB} GB to run '
+            f'Recommend at least {server_constants.MIN_AVAIL_MEM_GB} GB to run '
             f'heavier loads on SkyPilot and enjoy better performance.'
             f'{colorama.Style.RESET_ALL}')
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
@@ -134,7 +138,7 @@ def get_request_id(response) -> str:
     return response.headers.get('X-Request-ID')
 
 
-def check_health(func):
+def check_server_healthy_or_start(func):
 
     @functools.wraps(func)
     def wrapper(*args,
@@ -164,7 +168,7 @@ def check_health(func):
                                 'SkyPilot API server started.'))
                     else:
                         with ux_utils.print_exception_no_traceback():
-                            raise exceptions.APIServerConnectionError(
+                            raise exceptions.ApiServerConnectionError(
                                 server_url)
         return func(*args, **kwargs)
 
@@ -178,6 +182,16 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
     This function needs to be called after sdk.validate(),
     as the file paths need to be expanded to keep file_mounts_mapping
     aligned with the actual task uploaded to SkyPilot server.
+
+    Args:
+        dag: The dag where the file mounts are defined.
+        workdir_only: Whether to only upload the workdir, which is used for
+            `exec`, as it does not need other files/folders in file_mounts.
+
+    Returns:
+        The dag with the file_mounts_mapping updated, which maps the original
+        file paths to the full path, so that on API server, the file paths can
+        be retrieved by adding prefix to the full path.
     """
     # TODO(zhwu): upload user config file at `~/.sky/config.yaml`
     if is_api_server_local():
@@ -256,7 +270,9 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                         files=files)
                     if response.status_code != 200:
                         err_msg = response.content.decode('utf-8')
-                        raise RuntimeError(f'Failed to upload files: {err_msg}')
+                        with ux_utils.print_exception_no_traceback():
+                            raise RuntimeError(
+                                f'Failed to upload files: {err_msg}')
                     f_log.write(f'Finished uploading these files in '
                                 f'{time.time() - start}s: {upload_list}\n')
                     logger.info(
@@ -267,8 +283,25 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
     return dag
 
 
-def process_mounts_in_task(task: str, env_vars: Dict[str, str],
-                           workdir_only: bool) -> 'dag_lib.Dag':
+def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
+                                         workdir_only: bool) -> 'dag_lib.Dag':
+    """Translates the file mounts path in a task to the path on API server.
+
+    When a task involves file mounts, the client will invoke
+    `upload_mounts_to_api_server` above to upload those local files to the API
+    server first. This function will then translates the paths in the task to
+    be the actual file paths on the API server, based on the
+    `file_mounts_mapping` in the task set by the client.
+
+    Args:
+        task: The task to be translated.
+        env_vars: The environment variables of the task.
+        workdir_only: Whether to only translate the workdir, which is used for
+            `exec`, as it does not need other files/folders in file_mounts.
+
+    Returns:
+        The translated task as a single-task dag.
+    """
     from sky.utils import dag_utils  # pylint: disable=import-outside-toplevel
 
     user_hash = env_vars.get(constants.USER_ID_ENV_VAR, 'unknown')
@@ -331,6 +364,8 @@ def process_mounts_in_task(task: str, env_vars: Dict[str, str],
                 else:
                     raise ValueError(f'Unexpected file_mounts value: {src}')
 
+    # We can switch to using string, but this is to make it easier to debug, by
+    # persisting the translated task yaml file.
     translated_client_task_path = client_dir / f'{task_id}_translated.yaml'
     common_utils.dump_yaml(str(translated_client_task_path), task_configs)
 

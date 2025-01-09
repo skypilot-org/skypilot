@@ -5,11 +5,11 @@ import fastapi
 import httpx
 
 from sky import sky_logging
-from sky.api.requests import executor
-from sky.api.requests import payloads
-from sky.api.requests import requests
-from sky.jobs.api import core
-from sky.jobs.api import dashboard_utils
+from sky.jobs.server import core
+from sky.jobs.server import dashboard_utils
+from sky.server.requests import executor
+from sky.server.requests import payloads
+from sky.server.requests import requests
 from sky.skylet import constants
 from sky.utils import common
 from sky.utils import common_utils

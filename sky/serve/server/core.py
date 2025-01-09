@@ -98,7 +98,7 @@ def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """Spin up a service.
+    """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
 
@@ -313,13 +313,14 @@ def update(
         task: 'sky.Task',
         service_name: str,
         mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
-    """Update an existing service.
+    """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
 
     Args:
         task: sky.Task to update.
         service_name: Name of the service.
+        mode: Update mode.
     """
     task.validate()
     _validate_service_task(task)
@@ -469,7 +470,7 @@ def down(
     all: bool = False,
     purge: bool = False,
 ) -> None:
-    """Teardown a service.
+    """Tears down a service.
 
     Please refer to the sky.cli.serve_down for the docs.
 
@@ -528,7 +529,7 @@ def down(
 
 @usage_lib.entrypoint
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
-    """Tear down a specific replica for the given service.
+    """Tears down a specific replica for the given service.
 
     Args:
         service_name: Name of the service.
@@ -577,7 +578,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 def status(
     service_names: Optional[Union[str,
                                   List[str]]] = None) -> List[Dict[str, Any]]:
-    """Get service statuses.
+    """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
     services.
@@ -677,7 +678,7 @@ def tail_logs(
     replica_id: Optional[int] = None,
     follow: bool = True,
 ) -> None:
-    """Tail logs for a service.
+    """Tails logs for a service.
 
     Usage:
         sky.serve.tail_logs(

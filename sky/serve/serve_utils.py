@@ -805,9 +805,9 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
-    from sky.api import sdk  # pylint: disable=import-outside-toplevel
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
     # pylint: disable=import-outside-toplevel
-    from sky.serve.api import sdk as serve_sdk
+    from sky.serve.client import sdk as serve_sdk
 
     # Don't use backend_utils.is_controller_up since it is too slow.
     # handle = global_user_state.get_handle_from_cluster_name(

@@ -63,7 +63,7 @@ def list_accelerators(
     all_regions: bool = False,
     require_price: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
-    """List the names of all accelerators offered by Sky.
+    """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
     that may not be available in the user's account.
@@ -91,7 +91,7 @@ def list_accelerator_counts(
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
 ) -> Dict[str, List[int]]:
-    """List all accelerators offered by Sky and available counts.
+    """Lists all accelerators offered by Sky and available counts.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
     of available counts. See usage in cli.py.
@@ -125,7 +125,7 @@ def list_accelerator_realtime(
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
-    """List all accelerators offered by Sky with their realtime availability.
+    """Lists all accelerators offered by Sky with their realtime availability.
 
     Realtime availability is the total number of accelerators in the cluster
     and number of accelerators available at the time of the call.

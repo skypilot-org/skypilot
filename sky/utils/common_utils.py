@@ -5,6 +5,7 @@ import functools
 import getpass
 import hashlib
 import inspect
+import io
 import os
 import platform
 import random
@@ -323,23 +324,43 @@ def read_yaml(path: Optional[str]) -> Dict[str, Any]:
     return config
 
 
+def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
+    stream = io.StringIO(yaml_str)
+    config = yaml.safe_load_all(stream)
+    configs = list(config)
+    if not configs:
+        # Empty YAML file.
+        return [{}]
+    return configs
+
+
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
     with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load_all(f)
-        configs = list(config)
-        if not configs:
-            # Empty YAML file.
-            return [{}]
-        return configs
+        return read_yaml_all_str(f.read())
 
 
 def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
                                        Dict[str, Any]]) -> None:
+    """Dumps a YAML file.
+
+    Args:
+        path: the path to the YAML file.
+        config: the configuration to dump.
+    """
     with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
+    """Dumps a YAML string.
+
+    Args:
+        config: the configuration to dump.
+
+    Returns:
+        The YAML string.
+    """
+
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 

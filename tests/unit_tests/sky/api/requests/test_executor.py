@@ -1,6 +1,6 @@
 import pytest
 
-from sky.api.requests import executor
+from sky.server.requests import executor
 
 
 def test_parallel_size_blocking():

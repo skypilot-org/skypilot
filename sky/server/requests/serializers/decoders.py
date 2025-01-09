@@ -6,11 +6,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from sky import jobs as managed_jobs
 from sky import models
-from sky.api import constants as api_constants
 from sky.clouds.service_catalog import common
 from sky.data import storage
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
+from sky.server import constants as server_constants
 from sky.skylet import job_lib
 from sky.utils import registry
 from sky.utils import status_lib
@@ -31,8 +31,8 @@ def register_handler(*names: str):
 
     def decorator(func):
         for name in names:
-            if name != api_constants.DEFAULT_HANDLER_NAME:
-                name = api_constants.REQUEST_NAME_PREFIX + name
+            if name != server_constants.DEFAULT_HANDLER_NAME:
+                name = server_constants.REQUEST_NAME_PREFIX + name
             handlers[name] = func
         return func
 
@@ -41,10 +41,10 @@ def register_handler(*names: str):
 
 def get_handler(name: str):
     """Get the handler for name."""
-    return handlers.get(name, handlers[api_constants.DEFAULT_HANDLER_NAME])
+    return handlers.get(name, handlers[server_constants.DEFAULT_HANDLER_NAME])
 
 
-@register_handler(api_constants.DEFAULT_HANDLER_NAME)
+@register_handler(server_constants.DEFAULT_HANDLER_NAME)
 def default_decode_handler(return_value: Any) -> Any:
     """The default handler."""
     return return_value

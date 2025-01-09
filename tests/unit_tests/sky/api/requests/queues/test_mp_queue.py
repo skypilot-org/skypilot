@@ -2,7 +2,7 @@ import multiprocessing
 import time
 from typing import List
 
-from sky.api.requests.queues import mp_queue
+from sky.server.requests.queues import mp_queue
 
 
 def _produce(q_name: str, items: List[str], port: int):

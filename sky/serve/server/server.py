@@ -2,10 +2,10 @@
 
 import fastapi
 
-from sky.api.requests import executor
-from sky.api.requests import payloads
-from sky.api.requests import requests
-from sky.serve.api import core
+from sky.serve.server import core
+from sky.server.requests import executor
+from sky.server.requests import payloads
+from sky.server.requests import requests
 
 router = fastapi.APIRouter()
 
