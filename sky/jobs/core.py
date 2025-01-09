@@ -460,7 +460,7 @@ def sync_down_logs(
         stopped_message=(
             f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
             f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
-            f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
+            f'-r --sync-down {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
         spinner_message='Retrieving job logs')
 
     backend = backend_utils.get_backend_from_handle(handle)
