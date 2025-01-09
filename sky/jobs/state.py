@@ -654,14 +654,16 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
             f"""\
             SELECT spot_job_id, schedule_state, controller_pid
             FROM job_info
-            WHERE schedule_state not in (?, ?)
+            WHERE schedule_state not in (?, ?, ?)
             {job_filter}
             ORDER BY spot_job_id DESC""",
-            (ManagedJobScheduleState.INACTIVE, *job_value)).fetchall()
+            (ManagedJobScheduleState.INACTIVE.value,
+             ManagedJobScheduleState.WAITING.value,
+             ManagedJobScheduleState.DONE.value, *job_value)).fetchall()
         jobs = []
         for row in rows:
             job_dict = {
-                'spot_job_id': row[0],
+                'job_id': row[0],
                 'schedule_state': ManagedJobScheduleState(row[1]),
                 'controller_pid': row[2],
             }

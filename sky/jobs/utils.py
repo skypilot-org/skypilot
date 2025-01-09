@@ -219,10 +219,9 @@ def update_managed_job_status(job_id: Optional[int] = None):
             # is clearly wrong.
             if (job_info['schedule_state'] !=
                     managed_job_state.ManagedJobScheduleState.LAUNCHING):
-                logger.error(
-                    f'Missing controller PID for {job_info["spot_job_id"]}.'
-                    'Setting to DONE.')
-                scheduler.job_done(job_info['spot_job_id'])
+                logger.error(f'Missing controller PID for {job_info["job_id"]}.'
+                             'Setting to DONE.')
+                scheduler.job_done(job_info['job_id'])
         elif not _controller_process_alive(job_info['controller_pid']):
             logger.error(f'Controller for job {job_info["job_id"]} is missing. '
                          'Marking the job as DONE.')
