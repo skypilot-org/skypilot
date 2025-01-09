@@ -3898,7 +3898,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         assert job_name is None or job_id is None, (job_name, job_id)
         if job_id is None and job_name is not None:
             # generate code to get the job_id
-            code = managed_jobs.ManagedJobCodeGen.get_job_ids_by_name(
+            code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
                 job_name=job_name)
             returncode, run_timestamps, stderr = self.run_on_head(
                 handle,

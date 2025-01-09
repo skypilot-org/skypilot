@@ -3934,7 +3934,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     help='Query the latest job logs, restarting the jobs controller if stopped.'
 )
 @click.option('--sync-down',
-              '-d',
+              '-s',
               default=False,
               is_flag=True,
               required=False,
