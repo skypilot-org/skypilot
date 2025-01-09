@@ -548,3 +548,25 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+
+def get_service_controller_port(service_name: str) -> int:
+    """Gets the controller port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT controller_port FROM services WHERE name = ?',
+                      (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f'Service {service_name} does not exist.')
+        return row[0]
+
+
+def get_service_load_balancer_port(service_name: str) -> int:
+    """Gets the load balancer port of a service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute('SELECT load_balancer_port FROM services WHERE name = ?',
+                      (service_name,))
+        row = cursor.fetchone()
+        if row is None:
+            raise ValueError(f'Service {service_name} does not exist.')
+        return row[0]
