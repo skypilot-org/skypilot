@@ -630,14 +630,14 @@ class AWS(clouds.Cloud):
             hints = f'AWS custom-process is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.ASSUME_ROLE:
             # When using ASSUME ROLE, the credentials are coming from a different
-            # source profile. So we don't check for the existence of the file.
-            # the file. i.e. the assumed role will be assigned the IAM role of the
+            # source profile. So we don't check for the existence of ~/.aws/credentials.
+            # i.e. the assumed role will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS assume-role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.ENV:
             # When using ENV vars, the credentials are coming from the environment
-            # variables. So we don't check for the existence of the file.
-            # the file. i.e. the identity is not determined by the file.
+            # variables. So we don't check for the existence of ~/.aws/credentials.
+            # i.e. the identity is not determined by the file.
             hints = f'AWS env is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
