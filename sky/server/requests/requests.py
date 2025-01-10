@@ -46,7 +46,7 @@ class RequestStatus(enum.Enum):
     RUNNING = 'RUNNING'
     SUCCEEDED = 'SUCCEEDED'
     FAILED = 'FAILED'
-    ABORTED = 'ABORTED'
+    CANCELLED = 'CANCELLED'
 
     def __gt__(self, other):
         return (list(RequestStatus).index(self) >
@@ -62,7 +62,7 @@ _STATUS_TO_COLOR = {
     RequestStatus.RUNNING: colorama.Fore.YELLOW,
     RequestStatus.SUCCEEDED: colorama.Fore.GREEN,
     RequestStatus.FAILED: colorama.Fore.RED,
-    RequestStatus.ABORTED: colorama.Fore.WHITE,
+    RequestStatus.CANCELLED: colorama.Fore.WHITE,
 }
 
 REQUEST_COLUMNS = [
@@ -320,7 +320,7 @@ def kill_requests(request_ids: List[str]):
                 #   for other requests, avoiding the overhead of forking a new
                 #   process for each request.
                 os.kill(request_record.pid, signal.SIGTERM)
-            request_record.status = RequestStatus.ABORTED
+            request_record.status = RequestStatus.CANCELLED
 
 
 _DB_PATH = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)

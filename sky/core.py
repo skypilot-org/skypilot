@@ -951,7 +951,7 @@ def storage_delete(name: str) -> None:
 # = Server Info =
 # ===================
 @usage_lib.entrypoint
-def server_info() -> str:
+def api_info() -> str:
     commit = sky.__commit__[:7]  # pylint: disable=no-member
     version = sky.__version__  # pylint: disable=no-member
     return f'version: {version}, commit: {commit}'

@@ -252,7 +252,7 @@ def decode_rich_status(
             else:
                 if decoding_status is None:
                     # status may not be initialized if a user use --tail for
-                    # sky api get.
+                    # sky api logs.
                     continue
                 assert decoding_status is not None, (
                     f'Rich status not initialized: {encoded_msg}')

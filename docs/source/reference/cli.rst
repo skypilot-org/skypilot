@@ -136,18 +136,19 @@ End-user CLI
    :prog: sky api info
    :nested: full
 
-.. click:: sky.cli:api_get
-   :prog: sky api get
+.. _sky-api-logs:
+.. click:: sky.cli:api_logs
+   :prog: sky api logs
    :nested: full
 
-.. _sky-api-ls:
-.. click:: sky.cli:api_ls
-   :prog: sky api ls
+.. _sky-api-status:
+.. click:: sky.cli:api_status
+   :prog: sky api status
    :nested: full
 
-.. _sky-api-abort:
-.. click:: sky.cli:api_abort
-   :prog: sky api abort
+.. _sky-api-cancel:
+.. click:: sky.cli:api_cancel
+   :prog: sky api cancel
    :nested: full
 
 Admin CLI
@@ -161,9 +162,6 @@ Admin CLI
    :prog: sky api start
    :nested: full
 
-.. click:: sky.cli:api_server_logs
-   :prog: sky api server_logs
-   :nested: full
 
 Utils: ``show-gpus``/``check``/``cost-report``
 -------------------------------------------------

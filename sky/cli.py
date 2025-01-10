@@ -28,7 +28,6 @@ import datetime
 import functools
 import multiprocessing
 import os
-import pathlib
 import shlex
 import shutil
 import subprocess
@@ -41,7 +40,6 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import click
 import colorama
 import dotenv
-import filelock
 from rich import progress as rich_progress
 import yaml
 
@@ -54,7 +52,6 @@ from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
@@ -212,15 +209,15 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                 ux_utils.starting_message('Request will continue running '
                                           'asynchronously.') +
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
-                f'{ux_utils.BOLD}sky api get {request_id}'
+                f'{ux_utils.BOLD}sky api logs {request_id}'
                 f'{colorama.Style.RESET_ALL}'
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
                 'visit: '
-                f'{server_common.get_server_url()}/stream?'
+                f'{server_common.get_server_url()}/api/stream?'
                 f'request_id={request_id}'
-                f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To abort '
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
                 'the request, run: '
-                f'{ux_utils.BOLD}sky api abort {request_id}'
+                f'{ux_utils.BOLD}sky api cancel {request_id}'
                 f'{colorama.Style.RESET_ALL}'
                 f'\n{colorama.Style.RESET_ALL}')
             raise
@@ -229,12 +226,13 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                     fg='green')
         click.echo(
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
-            f'sky api get {request_id[:-8]}{colorama.Style.RESET_ALL}\n'
+            f'sky api logs {request_id[:-8]}{colorama.Style.RESET_ALL}\n'
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
-            f'{server_common.get_server_url()}/stream?request_id={request_id}\n'
-            f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To abort '
+            f'{server_common.get_server_url()}/api/stream?'
+            f'request_id={request_id}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
             'the request, run: '
-            f'{ux_utils.BOLD}sky api abort {request_id}'
+            f'{ux_utils.BOLD}sky api cancel {request_id}'
             f'{colorama.Style.RESET_ALL}\n')
 
 
@@ -2184,7 +2182,7 @@ def logs(
         sdk.stream_and_get(log_request_id)
     finally:
         if log_request_id is not None:
-            sdk.abort(log_request_id, silent=True)
+            sdk.api_cancel(log_request_id, silent=True)
 
 
 @cli.command()
@@ -4101,7 +4099,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
             raise
     finally:
         if log_request_id is not None:
-            sdk.abort(log_request_id, silent=True)
+            sdk.api_cancel(log_request_id, silent=True)
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
@@ -5645,8 +5643,13 @@ def api_stop():
     sdk.api_stop()
 
 
-@api.command('get', cls=_DocumentedCodeCommand)
+@api.command('logs', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
+@click.option('--server-logs',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Stream the server logs.')
 @click.option('--log-path',
               '-l',
               required=False,
@@ -5657,20 +5660,29 @@ def api_stop():
               type=int,
               help=('Number of lines to show from the end of the logs. '
                     '(default: None)'))
+@click.option('--follow/--no-follow',
+              is_flag=True,
+              default=True,
+              required=False,
+              help='Follow the logs.')
 @usage_lib.entrypoint
-def api_get(request_id: Optional[str], log_path: Optional[str],
-            tail: Optional[int]):
+def api_logs(request_id: Optional[str], server_logs: bool,
+             log_path: Optional[str], tail: Optional[int], follow: bool):
     """Stream the logs of a request running on SkyPilot server."""
-    if request_id is None and log_path is None:
+    if not server_logs and request_id is None and log_path is None:
         # TODO(zhwu): get the latest request ID.
         raise click.BadParameter('Please provide the request ID or log path.')
+    if server_logs:
+        sdk.api_server_logs(follow=follow, tail=tail)
+        return
+
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
     sdk.stream_and_get(request_id, log_path, tail)
 
 
-@api.command('abort', cls=_DocumentedCodeCommand)
+@api.command('cancel', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
 @click.option('--all',
               '-a',
@@ -5686,21 +5698,21 @@ def api_get(request_id: Optional[str], log_path: Optional[str],
               help='Abort all requests from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_abort(request_id: Optional[str], all: bool, all_users: bool):
-    """Abort a request running on SkyPilot server."""
+def api_cancel(request_id: Optional[str], all: bool, all_users: bool):
+    """Cancel a request running on SkyPilot server."""
     if all or all_users:
         keyword = 'EVERYONE\'S' if all_users else 'YOUR'
         user_input = click.prompt(
-            f'This will abort all {keyword} requests.\n'
+            f'This will cancel all {keyword} requests.\n'
             f'To proceed, please type {colorama.Style.BRIGHT}'
             f'delete{colorama.Style.RESET_ALL}',
             type=str)
         if user_input != 'delete':
             raise click.Abort()
-    sdk.abort(request_id=request_id, all=all, all_users=all_users)
+    sdk.api_cancel(request_id=request_id, all=all, all_users=all_users)
 
 
-@api.command('ls', cls=_DocumentedCodeCommand)
+@api.command('status', cls=_DocumentedCodeCommand)
 @click.argument('request_id', required=False, type=str)
 @click.option('--all-status',
               '-a',
@@ -5710,9 +5722,9 @@ def api_abort(request_id: Optional[str], all: bool, all_users: bool):
               help='Show requests of all statuses.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_ls(request_id: Optional[str], all_status: bool):
+def api_status(request_id: Optional[str], all_status: bool):
     """List requests on SkyPilot server."""
-    request_list = sdk.requests_ls(request_id, all_status)
+    request_list = sdk.api_status(request_id, all_status)
     table = log_utils.create_table([
         'ID',
         'User',
@@ -5733,32 +5745,6 @@ def api_ls(request_id: Optional[str], all_status: bool):
     click.echo(table)
 
 
-@api.command('server_logs', cls=_DocumentedCodeCommand)
-@click.option('--follow',
-              '-f',
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Follow the logs.')
-@click.option('--tail',
-              '-n',
-              default='all',
-              help=('Number of lines to show from the end of the logs '
-                    '(default "all")'))
-# Follow the arguments of `docker logs` command.
-@usage_lib.entrypoint
-def api_server_logs(follow: bool, tail: str):
-    """Shows the SkyPilot server logs."""
-    tail_num = None
-    if tail != 'all':
-        try:
-            tail_num = int(tail)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Invalid tail argument: {tail}') from e
-    sdk.api_server_logs(follow, tail_num)
-
-
 @api.command('login', cls=_DocumentedCodeCommand)
 @click.option('--endpoint',
               '-e',
@@ -5767,26 +5753,7 @@ def api_server_logs(follow: bool, tail: str):
 @usage_lib.entrypoint
 def api_login(endpoint: Optional[str]):
     """Logs into a SkyPilot server."""
-    if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot server endpoint')
-    # Check endpoint is a valid URL
-    if endpoint and not endpoint.startswith(
-            'http://') and not endpoint.startswith('https://'):
-        raise click.BadParameter('Endpoint must be a valid URL.')
-    if not endpoint:
-        endpoint = None
-
-    # Set the endpoint in the config file
-    config_path = pathlib.Path(skypilot_config.CONFIG_PATH).expanduser()
-    with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not skypilot_config.loaded():
-            config_path.touch()
-            config = {'api_server': {'endpoint': endpoint}}
-        else:
-            config = skypilot_config.set_nested(('api_server', 'endpoint'),
-                                                endpoint)
-        common_utils.dump_yaml(str(config_path), config)
-        click.secho(f'Logged in to SkyPilot server at {endpoint}', fg='green')
+    sdk.api_login(endpoint)
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
@@ -5794,7 +5761,7 @@ def api_login(endpoint: Optional[str]):
 def api_info():
     """Shows the SkyPilot server URL."""
     url = server_common.get_server_url()
-    api_server_info = sdk.stream_and_get(sdk.server_info())
+    api_server_info = sdk.stream_and_get(sdk.api_info())
     click.echo(f'Using SkyPilot server: {url} ({api_server_info})')
 
 

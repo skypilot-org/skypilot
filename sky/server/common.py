@@ -64,7 +64,7 @@ def is_api_server_running() -> bool:
     server_url = get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            response = requests.get(f'{server_url}/health', timeout=2.5)
+            response = requests.get(f'{server_url}/api/health', timeout=2.5)
             return response.status_code == 200
         except requests.exceptions.Timeout as e:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
@@ -110,7 +110,7 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
     start_time = time.time()
     while True:
         try:
-            requests.get(f'{server_url}/health', timeout=1)
+            requests.get(f'{server_url}/api/health', timeout=1)
             break
         except requests.exceptions.ConnectionError as e:
             if time.time() - start_time < timeout_sec:

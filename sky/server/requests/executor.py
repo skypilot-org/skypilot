@@ -235,7 +235,7 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
             with override_request_env_and_config(request_body):
                 return_value = func(**request_body.to_kwargs())
         except KeyboardInterrupt:
-            logger.info(f'Request {request_id} aborted by user')
+            logger.info(f'Request {request_id} cancelled by user')
             restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -318,11 +318,11 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 continue
             request_id, ignore_return_value = request_element
             request = requests.get_request(request_id)
-            if request.status == requests.RequestStatus.ABORTED:
+            if request.status == requests.RequestStatus.CANCELLED:
                 continue
             logger.info(f'[{worker}] Submitted request: {request_id}')
             # Start additional process to run the request, so that it can be
-            # aborted when requested by a user.
+            # cancelled when requested by a user.
             # TODO(zhwu): since the executor is reusing the request process,
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of

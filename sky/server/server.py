@@ -112,18 +112,6 @@ async def check(request: fastapi.Request,
     )
 
 
-@app.get('/server_info')
-async def server_info(request: fastapi.Request) -> None:
-    """Gets informatiion of the server, including the version of the server."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='server_info',
-        request_body=payloads.RequestBody(),
-        func=core.server_info,
-        schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
-    )
-
-
 @app.get('/enabled_clouds')
 async def enabled_clouds(request: fastapi.Request) -> None:
     """Gets enabled clouds on the server."""
@@ -212,7 +200,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
-    logger.info(f'Validating tasks: {validate_body.dag}')
+    logger.debug(f'Validating tasks: {validate_body.dag}')
     dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
     for task in dag.tasks:
         # Will validate workdir and file_mounts in the backend, as those need
@@ -567,8 +555,23 @@ async def local_down(request: fastapi.Request) -> None:
     )
 
 
-@app.get('/get')
-async def get(request_id: str) -> requests_lib.RequestPayload:
+# === API server related APIs ===
+
+
+@app.get('/api/info')
+async def api_info(request: fastapi.Request) -> None:
+    """Gets informatiion of the server, including the version of the server."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='api_info',
+        request_body=payloads.RequestBody(),
+        func=core.api_info,
+        schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+    )
+
+
+@app.get('/api/get')
+async def api_get(request_id: str) -> requests_lib.RequestPayload:
     """Gets a request with a given request ID prefix."""
     while True:
         request_task = requests_lib.get_request(request_id)
@@ -600,7 +603,8 @@ async def _yield_log_file_with_payloads_skipped(
 async def log_streamer(request_id: Optional[str],
                        log_path: pathlib.Path,
                        plain_logs: bool = False,
-                       tail: Optional[int] = None) -> AsyncGenerator[str, None]:
+                       tail: Optional[int] = None,
+                       follow: bool = True) -> AsyncGenerator[str, None]:
     """Streams the logs of a request."""
     if request_id is not None:
         status_msg = rich_utils.EncodedStatusMessage(
@@ -630,6 +634,8 @@ async def log_streamer(request_id: Optional[str],
             # not want to yield too long.
             await asyncio.sleep(0)
             request_task = requests_lib.get_request(request_id)
+            if not follow:
+                break
         if show_request_waiting_spinner:
             yield status_msg.stop()
 
@@ -652,6 +658,9 @@ async def log_streamer(request_id: Optional[str],
                     request_task = requests_lib.get_request(request_id)
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
                         break
+                if not follow:
+                    break
+
                 # Sleep 0 to yield, so other coroutines can run. This busy
                 # waiting loop is performance critical for short-running
                 # requests, so we do not want to yield too long.
@@ -672,12 +681,12 @@ async def log_streamer(request_id: Optional[str],
             await asyncio.sleep(0)  # Allow other tasks to run
 
 
-@app.get('/stream')
-async def stream(
-        request_id: Optional[str] = None,
-        log_path: Optional[str] = None,
-        plain_logs: bool = True,
-        tail: Optional[int] = None) -> fastapi.responses.StreamingResponse:
+@app.get('/api/stream')
+async def stream(request_id: Optional[str] = None,
+                 log_path: Optional[str] = None,
+                 plain_logs: bool = True,
+                 tail: Optional[int] = None,
+                 follow: bool = True) -> fastapi.responses.StreamingResponse:
     """Streams the logs of a request."""
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
@@ -717,7 +726,7 @@ async def stream(
 
         log_path_to_stream = resolved_log_path
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, log_path_to_stream, plain_logs, tail),
+        log_streamer(request_id, log_path_to_stream, plain_logs, tail, follow),
         media_type='text/plain',
         headers={
             'Cache-Control': 'no-cache',
@@ -725,14 +734,14 @@ async def stream(
         })
 
 
-@app.post('/abort')
-async def abort(request: fastapi.Request,
-                abort_body: payloads.RequestIdBody) -> None:
-    """Aborts requests."""
+@app.post('/api/cancel')
+async def api_cancel(request: fastapi.Request,
+                     abort_body: payloads.RequestIdBody) -> None:
+    """Cancels requests."""
     # Create a list of target abort requests.
     request_ids = []
     if abort_body.all:
-        print('Aborting all requests...')
+        print('Cancelling all requests...')
         request_ids = [
             request_task.request_id for request_task in
             requests_lib.get_request_tasks(status=[
@@ -742,21 +751,21 @@ async def abort(request: fastapi.Request,
                                            user_id=abort_body.user_id)
         ]
     if abort_body.request_id is not None:
-        print(f'Aborting request ID: {abort_body.request_id}')
+        print(f'Cancelling request ID: {abort_body.request_id}')
         request_ids.append(abort_body.request_id)
 
     # Abort the target requests.
     executor.schedule_request(
         request_id=request.state.request_id,
-        request_name='kill_requests',
+        request_name='cancel_requests',
         request_body=payloads.KillRequestProcessesBody(request_ids=request_ids),
         func=requests_lib.kill_requests,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
     )
 
 
-@app.get('/requests')
-async def requests(
+@app.get('/api/status')
+async def api_status(
     request_id: Optional[str] = None,
     all: bool = False  # pylint: disable=redefined-builtin
 ) -> List[requests_lib.RequestPayload]:
@@ -780,7 +789,7 @@ async def requests(
         return [request_task.readable_encode()]
 
 
-@app.get('/health', response_class=fastapi.responses.PlainTextResponse)
+@app.get('/api/health', response_class=fastapi.responses.PlainTextResponse)
 async def health() -> str:
     """Checks the health of the API server."""
     return (f'SkyPilot API Server: {colorama.Style.BRIGHT}{colorama.Fore.GREEN}'

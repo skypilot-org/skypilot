@@ -86,6 +86,12 @@ from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
+from sky.client.sdk import api_cancel
+from sky.client.sdk import api_info
+from sky.client.sdk import api_server_logs
+from sky.client.sdk import api_start
+from sky.client.sdk import api_status
+from sky.client.sdk import api_stop
 from sky.client.sdk import autostop
 from sky.client.sdk import cancel
 from sky.client.sdk import cost_report
@@ -173,6 +179,7 @@ __all__ = [
     'Task',
     'Resources',
     # core APIs
+    'optimize',
     'launch',
     'exec',
     'spot_launch',
@@ -196,9 +203,15 @@ __all__ = [
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
-    # Request APIs
+    # API server APIs
     'get',
     'stream_and_get',
+    'api_status',
+    'api_cancel',
+    'api_info',
+    'api_start',
+    'api_stop',
+    'api_server_logs',
     # Admin Policy
     'UserRequest',
     'MutatedUserRequest',

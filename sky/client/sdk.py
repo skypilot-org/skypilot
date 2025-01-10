@@ -22,12 +22,14 @@ import zipfile
 
 import click
 import colorama
+import filelock
 import psutil
 import requests
 
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
+from sky import skypilot_config
 from sky.backends import backend_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -1304,7 +1306,7 @@ def get(request_id: str) -> Any:
         `Request Raises` in the documentation of the specific requests above.
     """
     response = requests.get(
-        f'{server_common.get_server_url()}/get?request_id={request_id}',
+        f'{server_common.get_server_url()}/api/get?request_id={request_id}',
         timeout=(5, None))
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
@@ -1321,11 +1323,11 @@ def get(request_id: str) -> Any:
                          f'{stacktrace}')
         with ux_utils.print_exception_no_traceback():
             raise error_obj
-    if request_task.status == requests_lib.RequestStatus.ABORTED:
+    if request_task.status == requests_lib.RequestStatus.CANCELLED:
         with ux_utils.print_exception_no_traceback():
-            raise exceptions.RequestAborted(
+            raise exceptions.RequestCancelled(
                 f'{colorama.Fore.YELLOW}Current {request_task.name!r} request '
-                f'({request_task.request_id}) is aborted by another process.'
+                f'({request_task.request_id}) is cancelled by another process.'
                 f'{colorama.Style.RESET_ALL}')
     return request_task.get_return_value()
 
@@ -1335,7 +1337,8 @@ def get(request_id: str) -> Any:
 @annotations.public_api
 def stream_and_get(request_id: Optional[str] = None,
                    log_path: Optional[str] = None,
-                   tail: Optional[int] = None) -> Any:
+                   tail: Optional[int] = None,
+                   follow: bool = True) -> Any:
     """Streams the logs of a request or a log file and gets the final result.
 
     This will block until the request is finished. The request id can be a
@@ -1346,6 +1349,7 @@ def stream_and_get(request_id: Optional[str] = None,
         log_path: The path to the log file to stream.
         tail: The number of lines to show from the end of the logs.
             If None, show all logs.
+        follow: Whether to follow the logs.
 
     Returns:
         The `Request Returns` of the specified request. See the documentation
@@ -1360,9 +1364,10 @@ def stream_and_get(request_id: Optional[str] = None,
         'log_path': log_path,
         'plain_logs': False,
         'tail': str(tail) if tail is not None else None,
+        'follow': follow,
     }
     response = requests.get(
-        f'{server_common.get_server_url()}/stream',
+        f'{server_common.get_server_url()}/api/stream',
         params=params,
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
@@ -1375,13 +1380,13 @@ def stream_and_get(request_id: Optional[str] = None,
                 print(line, flush=True)
         return get(request_id)
     except Exception:  # pylint: disable=broad-except
-        logger.debug(f'To stream request logs: sky api get {request_id}')
+        logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
 
 
 @usage_lib.entrypoint
 @annotations.public_api
-def abort(
+def api_cancel(
         request_id: Optional[str] = None,
         all: bool = False,  # pylint: disable=redefined-builtin
         all_users: bool = False,
@@ -1413,13 +1418,13 @@ def abort(
                                   all=all or all_users,
                                   user_id=user_id)
     if all_users:
-        echo('Aborting everyone\'s requests...')
+        echo('Cancelling everyone\'s requests...')
     else:
         if request_id is not None:
-            echo(f'Aborting request: {request_id!r}...')
+            echo(f'Cancelling request: {request_id!r}...')
         if all:
-            echo('Aborting all your requests...')
-    response = requests.post(f'{server_common.get_server_url()}/abort',
+            echo('Cancelling all your requests...')
+    response = requests.post(f'{server_common.get_server_url()}/api/cancel',
                              json=json.loads(body.model_dump_json()),
                              timeout=5)
     return server_common.get_request_id(response)
@@ -1427,7 +1432,7 @@ def abort(
 
 @usage_lib.entrypoint
 @annotations.public_api
-def requests_ls(
+def api_status(
     request_id: Optional[str] = None,
     # pylint: disable=redefined-builtin
     all: bool = False
@@ -1442,7 +1447,7 @@ def requests_ls(
         A list of requests.
     """
     body = payloads.RequestIdBody(request_id=request_id, all=all)
-    response = requests.get(f'{server_common.get_server_url()}/requests',
+    response = requests.get(f'{server_common.get_server_url()}/api/status',
                             params=server_common.request_body_to_params(body),
                             timeout=5)
     server_common.handle_request_error(response)
@@ -1455,13 +1460,13 @@ def requests_ls(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.public_api
-def server_info() -> server_common.RequestId:
+def api_info() -> server_common.RequestId:
     """Gets the server's commit and version.
 
     Returns:
         request_id: The request ID of the server info request.
     """
-    response = requests.get(f'{server_common.get_server_url()}/server_info')
+    response = requests.get(f'{server_common.get_server_url()}/api/info')
     return server_common.get_request_id(response)
 
 
@@ -1562,3 +1567,40 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
         stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
+
+
+@usage_lib.entrypoint
+@annotations.public_api
+def api_login(endpoint: Optional[str] = None) -> None:
+    """Logs into a SkyPilot server.
+
+    This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
+    use this endpoint.
+
+    Args:
+        endpoint: The endpoint of the SkyPilot server, e.g.,
+            http://1.2.3.4:46580 or https://skypilot.mydomain.com.
+    """
+    # TODO(zhwu): this SDK sets global endpoint, which may not be the best
+    # design as a user may expect this is only effective for the current
+    # session. We should also consider supporting env var for specifying
+    # endpoint.
+    if endpoint is None:
+        endpoint = click.prompt('Enter your SkyPilot server endpoint')
+    # Check endpoint is a valid URL
+    if endpoint and not endpoint.startswith(
+            'http://') and not endpoint.startswith('https://'):
+        raise click.BadParameter('Endpoint must be a valid URL.')
+    if not endpoint:
+        endpoint = None
+
+    config_path = pathlib.Path(skypilot_config.CONFIG_PATH).expanduser()
+    with filelock.FileLock(config_path.with_suffix('.lock')):
+        if not skypilot_config.loaded():
+            config_path.touch()
+            config = {'api_server': {'endpoint': endpoint}}
+        else:
+            config = skypilot_config.set_nested(('api_server', 'endpoint'),
+                                                endpoint)
+        common_utils.dump_yaml(str(config_path), config)
+        click.secho(f'Logged in to SkyPilot server at {endpoint}', fg='green')

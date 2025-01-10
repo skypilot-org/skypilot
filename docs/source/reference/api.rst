@@ -133,3 +133,23 @@ Enums
 
 .. autoclass:: sky.JobStatus
   :members:                                        
+
+
+API Server APIs
+-----------------
+
+.. autofunction:: sky.get
+
+.. autofunction:: sky.stream_and_get
+
+.. autofunction:: sky.api_status
+
+.. autofunction:: sky.api_cancel
+
+.. autofunction:: sky.api_info
+
+.. autofunction:: sky.api_start
+
+.. autofunction:: sky.api_stop
+
+.. autofunction:: sky.api_server_logs
