@@ -152,7 +152,7 @@ Test the API server by curling the health endpoint:
 .. code-block:: console
 
     $ curl ${ENDPOINT}/api/health
-    SkyPilot API Server: Healthy
+    {"status":"healthy","api_version":"1","commit":"ba7542c6dcd08484d83145d3e63ec9966d5909f3-dirty","version":"1.0.0-dev0"}
 
 If all looks good, you can now start using the API server. Refer to :ref:`sky-api-server-connect` to connect your local SkyPilot client to the API server.
 

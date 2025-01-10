@@ -1,4 +1,6 @@
 """Common data structures and constants used in the API."""
+import dataclasses
+import enum
 import functools
 import os
 import pathlib
@@ -33,16 +35,26 @@ if typing.TYPE_CHECKING:
 
 DEFAULT_SERVER_URL = 'http://0.0.0.0:46580'
 API_SERVER_CMD = 'python -m sky.server.server'
-# TODO(zhwu): This is a temporary fix for backend compatibility.
-# Remove this before merging to master.
-LEGACY_API_SERVER_CMD = 'python -m sky.api.rest'
 CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                     'file_uploads')
 RequestId = str
+ApiVersion = Optional[str]
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ApiServerStatus(enum.Enum):
+    HEALTHY = 'healthy'
+    UNHEALTHY = 'unhealthy'
+    VERSION_MISMATCH = 'version_mismatch'
+
+
+@dataclasses.dataclass
+class ApiServerInfo:
+    status: ApiServerStatus
+    api_version: ApiVersion
 
 
 @functools.lru_cache()
@@ -59,13 +71,24 @@ def is_api_server_local():
     return get_server_url() == DEFAULT_SERVER_URL
 
 
-def is_api_server_running() -> bool:
+def get_api_server_status() -> ApiServerInfo:
     time_out_try_count = 1
     server_url = get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
             response = requests.get(f'{server_url}/api/health', timeout=2.5)
-            return response.status_code == 200
+            if response.status_code == 200:
+                result = response.json()
+                if result['api_version'] == server_constants.API_VERSION:
+                    return ApiServerInfo(status=ApiServerStatus.HEALTHY,
+                                         api_version=result['api_version'])
+                else:
+                    return ApiServerInfo(
+                        status=ApiServerStatus.VERSION_MISMATCH,
+                        api_version=result['api_version'])
+            else:
+                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
+                                     api_version=None)
         except requests.exceptions.Timeout as e:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
                 with ux_utils.print_exception_no_traceback():
@@ -73,9 +96,10 @@ def is_api_server_running() -> bool:
             time_out_try_count += 1
             continue
         except requests.exceptions.ConnectionError:
-            return False
+            return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
+                                 api_version=None)
 
-    return False
+    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
 def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
@@ -145,8 +169,19 @@ def check_server_healthy_or_start(func):
                 api_server_reload: bool = False,
                 deploy: bool = False,
                 **kwargs):
-        if is_api_server_running():
+        api_server_info = get_api_server_status()
+        if api_server_info.status == ApiServerStatus.HEALTHY:
             return func(*args, **kwargs)
+        elif api_server_info.status == ApiServerStatus.VERSION_MISMATCH:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
+                    f'v{api_server_info.api_version} (client version is '
+                    f'v{server_constants.API_VERSION}). '
+                    'Please restart the SkyPilot API server with: '
+                    'sky api stop; sky api start'
+                    f'{colorama.Style.RESET_ALL}')
+
         server_url = get_server_url()
 
         # Automatically start a SkyPilot API server locally.
@@ -154,7 +189,8 @@ def check_server_healthy_or_start(func):
         # same time, causing issues with database initialization.
         with filelock.FileLock(
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
-            if not is_api_server_running():
+            api_server_info = get_api_server_status()
+            if api_server_info.status == ApiServerStatus.UNHEALTHY:
                 with rich_utils.client_status('Starting SkyPilot API server'):
                     if server_url == DEFAULT_SERVER_URL:
                         logger.info(f'{colorama.Style.DIM}Failed to connect to '

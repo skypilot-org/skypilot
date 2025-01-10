@@ -17,7 +17,6 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import task
-import sky  # TODO(zongheng): import speed?
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
@@ -945,16 +944,6 @@ def storage_delete(name: str) -> None:
                                       source=handle.source,
                                       sync_on_reconstruction=False)
         storage_object.delete()
-
-
-# ===================
-# = Server Info =
-# ===================
-@usage_lib.entrypoint
-def api_info() -> str:
-    commit = sky.__commit__[:7]  # pylint: disable=no-member
-    version = sky.__version__  # pylint: disable=no-member
-    return f'version: {version}, commit: {commit}'
 
 
 # ===================

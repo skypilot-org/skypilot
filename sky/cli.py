@@ -5754,8 +5754,11 @@ def api_login(endpoint: Optional[str]):
 def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
-    api_server_info = sdk.stream_and_get(sdk.api_info())
-    click.echo(f'Using SkyPilot API server: {url} ({api_server_info})')
+    api_server_info = sdk.api_info()
+    click.echo(f'Using SkyPilot API server: {url} '
+               f'({api_server_info["status"]}, '
+               f'commit: {api_server_info["commit"]}, '
+               f'version: {api_server_info["version"]})')
 
 
 def main():

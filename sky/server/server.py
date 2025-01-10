@@ -9,16 +9,16 @@ import pathlib
 import shutil
 import sys
 import time
-from typing import AsyncGenerator, Deque, List, Optional
+from typing import AsyncGenerator, Deque, Dict, List, Optional
 import uuid
 import zipfile
 
 import aiofiles
-import colorama
 import fastapi
 from fastapi.middleware import cors
 import starlette.middleware.base
 
+import sky
 from sky import check as sky_check
 from sky import clouds
 from sky import core
@@ -31,6 +31,7 @@ from sky.jobs.server import server as jobs_rest
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve.server import server as serve_rest
 from sky.server import common
+from sky.server import constants as server_constants
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
@@ -576,18 +577,6 @@ async def local_down(request: fastapi.Request) -> None:
 # === API server related APIs ===
 
 
-@app.get('/api/info')
-async def api_info(request: fastapi.Request) -> None:
-    """Gets informatiion of the server, including the version of the server."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='api_info',
-        request_body=payloads.RequestBody(),
-        func=core.api_info,
-        schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
-    )
-
-
 @app.get('/api/get')
 async def api_get(request_id: str) -> requests_lib.RequestPayload:
     """Gets a request with a given request ID prefix."""
@@ -807,11 +796,23 @@ async def api_status(
         return [request_task.readable_encode()]
 
 
-@app.get('/api/health', response_class=fastapi.responses.PlainTextResponse)
-async def health() -> str:
-    """Checks the health of the API server."""
-    return (f'SkyPilot API Server: {colorama.Style.BRIGHT}{colorama.Fore.GREEN}'
-            f'Healthy{colorama.Style.RESET_ALL}\n')
+@app.get('/api/health')
+async def health() -> Dict[str, str]:
+    """Checks the health of the API server.
+
+    Returns:
+        A dictionary with the following keys:
+        - status: str; The status of the API server.
+        - api_version: str; The API version of the API server.
+        - commit: str; The commit hash of SkyPilot used for API server.
+        - version: str; The version of SkyPilot used for API server.
+    """
+    return {
+        'status': common.ApiServerStatus.HEALTHY.value,
+        'api_version': server_constants.API_VERSION,
+        'commit': sky.__commit__,
+        'version': sky.__version__,
+    }
 
 
 @app.websocket('/kubernetes-pod-ssh-proxy')

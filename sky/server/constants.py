@@ -1,5 +1,10 @@
 """Constants for the API servers."""
 
+# API server version, whenever there is a change in API server that requires a
+# restart of the local API server or error out when the client does not match
+# the server version.
+API_VERSION = '1'
+
 # Prefix for API request names.
 REQUEST_NAME_PREFIX = 'sky.'
 # The user ID of the SkyPilot system.

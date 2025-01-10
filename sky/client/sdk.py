@@ -1460,14 +1460,25 @@ def api_status(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.public_api
-def api_info() -> server_common.RequestId:
-    """Gets the server's commit and version.
+def api_info() -> Dict[str, str]:
+    """Gets the server's status, commit and version.
 
     Returns:
-        request_id: The request ID of the server info request.
+        A dictionary containing the server's status, commit and version.
+
+        .. code-block:: python
+
+            {
+                'status': 'healthy',
+                'api_version': '1',
+                'commit': 'abc1234567890',
+                'version': '1.0.0',
+            }
+
     """
-    response = requests.get(f'{server_common.get_server_url()}/api/info')
-    return server_common.get_request_id(response)
+    response = requests.get(f'{server_common.get_server_url()}/api/health')
+    response.raise_for_status()
+    return response.json()
 
 
 @usage_lib.entrypoint
@@ -1523,9 +1534,7 @@ def api_stop() -> None:
     found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
-        if cmdline and (server_common.API_SERVER_CMD in ' '.join(cmdline) or
-                        server_common.LEGACY_API_SERVER_CMD
-                        in ' '.join(cmdline)):
+        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
             subprocess_utils.kill_children_processes(parent_pids=[process.pid],
                                                      force=True)
             found = True
