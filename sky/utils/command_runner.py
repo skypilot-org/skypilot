@@ -70,9 +70,9 @@ def ssh_options_list(
         connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
-    # Do not allow agent forwarding because SkyPilot API server has access to all
-    # user cluster private keys, which should not be all forwarded to individual
-    # user clusters.
+    # Do not allow agent forwarding because SkyPilot API server has access to
+    # all user cluster private keys, which should not be all forwarded to
+    # individual user clusters.
     arg_dict = {
         # SSH port
         'Port': port,

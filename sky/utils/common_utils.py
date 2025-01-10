@@ -250,8 +250,8 @@ _current_command: Optional[str] = None
 def set_current_command(command: str):
     """Override the current command.
 
-    This is useful when we are on the SkyPilot API server side and we have a command
-    from the client.
+    This is useful when we are on the SkyPilot API server side and we have a
+    command from the client.
     """
     global _current_command
     _current_command = command

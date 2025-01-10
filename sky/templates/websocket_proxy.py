@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Starting a websocket with SkyPilot API server to proxy SSH to a Kubernetes pod.
+"""Starting a websocket with SkyPilot API server to proxy SSH to a k8s pod.
 
 This script is useful for users who do not have local Kubernetes credentials.
 """
