@@ -59,7 +59,7 @@ class RequestStatus(enum.Enum):
 
 _STATUS_TO_COLOR = {
     RequestStatus.PENDING: colorama.Fore.BLUE,
-    RequestStatus.RUNNING: colorama.Fore.YELLOW,
+    RequestStatus.RUNNING: colorama.Fore.GREEN,
     RequestStatus.SUCCEEDED: colorama.Fore.GREEN,
     RequestStatus.FAILED: colorama.Fore.RED,
     RequestStatus.CANCELLED: colorama.Fore.WHITE,
