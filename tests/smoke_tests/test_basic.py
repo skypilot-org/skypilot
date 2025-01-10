@@ -250,6 +250,7 @@ def test_gcp_stale_job_manual_restart():
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -267,12 +268,32 @@ def test_env_check(generic_cloud: str):
 
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet. Run test_cli_logs_vast instead.
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
     if generic_cloud == 'kubernetes':
         # Kubernetes does not support multi-node
         num_nodes = 1
+    timestamp = time.time()
+    test = smoke_tests_utils.Test('cli_logs', [
+        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
+        f'sky exec {name} "echo {timestamp} 2"',
+        f'sky exec {name} "echo {timestamp} 3"',
+        f'sky exec {name} "echo {timestamp} 4"',
+        f'sky logs {name} 2 --status',
+        f'sky logs {name} 3 4 --sync-down',
+        f'sky logs {name} * --sync-down',
+        f'sky logs {name} 1 | grep "{timestamp} 1"',
+        f'sky logs {name} | grep "{timestamp} 4"',
+    ], f'sky down -y {name}')
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.vast
+def test_cli_logs_vast(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
         f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
