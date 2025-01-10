@@ -85,7 +85,7 @@ class RequestBody(pydantic.BaseModel):
 
 class CheckBody(RequestBody):
     """The request body for the check endpoint."""
-    clouds: Optional[Tuple[str]]
+    clouds: Optional[Tuple[str, ...]]
     verbose: bool
 
 
