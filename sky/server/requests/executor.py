@@ -353,7 +353,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     max_parallel_for_non_blocking = _max_parallel_size_for_non_blocking(
         mem_size_gb, parallel_for_blocking)
     logger.info(
-        f'SkyPilot server will start {parallel_for_blocking} workers for '
+        f'SkyPilot API server will start {parallel_for_blocking} workers for '
         f'blocking requests and will allow at max '
         f'{max_parallel_for_non_blocking} non-blocking requests in parallel.')
 

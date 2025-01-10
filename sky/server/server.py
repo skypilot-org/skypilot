@@ -204,7 +204,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
     for task in dag.tasks:
         # Will validate workdir and file_mounts in the backend, as those need
-        # to be validated after the files are uploaded to the SkyPilot server
+        # to be validated after the files are uploaded to the SkyPilot API server
         # with `upload_mounts_to_api_server`.
         task.validate_name()
         task.validate_run()
@@ -925,7 +925,7 @@ if __name__ == '__main__':
     workers = []
     try:
         workers = executor.start(cmd_args.deploy)
-        logger.info('Starting SkyPilot server')
+        logger.info('Starting SkyPilot API server')
         uvicorn.run('sky.server.server:app',
                     host=cmd_args.host,
                     port=cmd_args.port,

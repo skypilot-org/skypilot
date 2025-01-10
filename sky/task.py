@@ -350,7 +350,7 @@ class Task:
     def expand_and_validate_file_mounts(self):
         """Expand file_mounts paths to absolute paths and validate them.
 
-        Note: if this function is called on a remote SkyPilot server,
+        Note: if this function is called on a remote SkyPilot API server,
         it must be after the client side has sync-ed all files to the
         remote server.
         """
@@ -392,7 +392,7 @@ class Task:
     def expand_and_validate_workdir(self):
         """Expand workdir to absolute path and validate it.
 
-        Note: if this function is called on a remote SkyPilot server,
+        Note: if this function is called on a remote SkyPilot API server,
         it must be after the client side has sync-ed all files to the
         remote server.
         """

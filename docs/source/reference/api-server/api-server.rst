@@ -81,7 +81,7 @@ Run ``sky api login`` to connect to the API server.
 .. code-block:: console
 
     $ sky api login
-    Enter your SkyPilot server endpoint: http://skypilot:password@1.2.3.4:30050
+    Enter your SkyPilot API server endpoint: http://skypilot:password@1.2.3.4:30050
 
 This will save the API server endpoint to your ``~/.sky/config.yaml`` file.
 
@@ -90,7 +90,7 @@ To verify that the API server is working, run ``sky api info``:
 .. code-block:: console
 
     $ sky api info
-    Using SkyPilot server: http://skypilot:password@1.2.3.4:30050 (version: 1.0.0-dev0, commit: 6864695)
+    Using SkyPilot API server: http://skypilot:password@1.2.3.4:30050 (version: 1.0.0-dev0, commit: 6864695)
 
 Asynchronous request execution
 ------------------------------
@@ -171,7 +171,7 @@ To get the current API server info (URL and version), run ``sky api info``.
 .. code-block:: console
 
     $ sky api info
-    Using SkyPilot server: http://skypilot:alpha1@1.2.3.4:30050 (version: 1.0.0-dev0, commit: 6864695)
+    Using SkyPilot API server: http://skypilot:alpha1@1.2.3.4:30050 (version: 1.0.0-dev0, commit: 6864695)
 
 
 Stop and restart local API server

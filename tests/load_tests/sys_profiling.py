@@ -1,5 +1,5 @@
 """
-This script is used to profile the system usage of the SkyPilot server.
+This script is used to profile the system usage of the SkyPilot API server.
 
 Usage:
 python tests/load_tests/sys_profiling.py

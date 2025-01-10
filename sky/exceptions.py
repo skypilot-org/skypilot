@@ -370,6 +370,6 @@ class ApiServerConnectionError(RuntimeError):
 
     def __init__(self, server_url: str):
         super().__init__(
-            f'Could not connect to SkyPilot server at {server_url}. '
+            f'Could not connect to SkyPilot API server at {server_url}. '
             f'Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')

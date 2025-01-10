@@ -10,11 +10,11 @@ SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 SERVER_ID_CONNECTOR: str = '-remote-'
 # We use the user hash (machine-specific) hash of the server to determine if a
-# SkyPilot server is started by the same user. It will be the same across the
+# SkyPilot API server is started by the same user. It will be the same across the
 # whole lifecycle of the server, including:
 # 1. all requests, because this global variable is set once during server
 #    starts.
-# 2. SkyPilot server restarts, as long as the `~/.sky` folder is persisted and
+# 2. SkyPilot API server restarts, as long as the `~/.sky` folder is persisted and
 #    the env var set during starting the server is the same.
 SERVER_ID = common_utils.get_user_hash()
 
@@ -38,7 +38,7 @@ def get_controller_name(controller_type: ControllerType) -> str:
     return f'{prefix}{user_id}{SERVER_ID_CONNECTOR}{SERVER_ID}'
 
 
-# Controller names differ per user and per SkyPilot server.
+# Controller names differ per user and per SkyPilot API server.
 # If local: <prefix>-<user_id>
 # If remote: <prefix>-<user_id>-remote-<api_server_user_id>
 # DO NOT use these variables on the client side because client side doesn't know

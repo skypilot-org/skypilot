@@ -2,7 +2,7 @@
 
 import functools
 
-# Whether the current process is a SkyPilot server process.
+# Whether the current process is a SkyPilot API server process.
 is_server = True
 
 

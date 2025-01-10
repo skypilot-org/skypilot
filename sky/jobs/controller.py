@@ -488,7 +488,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         # TODO(zhwu): this assumes the specific backend.
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
         # Need to re-construct storage object in the controller process
-        # because when SkyPilot server machine sends the yaml config to the
+        # because when SkyPilot API server machine sends the yaml config to the
         # controller machine, only storage metadata is sent, not the storage
         # object itself.
         for storage in task.storage_mounts.values():

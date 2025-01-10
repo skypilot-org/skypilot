@@ -1,13 +1,13 @@
 # Load Testing Tools
 
-This folder contains tools for load testing and profiling the SkyPilot server.
+This folder contains tools for load testing and profiling the SkyPilot API server.
 
 * System Profiling (`sys_profiling.py`): monitors system resource usage (CPU and memory) over time
-* Load Testing (`test_load_on_server.py`): sends concurrent requests to stress test the SkyPilot server
+* Load Testing (`test_load_on_server.py`): sends concurrent requests to stress test the SkyPilot API server
 
 ## Instructions
 
-1. Start the SkyPilot server on a remote machine
+1. Start the SkyPilot API server on a remote machine
 ```bash
 sky api stop && sky api start
 ```

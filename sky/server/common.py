@@ -83,7 +83,7 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
     avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
     if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
         logger.warning(
-            f'{colorama.Fore.YELLOW} Your SkyPilot server machine only has '
+            f'{colorama.Fore.YELLOW} Your SkyPilot API server machine only has '
             f'{avail_mem_size_gb:.1f} GB of memory available. '
             f'Recommend at least {server_constants.MIN_AVAIL_MEM_GB} GB to run '
             f'heavier loads on SkyPilot and enjoy better performance.'
@@ -118,7 +118,7 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
             else:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
-                        'Failed to connect to SkyPilot server at '
+                        'Failed to connect to SkyPilot API server at '
                         f'{server_url}. '
                         f'\nView logs at: {constants.API_SERVER_LOGS}') from e
 
@@ -127,7 +127,7 @@ def handle_request_error(response):
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
-                'Failed to process response from SkyPilot server at '
+                'Failed to process response from SkyPilot API server at '
                 f'{get_server_url()}. '
                 f'Response: {response.status_code} '
                 f'{response.text}')
@@ -149,13 +149,13 @@ def check_server_healthy_or_start(func):
             return func(*args, **kwargs)
         server_url = get_server_url()
 
-        # Automatically start a SkyPilot server locally.
+        # Automatically start a SkyPilot API server locally.
         # Lock to prevent multiple processes from starting the server at the
         # same time, causing issues with database initialization.
         with filelock.FileLock(
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             if not is_api_server_running():
-                with rich_utils.client_status('Starting SkyPilot server'):
+                with rich_utils.client_status('Starting SkyPilot API server'):
                     if server_url == DEFAULT_SERVER_URL:
                         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                                     f'SkyPilot API server at {server_url}. '
@@ -181,7 +181,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
 
     This function needs to be called after sdk.validate(),
     as the file paths need to be expanded to keep file_mounts_mapping
-    aligned with the actual task uploaded to SkyPilot server.
+    aligned with the actual task uploaded to SkyPilot API server.
 
     Args:
         dag: The dag where the file mounts are defined.
@@ -241,7 +241,7 @@ def upload_mounts_to_api_server(dag: 'sky.Dag',
                                 f'{time.strftime("%Y-%m-%d-%H%M%S")}.log')
         with rich_utils.client_status(
                 ux_utils.spinner_message(
-                    'Uploading files to the SkyPilot server',
+                    'Uploading files to the SkyPilot API server',
                     log_file,
                     is_local=True)):
             with tempfile.NamedTemporaryFile('wb+',

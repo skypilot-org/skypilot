@@ -1572,13 +1572,13 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
 @usage_lib.entrypoint
 @annotations.public_api
 def api_login(endpoint: Optional[str] = None) -> None:
-    """Logs into a SkyPilot server.
+    """Logs into a SkyPilot API server.
 
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
     use this endpoint.
 
     Args:
-        endpoint: The endpoint of the SkyPilot server, e.g.,
+        endpoint: The endpoint of the SkyPilot API server, e.g.,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
     """
     # TODO(zhwu): this SDK sets global endpoint, which may not be the best
@@ -1586,7 +1586,7 @@ def api_login(endpoint: Optional[str] = None) -> None:
     # session. We should also consider supporting env var for specifying
     # endpoint.
     if endpoint is None:
-        endpoint = click.prompt('Enter your SkyPilot server endpoint')
+        endpoint = click.prompt('Enter your SkyPilot API server endpoint')
     # Check endpoint is a valid URL
     if endpoint and not endpoint.startswith(
             'http://') and not endpoint.startswith('https://'):
@@ -1603,4 +1603,4 @@ def api_login(endpoint: Optional[str] = None) -> None:
             config = skypilot_config.set_nested(('api_server', 'endpoint'),
                                                 endpoint)
         common_utils.dump_yaml(str(config_path), config)
-        click.secho(f'Logged in to SkyPilot server at {endpoint}', fg='green')
+        click.secho(f'Logged in to SkyPilot API server at {endpoint}', fg='green')
