@@ -97,6 +97,8 @@ class AWSIdentityType(enum.Enum):
 
     CUSTOM_PROCESS = 'custom-process'
 
+    ASSUME_ROLE = 'assume-role'
+
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
     #    profile                <not set>             None    None
@@ -626,6 +628,17 @@ class AWS(clouds.Cloud):
             # the file. i.e. the custom process will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS custom-process is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.ASSUME_ROLE:
+            # When using ASSUME ROLE, the credentials are coming from a different
+            # source profile. So we don't check for the existence of ~/.aws/credentials.
+            # i.e. the assumed role will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS assume-role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.ENV:
+            # When using ENV vars, the credentials are coming from the environment
+            # variables. So we don't check for the existence of ~/.aws/credentials.
+            # i.e. the identity is not determined by the file.
+            hints = f'AWS env is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
@@ -677,18 +690,10 @@ class AWS(clouds.Cloud):
                     f'Unexpected `aws configure list` output:\n{output}')
             return len(results) == 1
 
-        if _is_access_key_of_type(AWSIdentityType.SSO.value):
-            return AWSIdentityType.SSO
-        elif _is_access_key_of_type(AWSIdentityType.IAM_ROLE.value):
-            return AWSIdentityType.IAM_ROLE
-        elif _is_access_key_of_type(AWSIdentityType.CONTAINER_ROLE.value):
-            return AWSIdentityType.CONTAINER_ROLE
-        elif _is_access_key_of_type(AWSIdentityType.ENV.value):
-            return AWSIdentityType.ENV
-        elif _is_access_key_of_type(AWSIdentityType.CUSTOM_PROCESS.value):
-            return AWSIdentityType.CUSTOM_PROCESS
-        else:
-            return AWSIdentityType.SHARED_CREDENTIALS_FILE
+        for identity_type in AWSIdentityType:
+            if _is_access_key_of_type(identity_type.value):
+                return identity_type
+        return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
     @functools.lru_cache(maxsize=1)
