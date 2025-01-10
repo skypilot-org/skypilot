@@ -63,6 +63,8 @@ sky autostop -i 10 -y ${CLUSTER_NAME}
 sky exec -d --cloud ${CLOUD} --num-nodes 2 ${CLUSTER_NAME} sleep 100
 
 conda activate sky-back-compat-current
+# The original cluster should exist in the status output
+sky status ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then

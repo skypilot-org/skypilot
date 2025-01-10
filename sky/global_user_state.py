@@ -371,6 +371,18 @@ def add_or_update_cluster(cluster_name: str,
     _DB.conn.commit()
 
 
+def _get_user_hash_or_current_user(user_hash: Optional[str]) -> str:
+    """Returns the user hash or the current user hash, if user_hash is None.
+
+    This is to ensure that the clusters created before the client-server
+    architecture (no user hash info previously) are associated with the current
+    user.
+    """
+    if user_hash is not None:
+        return user_hash
+    return common_utils.get_user_hash()
+
+
 def update_cluster_handle(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle'):
     handle = pickle.dumps(cluster_handle)
@@ -664,6 +676,7 @@ def get_cluster_from_name(
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
          status_updated_at, config_hash, user_hash) = row
+        user_hash = _get_user_hash_or_current_user(user_hash)
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -699,6 +712,7 @@ def get_clusters() -> List[Dict[str, Any]]:
         (name, launched_at, handle, last_use, status, autostop, metadata,
          to_down, owner, cluster_hash, storage_mounts_metadata, cluster_ever_up,
          status_updated_at, config_hash, user_hash) = row
+        user_hash = _get_user_hash_or_current_user(user_hash)
         # TODO: use namedtuple instead of dict
         record = {
             'name': name,
@@ -749,6 +763,7 @@ def get_clusters_from_history() -> List[Dict[str, Any]]:
             status,
             user_hash,
         ) = row[:7]
+        user_hash = _get_user_hash_or_current_user(user_hash)
 
         if status is not None:
             status = status_lib.ClusterStatus[status]
