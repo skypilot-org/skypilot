@@ -34,6 +34,7 @@ from sky.utils import common_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+@pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(

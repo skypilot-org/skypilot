@@ -77,6 +77,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace doesn't have T4 GPUs
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
@@ -591,6 +592,7 @@ def test_tpu_pod_slice_gke():
 
 
 # ---------- Simple apps. ----------
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -611,6 +613,7 @@ def test_multi_hostname(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
