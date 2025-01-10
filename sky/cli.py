@@ -1201,8 +1201,7 @@ def launch(
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
         if not detach_run and job_id is not None:
-            sdk.stream_and_get(
-                sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True))
+            sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
@@ -1350,7 +1349,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        sdk.stream_and_get(sdk.tail_logs(cluster, job_id, follow=True))
+        sdk.tail_logs(cluster, job_id, follow=True)
 
 
 def _get_managed_jobs(
@@ -2176,13 +2175,7 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    log_request_id = None
-    try:
-        log_request_id = sdk.tail_logs(cluster, job_id, follow, tail=tail)
-        sdk.stream_and_get(log_request_id)
-    finally:
-        if log_request_id is not None:
-            sdk.api_cancel(log_request_id, silent=True)
+    sdk.tail_logs(cluster, job_id, follow, tail=tail)
 
 
 @cli.command()

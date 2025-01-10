@@ -232,6 +232,7 @@ class ClusterJobBody(RequestBody):
     cluster_name: str
     job_id: Optional[int]
     follow: bool = True
+    tail: int = 0
 
 
 class ClusterJobsBody(RequestBody):

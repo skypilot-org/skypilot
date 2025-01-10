@@ -410,9 +410,15 @@ async def cancel(request: fastapi.Request,
 
 @app.post('/logs')
 async def logs(request: fastapi.Request,
-               cluster_job_body: payloads.ClusterJobBody) -> None:
+               cluster_job_body: payloads.ClusterJobBody,
+               background_tasks: fastapi.BackgroundTasks) -> None:
     """Tails the logs of a job."""
-    # TODO(SKY-988): make this synchronous.
+
+    async def on_disconnect():
+        logger.info(f'User terminated the connection for request '
+                    f'{request.state.request_id}')
+        requests_lib.kill_requests([request.state.request_id])
+
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='logs',
@@ -420,6 +426,18 @@ async def logs(request: fastapi.Request,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
     )
+    request_task = requests_lib.get_request(request.state.request_id)
+
+    # The background task will be run after returning a response.
+    # https://fastapi.tiangolo.com/tutorial/background-tasks/
+    background_tasks.add_task(on_disconnect)
+    return fastapi.responses.StreamingResponse(
+        log_streamer(request_task.request_id, request_task.log_path),
+        media_type='text/plain',
+        headers={
+            'Cache-Control': 'no-cache',
+            'X-Accel-Buffering': 'no'  # Disable nginx buffering if present
+        })
 
 
 @app.post('/download_logs')
