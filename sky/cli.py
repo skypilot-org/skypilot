@@ -136,8 +136,8 @@ def _get_cluster_records_and_set_ssh_config(
         if handle is not None and handle.cached_external_ips is not None:
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                # Replace the proxy command to proxy through the SkyPilot API server
-                # with websocket.
+                # Replace the proxy command to proxy through the SkyPilot API
+                # server with websocket.
                 key_path = (
                     cluster_utils.SSHConfigHelper.generate_local_key_file(
                         handle.cluster_name, credentials))
@@ -5610,13 +5610,13 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
-@click.option('--reload',
-              type=bool,
-              is_flag=True,
-              default=False,
-              required=False,
-              help='Automatically reload the SkyPilot API server when code changes.'
-             )
+@click.option(
+    '--reload',
+    type=bool,
+    is_flag=True,
+    default=False,
+    required=False,
+    help='Automatically reload the SkyPilot API server when code changes.')
 @click.option('--deploy',
               type=bool,
               is_flag=True,
