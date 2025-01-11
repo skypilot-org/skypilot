@@ -261,12 +261,10 @@ def _get_cloud_dependencies_installation_commands(
                 # We only need IBM deps on the jobs controller.
                 cloud_python_dependencies = []
         elif isinstance(cloud, clouds.Vast):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
+            step_prefix = prefix_str.replace('<step>', str(len(len) + 1))
             commands.append(f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
                             'pip list | grep vastai_sdk > /dev/null 2>&1 || '
                             'pip install "vastai_sdk>=0.1.2" > /dev/null 2>&1')
-            setup_clouds.append(str(cloud))
 
         python_packages.update(cloud_python_dependencies)
 
