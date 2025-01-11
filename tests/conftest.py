@@ -21,7 +21,7 @@ import pytest
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
     'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
 ]
 default_clouds_to_run = ['aws', 'azure']
@@ -43,6 +43,7 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'do': 'do',
     'runpod': 'runpod'
 }
 
@@ -219,3 +220,11 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
         if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
             region = list(ssh_proxy_command.keys())[0]
     return region
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.option.collectonly:
+        for item in items:
+            full_name = item.nodeid
+            marks = [mark.name for mark in item.iter_markers()]
+            print(f"Collected {full_name} with marks: {marks}")

@@ -1,0 +1,11 @@
+# An minimal example of a serve application.
+
+service:
+  readiness_probe: /
+  replicas: 1
+
+resources:
+  ports: 8080
+  cpus: 2+
+
+run: python3 -m http.server 8080

@@ -38,6 +38,13 @@ class DockerLoginConfig:
     password: str
     server: str
 
+    def format_image(self, image: str) -> str:
+        """Format the image name with the server prefix."""
+        server_prefix = f'{self.server}/'
+        if not image.startswith(server_prefix):
+            return f'{server_prefix}{image}'
+        return image
+
     @classmethod
     def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
         return cls(
@@ -220,9 +227,7 @@ class DockerInitializer:
                 wait_for_docker_daemon=True)
             # We automatically add the server prefix to the image name if
             # the user did not add it.
-            server_prefix = f'{docker_login_config.server}/'
-            if not specific_image.startswith(server_prefix):
-                specific_image = f'{server_prefix}{specific_image}'
+            specific_image = docker_login_config.format_image(specific_image)
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
@@ -338,14 +343,20 @@ class DockerInitializer:
         no_exist = 'NoExist'
         # SkyPilot: Add the current user to the docker group first (if needed),
         # before checking if docker is installed to avoid permission issues.
-        cleaned_output = self._run(
-            'id -nG $USER | grep -qw docker || '
-            'sudo usermod -aG docker $USER > /dev/null 2>&1;'
-            f'command -v {self.docker_cmd} || echo {no_exist!r}')
-        if no_exist in cleaned_output or 'docker' not in cleaned_output:
-            logger.error(
-                f'{self.docker_cmd.capitalize()} not installed. Please use an '
-                f'image with {self.docker_cmd.capitalize()} installed.')
+        docker_cmd = ('id -nG $USER | grep -qw docker || '
+                      'sudo usermod -aG docker $USER > /dev/null 2>&1;'
+                      f'command -v {self.docker_cmd} || echo {no_exist!r}')
+        cleaned_output = self._run(docker_cmd)
+        timeout = 60 * 10  # 10 minute timeout
+        start = time.time()
+        while no_exist in cleaned_output or 'docker' not in cleaned_output:
+            if time.time() - start > timeout:
+                logger.error(
+                    f'{self.docker_cmd.capitalize()} not installed. Please use '
+                    f'an image with {self.docker_cmd.capitalize()} installed.')
+                return
+            time.sleep(5)
+            cleaned_output = self._run(docker_cmd)
 
     def _check_container_status(self):
         if self.initialized:

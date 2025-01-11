@@ -200,3 +200,40 @@ def _add_bucket_iam_member(bucket_name: str, role: str, member: str) -> None:
     bucket.set_iam_policy(policy)
 
     logger.debug(f'Added {member} with role {role} to {bucket_name}.')
+
+
+def s3_to_oci(s3_bucket_name: str, oci_bucket_name: str) -> None:
+    """Creates a one-time transfer from Amazon S3 to OCI Object Storage.
+    Args:
+      s3_bucket_name: str; Name of the Amazon S3 Bucket
+      oci_bucket_name: str; Name of the OCI Bucket
+    """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
+    raise NotImplementedError('Moving data directly from S3 to OCI bucket '
+                              'is currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def gcs_to_oci(gs_bucket_name: str, oci_bucket_name: str) -> None:
+    """Creates a one-time transfer from Google Cloud Storage to
+    OCI Object Storage.
+    Args:
+      gs_bucket_name: str; Name of the Google Cloud Storage Bucket
+      oci_bucket_name: str; Name of the OCI Bucket
+    """
+    # TODO(HysunHe): Implement sync with other clouds (s3, gs)
+    raise NotImplementedError('Moving data directly from GCS to OCI bucket '
+                              'is currently not supported. Please specify '
+                              'a local source for the storage object.')
+
+
+def r2_to_oci(r2_bucket_name: str, oci_bucket_name: str) -> None:
+    """Creates a one-time transfer from Cloudflare R2 to OCI Bucket.
+    Args:
+      r2_bucket_name: str; Name of the Cloudflare R2 Bucket
+      oci_bucket_name: str; Name of the OCI Bucket
+    """
+    raise NotImplementedError(
+        'Moving data directly from Cloudflare R2 to OCI '
+        'bucket is currently not supported. Please specify '
+        'a local source for the storage object.')

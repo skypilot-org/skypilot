@@ -127,7 +127,7 @@ def check(
             '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
-    if len(all_enabled_clouds) == 0:
+    if not all_enabled_clouds:
         echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
