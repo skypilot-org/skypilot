@@ -1787,6 +1787,7 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         global_user_state.remove_cluster(cluster_name, terminate=True)
         logger.debug(f'Cluster {cluster_name!r} has no YAML file. '
                      'Removing the cluster from cache.')
+        return None
     if not isinstance(handle, backends.CloudVmRayResourceHandle):
         return record
     cluster_name = handle.cluster_name
