@@ -238,8 +238,9 @@ class Resources:
         self._docker_login_config = _docker_login_config
 
         # TODO(andyl): This ctor param seems to be unused.
-        # We always use `Task.set_resources` and `Resources.copy` to set the `docker_ssh_username`.
-        # But to keep the consistency with `_docker_login_config`, we keep it here.
+        # We always use `Task.set_resources` and `Resources.copy` to set the
+        # `docker_ssh_username`. But to keep the consistency with
+        # `_docker_login_config`, we keep it here.
         self._docker_ssh_username = _docker_ssh_username
 
         self._requires_fuse = _requires_fuse
@@ -1076,7 +1077,7 @@ class Resources:
         # Cloud specific variables
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun)
-        
+
         # TODO(andyl): Should we print some warnings if users' envs share
         # same names with the cloud specific variables, but not enabled
         # since it's not on the particular cloud?

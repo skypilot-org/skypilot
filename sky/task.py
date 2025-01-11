@@ -170,12 +170,14 @@ def _with_docker_login_config(
         new_resources.append(_add_docker_login_config(r))
     return type(resources)(new_resources)
 
+
 def _with_docker_ssh_username(
     resources: Union[Set['resources_lib.Resources'],
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
-    return resources.copy(docker_ssh_username=task_envs.get(constants.DOCKER_SSH_USERNAME_ENV_VAR))
+    return type(resources)(r.copy(_docker_ssh_username=task_envs.get(
+        constants.DOCKER_SSH_USERNAME_ENV_VAR)) for r in resources)
 
 
 class Task:
@@ -592,8 +594,7 @@ class Task:
         if _check_docker_login_config(self._envs):
             self.resources = _with_docker_login_config(self.resources,
                                                        self._envs)
-        self.resources = _with_docker_ssh_username(self.resources,
-                                                   self._envs)
+        self.resources = _with_docker_ssh_username(self.resources, self._envs)
         return self
 
     @property

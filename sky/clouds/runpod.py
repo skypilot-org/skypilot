@@ -178,9 +178,9 @@ class RunPod(clouds.Cloud):
             instance_type=instance_type, use_spot=use_spot)
 
         # default to root
-        docker_ssh_username = (
-            resources.docker_ssh_username if resources.docker_ssh_username is not None else 'root'
-        )
+        docker_ssh_username = (resources.docker_ssh_username
+                               if resources.docker_ssh_username is not None else
+                               'root')
 
         return {
             'instance_type': instance_type,
