@@ -513,7 +513,7 @@ def test_multiple_accelerators_unordered_with_default():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.no_vast # Requires other clouds to be enabled
+@pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
@@ -530,7 +530,7 @@ def test_multiple_resources():
 
 # ---------- Sky Benchmark ----------
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
-@pytest.mark.no_vast # Requires other clouds to be enabled
+@pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 @pytest.mark.aws  # SkyBenchmark requires S3 access

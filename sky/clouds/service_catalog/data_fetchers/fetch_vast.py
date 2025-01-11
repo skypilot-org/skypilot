@@ -26,7 +26,7 @@ _map = {
 def create_instance_type(obj: Dict[str, Any]) -> str:
     stubify = lambda x: re.sub(r'\s', '_', x)
     return '{}x-{}-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
-                              obj['cpu_cores'], obj['cpu_ram'])
+                                 obj['cpu_cores'], obj['cpu_ram'])
 
 
 def dot_get(d: dict, key: str) -> Any:
