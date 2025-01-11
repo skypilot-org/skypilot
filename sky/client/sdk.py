@@ -1362,9 +1362,9 @@ def stream_and_get(request_id: Optional[str] = None,
     params = {
         'request_id': request_id,
         'log_path': log_path,
-        'plain_logs': False,
         'tail': str(tail) if tail is not None else None,
         'follow': follow,
+        'format': 'console',
     }
     response = requests.get(
         f'{server_common.get_server_url()}/api/stream',

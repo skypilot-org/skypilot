@@ -9,7 +9,7 @@ import pathlib
 import shutil
 import sys
 import time
-from typing import AsyncGenerator, Deque, Dict, List, Optional
+from typing import AsyncGenerator, Deque, Dict, List, Literal, Optional
 import uuid
 import zipfile
 
@@ -621,6 +621,7 @@ async def log_streamer(request_id: Optional[str],
         if request_task is None:
             raise fastapi.HTTPException(
                 status_code=404, detail=f'Request {request_id} not found')
+        request_id = request_task.request_id
 
         # Do not show the waiting spinner if the request is a fast, non-blocking
         # request.
@@ -631,11 +632,16 @@ async def log_streamer(request_id: Optional[str],
         if show_request_waiting_spinner:
             yield status_msg.init()
             yield status_msg.start()
+        is_waiting_msg_logged = False
+        waiting_msg = (f'Waiting for {request_task.name!r} request to be '
+                       f'scheduled: {request_id}')
         while request_task.status < requests_lib.RequestStatus.RUNNING:
             if show_request_waiting_spinner:
-                yield status_msg.update(
-                    f'[dim]Waiting for {request_task.name} request: '
-                    f'{request_id}[/dim]')
+                yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
+            elif plain_logs and not is_waiting_msg_logged:
+                is_waiting_msg_logged = True
+                # Use smaller padding (1024 bytes) to force browser rendering
+                yield f'{waiting_msg}' + ' ' * 4096 + '\n'
             # Sleep 0 to yield, so other coroutines can run. This busy waiting
             # loop is performance critical for short-running requests, so we do
             # not want to yield too long.
@@ -664,6 +670,10 @@ async def log_streamer(request_id: Optional[str],
                 if request_id is not None:
                     request_task = requests_lib.get_request(request_id)
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
+                        if (request_task.status ==
+                                requests_lib.RequestStatus.CANCELLED):
+                            yield (f'{request_task.name!r} request {request_id}'
+                                   ' cancelled\n')
                         break
                 if not follow:
                     break
@@ -683,18 +693,41 @@ async def log_streamer(request_id: Optional[str],
                     # requests, so we do not want to yield too long.
                     await asyncio.sleep(0)
                     continue
-                line_str = common_utils.remove_color(line_str)
             yield line_str
             await asyncio.sleep(0)  # Allow other tasks to run
 
 
 @app.get('/api/stream')
-async def stream(request_id: Optional[str] = None,
-                 log_path: Optional[str] = None,
-                 plain_logs: bool = True,
-                 tail: Optional[int] = None,
-                 follow: bool = True) -> fastapi.responses.StreamingResponse:
-    """Streams the logs of a request."""
+async def stream(
+    request: fastapi.Request,
+    request_id: Optional[str] = None,
+    log_path: Optional[str] = None,
+    tail: Optional[int] = None,
+    follow: bool = True,
+    # Choices: 'auto', 'plain', 'html', 'console'
+    # 'auto': automatically choose between HTML and plain text
+    #         based on the request source
+    # 'plain': plain text for HTML clients
+    # 'html': HTML for browsers
+    # 'console': console for CLI/API clients
+    # pylint: disable=redefined-builtin
+    format: Literal['auto', 'plain', 'html', 'console'] = 'auto',
+) -> fastapi.responses.Response:
+    """Streams the logs of a request.
+
+    When format is 'auto' and the request is coming from a browser, the response
+    is a HTML page with JavaScript to handle streaming, which will request the
+    API server again with format='plain' to get the actual log content.
+
+    Args:
+        request_id: Request ID to stream logs for.
+        log_path: Log path to stream logs for.
+        tail: Number of lines to stream from the end of the log file.
+        follow: Whether to follow the log file.
+        format: Response format - 'auto' (HTML for browsers, plain for HTML
+            clients, console for CLI/API clients), 'plain' (force plain text),
+            'html' (force HTML), or 'console' (force console)
+    """
     if request_id is not None and log_path is not None:
         raise fastapi.HTTPException(
             status_code=400,
@@ -705,6 +738,30 @@ async def stream(request_id: Optional[str] = None,
         if request_id is None:
             raise fastapi.HTTPException(status_code=404,
                                         detail='No request found')
+
+    # Determine if we should use HTML format
+    if format == 'auto':
+        # Check if request is coming from a browser
+        user_agent = request.headers.get('user-agent', '').lower()
+        use_html = any(browser in user_agent
+                       for browser in ['mozilla', 'chrome', 'safari', 'edge'])
+    else:
+        use_html = format == 'html'
+
+    if use_html:
+        # Return HTML page with JavaScript to handle streaming
+        stream_url = request.url.include_query_params(format='plain')
+        html_dir = pathlib.Path(__file__).parent / 'html'
+        with open(html_dir / 'log.html', 'r', encoding='utf-8') as file:
+            html_content = file.read()
+        return fastapi.responses.HTMLResponse(
+            html_content.replace('{stream_url}', str(stream_url)),
+            headers={
+                'Cache-Control': 'no-cache, no-transform',
+                'X-Accel-Buffering': 'no'
+            })
+
+    # Original plain text streaming logic
     if request_id is not None:
         request_task = requests_lib.get_request(request_id)
         if request_task is None:
@@ -733,12 +790,18 @@ async def stream(request_id: Optional[str] = None,
 
         log_path_to_stream = resolved_log_path
     return fastapi.responses.StreamingResponse(
-        log_streamer(request_id, log_path_to_stream, plain_logs, tail, follow),
+        content=log_streamer(request_id,
+                             log_path_to_stream,
+                             plain_logs=format == 'plain',
+                             tail=tail,
+                             follow=follow),
         media_type='text/plain',
         headers={
-            'Cache-Control': 'no-cache',
-            'X-Accel-Buffering': 'no'  # Disable nginx buffering if present
-        })
+            'Cache-Control': 'no-cache, no-transform',
+            'X-Accel-Buffering': 'no',
+            'Transfer-Encoding': 'chunked'
+        },
+    )
 
 
 @app.post('/api/cancel')
