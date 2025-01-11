@@ -25,7 +25,7 @@ provider:
   {%- endif %}
 
 auth:
-  ssh_user: root
+  ssh_user: {{docker_ssh_username}}
   ssh_private_key: {{ssh_private_key}}
 
 available_node_types:

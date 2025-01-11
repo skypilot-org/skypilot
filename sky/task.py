@@ -121,6 +121,9 @@ def _check_docker_login_config(task_envs: Dict[str, str]) -> bool:
 
     If any of the docker login env vars is set, all of them must be set.
 
+    Returns:
+        True if there is a valid docker login config in task_envs.
+        False otherwise.
     Raises:
         ValueError: if any of the docker login env vars is set, but not all of
             them are set.
@@ -166,6 +169,13 @@ def _with_docker_login_config(
     for r in resources:
         new_resources.append(_add_docker_login_config(r))
     return type(resources)(new_resources)
+
+def _with_docker_ssh_username(
+    resources: Union[Set['resources_lib.Resources'],
+                     List['resources_lib.Resources']],
+    task_envs: Dict[str, str],
+) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
+    return resources.copy(docker_ssh_username=task_envs.get(constants.DOCKER_SSH_USERNAME_ENV_VAR))
 
 
 class Task:
@@ -582,6 +592,8 @@ class Task:
         if _check_docker_login_config(self._envs):
             self.resources = _with_docker_login_config(self.resources,
                                                        self._envs)
+        self.resources = _with_docker_ssh_username(self.resources,
+                                                   self._envs)
         return self
 
     @property
@@ -647,6 +659,7 @@ class Task:
             resources = {resources}
         # TODO(woosuk): Check if the resources are None.
         self.resources = _with_docker_login_config(resources, self.envs)
+        self.resources = _with_docker_ssh_username(self.resources, self.envs)
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
