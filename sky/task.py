@@ -176,8 +176,14 @@ def _with_docker_ssh_username(
                      List['resources_lib.Resources']],
     task_envs: Dict[str, str],
 ) -> Union[Set['resources_lib.Resources'], List['resources_lib.Resources']]:
-    return type(resources)(r.copy(_docker_ssh_username=task_envs.get(
-        constants.DOCKER_SSH_USERNAME_ENV_VAR)) for r in resources)
+    docker_ssh_username = task_envs.get(constants.DOCKER_SSH_USERNAME_ENV_VAR)
+
+    # We should not call r.copy() if docker_ssh_username is None,
+    # to prevent `DummyResources` instance becoming a `Resources` instance.
+    if docker_ssh_username is None:
+        return resources
+    return (type(resources)(
+        r.copy(_docker_ssh_username=docker_ssh_username) for r in resources))
 
 
 class Task:
