@@ -200,15 +200,21 @@ def _get_cloud_dependencies_installation_commands(
                   'on controller: ')
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
-    empty_str = ' ' * 10
-    aws_dependencies_installation = (
-        'pip list | grep boto3 > /dev/null 2>&1 || pip install '
-        'botocore>=1.29.10 boto3>=1.26.1; '
-        # Need to separate the installation of awscli from above because some
-        # other clouds will install boto3 but not awscli.
-        'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
-        'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
-    setup_clouds: List[str] = []
+
+    empty_str = ' ' * 20
+
+    # All python dependencies will be accumulated and then installed in one
+    # command at the end. This is very fast if the packages are already
+    # installed, so we don't check that.
+    python_packages: Set[str] = set()
+
+    # add flask to the controller dependencies for dashboard
+    python_packages.add('flask')
+
+    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
+                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
+
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
         if isinstance(
                 clouds,

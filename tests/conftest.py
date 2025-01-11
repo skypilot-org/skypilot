@@ -222,3 +222,11 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
         if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
             region = list(ssh_proxy_command.keys())[0]
     return region
+
+
+def pytest_collection_modifyitems(config, items):
+    if config.option.collectonly:
+        for item in items:
+            full_name = item.nodeid
+            marks = [mark.name for mark in item.iter_markers()]
+            print(f"Collected {full_name} with marks: {marks}")

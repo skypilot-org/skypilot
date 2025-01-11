@@ -365,7 +365,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
             # separated by `-`.
             (f'MANAGED_JOB_ID=`cat /tmp/{name}-run-id | rev | '
              f'cut -d\'_\' -f1 | rev | cut -d\'-\' -f1`; {terminate_cmd}'),
-            smoke_tests_utils.zJOB_WAIT_NOT_RUNNING.format(job_name=name),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name),
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -868,6 +868,29 @@ def test_managed_jobs_inline_env(generic_cloud: str):
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_logs_sync_down():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-managed-jobs-logs-sync-down',
+        [
+            f'sky jobs launch -n {name} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300 + smoke_tests_utils.BUMP_UP_SECONDS),
+            f'sky jobs logs --controller 1 --sync-down',
+            f'sky jobs logs 1 --sync-down',
+            f'sky jobs logs --controller --name minimal --sync-down',
+            f'sky jobs logs --name minimal --sync-down',
+        ],
+        f'sky jobs cancel -y -n {name}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
