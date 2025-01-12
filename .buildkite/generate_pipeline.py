@@ -21,11 +21,12 @@ SERVE_CLOUD_QUEUE_MAP) now, smoke tests for those clouds are generated, other
 clouds are not supported yet, smoke tests for those clouds are not generated.
 """
 
+import collections
 import os
 import random
 import re
 import subprocess
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import click
 from conftest import cloud_to_pytest_keyword
@@ -64,8 +65,9 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        'edit directly.\n')
 
 
-def _extract_marked_tests(file_path: str,
-                          filter_marks: List[str]) -> Dict[str, List[str]]:
+def _extract_marked_tests(
+    file_path: str, filter_marks: List[str]
+) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -83,15 +85,25 @@ def _extract_marked_tests(file_path: str,
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
-    function_name_marks_map = {}
+    function_name_marks_map = collections.defaultdict(set)
+    function_name_param_map = collections.defaultdict(list)
     for function_name, marks in matches:
-        function_name = re.sub(r'\[.*?\]', '', function_name)
         marks = marks.replace('\'', '').split(',')
         marks = [i.strip() for i in marks]
-        if function_name not in function_name_marks_map:
-            function_name_marks_map[function_name] = set(marks)
+        function_name_marks_map[function_name].update(marks)
+        if 'serve' in marks and '[' in function_name:
+            # example: test_skyserve_new_autoscaler_update[rolling]
+            # param: rolling
+            # function_name: test_skyserve_new_autoscaler_update
+            # Separate serve tests with different parameters to different steps
+            # for parallel execution
+            param = re.search('\[(.+?)\]', function_name).group(1)
+            function_name = re.search('(.+?)\[', function_name).group(1)
         else:
-            function_name_marks_map[function_name].update(marks)
+            param = None
+        if param:
+            function_name_param_map[function_name].append(param)
+
     function_cloud_map = {}
     filter_marks = set(filter_marks)
     for function_name, marks in function_name_marks_map.items():
@@ -132,10 +144,17 @@ def _extract_marked_tests(file_path: str,
                 f'Warning: {function_name} is marked to run on {clouds_to_include}, '
                 f'but we only have credentials for {final_clouds_to_include}. '
                 f'clouds {excluded_clouds} are skipped.')
+
+        param_list = function_name_param_map.get(function_name, [None])
+        if len(param_list) < len(final_clouds_to_include):
+            # align, so we can zip them together
+            param_list += [None
+                          ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             QUEUE_GKE if run_on_gke else cloud_queue_map[cloud]
             for cloud in final_clouds_to_include
-        ])
+        ], function_name_param_map.get(function_name, [None]))
+
     return function_cloud_map
 
 
@@ -145,11 +164,16 @@ def _generate_pipeline(test_file: str,
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file, filter_marks)
-    for test_function, clouds_and_queues in function_cloud_map.items():
-        for cloud, queue in zip(*clouds_and_queues):
+    for test_function, clouds_queues_param in function_cloud_map.items():
+        for cloud, queue, param in zip(*clouds_queues_param):
+            label = f'{test_function} on {cloud}'
+            command = f'pytest {test_file}::{test_function} --{cloud}'
+            if param:
+                label += f' with param {param}'
+                command += f' -k {param}'
             step = {
-                'label': f'{test_function} on {cloud}',
-                'command': f'pytest {test_file}::{test_function} --{cloud}',
+                'label': label,
+                'command': command,
                 'agents': {
                     # Separate agent pool for each cloud.
                     # Since they require different amount of resources and
