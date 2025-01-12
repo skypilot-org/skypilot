@@ -88,21 +88,22 @@ def _extract_marked_tests(
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
     for function_name, marks in matches:
+        clean_function_name = re.sub(r'\[.*?\]', '', function_name)
         marks = marks.replace('\'', '').split(',')
         marks = [i.strip() for i in marks]
-        function_name_marks_map[function_name].update(marks)
-        if 'serve' in marks and '[' in function_name:
-            # example: test_skyserve_new_autoscaler_update[rolling]
-            # param: rolling
-            # function_name: test_skyserve_new_autoscaler_update
-            # Separate serve tests with different parameters to different steps
-            # for parallel execution
+        function_name_marks_map[clean_function_name].update(marks)
+
+        # extract parameter from function name
+        # example: test_skyserve_new_autoscaler_update[rolling]
+        # param: rolling
+        # function_name: test_skyserve_new_autoscaler_update
+        param = None
+        if '[' in function_name and 'serve' in marks:
+            # Only serve tests are slow and flaky, so we separate them
+            # to different steps for parallel execution
             param = re.search('\[(.+?)\]', function_name).group(1)
-            function_name = re.search('(.+?)\[', function_name).group(1)
-        else:
-            param = None
         if param:
-            function_name_param_map[function_name].append(param)
+            function_name_param_map[clean_function_name].append(param)
 
     function_cloud_map = {}
     filter_marks = set(filter_marks)
