@@ -3980,8 +3980,15 @@ class OciStore(AbstractStore):
         self.compartment: str
         self.namespace: str
 
-        # Bucket region should be consistence with the OCI config file
-        region = oci.get_oci_config()['region']
+        # Region is from the specified name in <bucket>@<region> format
+        if '@' in name:
+            name, region = name.split('@', maxsplit=1)
+        # Region is from the specified source in oci://<bucket>@<region> format
+        if '@' in source:
+            source, region = source.split('@', maxsplit=1)
+        # Default region set to what specified in oci config.
+        if region is None:
+            region = oci.get_oci_config()['region']
 
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
@@ -4137,7 +4144,8 @@ class OciStore(AbstractStore):
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--src-dir "{base_dir_path}" {includes}')
+                f'--region {self.region} --src-dir "{base_dir_path}" '
+                f'{includes}')
 
             return sync_command
 
@@ -4157,8 +4165,8 @@ class OciStore(AbstractStore):
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--object-prefix "{dest_dir_name}" --src-dir "{src_dir_path}" '
-                f'{excludes} ')
+                f'--region {self.region} --object-prefix "{dest_dir_name}" '
+                f'--src-dir "{src_dir_path}" {excludes}')
 
             return sync_command
 
@@ -4289,7 +4297,8 @@ class OciStore(AbstractStore):
         def get_file_download_command(remote_path, local_path):
             download_command = (f'oci os object get --bucket-name {self.name} '
                                 f'--namespace-name {self.namespace} '
-                                f'--name {remote_path} --file {local_path}')
+                                f'--region {self.region} --name {remote_path} '
+                                f'--file {local_path}')
 
             return download_command
 
@@ -4346,6 +4355,7 @@ class OciStore(AbstractStore):
         @oci.with_oci_env
         def get_bucket_delete_command(bucket_name):
             remove_command = (f'oci os bucket delete --bucket-name '
+                              f'--region {self.region} '
                               f'{bucket_name} --empty --force')
 
             return remove_command

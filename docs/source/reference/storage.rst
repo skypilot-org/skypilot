@@ -290,7 +290,7 @@ Storage YAML reference
             - https://<azure_storage_account>.blob.core.windows.net/<container_name>
             - r2://<bucket_name>
             - cos://<region_name>/<bucket_name>
-            - oci://<bucket_name>
+            - oci://<bucket_name>@<region>
 
           If the source is local, data is uploaded to the cloud to an appropriate
           bucket (s3, gcs, azure, r2, oci, or ibm). If source is bucket URI,
