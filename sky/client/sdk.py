@@ -54,6 +54,19 @@ logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 
+def _stream_response(request_id: Optional[str],
+                     response: requests.Response) -> Any:
+    """Streams the response to the console."""
+    try:
+        for line in rich_utils.decode_rich_status(response):
+            if line is not None:
+                print(line, flush=True)
+        return get(request_id)
+    except Exception:  # pylint: disable=broad-except
+        logger.debug(f'To stream request logs: sky api logs {request_id}')
+        raise
+
+
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.public_api
@@ -511,9 +524,6 @@ def tail_logs(cluster_name: str,
             immediately.
         tail: if > 0, tail the last N lines of the logs.
 
-    Returns:
-        request_id: The request ID of the tail_logs request.
-
     Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
@@ -532,8 +542,11 @@ def tail_logs(cluster_name: str,
         tail=tail,
     )
     response = requests.post(f'{server_common.get_server_url()}/logs',
-                             json=json.loads(body.model_dump_json()))
-    return server_common.get_request_id(response)
+                             json=json.loads(body.model_dump_json()),
+                             stream=True,
+                             timeout=(5, None))
+    request_id = server_common.get_request_id(response)
+    return _stream_response(request_id, response)
 
 
 @usage_lib.entrypoint
@@ -1374,14 +1387,7 @@ def stream_and_get(request_id: Optional[str] = None,
         stream=True)
     if response.status_code != 200:
         return get(request_id)
-    try:
-        for line in rich_utils.decode_rich_status(response):
-            if line is not None:
-                print(line, flush=True)
-        return get(request_id)
-    except Exception:  # pylint: disable=broad-except
-        logger.debug(f'To stream request logs: sky api logs {request_id}')
-        raise
+    return _stream_response(request_id, response)
 
 
 @usage_lib.entrypoint

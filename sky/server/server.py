@@ -410,9 +410,10 @@ async def cancel(request: fastapi.Request,
 
 
 @app.post('/logs')
-async def logs(request: fastapi.Request,
-               cluster_job_body: payloads.ClusterJobBody,
-               background_tasks: fastapi.BackgroundTasks) -> None:
+async def logs(
+    request: fastapi.Request, cluster_job_body: payloads.ClusterJobBody,
+    background_tasks: fastapi.BackgroundTasks
+) -> fastapi.responses.StreamingResponse:
     """Tails the logs of a job."""
 
     async def on_disconnect():
