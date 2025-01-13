@@ -882,8 +882,8 @@ class AWS(clouds.Cloud):
     @functools.lru_cache(maxsize=1)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
-        return identity_type is not None and identity_type.can_credential_expire(
-        )
+        return (identity_type is not None and
+                identity_type.can_credential_expire())
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')

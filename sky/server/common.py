@@ -2,6 +2,7 @@
 import dataclasses
 import enum
 import functools
+import importlib
 import os
 import pathlib
 import subprocess
@@ -25,6 +26,8 @@ from sky.data import data_utils
 from sky.data import storage_utils
 from sky.server import constants as server_constants
 from sky.skylet import constants
+from sky.utils import annotations
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -419,3 +422,27 @@ def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
     return {
         k: v for k, v in body.model_dump(mode='json').items() if v is not None
     }
+
+
+def reload_for_new_request():
+    """Reload modules and global variables for a new request."""
+    # When a user request is sent to api server, it changes the user hash in the
+    # env vars, but since controller_utils is imported before the env vars are
+    # set, it doesn't get updated. So we need to reload it here.
+    # pylint: disable=import-outside-toplevel
+    from sky.utils import controller_utils
+    common.SKY_SERVE_CONTROLLER_NAME = common.get_controller_name(
+        common.ControllerType.SERVE)
+    common.JOB_CONTROLLER_NAME = common.get_controller_name(
+        common.ControllerType.JOBS)
+    # TODO(zhwu): We should avoid reloading the controller_utils module.
+    # Instead, we should reload required cache or global variables.
+    importlib.reload(controller_utils)
+
+    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
+        func.cache_clear()
+
+    # Make sure the logger takes the new environment variables. This is
+    # necessary because the logger is initialized before the environment
+    # variables are set, such as SKYPILOT_DEBUG.
+    sky_logging.reload_logger()

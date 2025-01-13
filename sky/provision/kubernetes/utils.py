@@ -24,6 +24,7 @@ from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import env_options
@@ -390,6 +391,7 @@ AUTOSCALER_TO_LABEL_FORMATTER = {
 }
 
 
+@annotations.cache_needs_reload
 @functools.lru_cache()
 def detect_gpu_label_formatter(
     context: Optional[str]
@@ -422,6 +424,7 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
+@annotations.cache_needs_reload
 @functools.lru_cache(maxsize=10)
 def detect_accelerator_resource(
         context: Optional[str]) -> Tuple[bool, Set[str]]:
@@ -447,6 +450,7 @@ def detect_accelerator_resource(
     return has_accelerator, cluster_resources
 
 
+@annotations.cache_needs_reload
 @functools.lru_cache(maxsize=10)
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
@@ -691,7 +695,7 @@ def get_accelerator_label_key_value(
                     f'{supported_formats}. Please refer to '
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
-        if label_formatter is not None:
+        else:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
             for node_name, label_list in node_labels.items():
@@ -782,6 +786,7 @@ def get_accelerator_label_key_value(
                 f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
                 'Please refer to the documentation on how to set up GPUs.'
                 f'{suffix}')
+    assert False, 'This should not be reached'
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
@@ -1027,6 +1032,7 @@ def is_kubeconfig_exec_auth(
     return False, None
 
 
+@annotations.cache_needs_reload
 @functools.lru_cache()
 def get_current_kube_config_context_name() -> Optional[str]:
     """Get the current kubernetes context from the kubeconfig file
@@ -1084,13 +1090,14 @@ def get_all_kube_context_names() -> List[str]:
     return context_names
 
 
+@annotations.cache_needs_reload
 @functools.lru_cache()
 def get_kube_config_context_namespace(
         context_name: Optional[str] = None) -> str:
     """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
-        str | None: The current kubernetes context namespace if it exists, else
+        str: The current kubernetes context namespace if it exists, else
             the default namespace.
     """
     k8s = kubernetes.kubernetes

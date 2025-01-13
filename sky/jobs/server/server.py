@@ -7,11 +7,11 @@ import httpx
 from sky import sky_logging
 from sky.jobs.server import core
 from sky.jobs.server import dashboard_utils
+from sky.server import common as server_common
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.skylet import constants
-from sky.utils import common
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -76,7 +76,7 @@ async def dashboard(request: fastapi.Request,
                     user_hash: str) -> fastapi.Response:
     # Find the port for the dashboard of the user
     os.environ[constants.USER_ID_ENV_VAR] = user_hash
-    common.reload()
+    server_common.reload_for_new_request()
     logger.info(f'Starting dashboard for user hash: {user_hash}')
 
     body = payloads.RequestBody()

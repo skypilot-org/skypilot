@@ -34,7 +34,7 @@ def is_tmp_9p_filesystem() -> bool:
     return filesystem_types[1].lower() == '9p'
 
 
-@functools.lru_cache
+@functools.lru_cache()
 def should_disable_control_master() -> bool:
     """Whether disable ssh control master based on file system.
 

@@ -21,6 +21,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.provision import common
 from sky.provision.aws import utils
+from sky.utils import annotations
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -222,6 +223,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
+@annotations.cache_needs_reload
 @functools.lru_cache(maxsize=128)  # Keep bounded.
 def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
                       main: bool) -> List[Any]:

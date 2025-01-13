@@ -1,9 +1,7 @@
 """Common enumerators and classes."""
 
 import enum
-import importlib
 
-from sky import sky_logging
 from sky.utils import common_utils
 
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
@@ -63,29 +61,6 @@ class StatusRefreshMode(enum.Enum):
 class OptimizeTarget(enum.Enum):
     COST = 0
     TIME = 1
-
-
-def reload():
-    # When a user request is sent to api server, it changes the user hash in the
-    # env vars, but since controller_utils is imported before the env vars are
-    # set, it doesn't get updated. So we need to reload it here.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
-    global SKY_SERVE_CONTROLLER_NAME
-    global JOB_CONTROLLER_NAME
-    SKY_SERVE_CONTROLLER_NAME = get_controller_name(ControllerType.SERVE)
-    JOB_CONTROLLER_NAME = get_controller_name(ControllerType.JOBS)
-    importlib.reload(controller_utils)
-
-    # We have to reload the kubernetes utils because it uses the lru_cache which
-    # should be cleared between among requests.
-    from sky.provision.kubernetes import utils
-    importlib.reload(utils)
-
-    # Make sure the logger takes the new environment variables. This is
-    # necessary because the logger is initialized before the environment
-    # variables are set, such as SKYPILOT_DEBUG.
-    sky_logging.reload_logger()
 
 
 def is_current_user_controller(controller_name: str) -> bool:

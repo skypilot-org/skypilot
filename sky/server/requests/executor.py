@@ -40,12 +40,12 @@ from sky import global_user_state
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -160,7 +160,7 @@ def override_request_env_and_config(
     common_utils.set_current_command(request_body.entrypoint_command)
     # Force color to be enabled.
     os.environ['CLICOLOR_FORCE'] = '1'
-    common.reload()
+    server_common.reload_for_new_request()
     try:
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config):
