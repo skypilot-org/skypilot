@@ -4,8 +4,6 @@ import time
 from time import sleep
 from typing import Any, Dict, List, Optional
 
-from rich import region
-
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
@@ -228,3 +226,10 @@ def query_instances(
             continue
         statuses[inst_id] = status
     return statuses
+
+def cleanup_ports(
+        cluster_name_on_cloud: str,
+        ports: List[str],
+        provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    del cluster_name_on_cloud, ports, provider_config  # Unused.

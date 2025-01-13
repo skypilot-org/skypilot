@@ -1,19 +1,17 @@
 """RunPod library wrapper for SkyPilot."""
 import os
 import time
-from typing import Any, Dict, List
+from typing import Any, Dict
 
 from nebius.api.nebius.common.v1 import ResourceMetadata, GetByNameRequest
 from nebius.aio.service_error import RequestError
-from nebius.api.nebius.iam.v1 import ProjectServiceClient, GetProjectByNameRequest, ListProjectsRequest
+from nebius.api.nebius.iam.v1 import ProjectServiceClient, ListProjectsRequest
 from nebius.api.nebius.vpc.v1 import SubnetServiceClient, ListSubnetsRequest
 from nebius.api.nebius.compute.v1 import ListInstancesRequest, CreateInstanceRequest, InstanceSpec, \
     NetworkInterfaceSpec, IPAddress, ResourcesSpec, AttachedDiskSpec, ExistingDisk, DiskServiceClient, \
-    CreateDiskRequest, DiskSpec, SourceImageFamily, InstanceServiceClient, InstanceStatus, DiskStatus, \
-    DeleteInstanceRequest, \
-    PublicIPAddress, StopInstanceRequest, StartInstanceRequest, DeleteDiskRequest, GetInstanceRequest, \
-    GpuClusterServiceClient, CreateGpuClusterRequest, InstanceGpuClusterSpec, GpuClusterSpec, DeleteGpuClusterRequest
-from nebius.base.protos.unset import Unset
+    CreateDiskRequest, DiskSpec, SourceImageFamily, InstanceServiceClient, DeleteInstanceRequest, PublicIPAddress, \
+    StopInstanceRequest, StartInstanceRequest, DeleteDiskRequest, GetInstanceRequest, GpuClusterServiceClient, \
+    CreateGpuClusterRequest, InstanceGpuClusterSpec, GpuClusterSpec, DeleteGpuClusterRequest
 
 from sky import sky_logging
 from sky.adaptors import nebius
@@ -35,6 +33,7 @@ def get_iam_token_project_id() -> Dict[str, str]:
         'iam_token': iam_token,
         'tenant_id': tenant_id
     }
+
 
 params = get_iam_token_project_id()
 NEBIUS_IAM_TOKEN = params['iam_token']
@@ -61,6 +60,7 @@ def retry(func):
 
     return wrapper
 
+
 def get_project_by_region(region: str) -> str:
     service = ProjectServiceClient(sdk)
     projects = service.list(ListProjectsRequest(
@@ -72,6 +72,7 @@ def get_project_by_region(region: str) -> str:
         if region == 'eu-west1' and project.metadata.id[8:11] == 'e01':
             return project.metadata.id
     raise Exception(f'No project found for region "{region}".')
+
 
 def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
     """Creates a GPU cluster."""
@@ -228,7 +229,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int, user_data
             spec=InstanceSpec(
                 gpu_cluster=InstanceGpuClusterSpec(
                     id=cluster_id,
-                ) if cluster_id else Unset,
+                ) if cluster_id else None,
                 boot_disk=AttachedDiskSpec(
                     attach_mode=AttachedDiskSpec.AttachMode(2),
                     existing_disk=ExistingDisk(
