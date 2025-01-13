@@ -4,6 +4,8 @@ server:
   http_listen_port: 9090
   http_server_read_timeout: 300s
   http_server_write_timeout: 300s
+  grpc_server_max_recv_msg_size: 1073741824  # 128 MB
+  grpc_server_max_send_msg_size: 1073741824  # 128 MB
 
 schema_config:
   configs:
@@ -14,12 +16,18 @@ schema_config:
       index:
         prefix: loki_index_
         period: 24h
+    - from: 2024-12-30
+      store: tsdb
+      object_store: aws
+      schema: v13
+      index:
+        prefix: loki_index_
+        period: 24h
 
 ingester:
   chunk_idle_period: 3m
   chunk_block_size: 262144
   chunk_retain_period: 1m
-  max_transfer_retries: 0
   wal:
     enabled: true
     dir: /loki/wal
@@ -31,18 +39,19 @@ ingester:
 
 storage_config:
   aws:
-    bucketnames: sky-host-loki
+    bucketnames: skypilot-loki
     region: us-west-2
     access_key_id: PLACEHOLDER
     secret_access_key: PLACEHOLDER
     s3forcepathstyle: true
   boltdb_shipper:
     active_index_directory: /loki/index
-    shared_store: s3
     cache_location: /loki/boltdb-cache
+  tsdb_shipper:
+    active_index_directory: /loki/tsdb-index
+    cache_location: /loki/tsdb-cache
 
 querier:
-  query_timeout: 10m
   max_concurrent: 32
 query_scheduler:
   max_outstanding_requests_per_tenant: 4096
@@ -53,23 +62,27 @@ query_range:
 
 limits_config:
   max_query_series: 5000
-  ingestion_rate_strategy: local # Default: global
+  ingestion_rate_strategy: local
   max_global_streams_per_user: 5000
-  max_query_length: 0h # Default: 721h
-  max_query_parallelism: 32 # Old Default: 14
+  max_query_length: 0h
+  max_query_parallelism: 32
   max_entries_limit_per_query: 1000000
-  max_streams_per_user: 0 # Old Default: 10000
+  max_streams_per_user: 0
   reject_old_samples: true
   reject_old_samples_max_age: 168h
+  query_timeout: 10m
+  allow_structured_metadata: false
 
 compactor:
   working_directory: /loki/boltdb-shipper-compactor
-  shared_store: aws
 
 chunk_store_config:
-  max_look_back_period: 0s
+  chunk_cache_config:
+    # Updated cache configuration for Loki 3.3
+    embedded_cache:
+      enabled: true
+      max_size_mb: 1024    # 1GB cache, expressed in MB
 
 table_manager:
   retention_deletes_enabled: false
   retention_period: 0s
-
