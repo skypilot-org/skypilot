@@ -23,6 +23,7 @@ from sky import check as sky_check
 from sky import clouds
 from sky import core
 from sky import execution
+from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
 from sky.clouds import service_catalog
@@ -971,6 +972,17 @@ async def kubernetes_pod_ssh_proxy(
         await asyncio.gather(websocket_to_ssh(), ssh_to_websocket())
     finally:
         proc.terminate()
+
+
+# === Internal APIs ===
+@app.get('/api/completion/cluster_name')
+async def complete_cluster_name(incomplete: str,) -> List[str]:
+    return global_user_state.get_cluster_names_start_with(incomplete)
+
+
+@app.get('/api/completion/storage_name')
+async def complete_storage_name(incomplete: str,) -> List[str]:
+    return global_user_state.get_storage_names_start_with(incomplete)
 
 
 if __name__ == '__main__':

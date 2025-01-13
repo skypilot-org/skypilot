@@ -229,41 +229,52 @@ def decode_rich_status(
     """Decode the rich status message."""
     decoding_status = None
     try:
-        for encoded_msg in response.iter_lines():
+        last_line = ''
+        for encoded_msg in response.iter_content(chunk_size=None):
             if encoded_msg is None:
                 return
             encoded_msg = encoded_msg.decode('utf-8')
-            is_payload, encoded_msg = message_utils.decode_payload(
-                encoded_msg, raise_for_mismatch=False)
-            control = None
-            if is_payload:
-                control, encoded_status = Control.decode(encoded_msg)
-            if control is None:
-                yield encoded_msg
+            lines = encoded_msg.splitlines(keepends=True)
 
-            if threading.current_thread() is not threading.main_thread():
-                if control is not None:
-                    yield None
-                else:
-                    yield encoded_msg
-
-            if control == Control.INIT:
-                decoding_status = client_status(encoded_status)
+            lines[0] = last_line + lines[0]
+            last_line = lines[-1]
+            if not last_line.endswith('\r') and not last_line.endswith('\n'):
+                lines = lines[:-1]
             else:
-                if decoding_status is None:
-                    # status may not be initialized if a user use --tail for
-                    # sky api logs.
-                    continue
-                assert decoding_status is not None, (
-                    f'Rich status not initialized: {encoded_msg}')
-                if control == Control.UPDATE:
-                    decoding_status.update(encoded_status)
-                elif control == Control.STOP:
-                    decoding_status.stop()
-                elif control == Control.EXIT:
-                    decoding_status.__exit__(None, None, None)
-                elif control == Control.START:
-                    decoding_status.start()
+                last_line = ''
+
+            for line in lines:
+                is_payload, line = message_utils.decode_payload(
+                    line, raise_for_mismatch=False)
+                control = None
+                if is_payload:
+                    control, encoded_status = Control.decode(line)
+                if control is None:
+                    yield line
+
+                if threading.current_thread() is not threading.main_thread():
+                    if control is not None:
+                        yield None
+                    else:
+                        yield line
+
+                if control == Control.INIT:
+                    decoding_status = client_status(encoded_status)
+                else:
+                    if decoding_status is None:
+                        # status may not be initialized if a user use --tail for
+                        # sky api logs.
+                        continue
+                    assert decoding_status is not None, (
+                        f'Rich status not initialized: {line}')
+                    if control == Control.UPDATE:
+                        decoding_status.update(encoded_status)
+                    elif control == Control.STOP:
+                        decoding_status.stop()
+                    elif control == Control.EXIT:
+                        decoding_status.__exit__(None, None, None)
+                    elif control == Control.START:
+                        decoding_status.start()
     finally:
         if decoding_status is not None:
             decoding_status.__exit__(None, None, None)

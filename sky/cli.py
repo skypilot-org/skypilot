@@ -40,6 +40,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import click
 import colorama
 import dotenv
+import requests as requests_lib
 from rich import progress as rich_progress
 import yaml
 
@@ -406,14 +407,22 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for cluster names."""
     del ctx, param  # Unused.
-    return global_user_state.get_cluster_names_start_with(incomplete)
+    response = requests_lib.get(
+        f'{server_common.get_server_url()}'
+        f'/api/completion/cluster_name?incomplete={incomplete}')
+    response.raise_for_status()
+    return response.json()
 
 
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    return global_user_state.get_storage_names_start_with(incomplete)
+    response = requests_lib.get(
+        f'{server_common.get_server_url()}'
+        f'/api/completion/storage_name?incomplete={incomplete}')
+    response.raise_for_status()
+    return response.json()
 
 
 def _complete_file_name(ctx: click.Context, param: click.Parameter,
