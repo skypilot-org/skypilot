@@ -535,7 +535,7 @@ def exec(  # pylint: disable=redefined-builtin
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
-              tail: int = 0) -> server_common.RequestId:
+              tail: int = 0) -> None:
     """Tails the logs of a job.
 
     Args:
@@ -567,7 +567,7 @@ def tail_logs(cluster_name: str,
                              stream=True,
                              timeout=(5, None))
     request_id = server_common.get_request_id(response)
-    return _stream_response(request_id, response)
+    _stream_response(request_id, response)
 
 
 @usage_lib.entrypoint
