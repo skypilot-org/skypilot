@@ -60,6 +60,9 @@ SERVE_CLOUD_QUEUE_MAP = {
     'kubernetes': QUEUE_KUBERNETES
 }
 
+# Skip tests that we do not have resources for.
+SKIP_TESTS = ['test_tpu_pod_slice_gke']
+
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
@@ -89,6 +92,8 @@ def _extract_marked_tests(
     function_name_param_map = collections.defaultdict(list)
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
+        if clean_function_name in SKIP_TESTS:
+            continue
         marks = marks.replace('\'', '').split(',')
         marks = [i.strip() for i in marks]
         function_name_marks_map[clean_function_name].update(marks)
