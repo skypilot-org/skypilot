@@ -3981,11 +3981,13 @@ class OciStore(AbstractStore):
         self.namespace: str
 
         # Region is from the specified name in <bucket>@<region> format
-        if '@' in name:
-            name, region = name.split('@', maxsplit=1)
+        if name is not None and '@' in name:
+            self._validate_bucket_expr(name)
+            name, region = name.split('@')
         # Region is from the specified source in oci://<bucket>@<region> format
-        if '@' in source:
-            source, region = source.split('@', maxsplit=1)
+        if source is not None and '@' in source:
+            self._validate_bucket_expr(source)
+            source, region = source.split('@')
         # Default region set to what specified in oci config.
         if region is None:
             region = oci.get_oci_config()['region']
@@ -3993,6 +3995,12 @@ class OciStore(AbstractStore):
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
         # TODO(zpoint): add _bucket_sub_path to the sync/mount/delete commands
+
+    def _validate_bucket_expr(self, bucket_expr: str):
+        pattern = r'^(\w+://)?[A-Za-z0-9-._]+(@\w{2}-\w+-\d{1})$'
+        assert re.match(pattern, bucket_expr), (
+            'The format for the bucket portion is <bucket>@<region> '
+            'when specify a region with a bucket.')
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
