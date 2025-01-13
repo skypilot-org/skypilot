@@ -541,7 +541,7 @@ def test_skyserve_update(generic_cloud: str):
                                                  (2, False, 'SHUTTING_DOWN')]) +
                  _check_service_version(name, "2")),
             ],
-            # _TEARDOWN_SERVICE.format(name=name),
+            _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
