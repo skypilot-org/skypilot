@@ -11,6 +11,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import colorama
 
 from sky.serve import constants
+from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
@@ -76,6 +77,8 @@ db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
                              'active_versions',
                              f'TEXT DEFAULT {json.dumps([])!r}')
+db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
+                             'load_balancing_policy', 'TEXT DEFAULT NULL')
 # Whether the service's load balancer is encrypted with TLS.
 db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services', 'tls_encrypted',
                              'INTEGER DEFAULT 0')
@@ -226,7 +229,7 @@ class ServiceStatus(enum.Enum):
                for status in ReplicaStatus.failed_statuses()) > 0:
             return cls.FAILED
         # When min_replicas = 0, there is no (provisioning) replica.
-        if len(replica_statuses) == 0:
+        if not replica_statuses:
             return cls.NO_REPLICA
         return cls.REPLICA_INIT
 
@@ -244,8 +247,8 @@ _SERVICE_STATUS_TO_COLOR = {
 
 
 def add_service(name: str, controller_job_id: int, policy: str,
-                requested_resources_str: str, status: ServiceStatus,
-                tls_encrypted: bool) -> bool:
+                requested_resources_str: str, load_balancing_policy: str,
+                status: ServiceStatus, tls_encrypted: bool) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -258,10 +261,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 """\
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
-                requested_resources_str, tls_encrypted)
-                VALUES (?, ?, ?, ?, ?, ?)""",
+                requested_resources_str, load_balancing_policy, tls_encrypted)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
-                 requested_resources_str, int(tls_encrypted)))
+                 requested_resources_str, load_balancing_policy,
+                 int(tls_encrypted)))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -328,7 +332,12 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, tls_encrypted) = row[:14]
+     _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
+    if load_balancing_policy is None:
+        # This entry in database was added in #4439, and it will always be set
+        # to a str value. If it is None, it means it is an legacy entry and is
+        # using the legacy default policy.
+        load_balancing_policy = lb_policies.LEGACY_DEFAULT_POLICY
     return {
         'name': name,
         'controller_job_id': controller_job_id,
@@ -345,6 +354,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         # integers in json format. This is mainly for display purpose.
         'active_versions': json.loads(active_versions),
         'requested_resources_str': requested_resources_str,
+        'load_balancing_policy': load_balancing_policy,
         'tls_encrypted': bool(tls_encrypted),
     }
 

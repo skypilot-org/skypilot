@@ -16,6 +16,10 @@ logger = sky_logging.init_logger(__name__)
 
 POLICY_PATH = os.path.join(os.path.dirname(os.path.dirname(sky.__file__)),
                            'examples', 'admin_policy')
+if not os.path.exists(POLICY_PATH):
+    # This is used for GitHub Actions, as we copy the examples to the package.
+    POLICY_PATH = os.path.join(os.path.dirname(__file__), 'examples',
+                               'admin_policy')
 
 
 @pytest.fixture
@@ -172,7 +176,7 @@ def test_enforce_autostop_policy(add_example_policy_paths, task):
                                     idle_minutes_to_autostop=None)
 
 
-@mock.patch('sky.provision.kubernetes.utils.get_all_kube_config_context_names',
+@mock.patch('sky.provision.kubernetes.utils.get_all_kube_context_names',
             return_value=['kind-skypilot', 'kind-skypilot2', 'kind-skypilot3'])
 def test_dynamic_kubernetes_contexts_policy(add_example_policy_paths, task):
     _, config = _load_task_and_apply_policy(

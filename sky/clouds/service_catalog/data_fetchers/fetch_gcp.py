@@ -60,6 +60,9 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
 
+# TPU V6e price for us-central2 is missing in the SKUs.
+TPU_V6E_MISSING_REGIONS = ['us-central2']
+
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
 TPU_V5_MISSING_ZONES_DF = {
@@ -334,7 +337,7 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
     df = df[~df['AvailabilityZone'].str.startswith(tuple(TPU_V4_ZONES))]
 
     # TODO(woosuk): Make this more efficient.
-    def get_vm_price(row: pd.Series, spot: bool) -> float:
+    def get_vm_price(row: pd.Series, spot: bool) -> Optional[float]:
         series = row['InstanceType'].split('-')[0].lower()
 
         ondemand_or_spot = 'OnDemand' if not spot else 'Preemptible'
@@ -385,12 +388,26 @@ def get_vm_df(skus: List[Dict[str, Any]], region_prefix: str) -> 'pd.DataFrame':
         if series in ['f1', 'g1']:
             memory_price = 0.0
 
-        assert cpu_price is not None, row
-        assert memory_price is not None, row
+        # TODO(tian): (2024/11/10) Some SKUs are missing in the SKUs API. We
+        # skip them in the catalog for now. We should investigate why they are
+        # missing and add them back.
+        if cpu_price is None or memory_price is None:
+            return None
         return cpu_price + memory_price
 
     df['Price'] = df.apply(lambda row: get_vm_price(row, spot=False), axis=1)
     df['SpotPrice'] = df.apply(lambda row: get_vm_price(row, spot=True), axis=1)
+    dropped_rows = df[df['Price'].isna() & df['SpotPrice'].isna()]
+    dropped_info = (dropped_rows[['InstanceType',
+                                  'AvailabilityZone']].drop_duplicates())
+    az2missing = dropped_info.groupby('AvailabilityZone').apply(
+        lambda x: x['InstanceType'].tolist())
+    print('Price not found for the following zones and instance types. '
+          'Dropping them.')
+    for az, instances in az2missing.items():
+        print('-' * 30, az, '-' * 30)
+        print(', '.join(instances))
+    df = df.dropna(subset=['Price', 'SpotPrice'], how='all')
     df = df.reset_index(drop=True)
     df = df.sort_values(['InstanceType', 'Region', 'AvailabilityZone'])
     return df
@@ -416,9 +433,6 @@ def _get_gpus_for_zone(zone: str) -> 'pd.DataFrame':
             gpu_name = gpu_name.upper()
             if 'H100-80GB' in gpu_name:
                 gpu_name = 'H100'
-                if count != 8:
-                    # H100 only has 8 cards.
-                    continue
             if 'H100-MEGA-80GB' in gpu_name:
                 gpu_name = 'H100-MEGA'
                 if count != 8:
@@ -613,6 +627,8 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
                 return 'TpuV5p'
             assert tpu_version == 'v5litepod', tpu_version
             return 'TpuV5e'
+        if tpu_version.startswith('v6e'):
+            return 'TpuV6e'
         return f'Tpu-{tpu_version}'
 
     def get_tpu_price(row: pd.Series, spot: bool) -> Optional[float]:
@@ -627,10 +643,10 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         # whether the TPU is a single device or a pod.
         # For TPU-v4, the pricing is uniform, and thus the pricing API
         # only provides the price of TPU-v4 pods.
-        # The price shown for v5 TPU is per chip hour, so there is no 'Pod'
-        # keyword in the description.
+        # The price shown for v5 & v6e TPU is per chip hour, so there is
+        # no 'Pod' keyword in the description.
         is_pod = ((num_cores > 8 or tpu_version == 'v4') and
-                  not tpu_version.startswith('v5'))
+                  not tpu_version.startswith('v5') and tpu_version != 'v6e')
 
         for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
@@ -661,7 +677,9 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             # for v5e. Reference here:
             # https://cloud.google.com/tpu/docs/v5p#using-accelerator-type
             # https://cloud.google.com/tpu/docs/v5e#tpu-v5e-config
-            core_per_sku = (1 if tpu_version == 'v5litepod' else
+            # v6e is also per chip price. Reference here:
+            # https://cloud.google.com/tpu/docs/v6e#configurations
+            core_per_sku = (1 if tpu_version in ['v5litepod', 'v6e'] else
                             2 if tpu_version == 'v5p' else 8)
             tpu_core_price = tpu_device_price / core_per_sku
             tpu_price = num_cores * tpu_core_price
@@ -681,13 +699,13 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        # TODO(tian): Hack. Should investigate how to retrieve the price
-        # for TPU-v6e.
-        if not tpu_name.startswith('tpu-v6e'):
+        if (tpu_name.startswith('tpu-v6e') and
+                tpu_region in TPU_V6E_MISSING_REGIONS):
+            if not spot:
+                tpu_price = 0.0
+        else:
             assert spot or tpu_price is not None, (row, hidden_tpu,
                                                    HIDDEN_TPU_DF)
-        else:
-            tpu_price = 0.0
         return tpu_price
 
     df['Price'] = df.apply(lambda row: get_tpu_price(row, spot=False), axis=1)

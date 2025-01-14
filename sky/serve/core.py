@@ -156,7 +156,9 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     _validate_service_task(task)
-
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
     dag, mutated_user_config = admin_policy_utils.apply(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
@@ -362,6 +364,15 @@ def update(
     """
     _validate_service_task(task)
 
+    # Always apply the policy again here, even though it might have been applied
+    # in the CLI. This is to ensure that we apply the policy to the final DAG
+    # and get the mutated config.
+    # TODO(cblmemo,zhwu): If a user sets a new skypilot_config, the update
+    # will not apply the config.
+    dag, _ = admin_policy_utils.apply(
+        task, use_mutated_config_in_current_request=False)
+    task = dag.tasks[0]
+
     assert task.service is not None
     if task.service.tls_credential is not None:
         logger.warning('Updating TLS keyfile and certfile is not supported. '
@@ -400,7 +411,7 @@ def update(
         raise RuntimeError(e.error_msg) from e
 
     service_statuses = serve_utils.load_service_status(serve_status_payload)
-    if len(service_statuses) == 0:
+    if not service_statuses:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find service {service_name!r}.'
                                f'To spin up a service, use {ux_utils.BOLD}'
@@ -423,6 +434,17 @@ def update(
     if prompt is not None:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
+
+    original_lb_policy = service_record['load_balancing_policy']
+    assert task.service is not None, 'Service section not found.'
+    if original_lb_policy != task.service.load_balancing_policy:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Current load balancing policy '
+            f'{original_lb_policy!r} is different from the new policy '
+            f'{task.service.load_balancing_policy!r}. Updating the load '
+            'balancing policy is not supported yet and it will be ignored. '
+            'The service will continue to use the current load balancing '
+            f'policy.{colorama.Style.RESET_ALL}')
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
@@ -520,9 +542,9 @@ def down(
         stopped_message='All services should have terminated.')
 
     service_names_str = ','.join(service_names)
-    if sum([len(service_names) > 0, all]) != 1:
-        argument_str = f'service_names={service_names_str}' if len(
-            service_names) > 0 else ''
+    if sum([bool(service_names), all]) != 1:
+        argument_str = (f'service_names={service_names_str}'
+                        if service_names else '')
         argument_str += ' all' if all else ''
         raise ValueError('Can only specify one of service_names or all. '
                          f'Provided {argument_str!r}.')
@@ -621,9 +643,10 @@ def status(
             'status': (sky.ServiceStatus) service status,
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
-            'policy': (Optional[str]) load balancer policy description,
+            'policy': (Optional[str]) autoscaling policy description,
             'requested_resources_str': (str) str representation of
               requested resources,
+            'load_balancing_policy': (str) load balancing policy name,
             'tls_encrypted': (bool) whether the service is TLS encrypted,
             'replica_info': (List[Dict[str, Any]]) replica information,
         }
@@ -742,6 +765,7 @@ def tail_logs(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'`target` must be a string or '
                              f'sky.serve.ServiceComponent, got {type(target)}.')
+
     if target == serve_utils.ServiceComponent.REPLICA:
         if replica_id is None:
             with ux_utils.print_exception_no_traceback():

@@ -131,6 +131,9 @@ def get_client(name: str,
             from azure.mgmt import authorization
             return authorization.AuthorizationManagementClient(
                 credential, subscription_id)
+        elif name == 'msi':
+            from azure.mgmt import msi
+            return msi.ManagedServiceIdentityClient(credential, subscription_id)
         elif name == 'graph':
             import msgraph
             return msgraph.GraphServiceClient(credential)

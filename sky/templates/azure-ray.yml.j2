@@ -34,6 +34,7 @@ provider:
   # instead of the cluster_name. This ensures that ray creates new instances
   # for different cluster_name.
   resource_group: {{resource_group}}
+  use_external_resource_group: {{use_external_resource_group}}
   # Keep (otherwise cannot reuse when re-provisioning).
   # teardown(terminate=True) will override this.
   cache_stopped_nodes: True
@@ -74,15 +75,11 @@ available_node_types:
             {%- if use_spot %}
             # optionally set priority to use Spot instances
             priority: Spot
-            # set a maximum price for spot instances if desired
-            # billingProfile:
-            #     maxPrice: -1
             {%- endif %}
             cloudInitSetupCommands: |-
               {%- for cmd in cloud_init_setup_commands %}
               {{ cmd }}
               {%- endfor %}
-        need_nvidia_driver_extension: {{need_nvidia_driver_extension}}
         {%- if disk_performance_tier is not none %}
         disk_performance_tier: {{disk_performance_tier}}
         {%- endif %}

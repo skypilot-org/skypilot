@@ -4,14 +4,23 @@ History:
  - Zhanghao Wu @ Oct 2023: Formatting and refactoring
  - Hysun He (hysun.he@oracle.com) @ Oct, 2024: Add default image OS
    configuration.
+ - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add the constant
+   SERVICE_PORT_RULE_TAG
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Set the default image
+   from ubuntu 20.04 to ubuntu 22.04, including:
+   - GPU: skypilot:gpu-ubuntu-2004 -> skypilot:gpu-ubuntu-2204
+   - CPU: skypilot:cpu-ubuntu-2004 -> skypilot:cpu-ubuntu-2204
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Support reuse existing
+   VCN for SkyServe.
 """
-import logging
 import os
 
+from sky import sky_logging
 from sky import skypilot_config
+from sky import status_lib
 from sky.utils import resources_utils
 
-logger = logging.getLogger(__name__)
+logger = sky_logging.init_logger(__name__)
 
 
 class OCIConfig:
@@ -41,6 +50,9 @@ class OCIConfig:
     VCN_CIDR_INTERNET = '0.0.0.0/0'
     VCN_CIDR = '192.168.0.0/16'
     VCN_SUBNET_CIDR = '192.168.0.0/18'
+    SERVICE_PORT_RULE_TAG = 'SkyServe-Service-Port'
+    # NSG name template
+    NSG_NAME_TEMPLATE = 'nsg_{cluster_name}'
 
     MAX_RETRY_COUNT = 3
     RETRY_INTERVAL_BASE_SECONDS = 5
@@ -77,6 +89,19 @@ class OCIConfig:
         resources_utils.DiskTier.HIGH: DISK_TIER_HIGH,
     }
 
+    # Oracle instance's lifecycle state to sky state mapping.
+    # For Oracle VM instance's lifecyle state, please refer to the link:
+    # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
+    STATE_MAPPING_OCI_TO_SKY = {
+        'PROVISIONING': status_lib.ClusterStatus.INIT,
+        'STARTING': status_lib.ClusterStatus.INIT,
+        'RUNNING': status_lib.ClusterStatus.UP,
+        'STOPPING': status_lib.ClusterStatus.STOPPED,
+        'STOPPED': status_lib.ClusterStatus.STOPPED,
+        'TERMINATED': None,
+        'TERMINATING': None,
+    }
+
     @classmethod
     def get_compartment(cls, region):
         # Allow task(cluster)-specific compartment/VCN parameters.
@@ -87,7 +112,14 @@ class OCIConfig:
         return compartment
 
     @classmethod
+    def get_vcn_ocid(cls, region):
+        # Will reuse the regional VCN if specified.
+        vcn = skypilot_config.get_nested(('oci', region, 'vcn_ocid'), None)
+        return vcn
+
+    @classmethod
     def get_vcn_subnet(cls, region):
+        # Will reuse the subnet if specified.
         vcn = skypilot_config.get_nested(('oci', region, 'vcn_subnet'), None)
         return vcn
 
@@ -98,7 +130,7 @@ class OCIConfig:
         # the sky's user-config file (if not specified, use the hardcode one at
         # last)
         return skypilot_config.get_nested(('oci', 'default', 'image_tag_gpu'),
-                                          'skypilot:gpu-ubuntu-2004')
+                                          'skypilot:gpu-ubuntu-2204')
 
     @classmethod
     def get_default_image_tag(cls) -> str:
@@ -106,7 +138,7 @@ class OCIConfig:
         # set the default image tag in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
         return skypilot_config.get_nested(
-            ('oci', 'default', 'image_tag_general'), 'skypilot:cpu-ubuntu-2004')
+            ('oci', 'default', 'image_tag_general'), 'skypilot:cpu-ubuntu-2204')
 
     @classmethod
     def get_sky_user_config_file(cls) -> str:

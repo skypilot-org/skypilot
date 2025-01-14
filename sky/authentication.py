@@ -380,8 +380,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     context = config['provider'].get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
-    if context == kubernetes_utils.IN_CLUSTER_REGION:
-        # If the context is set to IN_CLUSTER_REGION, we are running in a pod
+    if context == kubernetes.in_cluster_context_name():
+        # If the context is an in-cluster context name, we are running in a pod
         # with in-cluster configuration. We need to set the context to None
         # to use the mounted service account.
         context = None
@@ -408,14 +408,26 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         secret = k8s.client.V1Secret(
             metadata=k8s.client.V1ObjectMeta(**secret_metadata),
             string_data={secret_field_name: public_key})
-    if kubernetes_utils.check_secret_exists(secret_name, namespace, context):
-        logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
-        kubernetes.core_api(context).patch_namespaced_secret(
-            secret_name, namespace, secret)
-    else:
-        logger.debug(
-            f'Key {secret_name} does not exist in the cluster, creating it...')
-        kubernetes.core_api(context).create_namespaced_secret(namespace, secret)
+    try:
+        if kubernetes_utils.check_secret_exists(secret_name, namespace,
+                                                context):
+            logger.debug(f'Key {secret_name} exists in the cluster, '
+                         'patching it...')
+            kubernetes.core_api(context).patch_namespaced_secret(
+                secret_name, namespace, secret)
+        else:
+            logger.debug(f'Key {secret_name} does not exist in the cluster, '
+                         'creating it...')
+            kubernetes.core_api(context).create_namespaced_secret(
+                namespace, secret)
+    except kubernetes.api_exception() as e:
+        if e.status == 409 and e.reason == 'AlreadyExists':
+            logger.debug(f'Key {secret_name} was created concurrently, '
+                         'patching it...')
+            kubernetes.core_api(context).patch_namespaced_secret(
+                secret_name, namespace, secret)
+        else:
+            raise e
 
     private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:

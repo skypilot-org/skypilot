@@ -78,8 +78,8 @@ We can launch it with the following:
 
 .. code-block:: console
 
+  $ git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   $ sky jobs launch -n bert-qa bert_qa.yaml
-
 
 .. code-block:: yaml
 
@@ -88,39 +88,37 @@ We can launch it with the following:
 
   resources:
     accelerators: V100:1
-    # Use spot instances to save cost.
-    use_spot: true
+    use_spot: true  # Use spot instances to save cost.
 
-  # Assume your working directory is under `~/transformers`.
-  # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
-  workdir: ~/transformers
-
-  setup: |
+  envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
     # to pass the key in the command line, during `sky jobs launch`.
-    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+    WANDB_API_KEY:
 
+  # Assume your working directory is under `~/transformers`.
+  workdir: ~/transformers
+
+  setup: |
     pip install -e .
     cd examples/pytorch/question-answering/
     pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
   run: |
-    cd ./examples/pytorch/question-answering/
+    cd examples/pytorch/question-answering/
     python run_qa.py \
-    --model_name_or_path bert-base-uncased \
-    --dataset_name squad \
-    --do_train \
-    --do_eval \
-    --per_device_train_batch_size 12 \
-    --learning_rate 3e-5 \
-    --num_train_epochs 50 \
-    --max_seq_length 384 \
-    --doc_stride 128 \
-    --report_to wandb
-
+      --model_name_or_path bert-base-uncased \
+      --dataset_name squad \
+      --do_train \
+      --do_eval \
+      --per_device_train_batch_size 12 \
+      --learning_rate 3e-5 \
+      --num_train_epochs 50 \
+      --max_seq_length 384 \
+      --doc_stride 128 \
+      --report_to wandb \
+      --output_dir /tmp/bert_qa/
 
 .. note::
 
@@ -154,6 +152,7 @@ The :code:`MOUNT` mode in :ref:`SkyPilot bucket mounting <sky-storage>` ensures 
 Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
 This is typically achieved by reloading the latest checkpoint at the beginning of your program.
 
+
 .. _spot-jobs-end-to-end:
 
 An End-to-End Example
@@ -162,55 +161,52 @@ An End-to-End Example
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
 
 .. code-block:: yaml
-  :emphasize-lines: 13-16,42-45
+  :emphasize-lines: 8-11,41-44
 
   # bert_qa.yaml
   name: bert-qa
 
   resources:
     accelerators: V100:1
-    use_spot: true
-
-  # Assume your working directory is under `~/transformers`.
-  # To make this example work, please run the following command:
-  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
-  workdir: ~/transformers
+    use_spot: true  # Use spot instances to save cost.
 
   file_mounts:
     /checkpoint:
       name: # NOTE: Fill in your bucket name
       mode: MOUNT
 
-  setup: |
+  envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
     # Alternatively, you can use `--env WANDB_API_KEY=$WANDB_API_KEY`
     # to pass the key in the command line, during `sky jobs launch`.
-    echo export WANDB_API_KEY=[YOUR-WANDB-API-KEY] >> ~/.bashrc
+    WANDB_API_KEY:
 
+  # Assume your working directory is under `~/transformers`.
+  workdir: ~/transformers
+
+  setup: |
     pip install -e .
     cd examples/pytorch/question-answering/
-    pip install -r requirements.txt
+    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
     pip install wandb
 
   run: |
-    cd ./examples/pytorch/question-answering/
+    cd examples/pytorch/question-answering/
     python run_qa.py \
-    --model_name_or_path bert-base-uncased \
-    --dataset_name squad \
-    --do_train \
-    --do_eval \
-    --per_device_train_batch_size 12 \
-    --learning_rate 3e-5 \
-    --num_train_epochs 50 \
-    --max_seq_length 384 \
-    --doc_stride 128 \
-    --report_to wandb \
-    --run_name $SKYPILOT_TASK_ID \
-    --output_dir /checkpoint/bert_qa/ \
-    --save_total_limit 10 \
-    --save_steps 1000
-
-
+      --model_name_or_path bert-base-uncased \
+      --dataset_name squad \
+      --do_train \
+      --do_eval \
+      --per_device_train_batch_size 12 \
+      --learning_rate 3e-5 \
+      --num_train_epochs 50 \
+      --max_seq_length 384 \
+      --doc_stride 128 \
+      --report_to wandb \
+      --output_dir /checkpoint/bert_qa/ \
+      --run_name $SKYPILOT_TASK_ID \
+      --save_total_limit 10 \
+      --save_steps 1000
 
 As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up
 the output directory and frequency of checkpointing (see more
@@ -287,6 +283,24 @@ candidate resources for a job. See documentation :ref:`here
 
 In this example, SkyPilot will perform cost optimizations to select the resource to use, which almost certainly
 will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand/reserved instances.
+
+
+Jobs Restarts on User Code Failure
+-----------------------------------
+
+By default, SkyPilot will try to recover a job when its underlying cluster is preempted or failed. Any user code failures (non-zero exit codes) are not auto-recovered.
+
+In some cases, you may want a job to automatically restart on its own failures, e.g., when a training job crashes due to a Nvidia driver issue or NCCL timeouts. To specify this, you
+can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the job YAML file.
+
+.. code-block:: yaml
+
+  resources:
+    accelerators: A100:8
+    job_recovery:
+      # Restart the job up to 3 times on user code errors.
+      max_restarts_on_errors: 3
+
 
 More advanced policies for resource selection, such as the `Can't Be Late
 <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
@@ -442,6 +456,46 @@ especially useful when there are many in-progress jobs to monitor, which the
 terminal-based CLI may need more than one page to display.
 
 
+.. _intermediate-bucket:
+
+Intermediate storage for files
+------------------------------
+
+For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
+If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
+
+Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
+
+.. code-block:: yaml
+
+  # ~/.sky/config.yaml
+  jobs:
+    bucket: s3://my-bucket  # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
+
+
+If you choose to specify a bucket, ensure that the bucket already exists and that you have the necessary permissions.
+
+When using a pre-provisioned intermediate bucket with :code:`jobs.bucket`, SkyPilot creates job-specific directories under the bucket root to store files. They are organized in the following structure:
+
+.. code-block:: text
+
+  # cloud bucket, s3://my-bucket/ for example
+  my-bucket/
+  ├── job-15891b25/            # Job-specific directory
+  │   ├── local-file-mounts/   # Files from local file mounts
+  │   ├── tmp-files/           # Temporary files
+  │   └── workdir/             # Files from workdir
+  └── job-cae228be/            # Another job's directory
+      ├── local-file-mounts/
+      ├── tmp-files/
+      └── workdir/
+
+When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (e.g., :code:`job-15891b25/`) created by SkyPilot are removed when the job completes.
+
+.. tip::
+  Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
+
+
 Concept: Jobs Controller
 ------------------------
 
@@ -486,10 +540,9 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Specify the disk_size in GB of the jobs controller.
         disk_size: 100
 
-The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://skypilot.readthedocs.io/en/latest/reference/yaml-spec.html>`__.
+The :code:`resources` field has the same spec as a normal SkyPilot job; see `here <https://docs.skypilot.co/en/latest/reference/yaml-spec.html>`__.
 
 .. note::
   These settings will not take effect if you have an existing controller (either
   stopped or live).  For them to take effect, tear down the existing controller
   first, which requires all in-progress jobs to finish or be canceled.
-

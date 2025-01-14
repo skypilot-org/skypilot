@@ -9,13 +9,12 @@ variable "vm_generation" {
 }
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
-  version   = formatdate("YY.MM.DD", timestamp())
+  date    = formatdate("YYMMDD", timestamp())
+  version = formatdate("YY.MM.DD", timestamp())
 }
 
 source "azure-arm" "cpu-ubuntu" {
   managed_image_resource_group_name = "skypilot-images"
-  managed_image_name                = "skypilot-azure-cpu-ubuntu-${local.timestamp}"
 
   subscription_id = "59d8c23c-7ef5-42c7-b2f3-a919ad8026a7"
   tenant_id       = "7c81f068-46f8-4b26-9a46-2fbec2287e3d"
@@ -61,12 +60,12 @@ build {
     script = "./provisioners/docker.sh"
   }
   provisioner "shell" {
-    script = "./provisioners/skypilot.sh"
-  }
-  provisioner "shell" {
     environment_vars = [
       "CLOUD=azure",
     ]
-    script = "./provisioners/cloud.sh"
+    script = "./provisioners/skypilot.sh"
+  }
+  provisioner "shell" {
+    script = "./provisioners/user-toolkit.sh"
   }
 }

@@ -6,7 +6,7 @@ import pathlib
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import Optional, Tuple
 
 import filelock
 
@@ -87,18 +87,28 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-            self,
-            handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
-        """Downloads and streams the logs of the latest job.
+        self, task_id: Optional[int],
+        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
+    ) -> None:
+        """Downloads and streams the logs of the current job with given task ID.
 
         We do not stream the logs from the cluster directly, as the
         donwload and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
         """
+        if handle is None:
+            logger.info(f'Cluster for job {self._job_id} is not found. '
+                        'Skipping downloading and streaming the logs.')
+            return
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs')
-        controller_utils.download_and_stream_latest_job_log(
+        log_file = controller_utils.download_and_stream_latest_job_log(
             self._backend, handle, managed_job_logs_dir)
+        if log_file is not None:
+            # Set the path of the log file for the current task, so it can be
+            # accessed even after the job is finished
+            managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                 log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
@@ -160,6 +170,11 @@ class JobsController:
         if task_id == 0:
             submitted_at = backend_utils.get_timestamp_from_run_timestamp(
                 self._backend.run_timestamp)
+        assert task.name is not None, task
+        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
+            task.name, self._job_id)
+        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
+            cluster_name, self._backend, task, self._retry_until_up)
         managed_job_state.set_submitted(
             self._job_id,
             task_id,
@@ -167,15 +182,14 @@ class JobsController:
             submitted_at,
             resources_str=backend_utils.get_task_resources_str(
                 task, is_managed_job=True),
+            specs={
+                'max_restarts_on_errors':
+                    self._strategy_executor.max_restarts_on_errors
+            },
             callback_func=callback_func)
         logger.info(
             f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
-        assert task.name is not None, task
-        cluster_name = managed_job_utils.generate_managed_job_cluster_name(
-            task.name, self._job_id)
-        self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._retry_until_up)
 
         logger.info('Started monitoring.')
         managed_job_state.set_starting(job_id=self._job_id,
@@ -209,7 +223,8 @@ class JobsController:
             if job_status == job_lib.JobStatus.SUCCEEDED:
                 end_time = managed_job_utils.get_job_timestamp(
                     self._backend, cluster_name, get_end_time=True)
-                # The job is done.
+                # The job is done. Set the job to SUCCEEDED first before start
+                # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
                                                 task_id,
                                                 end_time=end_time,
@@ -217,12 +232,21 @@ class JobsController:
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
+                clusters = backend_utils.get_clusters(
+                    cluster_names=[cluster_name],
+                    refresh=False,
+                    include_controller=False)
+                if clusters:
+                    assert len(clusters) == 1, (clusters, cluster_name)
+                    handle = clusters[0].get('handle')
+                    # Best effort to download and stream the logs.
+                    self._download_log_and_stream(task_id, handle)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 recovery_strategy.terminate_cluster(cluster_name=cluster_name)
                 return True
 
-            # For single-node jobs, nonterminated job_status indicates a
+            # For single-node jobs, non-terminated job_status indicates a
             # healthy cluster. We can safely continue monitoring.
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
@@ -274,7 +298,7 @@ class JobsController:
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(handle)
+                    self._download_log_and_stream(task_id, handle)
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
@@ -283,23 +307,35 @@ class JobsController:
                     failure_reason = (
                         'To see the details, run: '
                         f'sky jobs logs --controller {self._job_id}')
-
-                    managed_job_state.set_failed(
-                        self._job_id,
-                        task_id,
-                        failure_type=managed_job_status,
-                        failure_reason=failure_reason,
-                        end_time=end_time,
-                        callback_func=callback_func)
-                    return False
-                # Although the cluster is healthy, we fail to access the
-                # job status. Try to recover the job (will not restart the
-                # cluster, if the cluster is healthy).
-                assert job_status is None, job_status
-                logger.info('Failed to fetch the job status while the '
-                            'cluster is healthy. Try to recover the job '
-                            '(the cluster will not be restarted).')
-
+                    should_restart_on_failure = (
+                        self._strategy_executor.should_restart_on_failure())
+                    if should_restart_on_failure:
+                        max_restarts = (
+                            self._strategy_executor.max_restarts_on_errors)
+                        logger.info(
+                            f'User program crashed '
+                            f'({managed_job_status.value}). '
+                            f'Retry the job as max_restarts_on_errors is '
+                            f'set to {max_restarts}. '
+                            f'[{self._strategy_executor.restart_cnt_on_failure}'
+                            f'/{max_restarts}]')
+                    else:
+                        managed_job_state.set_failed(
+                            self._job_id,
+                            task_id,
+                            failure_type=managed_job_status,
+                            failure_reason=failure_reason,
+                            end_time=end_time,
+                            callback_func=callback_func)
+                        return False
+                else:
+                    # Although the cluster is healthy, we fail to access the
+                    # job status. Try to recover the job (will not restart the
+                    # cluster, if the cluster is healthy).
+                    assert job_status is None, job_status
+                    logger.info('Failed to fetch the job status while the '
+                                'cluster is healthy. Try to recover the job '
+                                '(the cluster will not be restarted).')
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
                 resources = handle.launched_resources
