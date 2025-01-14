@@ -89,9 +89,6 @@ if __name__ == '__main__':
             'TotalGpuMemoryInMiB': offer['gpu_total_ram']
         }).replace('"', '\'')
 
-        if instance_type not in priceMap:
-            priceMap[instance_type] = []
-
         priceMap[instance_type].append(entry)
 
     for instanceList in priceMap.values():
