@@ -92,10 +92,10 @@ def get_api_server_status() -> ApiServerInfo:
             else:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
                                      api_version=None)
-        except requests.exceptions.Timeout as e:
+        except requests.exceptions.Timeout:
             if time_out_try_count == RETRY_COUNT_ON_TIMEOUT:
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ApiServerConnectionError(server_url) from e
+                return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
+                                     api_version=None)
             time_out_try_count += 1
             continue
         except requests.exceptions.ConnectionError:
@@ -165,6 +165,25 @@ def get_request_id(response) -> str:
     return response.headers.get('X-Request-ID')
 
 
+def _start_api_server(api_server_reload: bool = False, deploy: bool = False):
+    """Starts a SkyPilot API server locally."""
+    # Lock to prevent multiple processes from starting the server at the
+    # same time, causing issues with database initialization.
+    server_url = get_server_url()
+    assert server_url == DEFAULT_SERVER_URL, (
+        f'server url {server_url} is not a local url')
+    with filelock.FileLock(
+            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
+        with rich_utils.client_status('Starting SkyPilot API server'):
+            logger.info(f'{colorama.Style.DIM}Failed to connect to '
+                        f'SkyPilot API server at {server_url}. '
+                        'Starting a local server.'
+                        f'{colorama.Style.RESET_ALL}')
+            start_uvicorn_in_background(reload=api_server_reload, deploy=deploy)
+            logger.info(
+                ux_utils.finishing_message('SkyPilot API server started.'))
+
+
 def check_server_healthy_or_start(func):
 
     @functools.wraps(func)
@@ -173,8 +192,14 @@ def check_server_healthy_or_start(func):
                 deploy: bool = False,
                 **kwargs):
         api_server_info = get_api_server_status()
-        if api_server_info.status == ApiServerStatus.HEALTHY:
-            return func(*args, **kwargs)
+        if api_server_info.status == ApiServerStatus.UNHEALTHY:
+            # If server is remote and unhealthy, raise exception. Else, start
+            # the server locally.
+            server_url = get_server_url()
+            if server_url != DEFAULT_SERVER_URL:
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.ApiServerConnectionError(server_url)
+            _start_api_server(api_server_reload, deploy)
         elif api_server_info.status == ApiServerStatus.VERSION_MISMATCH:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
@@ -184,31 +209,6 @@ def check_server_healthy_or_start(func):
                     'Please restart the SkyPilot API server with: '
                     'sky api stop; sky api start'
                     f'{colorama.Style.RESET_ALL}')
-
-        server_url = get_server_url()
-
-        # Automatically start a SkyPilot API server locally.
-        # Lock to prevent multiple processes from starting the server at the
-        # same time, causing issues with database initialization.
-        with filelock.FileLock(
-                os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
-            api_server_info = get_api_server_status()
-            if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                with rich_utils.client_status('Starting SkyPilot API server'):
-                    if server_url == DEFAULT_SERVER_URL:
-                        logger.info(f'{colorama.Style.DIM}Failed to connect to '
-                                    f'SkyPilot API server at {server_url}. '
-                                    'Starting a local server.'
-                                    f'{colorama.Style.RESET_ALL}')
-                        start_uvicorn_in_background(reload=api_server_reload,
-                                                    deploy=deploy)
-                        logger.info(
-                            ux_utils.finishing_message(
-                                'SkyPilot API server started.'))
-                    else:
-                        with ux_utils.print_exception_no_traceback():
-                            raise exceptions.ApiServerConnectionError(
-                                server_url)
         return func(*args, **kwargs)
 
     return wrapper

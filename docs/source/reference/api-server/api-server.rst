@@ -92,6 +92,17 @@ To verify that the API server is working, run ``sky api info``:
     $ sky api info
     Using SkyPilot API server: http://skypilot:password@1.2.3.4:30050 (version: 1.0.0-dev0, commit: 6864695)
 
+
+.. tip::
+
+    You can also set the API server endpoint using the ``SKYPILOT_API_SERVER_ENDPOINT`` environment variable. It will override the value set in ``~/.sky/config.yaml``:
+
+    .. code-block:: console
+
+        $ export SKYPILOT_API_SERVER_ENDPOINT=http://skypilot:password@myendpoint.com:30050
+        $ sky api info
+        Using SkyPilot API server: http://skypilot:password@myendpoint.com:30050 (version: 1.0.0-dev0, commit: 6864695)
+
 Asynchronous request execution
 ------------------------------
 

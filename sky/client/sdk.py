@@ -1533,14 +1533,19 @@ def api_start(
     # satisfy the type checker.
     del api_server_reload, deploy
     is_local_api_server = server_common.is_api_server_local()
-    prefix_symbol = (ux_utils.INDENT_SYMBOL
-                     if is_local_api_server else ux_utils.INDENT_LAST_SYMBOL)
-    logger.info(
-        f'{prefix_symbol}SkyPilot API server: {server_common.get_server_url()}')
-    if is_local_api_server:
-        logger.info(ux_utils.INDENT_LAST_SYMBOL +
-                    f'View API server logs at: {constants.API_SERVER_LOGS}')
-        return
+    if not is_local_api_server:
+        server_url = server_common.get_server_url()
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Unable to start local API server: '
+                             f'server endpoint is set to {server_url}. '
+                             'To start a local API server, remove the endpoint '
+                             'from the config file and/or unset the '
+                             'SKYPILOT_API_SERVER_ENDPOINT environment '
+                             'variable.')
+    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
+                f'{server_common.get_server_url()}\n'
+                f'{ux_utils.INDENT_LAST_SYMBOL}'
+                f'View API server logs at: {constants.API_SERVER_LOGS}')
 
 
 @usage_lib.entrypoint
