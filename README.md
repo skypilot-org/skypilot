@@ -199,7 +199,7 @@ Read the research:
 - [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
 - [Policy for Managed Spot Jobs](https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao)  (NSDI 2024)
 
-SkyPilot was initially developed at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley. Over time, it has gained adoption among both industry users and academic researchers.
+SkyPilot was initially started at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley and has since gained many industry contributors. Read more about the project's origin [here](https://docs.skypilot.co/en/latest/sky-computing.html).
 
 ## Support and Questions
 We are excited to hear your feedback!
