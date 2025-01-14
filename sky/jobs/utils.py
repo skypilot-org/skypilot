@@ -642,7 +642,7 @@ def stream_logs(job_id: Optional[int],
             job_status = managed_job_state.get_status(job_id)
             if job_status is None:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Couldn\'t find job {job_id}.')
+                    raise ValueError(f'Job {job_id} not found.')
             # We shouldn't count CANCELLING as terminal here, the controller is
             # still cleaning up.
             if (job_status.is_terminal() and not job_status
