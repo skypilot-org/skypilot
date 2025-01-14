@@ -226,10 +226,13 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
 
 def decode_rich_status(
         response: 'requests.Response') -> Iterator[Optional[str]]:
-    """Decode the rich status message."""
+    """Decode the rich status message from the response."""
     decoding_status = None
     try:
         last_line = ''
+        # Iterate over the response content in chunks. We do not use iter_lines
+        # because it will strip the trailing newline characters, causing the
+        # progress bar ending with `\r` becomes a pyramid.
         for encoded_msg in response.iter_content(chunk_size=None):
             if encoded_msg is None:
                 return
@@ -238,12 +241,22 @@ def decode_rich_status(
 
             lines[0] = last_line + lines[0]
             last_line = lines[-1]
-            if not last_line.endswith('\r') and not last_line.endswith('\n'):
+            # If the last line is not ended with `\r` or `\n` (with ending
+            # spaces stripped), it means the last line is not a complete line.
+            # We keep the last line in the buffer and continue.
+            if (not last_line.strip(' ').endswith('\r') and
+                    not last_line.strip(' ').endswith('\n')):
                 lines = lines[:-1]
             else:
+                # Reset the buffer for the next line, as the last line is a
+                # complete line.
                 last_line = ''
 
             for line in lines:
+                if line.endswith('\r\n'):
+                    # Replace `\r\n` with `\n`, as printing a line ends with
+                    # `\r\n` in linux will cause the line to be empty.
+                    line = line[:-2] + '\n'
                 is_payload, line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
                 control = None
@@ -251,13 +264,12 @@ def decode_rich_status(
                     control, encoded_status = Control.decode(line)
                 if control is None:
                     yield line
+                    continue
 
+                # control is not None, i.e. it is a rich status control message.
                 if threading.current_thread() is not threading.main_thread():
-                    if control is not None:
-                        yield None
-                    else:
-                        yield line
-
+                    yield None
+                    continue
                 if control == Control.INIT:
                     decoding_status = client_status(encoded_status)
                 else:
