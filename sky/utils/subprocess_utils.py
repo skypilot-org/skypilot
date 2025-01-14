@@ -5,7 +5,7 @@ import random
 import resource
 import subprocess
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -97,7 +97,7 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 
 def run_in_parallel(func: Callable,
-                    args: Iterable[Any],
+                    args: List[Any],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
@@ -113,6 +113,11 @@ def run_in_parallel(func: Callable,
       A list of the return values of the function func, in the same order as the
       arguments.
     """
+    if len(args) == 0:
+        return []
+    # Short-circuit for single element
+    if len(args) == 1:
+        return [func(args[0])]
     # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
     processes = num_threads if num_threads is not None else get_parallel_threads(
     )

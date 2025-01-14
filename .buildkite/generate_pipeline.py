@@ -159,9 +159,7 @@ def _extract_marked_tests(
         function_cloud_map[function_name] = (final_clouds_to_include, [
             QUEUE_GKE if run_on_gke else cloud_queue_map[cloud]
             for cloud in final_clouds_to_include
-        ], function_name_param_map.get(function_name, [None]))
-
-    return function_cloud_map
+        ], param_list)
 
 
 def _generate_pipeline(test_file: str,

@@ -131,6 +131,7 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
+    # TODO(zpoint): clear old cache that has been created in the previous boot.
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
                  f'blobfuse2 {mount_path} --allow-other --no-symlinks '
