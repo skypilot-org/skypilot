@@ -49,7 +49,7 @@ if __name__ == '__main__':
     writer.writeheader()
 
     offerList = vast.vast().search_offers(limit=10000)
-    priceMap: Dict[Any, List] = {}
+    priceMap: Dict[str, List] = collections.defaultdict(list)
     for offer in offerList:
         entry = {}
         for ours, theirs in mapped_keys:
