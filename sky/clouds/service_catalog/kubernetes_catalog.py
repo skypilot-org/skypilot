@@ -115,6 +115,16 @@ def _list_accelerators(
 
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
+
+    Returns:
+        A tuple of three dictionaries:
+        - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo 
+            objects with quantity information.
+        - total_accelerators_capacity: Dict mapping accelerator names to their 
+            total capacity in the cluster.
+        - total_accelerators_available: Dict mapping accelerator names to their 
+            current availability. Returns -1 for each accelerator if 
+            realtime=False or if insufficient permissions.
     """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
@@ -242,6 +252,10 @@ def _list_accelerators(
                                         container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
+
+                # Initialize the entry if it doesn't exist yet
+                if accelerator_name not in total_accelerators_available:
+                    total_accelerators_available[accelerator_name] = 0
 
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
