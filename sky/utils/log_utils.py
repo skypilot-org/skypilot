@@ -5,6 +5,8 @@ import types
 from typing import Callable, Iterator, List, Optional, TextIO, Type
 
 import colorama
+# slow due to https://github.com/python-pendulum/pendulum/issues/808
+# FIXME(aylei): bump pendulum if it get fixed
 import pendulum
 import prettytable
 
