@@ -789,6 +789,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 # ------- Testing user dependencies --------
+@pytest.mark.no_vast  # Requires GCS
 def test_user_dependencies(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
