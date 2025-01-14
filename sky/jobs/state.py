@@ -455,7 +455,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
 
 
 def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
-    """Set the task to recovering state."""
+    """Set the task to recovering state, and update the job duration."""
     logger.info('=== Recovering... ===')
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         cursor.execute(

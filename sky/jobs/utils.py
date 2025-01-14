@@ -165,7 +165,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                     # This should only be the case for a very short period of
                     # time between marking the job as submitted and writing the
                     # launched controller process pid back to the database (see
-                    # scheduler.maybe_start_waiting_jobs).
+                    # scheduler.maybe_schedule_next_jobs).
                     # TODO(cooperc): Find a way to detect if we get stuck in
                     # this state.
                     continue

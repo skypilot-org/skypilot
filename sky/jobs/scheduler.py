@@ -4,7 +4,7 @@ Once managed jobs are submitted via submit_job, the scheduler is responsible for
 the business logic of deciding when they are allowed to start, and choosing the
 right one to start.
 
-The scheduler is not its own process - instead, maybe_start_waiting_jobs() can
+The scheduler is not its own process - instead, maybe_schedule_next_jobs() can
 be called from any code running on the managed jobs controller instance to
 trigger scheduling of new jobs if possible. This function should be called
 immediately after any state change that could result in new jobs being able to
@@ -30,7 +30,6 @@ Nomenclature:
 - launch/launching: launching a cluster (sky.launch) as part of a job
 - start/run/schedule: create the job controller process for a job
 - alive: a job controller exists
-
 """
 
 from argparse import ArgumentParser
@@ -52,7 +51,7 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 # The _MANAGED_JOB_SCHEDULER_LOCK should be held whenever we are checking the
 # parallelism control or updating the schedule_state of any job.
 # Any code that takes this lock must conclude by calling
-# maybe_start_waiting_jobs.
+# maybe_schedule_next_jobs.
 _MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
@@ -64,13 +63,16 @@ def _get_lock_path() -> str:
     return path
 
 
-def maybe_start_waiting_jobs() -> None:
+def maybe_schedule_next_jobs() -> None:
     """Determine if any managed jobs can be scheduled, and if so, schedule them.
 
-    For newly submitted jobs, this includes starting the job controller
-    process. For jobs that are already alive but are waiting to launch a new
-    task or recover, just update the state of the job to indicate that the
-    launch can proceed.
+    Here, "schedule" means to select job that is waiting, and allow it to
+    proceed. It does NOT mean to submit a job to the scheduler.
+
+    For newly submitted jobs, scheduling means updating the state of the jobs,
+    and starting the job controller process. For jobs that are already alive but
+    are waiting to launch a new task or recover, just update the state of the
+    job to indicate that the launch can proceed.
 
     This function transitions jobs into LAUNCHING on a best-effort basis. That
     is, if we can start any jobs, we will, but if not, we will exit (almost)
@@ -102,7 +104,7 @@ def maybe_start_waiting_jobs() -> None:
             while True:
                 maybe_next_job = state.get_waiting_job()
                 if maybe_next_job is None:
-                    # Nothing left to schedule, break from scheduling loop
+                    # Nothing left to start, break from scheduling loop
                     break
 
                 current_state = maybe_next_job['schedule_state']
@@ -168,7 +170,7 @@ def submit_job(job_id: int, dag_yaml_path: str) -> None:
     """
     with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_waiting(job_id, dag_yaml_path)
-    maybe_start_waiting_jobs()
+    maybe_schedule_next_jobs()
 
 
 def launch_finished(job_id: int) -> None:
@@ -181,7 +183,7 @@ def launch_finished(job_id: int) -> None:
     """
     with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_alive(job_id)
-    maybe_start_waiting_jobs()
+    maybe_schedule_next_jobs()
 
 
 def wait_until_launch_okay(job_id: int) -> None:
@@ -224,7 +226,7 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
 
     with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_done(job_id, idempotent)
-    maybe_start_waiting_jobs()
+    maybe_schedule_next_jobs()
 
 
 def _get_job_parallelism() -> int:
@@ -255,7 +257,7 @@ def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
     with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_alive_waiting(job_id)
-    maybe_start_waiting_jobs()
+    maybe_schedule_next_jobs()
 
 
 if __name__ == '__main__':
