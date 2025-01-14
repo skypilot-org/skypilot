@@ -59,8 +59,6 @@
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-SkyPilot was initially developed at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley. Over time, it has gained adoption among both industry users and academic researchers.
-
 SkyPilot **abstracts away infra burdens**:
 - Launch [dev clusters](https://docs.skypilot.co/en/latest/examples/interactive-development.html), [jobs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html), and [serving](https://docs.skypilot.co/en/latest/serving/sky-serve.html) on any infra
 - Easy job management: queue, run, and auto-recover many jobs
@@ -200,6 +198,8 @@ Read the research:
 - [Sky Computing whitepaper](https://arxiv.org/abs/2205.07147)
 - [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
 - [Policy for Managed Spot Jobs](https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao)  (NSDI 2024)
+
+SkyPilot was initially developed at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley. Over time, it has gained adoption among both industry users and academic researchers.
 
 ## Support and Questions
 We are excited to hear your feedback!
