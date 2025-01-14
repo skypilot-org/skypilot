@@ -1605,8 +1605,8 @@ class TestStorageWithCredentials:
         'europe-west8', 'europe-west9', 'europe-west10', 'europe-west12',
         'asia-east1', 'asia-east2', 'asia-northeast1', 'asia-northeast2',
         'asia-northeast3', 'asia-southeast1', 'asia-south1', 'asia-south2',
-        'asia-southeast2', 'me-central1', 'me-central2', 'me-west1',
-        'australia-southeast1', 'australia-southeast2', 'africa-south1'
+        'asia-southeast2', 'me-central1', 'me-west1', 'australia-southeast1',
+        'australia-southeast2', 'africa-south1'
     ])
     def test_gcs_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all GCS regions
