@@ -131,6 +131,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
 
     Note: we expect that job_id, if provided, refers to a nonterminal job.
     """
+
     if job_id is None:
         # Warning: it's totally possible for the controller job to transition to
         # a terminal state during the course of this function. The set_failed()
@@ -140,6 +141,8 @@ def update_managed_job_status(job_id: Optional[int] = None):
     else:
         job_ids = [job_id]
     for job_id_ in job_ids:
+
+        failure_reason = None
 
         tasks = managed_job_state.get_managed_jobs(job_id_)
         schedule_state = tasks[0]['schedule_state']
@@ -151,6 +154,8 @@ def update_managed_job_status(job_id: Optional[int] = None):
             if controller_status is None or controller_status.is_terminal():
                 logger.error(f'Controller for legacy job {job_id_} is in an '
                              'unexpected state.')
+                failure_reason = 'Legacy job is in an unexpected state'
+
                 # Continue to mark the job as failed.
             else:
                 # Still running.
@@ -171,14 +176,22 @@ def update_managed_job_status(job_id: Optional[int] = None):
                     # scheduler.maybe_schedule_next_jobs).
                     # TODO(cooperc): Find a way to detect if we get stuck in
                     # this state.
+                    logger.info(f'Job {job_id_} is in LAUNCHING state, '
+                                'but controller process hasn\'t started yet.')
                     continue
                 # All other statuses are unexpected. Proceed to mark as failed.
+                logger.error(f'Expected to find a controller pid for state '
+                             f'{schedule_state.value} but found none.')
+                failure_reason = ('No controller pid set for '
+                                  f'{schedule_state.value}')
             else:
                 logger.debug(f'Checking controller pid {pid}')
                 if _controller_process_alive(pid, job_id_):
                     # The controller is still running.
                     continue
                 # Otherwise, proceed to mark the job as failed.
+                logger.error(f'Controller for {job_id_} seems to be dead.')
+                failure_reason = 'Controller is dead'
 
         logger.error(f'Controller for job {job_id_} has exited abnormally. '
                      'Setting the job status to FAILED_CONTROLLER.')
@@ -190,6 +203,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                 cluster_name)
             if handle is not None:
                 backend = backend_utils.get_backend_from_handle(handle)
+                # TODO(cooperc): Add backoff
                 max_retry = 3
                 for retry_cnt in range(max_retry):
                     try:
@@ -210,10 +224,15 @@ def update_managed_job_status(job_id: Optional[int] = None):
             task_id=None,
             failure_type=managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
             failure_reason=
-            'Controller process has exited abnormally. For more details, run: '
-            f'sky jobs logs --controller {job_id_}')
+            f'Controller process has exited abnormally ({failure_reason}). For '
+            f'more details, run: sky jobs logs --controller {job_id_}')
         scheduler.job_done(job_id_, idempotent=True)
 
+    # Some jobs may be in a terminal status, but are not yet DONE. For instance,
+    # they may be still cleaning up resources, etc. Such jobs won't be captured
+    # by the above check, which only looks at nonterminal jobs. So, check the
+    # controller liveness of all jobs that should have live controller
+    # processes.
     for job_info in managed_job_state.get_schedule_live_jobs(job_id):
         if not job_info['controller_pid']:
             # Technically, this can happen very briefly between when the job is
@@ -222,12 +241,19 @@ def update_managed_job_status(job_id: Optional[int] = None):
             # is clearly wrong.
             if (job_info['schedule_state'] !=
                     managed_job_state.ManagedJobScheduleState.LAUNCHING):
-                logger.error(f'Missing controller PID for {job_info["job_id"]}.'
-                             'Setting to DONE.')
+                logger.error(
+                    f'Missing controller PID for {job_info["job_id"]}. '
+                    'Setting to DONE.')
                 scheduler.job_done(job_info['job_id'])
-        elif not _controller_process_alive(job_info['controller_pid'], job_info['job_id']):
-            logger.error(f'Controller for job {job_info["job_id"]} is missing. '
-                         'Marking the job as DONE.')
+            else:
+                logger.info(f'LAUNCHING job {job_info["job_id"]} has no '
+                            'controller process yet. Skipping.')
+
+        elif not _controller_process_alive(job_info['controller_pid'],
+                                           job_info['job_id']):
+            logger.error(
+                f'Controller for job {job_info["job_id"]} is not alive. '
+                'Marking the job as DONE.')
             scheduler.job_done(job_info['job_id'])
 
 
