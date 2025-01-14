@@ -3968,7 +3968,7 @@ class OciStore(AbstractStore):
 
     def __init__(self,
                  name: str,
-                 source: str,
+                 source: Optional[SourceType],
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
@@ -3980,17 +3980,27 @@ class OciStore(AbstractStore):
         self.compartment: str
         self.namespace: str
 
-        # Region is from the specified name in <bucket>@<region> format
+        # Region is from the specified name in <bucket>@<region> format.
+        # Another case is name can also be set by the source, for example:
+        #   /datasets-storage:
+        #       source: oci://RAGData@us-sanjose-1
+        # The name in above mount will be set to RAGData@us-sanjose-1
         if name is not None and '@' in name:
             self._validate_bucket_expr(name)
             name, region = name.split('@')
+
         # Region is from the specified source in oci://<bucket>@<region> format
-        if source is not None and '@' in source:
+        if isinstance(source,
+                      str) and source.startswith('oci://') and '@' in source:
             self._validate_bucket_expr(source)
             source, region = source.split('@')
+
         # Default region set to what specified in oci config.
         if region is None:
             region = oci.get_oci_config()['region']
+
+        # So far from now on, the name and source are canonical, means there
+        # is no region (@<region> suffix) associated with them anymore.
 
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
@@ -4000,8 +4010,8 @@ class OciStore(AbstractStore):
         pattern = r'^(\w+://)?[A-Za-z0-9-._]+(@\w{2}-\w+-\d{1})$'
         if not re.match(pattern, bucket_expr):
             raise ValueError(
-            'The format for the bucket portion is <bucket>@<region> '
-            'when specify a region with a bucket.')
+                'The format for the bucket portion is <bucket>@<region> '
+                'when specify a region with a bucket.')
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
