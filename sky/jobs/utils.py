@@ -109,10 +109,13 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     return status
 
 
-def _controller_process_alive(pid: int) -> bool:
+def _controller_process_alive(pid: int, job_id: int) -> bool:
     """Check if the controller process is alive."""
     try:
-        return psutil.Process(pid).is_running()
+        process = psutil.Process(pid)
+        # The last two args of the command line should be --job-id <id>
+        job_args = process.cmdline()[-2:]
+        return process.is_running() and job_args == ['--job-id', str(job_id)]
     except psutil.NoSuchProcess:
         return False
 
@@ -172,7 +175,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                 # All other statuses are unexpected. Proceed to mark as failed.
             else:
                 logger.debug(f'Checking controller pid {pid}')
-                if _controller_process_alive(pid):
+                if _controller_process_alive(pid, job_id_):
                     # The controller is still running.
                     continue
                 # Otherwise, proceed to mark the job as failed.
@@ -222,7 +225,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                 logger.error(f'Missing controller PID for {job_info["job_id"]}.'
                              'Setting to DONE.')
                 scheduler.job_done(job_info['job_id'])
-        elif not _controller_process_alive(job_info['controller_pid']):
+        elif not _controller_process_alive(job_info['controller_pid'], job_info['job_id']):
             logger.error(f'Controller for job {job_info["job_id"]} is missing. '
                          'Marking the job as DONE.')
             scheduler.job_done(job_info['job_id'])

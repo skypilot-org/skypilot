@@ -139,6 +139,8 @@ def maybe_schedule_next_jobs() -> None:
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
 
+                    # If the command line here is changed, please also update
+                    # utils._controller_process_alive.
                     run_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
                                'python -u -m sky.jobs.controller '
                                f'{dag_yaml_path} --job-id {job_id}')
