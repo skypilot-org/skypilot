@@ -118,12 +118,12 @@ def _list_accelerators(
 
     Returns:
         A tuple of three dictionaries:
-        - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo 
+        - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo
             objects with quantity information.
-        - total_accelerators_capacity: Dict mapping accelerator names to their 
+        - total_accelerators_capacity: Dict mapping accelerator names to their
             total capacity in the cluster.
-        - total_accelerators_available: Dict mapping accelerator names to their 
-            current availability. Returns -1 for each accelerator if 
+        - total_accelerators_available: Dict mapping accelerator names to their
+            current availability. Returns -1 for each accelerator if
             realtime=False or if insufficient permissions.
     """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
