@@ -113,3 +113,38 @@ def test_aws_az_fetching_error():
     assert deserialized.region == 'us-east-1'
     assert deserialized.reason == exceptions.AWSAzFetchingError.Reason.AUTH_FAILURE
     assert deserialized.stacktrace == 'test_stacktrace'
+
+
+def test_wrap_unsafe_exceptions():
+    """Test that non-safe exceptions are wrapped properly."""
+
+    # Mock a cloud exception
+    class MockBotoError(Exception):
+        pass
+
+    MockBotoError.__module__ = 'botocore.exceptions'
+
+    # Create mock cloud exception
+    boto_error = MockBotoError('Failed to launch instance')
+
+    # Serialize and deserialize the exception
+    wrapped = _serialize_deserialize(boto_error)
+
+    # Verify it was converted to CloudError
+    assert isinstance(wrapped, exceptions.CloudError)
+    assert wrapped.cloud_provider == 'botocore'
+    assert wrapped.error_type == 'MockBotoError'
+    assert str(
+        wrapped) == 'botocore error (MockBotoError): Failed to launch instance'
+
+    # Verify safe exceptions pass through unchanged
+    value_error = ValueError('Invalid value')
+    safe_error = _serialize_deserialize(value_error)
+    assert isinstance(safe_error, ValueError)
+    assert str(safe_error) == 'Invalid value'
+
+    # Verify SkyPilot exceptions pass through unchanged
+    sky_error = exceptions.ClusterNotUpError('test cluster')
+    sky_safe = _serialize_deserialize(sky_error)
+    assert isinstance(sky_safe, exceptions.ClusterNotUpError)
+    assert str(sky_safe) == 'test cluster'

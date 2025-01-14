@@ -24,8 +24,52 @@ INSUFFICIENT_PRIVILEGES_CODE = 52
 GIT_FATAL_EXIT_CODE = 128
 
 
+def is_safe_exception(exc: Exception) -> bool:
+    """Returns True if the exception is safe to send to clients.
+
+    Safe exceptions are:
+    1. Built-in exceptions
+    2. SkyPilot's own exceptions
+    """
+    module = type(exc).__module__
+
+    # Builtin exceptions (e.g., ValueError, RuntimeError)
+    if module == 'builtins':
+        return True
+
+    # SkyPilot exceptions
+    if module.startswith('sky.'):
+        return True
+
+    return False
+
+
+def wrap_exception(exc: Exception) -> Exception:
+    """Wraps non-safe exceptions into SkyPilot exceptions
+
+    This is used to wrap exceptions that are not safe to deserialize at clients.
+
+    Examples include exceptions from cloud providers whose packages are not
+    available at clients.
+    """
+    if is_safe_exception(exc):
+        return exc
+
+    return CloudError(message=str(exc),
+                      cloud_provider=type(exc).__module__.split('.')[0],
+                      error_type=type(exc).__name__)
+
+
 def serialize_exception(e) -> Dict[str, Any]:
-    """Serialize the exception."""
+    """Serialize the exception.
+
+    This function also wraps any unsafe exceptions (e.g., cloud exceptions)
+    into SkyPilot's CloudError before serialization to ensure clients can
+    deserialize them without needing cloud provider packages installed.
+    """
+    # Wrap unsafe exceptions before serialization
+    e = wrap_exception(e)
+
     stacktrace = getattr(e, 'stacktrace', None)
     attributes = e.__dict__.copy()
     if 'stacktrace' in attributes:
@@ -61,6 +105,19 @@ def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
     if serialized['stacktrace'] is not None:
         setattr(e, 'stacktrace', serialized['stacktrace'])
     return e
+
+
+class CloudError(Exception):
+    """Wraps cloud-specific errors into a SkyPilot exception."""
+
+    def __init__(self, message: str, cloud_provider: str, error_type: str):
+        super().__init__(message)
+        self.cloud_provider = cloud_provider
+        self.error_type = error_type
+
+    def __str__(self):
+        return (f'{self.cloud_provider} error ({self.error_type}): '
+                f'{super().__str__()}')
 
 
 class ResourcesUnavailableError(Exception):

@@ -16,6 +16,9 @@ default_args = {
 # Update this path to the root of the mock workflow
 MOCK_WORKFLOW_ROOT = '/Users/romilb/Romil/Berkeley/Research/sky-experiments/examples/airflow/workflow_clientserver/'
 
+# Unique bucket name for this DAG run
+DATA_BUCKET_NAME = str(uuid.uuid4())[:4]
+
 
 def task_failure_callback(context):
     """Callback to shut down SkyPilot cluster on task failure."""
@@ -29,26 +32,74 @@ def task_failure_callback(context):
 
 
 @task(on_failure_callback=task_failure_callback)
-def run_sky_task(task_name: str, bucket_name: str, bucket_store_type: str,
+def run_sky_task(base_path: str,
+                 yaml_path: str,
+                 envs_override: dict = None,
+                 git_branch: str = None,
                  **kwargs):
     """Generic function to run a SkyPilot task.
+
+    This is a blocking call that runs the SkyPilot task and streams the logs. 
+    In the future, we can use deferrable tasks to avoid blocking the worker 
+    while waiting for cluster to start.
     
     Args:
-        task_name: Name of the task (data_preprocessing/train/eval)
-        bucket_url: URL of the data bucket to be passed in DATA_BUCKET_URL env var
+        base_path: Base path (local directory or git repo URL)
+        yaml_path: Path to the YAML file (relative to base_path)
+        envs_override: Dictionary of environment variables to override in the task config
+        git_branch: Optional branch name to checkout (only used if base_path is a git repo)
     """
-    yaml_path = MOCK_WORKFLOW_ROOT + f"{task_name}.yaml"
+    import subprocess
+    import tempfile
 
+    original_cwd = os.getcwd()
+    try:
+        # Handle git repos vs local paths
+        if base_path.startswith(('http://', 'https://', 'git://')):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                # TODO(romilb): This assumes git credentials are available in the airflow worker
+                subprocess.run(['git', 'clone', base_path, temp_dir],
+                               check=True)
+
+                # Checkout specific branch if provided
+                if git_branch:
+                    subprocess.run(['git', 'checkout', git_branch],
+                                   cwd=temp_dir,
+                                   check=True)
+
+                full_yaml_path = os.path.join(temp_dir, yaml_path)
+                # Change to the temp dir to set context
+                os.chdir(temp_dir)
+
+                # Run the sky task
+                return _run_sky_task(full_yaml_path, envs_override or {},
+                                     kwargs)
+        else:
+            full_yaml_path = os.path.join(base_path, yaml_path)
+            os.chdir(base_path)
+
+            # Run the sky task
+            return _run_sky_task(full_yaml_path, envs_override or {}, kwargs)
+    finally:
+        os.chdir(original_cwd)
+
+
+def _run_sky_task(yaml_path: str, envs_override: dict, kwargs: dict):
+    """Internal helper to run the sky task after directory setup."""
     with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
         task_config = yaml.safe_load(f)
 
-    # Update the envs with the bucket name and store type
+    # Initialize envs if not present
+    if 'envs' not in task_config:
+        task_config['envs'] = {}
+
+    # Update the envs with the override values
     # task.update_envs() is not used here, see https://github.com/skypilot-org/skypilot/issues/4363
-    task_config['envs']['DATA_BUCKET_NAME'] = bucket_name
-    task_config['envs']['DATA_BUCKET_STORE_TYPE'] = bucket_store_type
+    task_config['envs'].update(envs_override)
 
     task = sky.Task.from_yaml_config(task_config)
-    cluster_uuid = str(uuid.uuid4())[:4]  # To uniquely identify the cluster
+    cluster_uuid = str(uuid.uuid4())[:4]
+    task_name = os.path.splitext(os.path.basename(yaml_path))[0]
     cluster_name = f'{task_name}-{cluster_uuid}'
     kwargs['ti'].xcom_push(key='cluster_name',
                            value=cluster_name)  # For failure callback
@@ -59,26 +110,46 @@ def run_sky_task(task_name: str, bucket_name: str, bucket_store_type: str,
     # the worker while waiting for cluster to start.
 
     # Stream the logs for airflow logging
-    job_logs = sky.tail_logs(cluster_name=cluster_name,
-                             job_id=job_id,
-                             follow=True)
-    sky.stream_and_get(job_logs)
+    sky.tail_logs(cluster_name=cluster_name, job_id=job_id, follow=True)
+
+
+@task
+def generate_bucket_uuid(**context):
+    bucket_uuid = str(uuid.uuid4())[:4]
+    return bucket_uuid
 
 
 with DAG(dag_id='sky_k8s_train_pipeline',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
-    bucket_uuid = str(uuid.uuid4())[:4]
-    bucket_name = f"sky-data-demo-{bucket_uuid}"
-    bucket_store_type = "s3"
+    repo_url = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+
+    # Generate bucket UUID as first task
+    # See https://stackoverflow.com/questions/55748050/generating-uuid-and-use-it-across-airflow-dag
+    bucket_uuid = generate_bucket_uuid()
+
+    # Use the bucket_uuid from previous task
+    common_envs = {
+        'DATA_BUCKET_NAME': f"sky-data-demo-{{{{ task_instance.xcom_pull(task_ids='generate_bucket_uuid') }}}}",
+        'DATA_BUCKET_STORE_TYPE': 's3'
+    }
 
     preprocess = run_sky_task.override(task_id="data_preprocess")(
-        "data_preprocessing", bucket_name, bucket_store_type)
-    train_task = run_sky_task.override(task_id="train")("train", bucket_name,
-                                                        bucket_store_type)
-    eval_task = run_sky_task.override(task_id="eval")("eval", bucket_name,
-                                                      bucket_store_type)
+        repo_url,
+        'data_preprocessing.yaml',
+        envs_override=common_envs,
+        git_branch='clientserver_example')
+    train_task = run_sky_task.override(task_id="train")(
+        repo_url,
+        'train.yaml',
+        envs_override=common_envs,
+        git_branch='clientserver_example')
+    eval_task = run_sky_task.override(task_id="eval")(
+        repo_url,
+        'eval.yaml',
+        envs_override=common_envs,
+        git_branch='clientserver_example')
 
     # Define the workflow
-    preprocess >> train_task >> eval_task
+    bucket_uuid >> preprocess >> train_task >> eval_task

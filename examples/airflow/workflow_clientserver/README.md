@@ -5,7 +5,7 @@ In this guide, we show how a training workflow involving data preprocessing, tra
 This example uses a remote SkyPilot API Server to manage shared state across invocations, and includes a failure callback to tear down the SkyPilot cluster on task failure.
 
 <p align="center">
-  <img src="https://i.imgur.com/Z1iEikn.png" width="800">
+  <img src="https://i.imgur.com/TXn5eKI.png" width="800">
 </p>
 
 **💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#job-pipelines) for more information. 
@@ -44,7 +44,7 @@ We will define the following tasks to mock a training workflow:
 2. `train.yaml`: Trains a model on the data in the bucket.
 3. `eval.yaml`: Evaluates the model and writes evaluation results to the bucket.
 
-We have defined these tasks in this directory.
+We have defined these tasks in this directory and uploaded them to a [Git repository](https://github.com/romilbhardwaj/mock_train_workflow/tree/clientserver_example).
 
 When developing the workflow, you can run the tasks independently using `sky launch`:
 
@@ -78,19 +78,45 @@ with DAG(dag_id='sky_k8s_train_pipeline',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
-    bucket_uuid = str(uuid.uuid4())[:4]
-    bucket_name = f"sky-data-demo-{bucket_uuid}"
-    bucket_store_type = "s3"
+    repo_url = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
 
-    preprocess = run_sky_task.override(task_id="data_preprocess")("data_preprocessing", bucket_name, bucket_store_type)
-    train_task = run_sky_task.override(task_id="train")("train", bucket_name, bucket_store_type)
-    eval_task = run_sky_task.override(task_id="eval")("eval", bucket_name, bucket_store_type)
+    # Generate bucket UUID as first task
+    bucket_uuid = generate_bucket_uuid()
     
+    # Use the bucket_uuid from previous task
+    common_envs = {
+        'DATA_BUCKET_NAME': f"sky-data-demo-{{{{ task_instance.xcom_pull(task_ids='generate_bucket_uuid') }}}}",
+        'DATA_BUCKET_STORE_TYPE': 's3'
+    }
+    
+    preprocess = run_sky_task.override(task_id="data_preprocess")(
+        repo_url, 'data_preprocessing.yaml', envs_override=common_envs, git_branch='clientserver_example')
+    train_task = run_sky_task.override(task_id="train")(
+        repo_url, 'train.yaml', envs_override=common_envs, git_branch='clientserver_example')
+    eval_task = run_sky_task.override(task_id="eval")(
+        repo_url, 'eval.yaml', envs_override=common_envs, git_branch='clientserver_example')
+
     # Define the workflow
-    preprocess >> train_task >> eval_task
+    bucket_uuid >> preprocess >> train_task >> eval_task
 ```
 
-Behind the scenes, the `run_sky_task` uses the Airflow native Python operator to invoke the sky python API. All clusters are set to auto-down after the task is done, so no dangling clusters are left behind.
+Behind the scenes, the `run_sky_task` uses the Airflow native Python operator to invoke the Sky Python API. The task YAML files can be sourced in two ways:
+
+1. **From a Git repository** (as shown above):
+   ```python
+   repo_url = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+   run_sky_task(...)(repo_url, 'path/to/yaml', git_branch='optional_branch')
+   ```
+   The task will automatically clone the repository and checkout the specified branch before execution.
+
+2. **From a local path**:
+   ```python
+   local_path = '/path/to/local/directory'
+   run_sky_task(...)(local_path, 'path/to/yaml')
+   ```
+   This is useful during development or when your tasks are stored locally.
+
+All clusters are set to auto-down after the task is done, so no dangling clusters are left behind.
 
 ## Running the DAG
 
