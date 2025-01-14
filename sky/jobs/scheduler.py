@@ -34,6 +34,7 @@ Nomenclature:
 """
 
 from argparse import ArgumentParser
+from functools import lru_cache
 import os
 import time
 
@@ -54,6 +55,13 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 # maybe_start_waiting_jobs.
 _MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
+
+
+@lru_cache(maxsize=1)
+def _get_lock_path() -> str:
+    path = os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    return path
 
 
 def maybe_start_waiting_jobs() -> None:
@@ -89,7 +97,7 @@ def maybe_start_waiting_jobs() -> None:
         # parallelism control. If we cannot obtain the lock, exit immediately.
         # The current lock holder is expected to launch any jobs it can before
         # releasing the lock.
-        with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK),
+        with filelock.FileLock(os.path.expanduser(_get_lock_path()),
                                blocking=False):
             while True:
                 maybe_next_job = state.get_waiting_job()
@@ -158,7 +166,7 @@ def submit_job(job_id: int, dag_yaml_path: str) -> None:
     there are resources available. It may block to acquire the lock, so it
     should not be on the critical path for `sky jobs launch -d`.
     """
-    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_waiting(job_id, dag_yaml_path)
     maybe_start_waiting_jobs()
 
@@ -171,7 +179,7 @@ def launch_finished(job_id: int) -> None:
 
     To transition back to LAUNCHING, use wait_until_launch_okay.
     """
-    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_alive(job_id)
     maybe_start_waiting_jobs()
 
@@ -214,7 +222,7 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_done(job_id, idempotent)
     maybe_start_waiting_jobs()
 
@@ -245,7 +253,7 @@ def _can_lauch_in_alive_job() -> bool:
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
-    with filelock.FileLock(os.path.expanduser(_MANAGED_JOB_SCHEDULER_LOCK)):
+    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_alive_waiting(job_id)
     maybe_start_waiting_jobs()
 
