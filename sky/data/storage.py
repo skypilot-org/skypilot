@@ -3998,7 +3998,8 @@ class OciStore(AbstractStore):
 
     def _validate_bucket_expr(self, bucket_expr: str):
         pattern = r'^(\w+://)?[A-Za-z0-9-._]+(@\w{2}-\w+-\d{1})$'
-        assert re.match(pattern, bucket_expr), (
+        if not re.match(pattern, bucket_expr):
+            raise ValueError(
             'The format for the bucket portion is <bucket>@<region> '
             'when specify a region with a bucket.')
 
