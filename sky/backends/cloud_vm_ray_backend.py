@@ -3911,40 +3911,39 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         Returns:
             A dictionary mapping job_id to log path.
         """
-        # exactly one of job_name, job_id should be None
-        if (job_name is None) == (job_id is None):
-            raise ValueError(
-                'Either job_id or job_name should be set, but not both')
+        # if job_name and job_id should not both be specified
+        assert job_name is None or job_id is None, (job_name, job_id)
 
-        if job_name is not None:
+        if job_id is None:
             # generate code to get the job_id
+            # if job_name is None, get all job_ids
             code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
                 job_name=job_name)
-            returncode, run_timestamps, stderr = self.run_on_head(
-                handle,
-                code,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
+            returncode, job_ids, stderr = self.run_on_head(handle,
+                                                           code,
+                                                           stream_logs=False,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
             subprocess_utils.handle_returncode(returncode, code,
                                                'Failed to sync down logs.',
                                                stderr)
-            job_ids = common_utils.decode_payload(run_timestamps)
+            job_ids = common_utils.decode_payload(job_ids)
             if not job_ids:
                 logger.info(f'{colorama.Fore.YELLOW}'
                             'No matching job found'
                             f'{colorama.Style.RESET_ALL}')
                 return {}
             elif len(job_ids) > 1:
-                logger.info(
-                    f'{colorama.Fore.YELLOW}'
-                    f'Multiple jobs IDs found under the name {job_name}. '
-                    'Downloading the latest job logs.'
-                    f'{colorama.Style.RESET_ALL}')
-                # list should aready be in descending order
+                name_str = ''
+                if job_name is not None:
+                    name_str = ('Multiple jobs IDs found under the name '
+                                f'{job_name}. ')
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            f'{name_str}'
+                            'Downloading the latest job logs.'
+                            f'{colorama.Style.RESET_ALL}')
+            # list should aready be in descending order
             job_id = job_ids[0]
-        else:
-            assert job_id is not None, (job_id, job_name)
 
         # get the run_timestamp
         # the function takes in [job_id]
