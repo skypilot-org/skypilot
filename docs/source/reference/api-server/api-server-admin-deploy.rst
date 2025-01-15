@@ -51,10 +51,10 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Create a Kubernetes secret with your AWS credentials:
 
-        .. code-block:: bash
+        .. code-block:: console
 
-            NAMESPACE=skypilot
-            kubectl create secret generic aws-credentials \
+            $ NAMESPACE=skypilot
+            $ kubectl create secret generic aws-credentials \
             -n $NAMESPACE \
             --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
             --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
@@ -63,14 +63,33 @@ Following tabs describe how to configure credentials for different clouds on the
 
         When installing or upgrading the Helm chart, enable AWS credentials by setting ``awsCredentials.enabled=true``.
 
-        .. code-block:: bash
+        .. code-block:: console
 
-            helm upgrade --install skypilot-platform skypilot/skypilot-platform --set awsCredentials.enabled=true
+            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform --set awsCredentials.enabled=true
     
     .. tab-item:: GCP
         :sync: gcp-creds-tab
 
-        Coming soon.
+        We use service accounts to authenticate with GCP. Refer to :ref:`GCP service account <gcp-service-account>` guide on how to set up a service account.
+
+        Once you have the JSON key for your service account, create a Kubernetes secret to store it:
+
+        .. code-block:: console
+
+            $ NAMESPACE=skypilot
+            $ kubectl create secret generic gcp-credentials \
+            -n $NAMESPACE \
+            --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
+
+        When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` to your project ID:
+
+        .. code-block:: console
+
+            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+            --set gcpCredentials.enabled=true \
+            --set gcpCredentials.projectId=YOUR_PROJECT_ID
+
+        Replace ``YOUR_PROJECT_ID`` with your actual GCP project ID.
 
 
 Step 3: Deploy the API Server Helm Chart
