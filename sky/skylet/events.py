@@ -119,8 +119,8 @@ class AutostopEvent(SkyletEvent):
             logger.debug('autostop_config not set. Skipped.')
             return
 
-        if job_lib.is_cluster_idle() and managed_job_state.get_num_alive_jobs(
-        ) == 0:
+        if (job_lib.is_cluster_idle() and
+                not managed_job_state.get_num_alive_jobs()):
             idle_minutes = (time.time() -
                             autostop_lib.get_last_active_time()) // 60
             logger.debug(
