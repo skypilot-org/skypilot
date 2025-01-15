@@ -104,8 +104,7 @@ def maybe_schedule_next_jobs() -> None:
         # parallelism control. If we cannot obtain the lock, exit immediately.
         # The current lock holder is expected to launch any jobs it can before
         # releasing the lock.
-        with filelock.FileLock(os.path.expanduser(_get_lock_path()),
-                               blocking=False):
+        with filelock.FileLock(_get_lock_path(), blocking=False):
             while True:
                 maybe_next_job = state.get_waiting_job()
                 if maybe_next_job is None:
@@ -175,7 +174,7 @@ def submit_job(job_id: int, dag_yaml_path: str) -> None:
     there are resources available. It may block to acquire the lock, so it
     should not be on the critical path for `sky jobs launch -d`.
     """
-    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
+    with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_waiting(job_id, dag_yaml_path)
     maybe_schedule_next_jobs()
 
@@ -216,7 +215,7 @@ def scheduled_launch(job_id: int):
 
     yield
 
-    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
+    with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_alive(job_id)
     maybe_schedule_next_jobs()
 
@@ -234,14 +233,14 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
                        == state.ManagedJobScheduleState.DONE):
         return
 
-    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
+    with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_done(job_id, idempotent)
     maybe_schedule_next_jobs()
 
 
 def _set_alive_waiting(job_id: int) -> None:
     """Should use wait_until_launch_okay() to transition to this state."""
-    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
+    with filelock.FileLock(_get_lock_path()):
         state.scheduler_set_alive_waiting(job_id)
     maybe_schedule_next_jobs()
 
