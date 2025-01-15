@@ -654,6 +654,7 @@ def test_managed_jobs_cancellation_gcp():
         timeout=25 * 60)
     smoke_tests_utils.run_one_test(test)
 
+
 @pytest.mark.managed_jobs
 def test_managed_jobs_retry_logs():
     """Test managed job retry logs are properly displayed when a task fails."""
@@ -679,6 +680,7 @@ def test_managed_jobs_retry_logs():
             timeout=7 * 60,  # 7 mins
         )
         smoke_tests_utils.run_one_test(test)
+
 
 # ---------- Testing storage for managed job ----------
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
