@@ -753,6 +753,8 @@ def tail_logs(
         signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
         signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
+    # Refer to the notes in
+    # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
     backend.run_on_head(handle,
                         code,
                         stream_logs=True,
