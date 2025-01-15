@@ -236,8 +236,9 @@ def update_managed_job_status(job_id: Optional[int] = None):
     # processes.
     for job_info in managed_job_state.get_schedule_live_jobs(job_id):
         if not job_info['controller_pid']:
-            # Technically, this can happen very briefly between when the job is
-            # set to LAUNCHING and before the controller actually is spawned.
+            # Technically, a job with no controller process but in LAUNCHING
+            # schedule state can happen very briefly after the job is set to
+            # LAUNCHING but before the controller process is actually spawned.
             # However, if we observe any state other than LAUNCHING, something
             # is clearly wrong.
             if (job_info['schedule_state'] !=
