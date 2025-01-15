@@ -33,7 +33,7 @@ class Resources:
 
     This class is immutable once created (to ensure some validations are done
     whenever properties change). To update the property of an instance of
-    Resources, use `resources.copy(**new_properties)`.
+    Resources, use ``resources.copy(**new_properties)``.
 
     Used:
 

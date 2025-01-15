@@ -49,12 +49,12 @@ JOB_CONTROLLER_NAME: str = get_controller_name(ControllerType.JOBS)
 
 class StatusRefreshMode(enum.Enum):
     """The mode of refreshing the status of a cluster."""
-    # Do not refresh any clusters.
     NONE = 'NONE'
-    # Only refresh clusters if their autostop is set or have spot instances.
+    """Do not refresh any clusters."""
     AUTO = 'AUTO'
-    # Refresh all clusters.
+    """Only refresh clusters if their autostop is set or have spot instances."""
     FORCE = 'FORCE'
+    """Enforce refreshing all clusters."""
 
 
 # Constants: minimize what target?

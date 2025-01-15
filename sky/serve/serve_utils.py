@@ -805,6 +805,23 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 
 def get_endpoint(service_record: Dict[str, Any]) -> str:
+    """Gets the endpoint for a service record.
+
+    Example:
+
+        .. code-block:: python
+
+            service_records = sdk.get(serve.status(service_names='my_service'))
+            endpoint = serve.get_endpoint(service_records[0])
+
+    Args:
+        service_record: The service record, retrieved with
+          ``sky.serve.status()``.
+
+    Returns:
+        The endpoint for the serve controller.
+    """
+    # TODO(zhwu): We should move this into serve SDK.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
     # pylint: disable=import-outside-toplevel
     from sky.serve.client import sdk as serve_sdk

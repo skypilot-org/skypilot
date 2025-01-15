@@ -81,6 +81,9 @@ def check(clouds: Optional[Tuple[str]],
 
     Returns:
         The request ID of the check request.
+
+    Request Returns:
+        None
     """
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.post(f'{server_common.get_server_url()}/check',
@@ -95,7 +98,10 @@ def enabled_clouds() -> server_common.RequestId:
     """Gets the enabled clouds.
 
     Returns:
-        request_id: The request ID of the enabled clouds request.
+        The request ID of the enabled clouds request.
+
+    Request Returns:
+        A list of enabled clouds in string format.
     """
     response = requests.get(f'{server_common.get_server_url()}/enabled_clouds')
     return server_common.get_request_id(response)
@@ -203,9 +209,12 @@ def optimize(
         minimize: whether to minimize cost or time.
 
     Returns:
-        request_id: The request ID of the optimize request.
+        The request ID of the optimize request.
 
-    Raises:
+    Request Returns:
+        The optimized DAG in YAML format.
+
+    Request Raises:
         exceptions.ResourcesUnavailableError: if no resources are available
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
@@ -234,7 +243,10 @@ def validate(dag: 'sky.Dag',
             `exec` as it does not need other files/folders in file_mounts.
 
     Returns:
-        request_id: The request ID of the validate request.
+        The request ID of the validate request.
+
+    Request Returns:
+        None
     """
     for task in dag.tasks:
         task.expand_and_validate_workdir()
@@ -292,65 +304,68 @@ def launch(
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
         cluster_name: name of the cluster to create/reuse.  If None,
-            auto-generate a name.
+          auto-generate a name.
         retry_until_up: whether to retry launching the cluster until it is
-            up.
+          up.
         idle_minutes_to_autostop: automatically stop the cluster after this
-            many minute of idleness, i.e., no running or pending jobs in the
-            cluster's job queue. Idleness gets reset whenever setting-up/
-            running/pending jobs are found in the job queue. Setting this
-            flag is equivalent to running
-            ``sky.launch(..., detach_run=True, ...)`` and then
-            ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
-            will not be autostopped.
+          many minute of idleness, i.e., no running or pending jobs in the
+          cluster's job queue. Idleness gets reset whenever setting-up/
+          running/pending jobs are found in the job queue. Setting this
+          flag is equivalent to running
+          ``sky.launch(..., detach_run=True, ...)`` and then
+          ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
+          will not be autostopped.
         dryrun: if True, do not actually launch the cluster.
         down: Tear down the cluster after all jobs finish (successfully or
-            abnormally). If --idle-minutes-to-autostop is also set, the
-            cluster will be torn down after the specified idle time.
-            Note that if errors occur during provisioning/data syncing/setting
-            up, the cluster will not be torn down for debugging purposes.
+          abnormally). If --idle-minutes-to-autostop is also set, the
+          cluster will be torn down after the specified idle time.
+          Note that if errors occur during provisioning/data syncing/setting
+          up, the cluster will not be torn down for debugging purposes.
         backend: backend to use.  If None, use the default backend
-            (CloudVMRayBackend).
+          (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
-            OptimizeTarget.TIME.
+          OptimizeTarget.TIME.
         no_setup: if True, do not re-run setup commands.
         clone_disk_from: [Experimental] if set, clone the disk from the
-            specified cluster. This is useful to migrate the cluster to a
-            different availability zone or region.
+          specified cluster. This is useful to migrate the cluster to a
+          different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
-            skip provisioning and setup steps.
+          skip provisioning and setup steps.
         need_confirmation: if True, show the confirmation prompt.
 
     Returns:
-        request_id: The request ID of the launch request.
-
-    Raises:
-        exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
-            owned by another user.
-        exceptions.InvalidClusterNameError: if the cluster name is invalid.
-        exceptions.ResourcesMismatchError: if the requested resources
-            do not match the existing cluster.
-        exceptions.NotSupportedError: if required features are not supported
-            by the backend/cloud/cluster.
-        exceptions.ResourcesUnavailableError: if the requested resources
-            cannot be satisfied. The failover_history of the exception
-            will be set as:
-                1. Empty: iff the first-ever sky.optimize() fails to
-                find a feasible resource; no pre-check or actual launch is
-                attempted.
-                2. Non-empty: iff at least 1 exception from either
-                our pre-checks (e.g., cluster name invalid) or a region/zone
-                throwing resource unavailability.
-        exceptions.CommandError: any ssh command error.
-        exceptions.NoCloudAccessError: if all clouds are disabled.
-    Other exceptions may be raised depending on the backend.
+        The request ID of the launch request.
 
     Request Returns:
-      job_id: Optional[int]; the job ID of the submitted job. None if the
-        backend is not CloudVmRayBackend, or no job is submitted to
-        the cluster.
-      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
-        if dryrun.
+        job_id (Optional[int]): the job ID of the submitted job. None if the
+          backend is not ``CloudVmRayBackend``, or no job is submitted to the
+          cluster.
+        handle (Optional[backends.ResourceHandle]): the handle to the cluster.
+          None if dryrun.
+
+    Request Raises:
+        exceptions.ClusterOwnerIdentityMismatchError: if the cluster is owned
+          by another user.
+        exceptions.InvalidClusterNameError: if the cluster name is invalid.
+        exceptions.ResourcesMismatchError: if the requested resources
+          do not match the existing cluster.
+        exceptions.NotSupportedError: if required features are not supported
+          by the backend/cloud/cluster.
+        exceptions.ResourcesUnavailableError: if the requested resources
+          cannot be satisfied. The failover_history of the exception will be set
+          as:
+
+          1. Empty: iff the first-ever sky.optimize() fails to find a feasible
+             resource; no pre-check or actual launch is attempted.
+
+          2. Non-empty: iff at least 1 exception from either our pre-checks
+             (e.g., cluster name invalid) or a region/zone throwing resource
+             unavailability.
+
+        exceptions.CommandError: any ssh command error.
+        exceptions.NoCloudAccessError: if all clouds are disabled.
+
+    Other exceptions may be raised depending on the backend.
     """
     if cluster_name is None:
         cluster_name = backend_utils.generate_cluster_name()
@@ -485,29 +500,30 @@ def exec(  # pylint: disable=redefined-builtin
         cluster_name: name of an existing cluster to execute the task.
         dryrun: if True, do not actually execute the task.
         down: Tear down the cluster after all jobs finish (successfully or
-            abnormally). If --idle-minutes-to-autostop is also set, the
-            cluster will be torn down after the specified idle time.
-            Note that if errors occur during provisioning/data syncing/setting
-            up, the cluster will not be torn down for debugging purposes.
+          abnormally). If --idle-minutes-to-autostop is also set, the
+          cluster will be torn down after the specified idle time.
+          Note that if errors occur during provisioning/data syncing/setting
+          up, the cluster will not be torn down for debugging purposes.
         backend: backend to use.  If None, use the default backend
-            (CloudVMRayBackend).
+          (CloudVMRayBackend).
 
     Returns:
-        request_id: The request ID of the exec request.
+        The request ID of the exec request.
 
-    Raises:
-        ValueError: if the specified cluster is not in UP status.
-        sky.exceptions.ClusterDoesNotExist: if the specified cluster does not
-            exist.
-        sky.exceptions.NotSupportedError: if the specified cluster is a
-            controller that does not support this operation.
 
     Request Returns:
-      job_id: Optional[int]; the job ID of the submitted job. None if the
-        backend is not CloudVmRayBackend, or no job is submitted to
-        the cluster.
-      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
-        if dryrun.
+        job_id (Optional[int]): the job ID of the submitted job. None if the
+          backend is not CloudVmRayBackend, or no job is submitted to
+          the cluster.
+        handle (Optional[backends.ResourceHandle]): the handle to the cluster.
+          None if dryrun.
+
+    Request Raises:
+        ValueError: if the specified cluster is not in UP status.
+        sky.exceptions.ClusterDoesNotExist: if the specified cluster does not
+          exist.
+        sky.exceptions.NotSupportedError: if the specified cluster is a
+          controller that does not support this operation.
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
@@ -545,7 +561,10 @@ def tail_logs(cluster_name: str,
             immediately.
         tail: if > 0, tail the last N lines of the logs.
 
-    Raises:
+    Returns:
+        None
+
+    Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
@@ -582,12 +601,12 @@ def download_logs(cluster_name: str,
         job_ids: (List[str]) job ids.
 
     Returns:
-        request_id: The request ID of the download_logs request.
+        The request ID of the download_logs request.
 
     Request Returns:
-        Dict[str, str]: a mapping of job_id to local log path.
+        job_log_paths (Dict[str, str]): a mapping of job_id to local log path.
 
-    Raises:
+    Request Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
@@ -697,19 +716,22 @@ def start(
             Useful for upgrading SkyPilot runtime.
 
     Returns:
-        request_id: The request ID of the start request.
+        The request ID of the start request.
 
-    Raises:
+    Request Returns:
+        None
+
+    Request Raises:
         ValueError: argument values are invalid: (1) if ``down`` is set to True
-          but ``idle_minutes_to_autostop`` is None; (2) if the specified
-          cluster is the managed jobs controller, and either
-          ``idle_minutes_to_autostop`` is not None or ``down`` is True (omit
-          them to use the default autostop settings).
+            but ``idle_minutes_to_autostop`` is None; (2) if the specified
+            cluster is the managed jobs controller, and either
+            ``idle_minutes_to_autostop`` is not None or ``down`` is True (omit
+            them to use the default autostop settings).
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
-          exist.
+            exist.
         sky.exceptions.NotSupportedError: if the cluster to restart was
-          launched using a non-default backend that does not support this
-          operation.
+            launched using a non-default backend that does not support this
+            operation.
         sky.exceptions.ClusterOwnerIdentitiesMismatchError: if the cluster to
             restart was launched by a different user.
     """
@@ -748,14 +770,18 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
             resources.
 
     Returns:
-        request_id: The request ID of the down request.
+        The request ID of the down request.
 
-    Raises:
+    Request Returns:
+        None
+
+    Request Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
-          exist.
+            exist.
         RuntimeError: failed to tear down the cluster.
         sky.exceptions.NotSupportedError: the specified cluster is the managed
-          jobs controller.
+            jobs controller.
+
     """
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
@@ -792,14 +818,18 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
             related resources.
 
     Returns:
-        request_id: The request ID of the stop request.
+        The request ID of the stop request.
 
-    Raises:
+    Request Returns:
+        None
+
+    Request Raises:
         sky.exceptions.ClusterDoesNotExist: the specified cluster does not
-          exist.
+            exist.
         RuntimeError: failed to stop the cluster.
         sky.exceptions.NotSupportedError: if the specified cluster is a spot
-          cluster, or a TPU VM Pod cluster, or the managed jobs controller.
+            cluster, or a TPU VM Pod cluster, or the managed jobs controller.
+
     """
     body = payloads.StopOrDownBody(
         cluster_name=cluster_name,
@@ -848,23 +878,26 @@ def autostop(
     Args:
         cluster_name: name of the cluster.
         idle_minutes: the number of minutes of idleness (no pending/running
-          jobs) after which the cluster will be stopped automatically. Setting
-          to a negative number cancels any autostop/autodown setting.
+            jobs) after which the cluster will be stopped automatically. Setting
+            to a negative number cancels any autostop/autodown setting.
         down: if true, use autodown (tear down the cluster; non-restartable),
-          rather than autostop (restartable).
+            rather than autostop (restartable).
 
     Returns:
-        request_id: The request ID of the autostop request.
+        The request ID of the autostop request.
 
-    Raises:
+    Request Returns:
+        None
+
+    Request Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend or the cluster is TPU VM Pod.
+            CloudVmRayBackend or the cluster is TPU VM Pod.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
+            not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
+            user identity.
     """
     body = payloads.AutostopBody(
         cluster_name=cluster_name,
@@ -892,37 +925,41 @@ def queue(cluster_name: List[str],
         skip_finished: if True, skip finished jobs.
         all_users: if True, return jobs from all users.
 
+
     Returns:
-        request_id: The request ID of the queue request.
+        The request ID of the queue request.
 
     Request Returns:
-        .. code-block:: python
+        job_records (List[Dict[str, Any]]): A list of dicts for each job in the
+            queue.
 
-            [
-                {
-                    'job_id': (int) job id,
-                    'job_name': (str) job name,
-                    'username': (str) username,
-                    'user_hash': (str) user hash,
-                    'submitted_at': (int) timestamp of submitted,
-                    'start_at': (int) timestamp of started,
-                    'end_at': (int) timestamp of ended,
-                    'resources': (str) resources,
-                    'status': (job_lib.JobStatus) job status,
-                    'log_path': (str) log path,
-                }
-            ]
+            .. code-block:: python
 
-    raises:
+                [
+                    {
+                        'job_id': (int) job id,
+                        'job_name': (str) job name,
+                        'username': (str) username,
+                        'user_hash': (str) user hash,
+                        'submitted_at': (int) timestamp of submitted,
+                        'start_at': (int) timestamp of started,
+                        'end_at': (int) timestamp of ended,
+                        'resources': (str) resources,
+                        'status': (job_lib.JobStatus) job status,
+                        'log_path': (str) log path,
+                    }
+                ]
+
+    Request Raises:
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the cluster is not based on
-          CloudVmRayBackend.
+            ``CloudVmRayBackend``.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
+            not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
-        exceptions.CommandError: if failed to get the job queue with ssh.
+            user identity.
+        sky.exceptions.CommandError: if failed to get the job queue with ssh.
     """
     body = payloads.QueueBody(
         cluster_name=cluster_name,
@@ -939,6 +976,31 @@ def queue(cluster_name: List[str],
 @annotations.public_api
 def job_status(cluster_name: str,
                job_ids: Optional[List[int]] = None) -> server_common.RequestId:
+    """Gets the status of jobs on a cluster.
+
+    Args:
+        cluster_name: name of the cluster.
+        job_ids: job ids. If None, get the status of the last job.
+
+    Returns:
+        The request ID of the job status request.
+
+    Request Returns:
+        job_statuses (Dict[Optional[int], Optional[job_lib.JobStatus]]): A
+            mapping of job_id to job statuses. The status will be None if the
+            job does not exist. If job_ids is None and there is no job on the
+            cluster, it will return {None: None}.
+
+    Request Raises:
+        sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
+        sky.exceptions.ClusterNotUpError: if the cluster is not UP.
+        sky.exceptions.NotSupportedError: if the cluster is not based on
+            ``CloudVmRayBackend``.
+        sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
+            not the same as the user who created the cluster.
+        sky.exceptions.CloudUserIdentityError: if we fail to get the current
+            user identity.
+    """
     # TODO: merge this into the queue endpoint, i.e., let the queue endpoint
     # take job_ids to filter the returned jobs.
     body = payloads.JobStatusBody(
@@ -974,18 +1036,22 @@ def cancel(
             worker node is preempted in the spot cluster.
 
     Returns:
-        request_id: The request ID of the cancel request.
+        The request ID of the cancel request.
 
-    Raises:
+    Request Returns:
+        None
+
+    Request Raises:
         ValueError: if arguments are invalid.
         sky.exceptions.ClusterDoesNotExist: if the cluster does not exist.
         sky.exceptions.ClusterNotUpError: if the cluster is not UP.
         sky.exceptions.NotSupportedError: if the specified cluster is a
-          controller that does not support this operation.
+            controller that does not support this operation.
         sky.exceptions.ClusterOwnerIdentityMismatchError: if the current user is
-          not the same as the user who created the cluster.
+            not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
-          user identity.
+            user identity.
+
     """
     body = payloads.CancelBody(
         cluster_name=cluster_name,
@@ -1011,24 +1077,6 @@ def status(
 
     If cluster_names is given, return those clusters. Otherwise, return all
     clusters.
-
-    Each returned value has the following fields:
-
-    .. code-block:: python
-
-        {
-            'name': (str) cluster name,
-            'launched_at': (int) timestamp of last launch on this cluster,
-            'handle': (ResourceHandle) an internal handle to the cluster,
-            'last_use': (str) the last command/entrypoint that affected this
-              cluster,
-            'status': (sky.ClusterStatus) cluster status,
-            'autostop': (int) idle time before autostop,
-            'to_down': (bool) whether autodown is used instead of autostop,
-            'metadata': (dict) metadata of the cluster,
-            'user_hash': (str) user hash of the cluster owner,
-            'user_name': (str) user name of the cluster owner,
-        }
 
     Each cluster can have one of the following statuses:
 
@@ -1073,13 +1121,30 @@ def status(
         all_users: whether to include all users' clusters. By default, only
             the current user's clusters are included.
 
-    Request Returns:
-        A list of dicts, with each dict containing the information of a
-        cluster. If a cluster is found to be terminated or not found, it will
-        be omitted from the returned list.
-
     Returns:
-        request_id: The request ID of the status request.
+        The request ID of the status request.
+
+    Request Returns:
+        cluster_records (List[Dict[str, Any]]): A list of dicts, with each dict
+          containing the information of a cluster. If a cluster is found to be
+          terminated or not found, it will be omitted from the returned list.
+
+          .. code-block:: python
+
+            {
+              'name': (str) cluster name,
+              'launched_at': (int) timestamp of last launch on this cluster,
+              'handle': (ResourceHandle) an internal handle to the cluster,
+              'last_use': (str) the last command/entrypoint that affected this
+              cluster,
+              'status': (sky.ClusterStatus) cluster status,
+              'autostop': (int) idle time before autostop,
+              'to_down': (bool) whether autodown is used instead of autostop,
+              'metadata': (dict) metadata of the cluster,
+              'user_hash': (str) user hash of the cluster owner,
+              'user_name': (str) user name of the cluster owner,
+            }
+
     """
     # TODO(zhwu): this does not stream the logs output by logger back to the
     # user, due to the rich progress implementation.
@@ -1104,12 +1169,16 @@ def endpoints(
     Args:
         cluster: The name of the cluster.
         port: The port number to get the endpoint for. If None, endpoints
-            for all ports are returned..
+            for all ports are returned.
 
-    Request Returns: A dictionary of port numbers to endpoints. If port is None,
+    Returns:
+        The request ID of the endpoints request.
+
+    Request Returns:
+        A dictionary of port numbers to endpoints. If port is None,
         the dictionary will contain all ports:endpoints exposed on the cluster.
 
-    RequestRaises:
+    Request Raises:
         ValueError: if the cluster is not UP or the endpoint is not exposed.
         RuntimeError: if the cluster has no ports to be exposed or no endpoints
             are exposed yet.
@@ -1129,22 +1198,6 @@ def endpoints(
 def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-builtin
     """Gets all cluster cost reports, including those that have been downed.
 
-    Each returned value has the following fields:
-
-    .. code-block:: python
-
-        {
-            'name': (str) cluster name,
-            'launched_at': (int) timestamp of last launch on this cluster,
-            'duration': (int) total seconds that cluster was up and running,
-            'last_use': (str) the last command/entrypoint that affected this
-            'num_nodes': (int) number of nodes launched for cluster,
-            'resources': (resources.Resources) type of resource launched,
-            'cluster_hash': (str) unique hash identifying cluster,
-            'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
-            'total_cost': (float) cost given resources and usage intervals,
-        }
-
     The estimated cost column indicates price for the cluster based on the type
     of resources being used and the duration of use up until the call to
     status. This means if the cluster is UP, successive calls to report will
@@ -1152,12 +1205,26 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
     cache of the cluster status, and may not be accurate for the cluster with
     autostop/use_spot set or terminated/stopped on the cloud console.
 
-    Request Returns:
-        A list of dicts, with each dict containing the cost information of a
-        cluster.
-
     Returns:
-        request_id: The request ID of the cost report request.
+        The request ID of the cost report request.
+
+    Request Returns:
+        cluster_cost_records (List[Dict[str, Any]]): A list of dicts, with each
+          dict containing the cost information of a cluster.
+
+          .. code-block:: python
+
+            {
+              'name': (str) cluster name,
+              'launched_at': (int) timestamp of last launch on this cluster,
+              'duration': (int) total seconds that cluster was up and running,
+              'last_use': (str) the last command/entrypoint that affected this
+              'num_nodes': (int) number of nodes launched for cluster,
+              'resources': (resources.Resources) type of resource launched,
+              'cluster_hash': (str) unique hash identifying cluster,
+              'usage_intervals': (List[Tuple[int, int]]) cluster usage times,
+              'total_cost': (float) cost given resources and usage intervals,
+            }
     """
     response = requests.get(f'{server_common.get_server_url()}/cost_report')
     return server_common.get_request_id(response)
@@ -1171,17 +1238,21 @@ def storage_ls() -> server_common.RequestId:
     """Gets the storages.
 
     Returns:
-        request_id: The request ID of the storage list request.
+        The request ID of the storage list request.
 
     Request Returns:
-        [
-            {
-                'name': str,
-                'launched_at': int timestamp of creation,
-                'store': List[sky.StoreType],
-                'last_use': int timestamp of last use,
-                'status': sky.StorageStatus,
-            }
+        storage_records (List[Dict[str, Any]]): A list of dicts, with each dict
+            containing the information of a storage.
+
+            .. code-block:: python
+
+                {
+                    'name': (str) storage name,
+                    'launched_at': (int) timestamp of creation,
+                    'store': (List[sky.StoreType]) storage type,
+                    'last_use': (int) timestamp of last use,
+                    'status': (sky.StorageStatus) storage status,
+                }
         ]
     """
     response = requests.get(f'{server_common.get_server_url()}/storage/ls')
@@ -1198,7 +1269,10 @@ def storage_delete(name: str) -> server_common.RequestId:
         name: The name of the storage to delete.
 
     Returns:
-        request_id: The request ID of the storage delete request.
+        The request ID of the storage delete request.
+
+    Request Returns:
+        None
 
     Request Raises:
         ValueError: If the storage does not exist.
@@ -1246,8 +1320,7 @@ def realtime_kubernetes_gpu_availability(
     """Gets the real-time Kubernetes GPU availability.
 
     Returns:
-        request_id: The request ID of the real-time Kubernetes GPU availability
-            request.
+        The request ID of the real-time Kubernetes GPU availability request.
     """
     body = payloads.RealtimeGpuAvailabilityRequestBody(
         context=context,
@@ -1332,12 +1405,13 @@ def get(request_id: str) -> Any:
         request_id: The request ID of the request to get.
 
     Returns:
-        The `Request Returns` of the specified request. See the documentation
+        The ``Request Returns`` of the specified request. See the documentation
         of the specific requests above for more details.
 
     Raises:
-        It raises the same exceptions as the specific requests, see
-        `Request Raises` in the documentation of the specific requests above.
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
     """
     response = requests.get(
         f'{server_common.get_server_url()}/api/get?request_id={request_id}',
@@ -1386,12 +1460,13 @@ def stream_and_get(request_id: Optional[str] = None,
         follow: Whether to follow the logs.
 
     Returns:
-        The `Request Returns` of the specified request. See the documentation
+        The ``Request Returns`` of the specified request. See the documentation
         of the specific requests above for more details.
 
     Raises:
-        It raises the same exceptions as the specific requests, see
-        `Request Raises` in the documentation of the specific requests above.
+        Exception: It raises the same exceptions as the specific requests,
+            see ``Request Raises`` in the documentation of the specific requests
+            above.
     """
     params = {
         'request_id': request_id,
@@ -1471,7 +1546,7 @@ def api_status(
         all: Whether to list all requests.
 
     Returns:
-        A list of requests.
+        A list of request payloads.
     """
     body = payloads.RequestIdBody(request_id=request_id, all=all)
     response = requests.get(f'{server_common.get_server_url()}/api/status',
@@ -1528,6 +1603,9 @@ def api_start(
             resources of the machine.
         api_server_reload: Whether to automatically reload the API server, when
             the code is changed. This is not well tested.
+
+    Returns:
+        None
     """
     # Only used in server_common.check_server_healthy_or_start, this is to
     # satisfy the type checker.
@@ -1554,6 +1632,9 @@ def api_stop() -> None:
     """Stops the API server.
 
     It will do nothing if the API server is remotely hosted.
+
+    Returns:
+        None
     """
     # Kill the uvicorn process by name: uvicorn sky.server.server:app
     server_url = server_common.get_server_url()
@@ -1597,6 +1678,9 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         follow: Whether to follow the logs.
         tail: the number of lines to show from the end of the logs.
             If None, show all logs.
+
+    Returns:
+        None
     """
     if server_common.is_api_server_local():
         tail_args = ['-f'] if follow else []
@@ -1618,9 +1702,15 @@ def api_login(endpoint: Optional[str] = None) -> None:
     This sets the endpoint globally, i.e., all SkyPilot CLI and SDK calls will
     use this endpoint.
 
+    To temporarily override the endpoint, use the environment variable
+    `SKYPILOT_API_SERVER_ENDPOINT` instead.
+
     Args:
         endpoint: The endpoint of the SkyPilot API server, e.g.,
             http://1.2.3.4:46580 or https://skypilot.mydomain.com.
+
+    Returns:
+        None
     """
     # TODO(zhwu): this SDK sets global endpoint, which may not be the best
     # design as a user may expect this is only effective for the current

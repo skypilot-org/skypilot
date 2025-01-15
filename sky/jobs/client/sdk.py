@@ -47,13 +47,13 @@ def launch(
         The request ID of the launch request.
 
     Request Returns:
-        job_id: Optional[int]; Job ID for the managed job
-        controller_handle: Optional[ResourceHandle]; ResourceHandle of the
-        controller
+        job_id (Optional[int]): Job ID for the managed job
+        controller_handle (Optional[ResourceHandle]): ResourceHandle of the
+          controller
 
     Request Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
-        chain dag.
+          chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -99,14 +99,16 @@ def queue(refresh: bool,
         The request ID of the queue request.
 
     Request Returns:
+        job_records (List[Dict[str, Any]]): A list of dicts, with each dict
+          containing the information of a job.
 
-    .. code-block:: python
+          .. code-block:: python
 
-        [
-            {
-                'job_id': int,
-                'job_name': str,
-                'resources': str,
+            [
+              {
+                'job_id': (int) job id,
+                'job_name': (str) job name,
+                'resources': (str) resources of the job,
                 'submitted_at': (float) timestamp of submission,
                 'end_at': (float) timestamp of end,
                 'duration': (float) duration in seconds,
@@ -114,12 +116,12 @@ def queue(refresh: bool,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
-            }
-        ]
+              }
+            ]
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the jobs controller is not up or
-        does not exist.
+          does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
     body = payloads.JobsQueueBody(

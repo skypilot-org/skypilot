@@ -127,6 +127,7 @@ from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
 from sky.task import Task
 from sky.utils.common import OptimizeTarget
+from sky.utils.common import StatusRefreshMode
 from sky.utils.config_utils import Config
 from sky.utils.status_lib import ClusterStatus
 
@@ -174,6 +175,7 @@ __all__ = [
     'ClusterStatus',
     'JobStatus',
     'ManagedJobStatus',
+    'StatusRefreshMode',
     # APIs
     'Dag',
     'Task',

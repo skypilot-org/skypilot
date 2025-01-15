@@ -35,9 +35,9 @@ def up(task: Union['sky.Task', 'sky.Dag'],
         The request ID of the up request.
 
     Request Returns:
-        service_name: str; The name of the service.  Same if passed in as an
+        service_name (str): The name of the service.  Same if passed in as an
             argument.
-        endpoint: str; The service endpoint.
+        endpoint (str): The service endpoint.
     """
     # This is to avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -87,7 +87,8 @@ def update(task: Union['sky.Task', 'sky.Dag'],
     Returns:
         The request ID of the update request.
 
-    Request Returns: None
+    Request Returns:
+        None
     """
     # This is to avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
@@ -133,6 +134,12 @@ def down(
         all: Whether to terminate all services.
         purge: Whether to terminate services in a failed status. These services
           may potentially lead to resource leaks.
+
+    Returns:
+        The request ID of the down request.
+
+    Request Returns:
+        None
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: if the sky serve controller is not up.
@@ -240,8 +247,9 @@ def status(
         The request ID of the status request.
 
     Request Returns:
-        A list of dicts, with each dict containing the information of a service.
-        If a service is not found, it will be omitted from the returned list.
+        service_records (List[Dict[str, Any]]): A list of dicts, with each
+            dict containing the information of a service. If a service is not
+            found, it will be omitted from the returned list.
 
     Request Raises:
         RuntimeError: if failed to get the service status.
@@ -265,6 +273,9 @@ def tail_logs(service_name: str,
     """Tails logs for a service.
 
     Usage:
+
+    .. code-block:: python
+
         sky.stream_and_get(sky.serve.tail_logs(
             service_name,
             target=<component>,
@@ -272,24 +283,40 @@ def tail_logs(service_name: str,
             # replica_id=3, # Must be specified when target is REPLICA.
         ))
 
-    `target` is a enum of sky.serve.ServiceComponent, which can be one of:
-        - CONTROLLER
-        - LOAD_BALANCER
-        - REPLICA
+
+    ``target`` is a enum of ``sky.serve.ServiceComponent``, which can be one of:
+
+    - ``sky.serve.ServiceComponent.CONTROLLER``
+
+    - ``sky.serve.ServiceComponent.LOAD_BALANCER``
+
+    - ``sky.serve.ServiceComponent.REPLICA``
+
     Pass target as a lower-case string is also supported, e.g.
-    target='controller'.
-    To use REPLICA, you must specify `replica_id`.
+    ``target='controller'``.
+    To use ``sky.serve.ServiceComponent.REPLICA``, you must specify
+    ``replica_id``.
 
     To tail controller logs:
+
+    .. code-block:: python
+
         # follow default to True
         sky.stream_and_get(sky.serve.tail_logs(
             service_name, target=sky.serve.ServiceComponent.CONTROLLER))
 
     To print replica 3 logs:
+
+    .. code-block:: python
+
         # Pass target as a lower-case string is also supported.
         sky.stream_and_get(sky.serve.tail_logs(
             service_name, target='replica',
             follow=False, replica_id=3)
+
+
+    Returns:
+        The request ID of the tail logs request.
 
     Request Raises:
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
@@ -316,14 +343,15 @@ def endpoint(port: Optional[Union[int, str]] = None) -> server_common.RequestId:
 
     Args:
         port: The port number to get the endpoint for. If None, endpoints
-            for all ports are returned..
+            for all ports are returned.
 
     Returns:
         The request ID of the endpoint request.
 
-    Request Returns: A dictionary of port numbers to endpoints. If endpoint is
-        None, the dictionary will contain all ports:endpoints exposed on the
-        controller.
+    Request Returns:
+        port_endpoints (Dict[int, str]): A dictionary of port numbers to
+            endpoints. If endpoint is None, the dictionary will contain all
+            ports:endpoints exposed on the controller.
 
     Request Raises:
         ValueError: if the controller is not UP or the endpoint is not exposed.
