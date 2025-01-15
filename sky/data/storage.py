@@ -78,6 +78,11 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
 _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
 
 
+def _is_sky_managed_intermediate_bucket(bucket_name: str) -> bool:
+    return re.match(r'skypilot-filemounts-.+-[a-f0-9]{8}',
+                    bucket_name) is not None
+
+
 def get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
@@ -550,8 +555,6 @@ class Storage(object):
         mode: StorageMode = StorageMode.MOUNT,
         sync_on_reconstruction: bool = True,
         # pylint: disable=invalid-name
-        _is_sky_managed: Optional[bool] = None,
-        # pylint: disable=invalid-name
         _bucket_sub_path: Optional[str] = None
     ) -> None:
         """Initializes a Storage object.
@@ -591,16 +594,6 @@ class Storage(object):
             there. This is set to false when the Storage object is created not
             for direct use, e.g. for 'sky storage delete', or the storage is
             being re-used, e.g., for `sky start` on a stopped cluster.
-          _is_sky_managed: Optional[bool]; Indicates if the storage is managed
-            by Sky. Without this argument, the controller's behavior differs
-            from the local machine. For example, if a bucket does not exist:
-            Local Machine (is_sky_managed=True) →
-            Controller (is_sky_managed=False).
-            With this argument, the controller aligns with the local machine,
-            ensuring it retains the is_sky_managed information from the YAML.
-            During teardown, if is_sky_managed is True, the controller should
-            delete the bucket. Otherwise, it might mistakenly delete only the
-            sub-path, assuming is_sky_managed is False.
           _bucket_sub_path: Optional[str]; The subdirectory to use for the
             storage object.
         """
@@ -610,7 +603,6 @@ class Storage(object):
         self.mode = mode
         assert mode in StorageMode
         self.sync_on_reconstruction = sync_on_reconstruction
-        self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
 
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
@@ -1024,7 +1016,6 @@ class Storage(object):
                 source=self.source,
                 region=region,
                 sync_on_reconstruction=self.sync_on_reconstruction,
-                is_sky_managed=self._is_sky_managed,
                 _bucket_sub_path=self._bucket_sub_path)
         except exceptions.StorageBucketCreateError:
             # Creation failed, so this must be sky managed store. Add failure
@@ -1157,8 +1148,6 @@ class Storage(object):
         mode_str = config.pop('mode', None)
         force_delete = config.pop('_force_delete', None)
         # pylint: disable=invalid-name
-        _is_sky_managed = config.pop('_is_sky_managed', None)
-        # pylint: disable=invalid-name
         _bucket_sub_path = config.pop('_bucket_sub_path', None)
         if force_delete is None:
             force_delete = False
@@ -1180,7 +1169,6 @@ class Storage(object):
                           source=source,
                           persistent=persistent,
                           mode=mode,
-                          _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path)
         if store is not None:
             storage_obj.add_store(StoreType(store.upper()))
@@ -1205,12 +1193,9 @@ class Storage(object):
         add_if_not_none('source', self.source)
 
         stores = None
-        is_sky_managed = self._is_sky_managed
         if self.stores:
             stores = ','.join([store.value for store in self.stores])
-            is_sky_managed = list(self.stores.values())[0].is_sky_managed
         add_if_not_none('store', stores)
-        add_if_not_none('_is_sky_managed', is_sky_managed)
         add_if_not_none('persistent', self.persistent)
         add_if_not_none('mode', self.mode.value)
         if self.force_delete:
@@ -1384,7 +1369,9 @@ class S3Store(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -1867,7 +1854,9 @@ class GcsStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -2442,7 +2431,9 @@ class AzureBlobStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def _update_storage_account_name_and_resource(self):
         self.storage_account_name, self.resource_group_name = (
@@ -3152,7 +3143,9 @@ class R2Store(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.
@@ -3631,7 +3624,9 @@ class IBMCosStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads files from local machine to bucket.
@@ -4075,7 +4070,9 @@ class OciStore(AbstractStore):
             # object (i.e., did not exist in global_user_state) and we should
             # set the is_sky_managed property.
             # If is_sky_managed is specified, then we take no action.
-            self.is_sky_managed = is_new_bucket
+            self.is_sky_managed = (is_new_bucket or
+                                   _is_sky_managed_intermediate_bucket(
+                                       self.name))
 
     def upload(self):
         """Uploads source to store bucket.

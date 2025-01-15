@@ -299,9 +299,6 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
-            '_is_sky_managed': {
-                'type': 'boolean',
-            },
             '_bucket_sub_path': {
                 'type': 'string',
             },
