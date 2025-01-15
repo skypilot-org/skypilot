@@ -58,8 +58,11 @@ def test_minimal(generic_cloud: str):
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
-            # TODO(SKY-1217): Fix the logs downloading.
-            # f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo "$log_path" && test -f $log_path/run.log',
+            f'log_path=$(sky logs {name} 1 --sync-down | grep "Job 1 logs:" | sed -E "s/^.*Job 1 logs: (.*)\\x1b\\[0m/\\1/g") && echo "$log_path" '
+            # We need to explicitly expand the log path as it starts with ~, and linux does not automatically
+            # expand it when having it in a variable.
+            '  && expanded_log_path=$(eval echo "$log_path") && echo "$expanded_log_path" '
+            '  && test -f $expanded_log_path/run.log',
             # Ensure the raylet process has the correct file descriptor limit.
             f'sky exec {name} "prlimit -n --pid=\$(pgrep -f \'raylet/raylet --raylet_socket_name\') | grep \'"\'1048576 1048576\'"\'"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
