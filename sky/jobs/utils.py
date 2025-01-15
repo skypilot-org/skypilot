@@ -121,20 +121,20 @@ def _controller_process_alive(pid: int, job_id: int) -> bool:
 
 
 def update_managed_job_status(job_id: Optional[int] = None):
-    """Update managed job status if the controller job failed abnormally.
+    """Update managed job status if the controller process failed abnormally.
 
-    Check the status of the controller job. If it is not running, it must have
-    exited abnormally, and we should set the job status to FAILED_CONTROLLER.
-    `end_at` will be set to the current timestamp for the job when above
-    happens, which could be not accurate based on the frequency this function
-    is called.
+    Check the status of the controller process. If it is not running, it must
+    have exited abnormally, and we should set the job status to
+    FAILED_CONTROLLER. `end_at` will be set to the current timestamp for the job
+    when above happens, which could be not accurate based on the frequency this
+    function is called.
 
     Note: we expect that job_id, if provided, refers to a nonterminal job.
     """
 
     if job_id is None:
-        # Warning: it's totally possible for the controller job to transition to
-        # a terminal state during the course of this function. The set_failed()
+        # Warning: it's totally possible for the managed job to transition to
+        # a terminal status during the course of this function. The set_failed()
         # called below will not update the state for jobs that already have a
         # terminal status, so it should be fine.
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
@@ -152,8 +152,8 @@ def update_managed_job_status(job_id: Optional[int] = None):
             # TODO(cooperc): Remove before 0.11.0.
             controller_status = job_lib.get_status(job_id_)
             if controller_status is None or controller_status.is_terminal():
-                logger.error(f'Controller for legacy job {job_id_} is in an '
-                             'unexpected state.')
+                logger.error(f'Controller process for legacy job {job_id_} is '
+                             'in an unexpected state.')
                 failure_reason = 'Legacy job is in an unexpected state'
 
                 # Continue to mark the job as failed.
@@ -190,11 +190,12 @@ def update_managed_job_status(job_id: Optional[int] = None):
                     # The controller is still running.
                     continue
                 # Otherwise, proceed to mark the job as failed.
-                logger.error(f'Controller for {job_id_} seems to be dead.')
-                failure_reason = 'Controller is dead'
+                logger.error(f'Controller process for {job_id_} seems to be '
+                             'dead.')
+                failure_reason = 'Controller process is dead'
 
-        logger.error(f'Controller for job {job_id_} has exited abnormally. '
-                     'Setting the job status to FAILED_CONTROLLER.')
+        logger.error(f'Controller process for job {job_id_} has exited '
+                     'abnormally. Setting the job status to FAILED_CONTROLLER.')
         for task in tasks:
             task_name = task['job_name']
             # Tear down the abnormal cluster to avoid resource leakage.
@@ -214,7 +215,7 @@ def update_managed_job_status(job_id: Optional[int] = None):
                                      f'{cluster_name!r}. Retrying '
                                      f'[{retry_cnt}/{max_retry}].')
 
-        # The controller job for this managed job is not running: it must
+        # The controller process for this managed job is not running: it must
         # have exited abnormally, and we should set the job status to
         # FAILED_CONTROLLER.
         # The `set_failed` will only update the task's status if the
@@ -252,8 +253,8 @@ def update_managed_job_status(job_id: Optional[int] = None):
         elif not _controller_process_alive(job_info['controller_pid'],
                                            job_info['job_id']):
             logger.error(
-                f'Controller for job {job_info["job_id"]} is not alive. '
-                'Marking the job as DONE.')
+                f'Controller process for job {job_info["job_id"]} is not '
+                'alive. Marking the job as DONE.')
             scheduler.job_done(job_info['job_id'])
 
 
