@@ -118,7 +118,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
 
     Args:
         max_retries: Maximum number of retry attempts
-        retry_interval: Seconds to wait between retries
+        retry_interval: Initial seconds to wait between retries
         resource_type: Type of resource being accessed (e.g. 'node', 'pod').
             Used to provide more specific error messages.
     """
@@ -128,6 +128,8 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
+            backoff = common_utils.Backoff(initial_backoff=retry_interval, max_backoff_factor=3)
+            
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
@@ -141,9 +143,11 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                             e.status in (401, 403)):
                         raise
                     if attempt < max_retries - 1:
+                        sleep_time = backoff.current_backoff()
                         logger.debug(f'Kubernetes API call {func.__name__} '
-                                     f'failed with {str(e)}. Retrying...')
-                        time.sleep(retry_interval)
+                                     f'failed with {str(e)}. Retrying in '
+                                     f'{sleep_time:.1f}s...')
+                        time.sleep(sleep_time)
                         continue
 
             # Format error message based on the type of exception
