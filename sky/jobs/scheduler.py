@@ -2,13 +2,14 @@
 
 Once managed jobs are submitted via submit_job, the scheduler is responsible for
 the business logic of deciding when they are allowed to start, and choosing the
-right one to start.
+right one to start. The scheduler will also schedule jobs that are already live
+but waiting to launch a new task or recover.
 
 The scheduler is not its own process - instead, maybe_schedule_next_jobs() can
 be called from any code running on the managed jobs controller instance to
 trigger scheduling of new jobs if possible. This function should be called
-immediately after any state change that could result in new jobs being able to
-start.
+immediately after any state change that could result in jobs newly being able to
+be scheduled.
 
 The scheduling logic limits the number of running jobs according to two limits:
 1. The number of jobs that can be launching (that is, STARTING or RECOVERING) at
@@ -28,8 +29,11 @@ this state. See state.ManagedJobScheduleState.
 Nomenclature:
 - job: same as managed job (may include multiple tasks)
 - launch/launching: launching a cluster (sky.launch) as part of a job
-- start/run/schedule: create the job controller process for a job
-- alive: a job controller exists
+- start/run: create the job controller process for a job
+- schedule: transition a job to the LAUNCHING state, whether a new job or a job
+  that is already alive
+- alive: a job controller exists (includes multiple schedule_states: ALIVE, 
+  ALIVE_WAITING, LAUNCHING)
 """
 
 from argparse import ArgumentParser
