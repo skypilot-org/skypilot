@@ -22,7 +22,7 @@ async def main():
     timeout = 2
 
     async with aiohttp.ClientSession() as session:
-        task = asyncio.create_task(fetch(session, f'http://{args.endpoint}/'))
+        task = asyncio.create_task(fetch(session, f'{args.endpoint}/'))
 
         await asyncio.sleep(timeout)
         # We manually cancel requests for test purposes.
