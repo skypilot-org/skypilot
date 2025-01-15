@@ -32,7 +32,7 @@ Nomenclature:
 - start/run: create the job controller process for a job
 - schedule: transition a job to the LAUNCHING state, whether a new job or a job
   that is already alive
-- alive: a job controller exists (includes multiple schedule_states: ALIVE, 
+- alive: a job controller exists (includes multiple schedule_states: ALIVE,
   ALIVE_WAITING, LAUNCHING)
 """
 
