@@ -163,18 +163,9 @@ def update_managed_job_status(job_id: Optional[int] = None):
                     task_name, job_id_)
                 handle = global_user_state.get_handle_from_cluster_name(
                     cluster_name)
+                # If the cluster exists, terminate it.
                 if handle is not None:
-                    backend = backend_utils.get_backend_from_handle(handle)
-                    max_retry = 3
-                    for retry_cnt in range(max_retry):
-                        try:
-                            backend.teardown(handle, terminate=True)
-                            break
-                        except RuntimeError:
-                            logger.error('Failed to tear down the cluster '
-                                         f'{cluster_name!r}. Retrying '
-                                         f'[{retry_cnt}/{max_retry}].')
-
+                    terminate_cluster(cluster_name)
             # The controller job for this managed job is not running: it must
             # have exited abnormally, and we should set the job status to
             # FAILED_CONTROLLER.
