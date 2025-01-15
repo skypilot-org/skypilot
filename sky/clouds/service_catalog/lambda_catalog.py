@@ -4,7 +4,7 @@ This module loads the service catalog file and can be used to query
 instance types and pricing information for Lambda.
 """
 import typing
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 from sky.clouds.service_catalog import common
 from sky.utils import resources_utils
@@ -72,7 +72,7 @@ def get_default_instance_type(
 
 
 def get_accelerators_from_instance_type(
-        instance_type: str) -> Optional[Dict[str, int]]:
+        instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
     return common.get_accelerators_from_instance_type_impl(_df, instance_type)
 
 

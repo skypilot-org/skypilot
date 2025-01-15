@@ -177,7 +177,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
             hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
         hints += f'\n{_INDENT_PREFIX}For more info: '
-        hints += 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'  # pylint: disable=line-too-long
+        hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#cloudflare-r2'  # pylint: disable=line-too-long
 
     return (False, hints) if hints else (True, hints)
 

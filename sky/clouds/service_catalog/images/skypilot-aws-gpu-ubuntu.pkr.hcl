@@ -4,11 +4,11 @@ variable "region" {
 }
 
 locals {
-  timestamp = regex_replace(timestamp(), "[- TZ:]", "")
+  date = formatdate("YYMMDD", timestamp())
 }
 
 source "amazon-ebs" "gpu-ubuntu" {
-  ami_name      = "skypilot-aws-gpu-ubuntu-${local.timestamp}"
+  ami_name      = "skypilot-aws-gpu-ubuntu-${local.date}"
   instance_type = "g6.xlarge"
   region        = var.region
   ssh_username  = "ubuntu"
@@ -22,9 +22,9 @@ source "amazon-ebs" "gpu-ubuntu" {
     owners      = ["099720109477"]
   }
   launch_block_device_mappings {
-    device_name = "/dev/sda1"
-    volume_size = 30
-    volume_type = "gp2"
+    device_name           = "/dev/sda1"
+    volume_size           = 30
+    volume_type           = "gp2"
     delete_on_termination = true
   }
 }
@@ -44,12 +44,12 @@ build {
     script = "./provisioners/nvidia-container-toolkit.sh"
   }
   provisioner "shell" {
-    script = "./provisioners/skypilot.sh"
-  }
-  provisioner "shell" {
     environment_vars = [
       "CLOUD=aws",
     ]
-    script = "./provisioners/cloud.sh"
+    script = "./provisioners/skypilot.sh"
+  }
+  provisioner "shell" {
+    script = "./provisioners/user-toolkit.sh"
   }
 }

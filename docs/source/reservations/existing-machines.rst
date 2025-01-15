@@ -42,7 +42,7 @@ Prerequisites
 **Local machine (typically your laptop):**
 
 * `kubectl <https://kubernetes.io/docs/tasks/tools/install-kubectl/>`_
-* `SkyPilot <https://skypilot.readthedocs.io/en/latest/getting-started/installation.html>`_
+* `SkyPilot <https://docs.skypilot.co/en/latest/getting-started/installation.html>`_
 
 **Remote machines (your cluster, optionally with GPUs):**
 
@@ -106,7 +106,7 @@ Deploying SkyPilot
 
    .. code-block:: console
 
-      $ sky show-gpus --cloud kubernetes
+      $ sky show-gpus --cloud k8s
       Kubernetes GPUs
       GPU   REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
       L4    1, 2, 4                   12          12
@@ -121,7 +121,7 @@ Deploying SkyPilot
       my-cluster-4               H100      8           8
       my-cluster-5               H100      8           8
 
-      $ sky launch --cloud kubernetes --gpus H100:1 -- nvidia-smi
+      $ sky launch --cloud k8s --gpus H100:1 -- nvidia-smi
 
    .. tip::
 

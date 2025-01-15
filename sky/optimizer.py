@@ -22,6 +22,7 @@ from sky.utils import log_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -105,6 +106,7 @@ class Optimizer:
         return egress_time
 
     @staticmethod
+    @timeline.event
     def optimize(dag: 'dag_lib.Dag',
                  minimize: OptimizeTarget = OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
@@ -186,7 +188,7 @@ class Optimizer:
         """Removes special Source and Sink nodes."""
         source = [t for t in dag.tasks if t.name == _DUMMY_SOURCE_NAME]
         sink = [t for t in dag.tasks if t.name == _DUMMY_SINK_NAME]
-        if len(source) == len(sink) == 0:
+        if not source and not sink:
             return
         assert len(source) == len(sink) == 1, dag.tasks
         dag.remove(source[0])
@@ -831,13 +833,17 @@ class Optimizer:
             return row
 
         def _get_resource_group_hash(resources: 'resources_lib.Resources'):
-            return json.dumps(
-                {
-                    'cloud': f'{resources.cloud}',
-                    'accelerators': f'{resources.accelerators}',
-                    'use_spot': resources.use_spot
-                },
-                sort_keys=True)
+            resource_key_dict = {
+                'cloud': f'{resources.cloud}',
+                'accelerators': f'{resources.accelerators}',
+                'use_spot': resources.use_spot
+            }
+            if isinstance(resources.cloud, clouds.Kubernetes):
+                # Region for Kubernetes is the context name, i.e. different
+                # Kubernetes clusters. We add region to the key to show all the
+                # Kubernetes clusters in the optimizer table for better UX.
+                resource_key_dict['region'] = resources.region
+            return json.dumps(resource_key_dict, sort_keys=True)
 
         # Print the list of resouces that the optimizer considered.
         resource_fields = [
@@ -1287,12 +1293,15 @@ def _fill_in_launchable_resources(
                        if resources.cloud is not None else enabled_clouds)
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
-        for cloud in clouds_list:
-            feasible_resources = cloud.get_feasible_launchable_resources(
-                resources, num_nodes=task.num_nodes)
+
+        feasible_list = subprocess_utils.run_in_parallel(
+            lambda cloud, r=resources, n=task.num_nodes:
+            (cloud, cloud.get_feasible_launchable_resources(r, n)),
+            clouds_list)
+        for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
-            if len(feasible_resources.resources_list) > 0:
+            if feasible_resources.resources_list:
                 # Assume feasible_resources is sorted by prices. Guaranteed by
                 # the implementation of get_feasible_launchable_resources and
                 # the underlying service_catalog filtering
@@ -1304,7 +1313,7 @@ def _fill_in_launchable_resources(
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)
-        if len(launchable[resources]) == 0:
+        if not launchable[resources]:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])
             num_node_str = ''

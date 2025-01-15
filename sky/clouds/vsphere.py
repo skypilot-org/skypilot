@@ -1,8 +1,7 @@
 """Vsphere cloud implementation."""
-import json
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
@@ -152,7 +151,7 @@ class Vsphere(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds=_CLOUD_VSPHERE)
 
@@ -174,6 +173,7 @@ class Vsphere(clouds.Cloud):
         cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
@@ -182,10 +182,8 @@ class Vsphere(clouds.Cloud):
         zone_names = [zone.name for zone in zones]
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': resources.instance_type,
@@ -268,7 +266,7 @@ class Vsphere(clouds.Cloud):
                 'Run the following commands:'
                 f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
                 f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                'For more details. See https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
+                'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
         required_keys = ['name', 'username', 'password', 'clusters']
