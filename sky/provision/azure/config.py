@@ -86,6 +86,9 @@ def bootstrap_instances(
                                   'use_external_resource_group field')
     use_external_resource_group = provider_config['use_external_resource_group']
 
+    # TODO: test this
+    subnet_id = provider_config.get('subnet_id', None)
+
     if 'tags' in provider_config:
         params['tags'] = provider_config['tags']
 
@@ -142,12 +145,13 @@ def bootstrap_instances(
     cluster_id, nsg_name = get_cluster_id_and_nsg_name(
         resource_group=provider_config['resource_group'],
         cluster_name_on_cloud=cluster_name_on_cloud)
+
+    # subnet_mask is ignored if subnet_id (of existing subnet) is provided
     subnet_mask = provider_config.get('subnet_mask')
     if subnet_mask is None:
         # choose a random subnet, skipping most common value of 0
         random.seed(cluster_id)
         subnet_mask = f'10.{random.randint(1, 254)}.0.0/16'
-    logger.info(f'Using subnet mask: {subnet_mask}')
 
     parameters = {
         'properties': {
@@ -165,10 +169,22 @@ def bootstrap_instances(
                 },
                 'location': {
                     'value': params['location']
-                }
+                },
+                'existingSubnet': {
+                    'value': subnet_id
+                },
             },
         }
     }
+
+    if subnet_id:
+        # add existingSubnet to paremeters if set
+        parameters['properties']['parameters']['existingSubnet'] = {
+            'value': subnet_id
+        }
+    else:
+        # informa about using new subnet mask
+        logger.info(f'Using mask for new subnet: {subnet_mask}')
 
     # Skip creating or updating the deployment if the deployment already exists
     # and the cluster name is the same.
@@ -215,6 +231,6 @@ def bootstrap_instances(
     # append output resource ids to be used with vm creation
     provider_config['msi'] = outputs['msi']['value']
     provider_config['nsg'] = outputs['nsg']['value']
-    provider_config['subnet'] = outputs['subnet']['value']
+    provider_config['subnet'] = outputs['subnet']['value'] if subnet_id == '' else subnet_id
 
     return config
