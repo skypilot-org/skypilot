@@ -377,7 +377,7 @@ class IBMVPCNodeProvider(NodeProvider):
                 node["id"], nic_id
             ).get_result()
             floating_ips = res["floating_ips"]
-            if len(floating_ips) == 0:
+            if not floating_ips:
                 # not adding a node that's yet/failed to
                 # to get a floating ip provisioned
                 continue
@@ -485,7 +485,7 @@ class IBMVPCNodeProvider(NodeProvider):
         """Returns instance (node) information matching the specified name"""
 
         instances_data = self.ibm_vpc_client.list_instances(name=name).get_result()
-        if len(instances_data["instances"]) > 0:
+        if instances_data["instances"]:
             return instances_data["instances"][0]
         return None
 

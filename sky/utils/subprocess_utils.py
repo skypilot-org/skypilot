@@ -5,7 +5,7 @@ import random
 import resource
 import subprocess
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -97,7 +97,7 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 
 def run_in_parallel(func: Callable,
-                    args: Iterable[Any],
+                    args: List[Any],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
@@ -114,8 +114,15 @@ def run_in_parallel(func: Callable,
     Raises:
         Exception: The first exception encountered.
     """
+    # Short-circuit for short lists
+    if len(args) == 0:
+        return []
+    if len(args) == 1:
+        return [func(args[0])]
+
     processes = (num_threads
                  if num_threads is not None else get_parallel_threads())
+
     with pool.ThreadPool(processes=processes) as p:
         ordered_iterators = p.imap(func, args)
         return list(ordered_iterators)

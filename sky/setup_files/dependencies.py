@@ -123,10 +123,13 @@ extras_require: Dict[str, List[str]] = {
     'oci': ['oci'] + local_ray,
     'kubernetes': ['kubernetes>=20.0.0'],
     'remote': remote,
-    'runpod': ['runpod>=1.5.1'],
+    # For the container registry auth api. Reference:
+    # https://github.com/runpod/runpod-python/releases/tag/1.6.1
+    'runpod': ['runpod>=1.6.1'],
     'fluidstack': [],  # No dependencies needed for fluidstack
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
+    'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
