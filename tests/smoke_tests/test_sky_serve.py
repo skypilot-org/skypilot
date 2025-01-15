@@ -89,10 +89,30 @@ _SERVE_ENDPOINT_WAIT = (
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
 
-_SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
-                      'until ! echo "$s" | grep "Controller is initializing."; '
-                      'do echo "Waiting for serve status to be ready..."; '
-                      'sleep 5; s=$(sky serve status {name}); done; echo "$s"')
+_SERVE_STATUS_WAIT = (
+    's=$(sky serve status {name}); '
+    # 1. Wait for "Controller is initializing." to disappear
+    'until ! echo "$s" | grep "Controller is initializing."; '
+    'do '
+    '    echo "Waiting for serve status to be ready..."; '
+    '    sleep 5; '
+    '    s=$(sky serve status {name}); '
+    'done; '
+    # 2. Once controller is ready, check provisioning vs. vCPU=2
+    'provisioning_count=$(echo "$s" | grep "PROVISIONING" | wc -l); '
+    'vcpu_count=$(echo "$s" | grep "vCPU=2" | wc -l); '
+    'until [ "$provisioning_count" -eq "$vcpu_count" ]; '
+    'do '
+    '    echo "Waiting for provisioning resource repr ready..."; '
+    '    echo "PROVISIONING: $provisioning_count, vCPU=2: $vcpu_count"; '
+    '    sleep 5; '
+    '    s=$(sky serve status {name}); '
+    '    provisioning_count=$(echo "$s" | grep "PROVISIONING" | wc -l); '
+    '    vcpu_count=$(echo "$s" | grep "vCPU=2" | wc -l); '
+    'done; '
+    # 3. Provisioning is complete
+    'echo "Provisioning complete. PROVISIONING: $provisioning_count, vCPU=2: $vcpu_count"; '
+    'echo "$s"')
 
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
