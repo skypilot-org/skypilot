@@ -347,8 +347,8 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'job_ids={job_id_str}' if job_ids else ''
         argument_str += f' name={name}' if name is not None else ''
         argument_str += ' all' if all else ''
         with ux_utils.print_exception_no_traceback():
@@ -425,6 +425,52 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                   job_name=name,
                                   follow=follow,
                                   controller=controller)
+
+
+@usage_lib.entrypoint
+def sync_down_logs(
+        name: Optional[str],
+        job_id: Optional[int],
+        refresh: bool,
+        controller: bool,
+        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
+    """Sync down logs of managed jobs.
+
+    Please refer to sky.cli.job_logs for documentation.
+
+    Raises:
+        ValueError: invalid arguments.
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+    """
+    # TODO(zhwu): Automatically restart the jobs controller
+    if name is not None and job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
+
+    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    job_name_or_id_str = ''
+    if job_id is not None:
+        job_name_or_id_str = str(job_id)
+    elif name is not None:
+        job_name_or_id_str = f'-n {name}'
+    else:
+        job_name_or_id_str = ''
+    handle = _maybe_restart_controller(
+        refresh,
+        stopped_message=(
+            f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
+            f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
+            f'-r --sync-down {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
+        spinner_message='Retrieving job logs')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+
+    backend.sync_down_managed_job_logs(handle,
+                                       job_id=job_id,
+                                       job_name=name,
+                                       controller=controller,
+                                       local_dir=local_dir)
 
 
 spot_launch = common_utils.deprecated_function(

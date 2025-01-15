@@ -26,10 +26,40 @@ setup: |
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
 
-  # Dashboard.
-  ps aux | grep -v nohup | grep -v grep | grep -- "-m sky.spot.dashboard" | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
-  pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
-  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "-m sky.jobs.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &));
+  # Create systemd service file
+  mkdir -p ~/.config/systemd/user/
+
+  # Create systemd user service file
+  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
+  [Unit]
+  Description=SkyPilot Jobs Dashboard
+  After=network.target
+
+  [Service]
+  Environment="PATH={{ sky_python_env_path }}:\$PATH"
+  Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
+  Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
+  Restart=always
+  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
+  StandardError=append:/home/$USER/.sky/job-dashboard.log
+  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
+
+  [Install]
+  WantedBy=default.target
+  EOF
+
+  if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; then
+    systemctl --user daemon-reload
+    systemctl --user enable --now skypilot-dashboard
+  else
+    echo "Systemd user services not found. Setting up SkyPilot dashboard manually."
+    # Kill any old dashboard processes
+    ps aux | grep -v nohup | grep -v grep | grep -- '-m sky.jobs.dashboard.dashboard' \
+      | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
+    # Launch the dashboard in the background if not already running
+    (ps aux | grep -v nohup | grep -v grep | grep -q -- '-m sky.jobs.dashboard.dashboard') || \
+      (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &)
+  fi
 
 run: |
   {{ sky_activate_python_env }}

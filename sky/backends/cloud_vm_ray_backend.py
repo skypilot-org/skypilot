@@ -26,6 +26,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
@@ -178,6 +179,7 @@ def _get_cluster_config_template(cloud):
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Paperspace: 'paperspace-ray.yml.j2',
+        clouds.DO: 'do-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
@@ -1995,6 +1997,22 @@ class RetryingVmProvisioner(object):
                                        skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
+        # If the user is using local credentials which may expire, the
+        # controller may leak resources if the credentials expire while a job
+        # is running. Here we check the enabled clouds and expiring credentials
+        # and raise a warning to the user.
+        if task.is_controller_task():
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            expirable_clouds = backend_utils.get_expirable_clouds(
+                enabled_clouds)
+
+            if len(expirable_clouds) > 0:
+                warnings = (f'\033[93mWarning: Credentials used for '
+                            f'{expirable_clouds} may expire. Clusters may be '
+                            f'leaked if the credentials expire while jobs '
+                            f'are running. It is recommended to use credentials'
+                            f' that never expire or a service account.\033[0m')
+                logger.warning(warnings)
 
         # Retrying launchable resources.
         while True:
@@ -2599,7 +2617,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
 
     def __init__(self):
-        self.run_timestamp = backend_utils.get_run_timestamp()
+        self.run_timestamp = sky_logging.get_run_timestamp()
         # NOTE: do not expanduser() here, as this '~/...' path is used for
         # remote as well to be expanded on the remote side.
         self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
@@ -2626,7 +2644,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
-        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
+        assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
         self,
@@ -3309,7 +3327,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # even if some of them raise exceptions. We should replace it with
         # multi-process.
         rich_utils.stop_safe_status()
-        subprocess_utils.run_in_parallel(_setup_node, range(num_nodes))
+        subprocess_utils.run_in_parallel(_setup_node, list(range(num_nodes)))
 
         if detach_setup:
             # Only set this when setup needs to be run outside the self._setup()
@@ -3873,6 +3891,152 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stdin=subprocess.DEVNULL,
         )
 
+    def sync_down_managed_job_logs(
+            self,
+            handle: CloudVmRayResourceHandle,
+            job_id: Optional[int] = None,
+            job_name: Optional[str] = None,
+            controller: bool = False,
+            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+        """Sync down logs for a managed job.
+
+        Args:
+            handle: The handle to the cluster.
+            job_id: The job ID to sync down logs for.
+            job_name: The job name to sync down logs for.
+            controller: Whether to sync down logs for the controller.
+            local_dir: The local directory to sync down logs to.
+
+        Returns:
+            A dictionary mapping job_id to log path.
+        """
+        # if job_name is not None, job_id should be None
+        assert job_name is None or job_id is None, (job_name, job_id)
+        if job_id is None and job_name is not None:
+            # generate code to get the job_id
+            code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
+                job_name=job_name)
+            returncode, run_timestamps, stderr = self.run_on_head(
+                handle,
+                code,
+                stream_logs=False,
+                require_outputs=True,
+                separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync down logs.',
+                                               stderr)
+            job_ids = common_utils.decode_payload(run_timestamps)
+            if not job_ids:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching job found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
+            elif len(job_ids) > 1:
+                logger.info(
+                    f'{colorama.Fore.YELLOW}'
+                    f'Multiple jobs IDs found under the name {job_name}. '
+                    'Downloading the latest job logs.'
+                    f'{colorama.Style.RESET_ALL}')
+                job_ids = [job_ids[0]]  # descending order
+        else:
+            job_ids = [job_id]
+
+        # get the run_timestamp
+        # the function takes in [job_id]
+        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(job_ids)
+        returncode, run_timestamps, stderr = self.run_on_head(
+            handle,
+            code,
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to sync logs.', stderr)
+        # returns with a dict of {job_id: run_timestamp}
+        run_timestamps = common_utils.decode_payload(run_timestamps)
+        if not run_timestamps:
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        'No matching log directories found'
+                        f'{colorama.Style.RESET_ALL}')
+            return {}
+
+        run_timestamp = list(run_timestamps.values())[0]
+        job_id = list(run_timestamps.keys())[0]
+        local_log_dir = ''
+        if controller:  # download controller logs
+            remote_log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
+                                          run_timestamp)
+            local_log_dir = os.path.expanduser(
+                os.path.join(local_dir, run_timestamp))
+
+            logger.info(f'{colorama.Fore.CYAN}'
+                        f'Job {job_ids} local logs: {local_log_dir}'
+                        f'{colorama.Style.RESET_ALL}')
+
+            runners = handle.get_command_runners()
+
+            def _rsync_down(args) -> None:
+                """Rsync down logs from remote nodes.
+
+                Args:
+                    args: A tuple of (runner, local_log_dir, remote_log_dir)
+                """
+                (runner, local_log_dir, remote_log_dir) = args
+                try:
+                    os.makedirs(local_log_dir, exist_ok=True)
+                    runner.rsync(
+                        source=f'{remote_log_dir}/',
+                        target=local_log_dir,
+                        up=False,
+                        stream_logs=False,
+                    )
+                except exceptions.CommandError as e:
+                    if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+                        # Raised by rsync_down. Remote log dir may not exist
+                        # since the job can be run on some part of the nodes.
+                        logger.debug(
+                            f'{runner.node_id} does not have the tasks/*.')
+                    else:
+                        raise
+
+            parallel_args = [[runner, *item]
+                             for item in zip([local_log_dir], [remote_log_dir])
+                             for runner in runners]
+            subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
+        else:  # download job logs
+            local_log_dir = os.path.expanduser(
+                os.path.join(local_dir, 'managed_jobs', run_timestamp))
+            os.makedirs(os.path.dirname(local_log_dir), exist_ok=True)
+            log_file = os.path.join(local_log_dir, 'run.log')
+
+            code = managed_jobs.ManagedJobCodeGen.stream_logs(job_name=None,
+                                                              job_id=job_id,
+                                                              follow=False,
+                                                              controller=False)
+
+            # With the stdin=subprocess.DEVNULL, the ctrl-c will not
+            # kill the process, so we need to handle it manually here.
+            if threading.current_thread() is threading.main_thread():
+                signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+                signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+            # We redirect the output to the log file
+            # and disable the STDOUT and STDERR
+            self.run_on_head(
+                handle,
+                code,
+                log_path=log_file,
+                stream_logs=False,
+                process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+                stdin=subprocess.DEVNULL,
+            )
+
+        logger.info(f'{colorama.Fore.CYAN}'
+                    f'Job {job_id} logs: {local_log_dir}'
+                    f'{colorama.Style.RESET_ALL}')
+        return {str(job_id): local_log_dir}
+
     def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
                         service_name: str, target: serve_lib.ServiceComponent,
                         replica_id: Optional[int], follow: bool) -> None:
@@ -4198,11 +4362,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         attempts = 0
         while True:
             logger.debug(f'instance statuses attempt {attempts + 1}')
-            node_status_dict = provision_lib.query_instances(
-                repr(cloud),
-                cluster_name_on_cloud,
-                config['provider'],
-                non_terminated_only=False)
+            try:
+                node_status_dict = provision_lib.query_instances(
+                    repr(cloud),
+                    cluster_name_on_cloud,
+                    config['provider'],
+                    non_terminated_only=False)
+            except Exception as e:  # pylint: disable=broad-except
+                if purge:
+                    logger.warning(
+                        f'Failed to query instances. Skipping since purge is '
+                        f'set. Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    break
+                raise
 
             unexpected_node_state: Optional[Tuple[str, str]] = None
             for node_id, node_status in node_status_dict.items():
@@ -4221,8 +4394,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
             else:
                 (node_id, node_status) = unexpected_node_state
-                raise RuntimeError(f'Instance {node_id} in unexpected state '
-                                   f'{node_status}.')
+                if purge:
+                    logger.warning(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}. Skipping since purge '
+                                   'is set.')
+                    break
+                raise RuntimeError(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

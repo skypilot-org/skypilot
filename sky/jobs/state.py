@@ -564,6 +564,33 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
+def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
+    """Get all job ids by name."""
+    name_filter = ''
+    field_values = []
+    if name is not None:
+        # We match the job name from `job_info` for the jobs submitted after
+        # #1982, and from `spot` for the jobs submitted before #1982, whose
+        # job_info is not available.
+        name_filter = ('WHERE (job_info.name=(?) OR '
+                       '(job_info.name IS NULL AND spot.task_name=(?)))')
+        field_values = [name, name]
+
+    # Left outer join is used here instead of join, because the job_info does
+    # not contain the managed jobs submitted before #1982.
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            f"""\
+            SELECT DISTINCT spot.spot_job_id
+            FROM spot
+            LEFT OUTER JOIN job_info
+            ON spot.spot_job_id=job_info.spot_job_id
+            {name_filter}
+            ORDER BY spot.spot_job_id DESC""", field_values).fetchall()
+        job_ids = [row[0] for row in rows if row[0] is not None]
+        return job_ids
+
+
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -591,7 +618,7 @@ def get_latest_task_id_status(
     If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
-    if len(id_statuses) == 0:
+    if not id_statuses:
         return None, None
     task_id, status = id_statuses[-1]
     for task_id, status in id_statuses:
@@ -617,7 +644,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
             WHERE spot_job_id=(?)
             ORDER BY task_id ASC""", (job_id,)).fetchall()
         reason = [r[0] for r in reason if r[0] is not None]
-        if len(reason) == 0:
+        if not reason:
             return None
         return reason[0]
 

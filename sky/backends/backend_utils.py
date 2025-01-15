@@ -650,6 +650,42 @@ def _replace_yaml_dicts(
     return common_utils.dump_yaml_str(new_config)
 
 
+def get_expirable_clouds(
+        enabled_clouds: Sequence[clouds.Cloud]) -> List[clouds.Cloud]:
+    """Returns a list of clouds that use local credentials and whose credentials can expire.
+
+    This function checks each cloud in the provided sequence to determine if it uses local credentials
+    and if its credentials can expire. If both conditions are met, the cloud is added to the list of
+    expirable clouds.
+
+    Args:
+        enabled_clouds (Sequence[clouds.Cloud]): A sequence of cloud objects to check.
+
+    Returns:
+        list[clouds.Cloud]: A list of cloud objects that use local credentials and whose credentials can expire.
+    """
+    expirable_clouds = []
+    local_credentials_value = schemas.RemoteIdentityOptions.LOCAL_CREDENTIALS.value
+    for cloud in enabled_clouds:
+        remote_identities = skypilot_config.get_nested(
+            (str(cloud).lower(), 'remote_identity'), None)
+        if remote_identities is None:
+            remote_identities = schemas.get_default_remote_identity(
+                str(cloud).lower())
+
+        local_credential_expiring = cloud.can_credential_expire()
+        if isinstance(remote_identities, str):
+            if remote_identities == local_credentials_value and local_credential_expiring:
+                expirable_clouds.append(cloud)
+        elif isinstance(remote_identities, list):
+            for profile in remote_identities:
+                if list(profile.values(
+                ))[0] == local_credentials_value and local_credential_expiring:
+                    expirable_clouds.append(cloud)
+                    break
+    return expirable_clouds
+
+
 # TODO: too many things happening here - leaky abstraction. Refactor.
 @timeline.event
 def write_cluster_config(
@@ -926,6 +962,13 @@ def write_cluster_config(
             tmp_yaml_path,
             cluster_config_overrides=to_provision.cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
+        yaml_obj = common_utils.read_yaml(tmp_yaml_path)
+        pod_config = yaml_obj['available_node_types']['ray_head_default'][
+            'node_config']
+        valid, message = kubernetes_utils.check_pod_config(pod_config)
+        if not valid:
+            raise exceptions.InvalidCloudConfigs(
+                f'Invalid pod_config. Details: {message}')
 
     if dryrun:
         # If dryrun, return the unfinished tmp yaml path.
@@ -1000,6 +1043,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.Cudo,
             clouds.Paperspace,
             clouds.Azure,
+            clouds.DO,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
@@ -1017,10 +1061,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     else:
         assert False, cloud
     common_utils.dump_yaml(cluster_config_file, config)
-
-
-def get_run_timestamp() -> str:
-    return 'sky-' + datetime.now().strftime('%Y-%m-%d-%H-%M-%S-%f')
 
 
 def get_timestamp_from_run_timestamp(run_timestamp: str) -> float:
