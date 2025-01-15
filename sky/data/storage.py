@@ -3997,6 +3997,13 @@ class OciStore(AbstractStore):
             self._validate_bucket_expr(source)
             source, region_in_source = source.split('@')
 
+        if region_in_name is not None and region_in_source is not None:
+            # This should never happen because name and source will never be
+            # the remote bucket at the same time.
+            assert region_in_name == region_in_source, (
+                f'Mismatch region specified. Region in name {region_in_name}, '
+                f'but region in source is {region_in_source}')
+
         if region_in_name is not None:
             region = region_in_name
         elif region_in_source is not None:
