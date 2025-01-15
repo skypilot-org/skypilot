@@ -83,9 +83,14 @@ class UserSignal(enum.Enum):
 
 
 # ====== internal functions ======
-def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
     """Terminate the cluster."""
     retry_cnt = 0
+    backoff = common_utils.Backoff(
+        # Each attempt may take around 10s, so we back off longer than that.
+        initial_backoff=15,
+        # 1.6 ** 5 = 10.48576 < 20, so we won't hit this with default max_retry
+        max_backoff_factor=20)
     while True:
         try:
             usage_lib.messages.usage.set_internal()
@@ -105,6 +110,7 @@ def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
                 f'Details: {common_utils.format_exception(e)}')
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')
+            time.sleep(backoff.current_backoff())
 
 
 def get_job_status(backend: 'backends.CloudVmRayBackend',
