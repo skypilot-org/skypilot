@@ -190,8 +190,6 @@ class JobsController:
             f'Submitted managed job {self._job_id} (task: {task_id}, name: '
             f'{task.name!r}); {constants.TASK_ID_ENV_VAR}: {task_id_env_var}')
 
-        scheduler.wait_until_launch_okay(self._job_id)
-
         logger.info('Started monitoring.')
         managed_job_state.set_starting(job_id=self._job_id,
                                        task_id=task_id,
@@ -203,8 +201,6 @@ class JobsController:
                                       task_id=task_id,
                                       start_time=remote_job_submitted_at,
                                       callback_func=callback_func)
-
-        scheduler.launch_finished(self._job_id)
 
         while True:
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
@@ -357,15 +353,11 @@ class JobsController:
             managed_job_state.set_recovering(job_id=self._job_id,
                                              task_id=task_id,
                                              callback_func=callback_func)
-            # Switch to LAUNCHING schedule_state here, since the entire recovery
-            # process is somewhat heavy.
-            scheduler.wait_until_launch_okay(self._job_id)
             recovered_time = self._strategy_executor.recover()
             managed_job_state.set_recovered(self._job_id,
                                             task_id,
                                             recovered_time=recovered_time,
                                             callback_func=callback_func)
-            scheduler.launch_finished(self._job_id)
 
     def run(self):
         """Run controller logic and handle exceptions."""

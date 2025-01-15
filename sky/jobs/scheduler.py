@@ -33,6 +33,7 @@ Nomenclature:
 """
 
 from argparse import ArgumentParser
+import contextlib
 from functools import lru_cache
 import os
 import time
@@ -175,21 +176,12 @@ def submit_job(job_id: int, dag_yaml_path: str) -> None:
     maybe_schedule_next_jobs()
 
 
-def launch_finished(job_id: int) -> None:
-    """Transition a job from LAUNCHING to ALIVE.
+@contextlib.contextmanager
+def scheduled_launch(job_id: int):
+    """Launch as part of an ongoing job.
 
-    This should be called after sky.launch finishes, whether or not it was
-    successful. This may cause other jobs to begin launching.
-
-    To transition back to LAUNCHING, use wait_until_launch_okay.
-    """
-    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
-        state.scheduler_set_alive(job_id)
-    maybe_schedule_next_jobs()
-
-
-def wait_until_launch_okay(job_id: int) -> None:
-    """Block until we can start a launch as part of an ongoing job.
+    A newly started job will already be LAUNCHING, and this will immediately
+    enter the context.
 
     If a job is ongoing (ALIVE schedule_state), there are two scenarios where we
     may need to call sky.launch again during the course of a job controller:
@@ -198,19 +190,31 @@ def wait_until_launch_okay(job_id: int) -> None:
 
     This function will mark the job as ALIVE_WAITING, which indicates to the
     scheduler that it wants to transition back to LAUNCHING. Then, it will wait
-    until the scheduler transitions the job state.
+    until the scheduler transitions the job state, before entering the context.
+
+    On exiting the context, the job will transition to ALIVE.
+
+    This should only be used within the job controller for the given job_id. If
+    multiple uses of this context are nested, behavior is undefined. Don't do
+    that.
     """
-    if (state.get_job_schedule_state(job_id) ==
+
+    # If we're already in LAUNCHING schedule_state, we don't need to wait.
+    # This may be the case for the first launch of a job.
+    if (state.get_job_schedule_state(job_id) !=
             state.ManagedJobScheduleState.LAUNCHING):
-        # If we're already in LAUNCHING schedule_state, we don't need to wait.
-        # This may be the case for the first launch of a job.
-        return
+        # Since we aren't LAUNCHING, we need to wait to be scheduled.
+        _set_alive_waiting(job_id)
 
-    _set_alive_waiting(job_id)
+        while (state.get_job_schedule_state(job_id) !=
+               state.ManagedJobScheduleState.LAUNCHING):
+            time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
 
-    while (state.get_job_schedule_state(job_id) !=
-           state.ManagedJobScheduleState.LAUNCHING):
-        time.sleep(_ALIVE_JOB_LAUNCH_WAIT_INTERVAL)
+    yield
+
+    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
+        state.scheduler_set_alive(job_id)
+    maybe_schedule_next_jobs()
 
 
 def job_done(job_id: int, idempotent: bool = False) -> None:
@@ -228,6 +232,13 @@ def job_done(job_id: int, idempotent: bool = False) -> None:
 
     with filelock.FileLock(os.path.expanduser(_get_lock_path())):
         state.scheduler_set_done(job_id, idempotent)
+    maybe_schedule_next_jobs()
+
+
+def _set_alive_waiting(job_id: int) -> None:
+    """Should use wait_until_launch_okay() to transition to this state."""
+    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
+        state.scheduler_set_alive_waiting(job_id)
     maybe_schedule_next_jobs()
 
 
@@ -253,13 +264,6 @@ def _can_start_new_job() -> bool:
 def _can_lauch_in_alive_job() -> bool:
     launching_jobs = state.get_num_launching_jobs()
     return launching_jobs < _get_launch_parallelism()
-
-
-def _set_alive_waiting(job_id: int) -> None:
-    """Should use wait_until_launch_okay() to transition to this state."""
-    with filelock.FileLock(os.path.expanduser(_get_lock_path())):
-        state.scheduler_set_alive_waiting(job_id)
-    maybe_schedule_next_jobs()
 
 
 if __name__ == '__main__':
