@@ -164,7 +164,7 @@ class Vast(clouds.Cloud):
             acc_dict)
 
         if r.image_id is None:
-            image_id = 'vastai/pytorch:latest'
+            image_id = 'vastai/base:0.0.2'
         elif r.extract_docker_image() is not None:
             image_id = r.extract_docker_image()
         else:
