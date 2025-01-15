@@ -26,6 +26,10 @@ setup: |
   echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
   {% endif %}
 
+  {% if controller_envs.get("SKYPILOT_DEV") %}
+  grep -q "alias sky-env=" ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
+  {% endif %}
+
   # Create systemd service file
   mkdir -p ~/.config/systemd/user/
 
