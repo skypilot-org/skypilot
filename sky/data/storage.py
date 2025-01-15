@@ -3985,15 +3985,22 @@ class OciStore(AbstractStore):
         #   /datasets-storage:
         #       source: oci://RAGData@us-sanjose-1
         # The name in above mount will be set to RAGData@us-sanjose-1
+        region_in_name = None
         if name is not None and '@' in name:
             self._validate_bucket_expr(name)
-            name, region = name.split('@')
+            name, region_in_name = name.split('@')
 
         # Region is from the specified source in oci://<bucket>@<region> format
+        region_in_source = None
         if isinstance(source,
                       str) and source.startswith('oci://') and '@' in source:
             self._validate_bucket_expr(source)
-            source, region = source.split('@')
+            source, region_in_source = source.split('@')
+
+        if region_in_name is not None:
+            region = region_in_name
+        elif region_in_source is not None:
+            region = region_in_source
 
         # Default region set to what specified in oci config.
         if region is None:
