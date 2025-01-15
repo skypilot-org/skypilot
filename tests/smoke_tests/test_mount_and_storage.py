@@ -47,6 +47,7 @@ from sky.data.data_utils import Rclone
 
 
 # ---------- file_mounts ----------
+@pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
