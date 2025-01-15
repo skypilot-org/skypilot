@@ -2,19 +2,20 @@
 
 Tutorial: AI Training
 ======================
-This example uses SkyPilot to train a Transformer-based language model from HuggingFace.
+This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) with Distributed Data Parallel (DDP) in PyTorch.
 
-First, define a :ref:`task YAML <yaml-spec>` with the resource requirements, the setup commands,
+We define a :ref:`task YAML <yaml-spec>` with the resource requirements, the setup commands,
 and the commands to run:
 
 .. code-block:: yaml
 
-  # dnn.yaml
+  # train.yaml
 
-  name: huggingface
+  name: minGPT-ddp
 
   resources:
-    accelerators: V100:4
+      cpus: 4+
+      accelerators: L4:4  # Or A100:8, H100:8
 
   # Optional: upload a working directory to remote ~/sky_workdir.
   # Commands in "setup" and "run" will be executed under it.
@@ -30,26 +31,21 @@ and the commands to run:
   #   ~/.netrc: ~/.netrc
 
   setup: |
-    set -e  # Exit if any command failed.
-    git clone https://github.com/huggingface/transformers/ || true
-    cd transformers
-    pip install .
-    cd examples/pytorch/text-classification
-    pip install -r requirements.txt torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
+      git clone --depth 1 https://github.com/pytorch/examples || true
+      cd examples
+      git filter-branch --prune-empty --subdirectory-filter distributed/minGPT-ddp
+      # SkyPilot's default image on AWS/GCP has CUDA 11.6 (Azure 11.5).
+      uv pip install -r requirements.txt "numpy<2" "torch==1.12.1+cu113" --extra-index-url https://download.pytorch.org/whl/cu113
 
   run: |
-    set -e  # Exit if any command failed.
-    cd transformers/examples/pytorch/text-classification
-    python run_glue.py \
-      --model_name_or_path bert-base-cased \
-      --dataset_name imdb  \
-      --do_train \
-      --max_seq_length 128 \
-      --per_device_train_batch_size 32 \
-      --learning_rate 2e-5 \
-      --max_steps 50 \
-      --output_dir /tmp/imdb/ --overwrite_output_dir \
-      --fp16
+      cd examples/mingpt
+      export LOGLEVEL=INFO
+
+      echo "Starting minGPT-ddp training"
+
+      torchrun \
+      --nproc_per_node=$SKYPILOT_NUM_GPUS_PER_NODE \
+      main.py
 
 .. tip::
 
@@ -57,11 +53,15 @@ and the commands to run:
   learn about how to use them to mount local dirs/files or object store buckets
   (S3, GCS, R2) into your cluster, see :ref:`sync-code-artifacts`.
 
+.. tip::
+
+  The ``SKYPILOT_NUM_GPUS_PER_NODE`` environment variable is automatically set by SkyPilot to the number of GPUs per node. See :ref:`env-vars` for more.
+
 Then, launch training:
 
 .. code-block:: console
 
-   $ sky launch -c lm-cluster dnn.yaml
+   $ sky launch -c mingpt train.yaml
 
 This will provision the cheapest cluster with the required resources, execute the setup
 commands, then execute the run commands.

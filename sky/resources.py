@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
+from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import common_utils
@@ -44,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -55,7 +56,7 @@ class Resources:
         accelerators: Union[None, str, Dict[str, int]] = None,
         accelerator_args: Optional[Dict[str, str]] = None,
         use_spot: Optional[bool] = None,
-        job_recovery: Optional[str] = None,
+        job_recovery: Optional[Union[Dict[str, Union[str, int]], str]] = None,
         region: Optional[str] = None,
         zone: Optional[str] = None,
         image_id: Union[Dict[str, str], str, None] = None,
@@ -111,6 +112,12 @@ class Resources:
             job to recover the cluster from preemption. Refer to
             `recovery_strategy module <https://github.com/skypilot-org/skypilot/blob/master/sky/jobs/recovery_strategy.py>`__ # pylint: disable=line-too-long
             for more details.
+            When a dict is provided, it can have the following fields:
+
+            - strategy: the recovery strategy to use.
+            - max_restarts_on_errors: the max number of restarts on user code
+              errors.
+
           region: the region to use.
           zone: the zone to use.
           image_id: the image ID to use. If a str, must be a string
@@ -161,10 +168,20 @@ class Resources:
 
         self._use_spot_specified = use_spot is not None
         self._use_spot = use_spot if use_spot is not None else False
-        self._job_recovery = None
+        self._job_recovery: Optional[Dict[str, Union[str, int]]] = None
         if job_recovery is not None:
-            if job_recovery.strip().lower() != 'none':
-                self._job_recovery = job_recovery.upper()
+            if isinstance(job_recovery, str):
+                job_recovery = {'strategy': job_recovery}
+            if 'strategy' not in job_recovery:
+                job_recovery['strategy'] = None
+
+            strategy_name = job_recovery['strategy']
+            if strategy_name == 'none':
+                self._job_recovery = None
+            else:
+                if strategy_name is not None:
+                    job_recovery['strategy'] = strategy_name.upper()
+                self._job_recovery = job_recovery
 
         if disk_size is not None:
             if round(disk_size) != disk_size:
@@ -225,6 +242,7 @@ class Resources:
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
+        # TODO: move these out of init to prevent repeated calls.
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_managed_job_attributes()
@@ -391,7 +409,7 @@ class Resources:
 
     @property
     @functools.lru_cache(maxsize=1)
-    def accelerators(self) -> Optional[Dict[str, int]]:
+    def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
         For example, Resources(AWS, 'p3.2xlarge') has its accelerators field
@@ -418,7 +436,7 @@ class Resources:
         return self._use_spot_specified
 
     @property
-    def job_recovery(self) -> Optional[str]:
+    def job_recovery(self) -> Optional[Dict[str, Union[str, int]]]:
         return self._job_recovery
 
     @property
@@ -565,33 +583,46 @@ class Resources:
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
-                    self._cloud = clouds.GCP()
-                assert self.cloud.is_same_cloud(
-                    clouds.GCP()), 'Cloud must be GCP.'
+                    if kubernetes_utils.is_tpu_on_gke(acc):
+                        self._cloud = clouds.Kubernetes()
+                    else:
+                        self._cloud = clouds.GCP()
+                assert (self.cloud.is_same_cloud(clouds.GCP()) or
+                        self.cloud.is_same_cloud(clouds.Kubernetes())), (
+                            'Cloud must be GCP or Kubernetes for TPU '
+                            'accelerators.')
+
                 if accelerator_args is None:
                     accelerator_args = {}
+
                 use_tpu_vm = accelerator_args.get('tpu_vm', True)
-                if self.instance_type is not None and use_tpu_vm:
-                    if self.instance_type != 'TPU-VM':
-                        with ux_utils.print_exception_no_traceback():
-                            raise ValueError(
-                                'Cannot specify instance type'
-                                f' (got "{self.instance_type}") for TPU VM.')
-                if 'runtime_version' not in accelerator_args:
+                if (self.cloud.is_same_cloud(clouds.GCP()) and
+                        not kubernetes_utils.is_tpu_on_gke(acc)):
+                    if 'runtime_version' not in accelerator_args:
 
-                    def _get_default_runtime_version() -> str:
-                        if not use_tpu_vm:
-                            return '2.12.0'
-                        # TPU V5 requires a newer runtime version.
-                        if acc.startswith('tpu-v5'):
-                            return 'v2-alpha-tpuv5'
-                        return 'tpu-vm-base'
+                        def _get_default_runtime_version() -> str:
+                            if not use_tpu_vm:
+                                return '2.12.0'
+                            # TPU V5 requires a newer runtime version.
+                            if acc.startswith('tpu-v5'):
+                                return 'v2-alpha-tpuv5'
+                            # TPU V6e requires a newer runtime version.
+                            elif acc.startswith('tpu-v6e'):
+                                return 'v2-alpha-tpuv6e'
+                            return 'tpu-vm-base'
 
-                    accelerator_args['runtime_version'] = (
-                        _get_default_runtime_version())
-                    logger.info(
-                        'Missing runtime_version in accelerator_args, using'
-                        f' default ({accelerator_args["runtime_version"]})')
+                        accelerator_args['runtime_version'] = (
+                            _get_default_runtime_version())
+                        logger.info(
+                            'Missing runtime_version in accelerator_args, using'
+                            f' default ({accelerator_args["runtime_version"]})')
+
+                    if self.instance_type is not None and use_tpu_vm:
+                        if self.instance_type != 'TPU-VM':
+                            with ux_utils.print_exception_no_traceback():
+                                raise ValueError(
+                                    'Cannot specify instance type (got '
+                                    f'{self.instance_type!r}) for TPU VM.')
 
         self._accelerators = accelerators
         self._accelerator_args = accelerator_args
@@ -630,7 +661,7 @@ class Resources:
                     continue
                 valid_clouds.append(cloud)
 
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -742,7 +773,7 @@ class Resources:
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -813,12 +844,13 @@ class Resources:
         Raises:
             ValueError: if the attributes are invalid.
         """
-        if self._job_recovery is None:
+        if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
-        if self._job_recovery not in managed_jobs.RECOVERY_STRATEGIES:
+        if (self._job_recovery['strategy']
+                not in managed_jobs.RECOVERY_STRATEGIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery} '
+                    f'Spot recovery strategy {self._job_recovery["strategy"]} '
                     'is not supported. The strategy should be among '
                     f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
 
@@ -976,7 +1008,7 @@ class Resources:
                         f'Label rejected due to {cloud}: {err_msg}'
                     ])
                     break
-        if len(invalid_table.rows) > 0:
+        if invalid_table.rows:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'The following labels are invalid:'
@@ -1009,6 +1041,7 @@ class Resources:
     def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
                               region: clouds.Region,
                               zones: Optional[List[clouds.Zone]],
+                              num_nodes: int,
                               dryrun: bool) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
@@ -1030,7 +1063,7 @@ class Resources:
 
         # Cloud specific variables
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, dryrun)
+            self, cluster_name, region, zones, num_nodes, dryrun)
 
         # Docker run options
         docker_run_options = skypilot_config.get_nested(
@@ -1250,7 +1283,7 @@ class Resources:
             _cluster_config_overrides=override.pop(
                 '_cluster_config_overrides', self._cluster_config_overrides),
         )
-        assert len(override) == 0
+        assert not override
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
@@ -1573,5 +1606,26 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+
+        if version < 20:
+            # Pre-0.7.0, we used 'kubernetes' as the default region for
+            # Kubernetes clusters. With the introduction of support for
+            # multiple contexts, we now set the region to the context name.
+            # Since we do not have information on which context the cluster
+            # was run in, we default it to the current active context.
+            legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
+            original_cloud = state.get('_cloud', None)
+            original_region = state.get('_region', None)
+            if (isinstance(original_cloud, clouds.Kubernetes) and
+                    original_region == legacy_region):
+                current_context = (
+                    kubernetes_utils.get_current_kube_config_context_name())
+                state['_region'] = current_context
+                # Also update the image_id dict if it contains the old region
+                if isinstance(state['_image_id'], dict):
+                    if legacy_region in state['_image_id']:
+                        state['_image_id'][current_context] = (
+                            state['_image_id'][legacy_region])
+                        del state['_image_id'][legacy_region]
 
         self.__dict__.update(state)
