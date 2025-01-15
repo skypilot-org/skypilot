@@ -915,8 +915,11 @@ def storage_delete(name: str) -> None:
     handle = global_user_state.get_handle_from_storage_name(name)
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')
-    else:
-        storage_object = data.Storage(name=handle.storage_name,
-                                      source=handle.source,
-                                      sync_on_reconstruction=False)
-        storage_object.delete()
+
+    assert handle.storage_name == name, (
+        f'In global_user_state, storage name {name!r} does not match '
+        f'handle.storage_name {handle.storage_name!r}')
+    storage_object = data.Storage(name=handle.storage_name,
+                                  source=handle.source,
+                                  sync_on_reconstruction=False)
+    storage_object.delete()
