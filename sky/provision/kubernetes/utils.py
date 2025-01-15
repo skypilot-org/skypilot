@@ -128,8 +128,9 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
-            backoff = common_utils.Backoff(initial_backoff=retry_interval, max_backoff_factor=3)
-            
+            backoff = common_utils.Backoff(initial_backoff=retry_interval,
+                                           max_backoff_factor=3)
+
             for attempt in range(max_retries):
                 try:
                     return func(*args, **kwargs)
