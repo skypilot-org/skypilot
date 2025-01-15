@@ -103,7 +103,7 @@ def test_job_pipeline(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'spot-pipeline',
         [
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml --cloud {generic_cloud} -y -d',
             'sleep 5',
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
