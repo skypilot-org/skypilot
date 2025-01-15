@@ -647,8 +647,8 @@ def stream_logs(job_id: Optional[int],
                     raise ValueError(f'Job {job_id} not found.')
             # We shouldn't count CANCELLING as terminal here, the controller is
             # still cleaning up.
-            if (job_status.is_terminal() and not job_status
-                    == managed_job_state.ManagedJobStatus.CANCELLING):
+            if (job_status.is_terminal() and job_status !=
+                    managed_job_state.ManagedJobStatus.CANCELLING):
                 # Don't keep waiting. If the log file is not created by this
                 # point, it never will be. This job may have been submitted
                 # using an old version that did not create the log file, so this
