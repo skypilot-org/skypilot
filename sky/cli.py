@@ -202,6 +202,7 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
 
 def _async_call_or_wait(request_id: str, async_call: bool,
                         request_name: str) -> Any:
+    short_request_id = request_id[:8]
     if not async_call:
         try:
             return sdk.stream_and_get(request_id)
@@ -210,15 +211,15 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                 ux_utils.starting_message('Request will continue running '
                                           'asynchronously.') +
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
-                f'{ux_utils.BOLD}sky api logs {request_id}'
+                f'{ux_utils.BOLD}sky api logs {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
                 f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
                 'visit: '
                 f'{server_common.get_server_url()}/api/stream?'
-                f'request_id={request_id}'
+                f'request_id={short_request_id}'
                 f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
                 'the request, run: '
-                f'{ux_utils.BOLD}sky api cancel {request_id}'
+                f'{ux_utils.BOLD}sky api cancel {short_request_id}'
                 f'{colorama.Style.RESET_ALL}'
                 f'\n{colorama.Style.RESET_ALL}')
             raise
@@ -227,13 +228,13 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                     fg='green')
         click.echo(
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
-            f'sky api logs {request_id[:-8]}{colorama.Style.RESET_ALL}\n'
+            f'sky api logs {short_request_id}{colorama.Style.RESET_ALL}\n'
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
             f'{server_common.get_server_url()}/api/stream?'
-            f'request_id={request_id}'
+            f'request_id={short_request_id}'
             f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
             'the request, run: '
-            f'{ux_utils.BOLD}sky api cancel {request_id}'
+            f'{ux_utils.BOLD}sky api cancel {short_request_id}'
             f'{colorama.Style.RESET_ALL}\n')
 
 
