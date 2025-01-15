@@ -39,8 +39,7 @@ def _is_head(pod) -> bool:
 
 
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
-    return next((pod_name for pod_name, pod in pods.items()
-                 if _is_head(pod)),
+    return next((pod_name for pod_name, pod in pods.items() if _is_head(pod)),
                 None)
 
 
@@ -651,6 +650,124 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             raise e
 
 
+def _is_serve_controller(cluster_name_on_cloud: str) -> bool:
+    return cluster_name_on_cloud.startswith('sky-serve-controller-')
+
+
+def _create_persistent_volume_claim(namespace: str, context: Optional[str],
+                                    pvc_name: str) -> None:
+    """Creates a persistent volume claim for SkyServe controller."""
+    try:
+        kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
+            name=pvc_name, namespace=namespace)
+        return
+    except kubernetes.api_exception() as e:
+        if e.status != 404:  # Not found
+            raise
+
+    pvc_spec = {
+        'apiVersion': 'v1',
+        'kind': 'PersistentVolumeClaim',
+        'metadata': {
+            'name': pvc_name,
+        },
+        'spec': {
+            'accessModes': ['ReadWriteOnce'],
+            'resources': {
+                'requests': {
+                    'storage': '10Gi'  # TODO(andyl): use a constant here
+                }
+            }
+        }
+    }
+
+    kubernetes.core_api(context).create_namespaced_persistent_volume_claim(
+        namespace=namespace, body=pvc_spec)
+
+
+def _create_serve_controller_deployment(
+        pod_spec: Dict[str, Any], cluster_name_on_cloud: str, namespace: str,
+        context: Optional[str]) -> Dict[str, Any]:
+    """Creates a deployment for SkyServe controller with persistence."""
+    pvc_name = f'{cluster_name_on_cloud}-data'
+    _create_persistent_volume_claim(namespace, context, pvc_name)
+
+    mount_path = '/root/.sky/serve'  # TODO(andyl): use a constant here
+    volume_mounts = [{'name': 'serve-data', 'mountPath': mount_path}]
+
+    volumes = [{
+        'name': 'serve-data',
+        'persistentVolumeClaim': {
+            'claimName': pvc_name
+        }
+    }]
+
+    if 'volumes' in pod_spec['spec']:
+        pod_spec['spec']['volumes'].extend(volumes)
+    else:
+        pod_spec['spec']['volumes'] = volumes
+
+    for container in pod_spec['spec']['containers']:
+        if 'volumeMounts' in container:
+            container['volumeMounts'].extend(volume_mounts)
+        else:
+            container['volumeMounts'] = volume_mounts
+
+    template_metadata = pod_spec.pop('metadata')
+
+    deployment_labels = {
+        'app': cluster_name_on_cloud,
+    }
+    template_metadata['labels'].update(deployment_labels)
+
+    # The pod template part of pod_spec is used in the deployment
+    # spec.template.spec
+
+    deployment_spec = {
+        'apiVersion': 'apps/v1',
+        'kind': 'Deployment',
+        'metadata': {
+            'name': f'{cluster_name_on_cloud}-deployment',
+            'namespace': namespace,
+        },
+        'spec': {
+            'replicas': 1,
+            'selector': {
+                'matchLabels': deployment_labels
+            },
+            'template': {
+                'metadata': template_metadata,
+                'spec': {
+                    **pod_spec['spec'], 'restartPolicy': 'Always'
+                }
+            }
+        }
+    }
+
+    return deployment_spec
+
+
+@timeline.event
+def _wait_for_deployment_pod(context, namespace, deployment, timeout=60):
+    label_selector = ','.join([
+        f'{key}={value}'
+        for key, value in deployment.spec.selector.match_labels.items()
+    ])
+    target_replicas = deployment.spec.replicas
+    start_time = time.time()
+    while time.time() - start_time < timeout:
+        pods = kubernetes.core_api(context).list_namespaced_pod(
+            namespace, label_selector=label_selector).items
+        # TODO(andyl): not sure if this necessary
+        if len(pods) == target_replicas:
+            return pods
+        time.sleep(2)
+
+    raise TimeoutError(
+        f'Timeout: Not all Pods for Deployment {deployment.metadata.name!r}'
+        ' are created.')
+
+
 @timeline.event
 def _create_pods(region: str, cluster_name_on_cloud: str,
                  config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -662,6 +779,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     tags = {
         TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
     }
+
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
         pod_spec['metadata']['labels'].update(tags)
@@ -749,7 +867,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
             head_selector = head_service_selector(cluster_name_on_cloud)
             pod_spec_copy['metadata']['labels'].update(head_selector)
-            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
+            pod_spec_copy['metadata'][
+                'name'] = f'{cluster_name_on_cloud}-head'  #!
         else:
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
@@ -800,12 +919,30 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             }
             pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
 
+        if _is_serve_controller(cluster_name_on_cloud):
+            deployment_spec = _create_serve_controller_deployment(
+                pod_spec_copy, cluster_name_on_cloud, namespace, context)
+            try:
+                return kubernetes.apps_api(
+                    context).create_namespaced_deployment(
+                        namespace, deployment_spec)
+            except Exception as e:
+                print('Deployment failed', e)
+                raise e
+
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
 
     # Create pods in parallel
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
                                             range(to_start_count), _NUM_THREADS)
+
+    if _is_serve_controller(cluster_name_on_cloud):
+        deployments = copy.deepcopy(pods)
+        pods.clear()  # Since it's not pods. What created here are true pods.
+        for deployment in deployments:
+            pods.extend(_wait_for_deployment_pod(context, namespace,
+                                                 deployment))
 
     # Process created pods
     for pod in pods:
