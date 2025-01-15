@@ -101,8 +101,8 @@ class AzureInstanceStatus(enum.Enum):
     ) -> Dict['AzureInstanceStatus', Optional[status_lib.ClusterStatus]]:
         return {
             cls.PENDING: status_lib.ClusterStatus.INIT,
-            cls.STOPPING: status_lib.ClusterStatus.INIT,
             cls.RUNNING: status_lib.ClusterStatus.UP,
+            cls.STOPPING: status_lib.ClusterStatus.STOPPED,
             cls.STOPPED: status_lib.ClusterStatus.STOPPED,
             cls.DELETING: None,
         }
@@ -343,7 +343,7 @@ def _create_instances(compute_client: 'azure_compute.ComputeManagementClient',
         _create_vm(compute_client, vm_name, node_tags, provider_config,
                    node_config, network_interface.id)
 
-    subprocess_utils.run_in_parallel(create_single_instance, range(count))
+    subprocess_utils.run_in_parallel(create_single_instance, list(range(count)))
 
     # Update disk performance tier
     performance_tier = node_config.get('disk_performance_tier', None)

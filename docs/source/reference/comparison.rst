@@ -46,7 +46,7 @@ SkyPilot provides faster iteration for interactive development. For example, a c
 * :strong:`With SkyPilot, a single command (`:literal:`sky launch`:strong:`) takes care of everything.` Behind the scenes, SkyPilot provisions pods, installs all required dependencies, executes the job, returns logs, and provides SSH and VSCode access to debug.
 
 
-.. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/k8s_vs_skypilot_iterative_v2.png
+.. figure:: https://i.imgur.com/xfCfz4N.png
     :align: center
     :width: 95%
     :alt: Iterative Development with Kubernetes vs SkyPilot

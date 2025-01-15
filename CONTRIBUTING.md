@@ -50,9 +50,10 @@ pytest tests/test_smoke.py --generic-cloud azure
 
 For profiling code, use:
 ```
-pip install tuna # Tuna is used for visualization of profiling data.
-python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
-tuna sky.prof
+pip install py-spy # py-spy is a sampling profiler for Python programs
+py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
+py-spy top -- python -m sky.cli status # Get a live top view
+py-spy -h # For more options
 ```
 
 #### Testing in a container
@@ -78,6 +79,7 @@ It has some convenience features which you might find helpful (see [Dockerfile](
 - If relevant, add tests for your changes. For changes that touch the core system, run the [smoke tests](#testing) and ensure they pass.
 - Follow the [Google style guide](https://google.github.io/styleguide/pyguide.html).
 - Ensure code is properly formatted by running [`format.sh`](https://github.com/skypilot-org/skypilot/blob/master/format.sh).
+  - [Optional] You can also install pre-commit hooks by running `pre-commit install` to automatically format your code on commit.
 - Push your changes to your fork and open a pull request in the SkyPilot repository.
 - In the PR description, write a `Tested:` section to describe relevant tests performed.
 

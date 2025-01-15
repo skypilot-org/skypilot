@@ -258,7 +258,7 @@ class Paperspace(clouds.Cloud):
             return False, (
                 'Failed to access Paperspace Cloud with credentials.\n    '
                 'To configure credentials, follow the instructions at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#paperspace\n    '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#paperspace\n    '
                 'Generate API key and create a json at `~/.paperspace/config.json` with \n     '
                 '    {"apiKey": "[YOUR API KEY]"}\n    '
                 f'Reason: {str(e)}')

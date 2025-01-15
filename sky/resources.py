@@ -45,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -661,7 +661,7 @@ class Resources:
                     continue
                 valid_clouds.append(cloud)
 
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -773,7 +773,7 @@ class Resources:
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -1008,7 +1008,7 @@ class Resources:
                         f'Label rejected due to {cloud}: {err_msg}'
                     ])
                     break
-        if len(invalid_table.rows) > 0:
+        if invalid_table.rows:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'The following labels are invalid:'
@@ -1283,7 +1283,7 @@ class Resources:
             _cluster_config_overrides=override.pop(
                 '_cluster_config_overrides', self._cluster_config_overrides),
         )
-        assert len(override) == 0
+        assert not override
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
@@ -1606,5 +1606,26 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+
+        if version < 20:
+            # Pre-0.7.0, we used 'kubernetes' as the default region for
+            # Kubernetes clusters. With the introduction of support for
+            # multiple contexts, we now set the region to the context name.
+            # Since we do not have information on which context the cluster
+            # was run in, we default it to the current active context.
+            legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
+            original_cloud = state.get('_cloud', None)
+            original_region = state.get('_region', None)
+            if (isinstance(original_cloud, clouds.Kubernetes) and
+                    original_region == legacy_region):
+                current_context = (
+                    kubernetes_utils.get_current_kube_config_context_name())
+                state['_region'] = current_context
+                # Also update the image_id dict if it contains the old region
+                if isinstance(state['_image_id'], dict):
+                    if legacy_region in state['_image_id']:
+                        state['_image_id'][current_context] = (
+                            state['_image_id'][legacy_region])
+                        del state['_image_id'][legacy_region]
 
         self.__dict__.update(state)

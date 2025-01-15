@@ -25,7 +25,9 @@ from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_utils
+from sky.setup_files import dependencies
 from sky.skylet import constants
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import rich_utils
@@ -187,79 +189,52 @@ class Controllers(enum.Enum):
 
 # Install cli dependencies. Not using SkyPilot wheels because the wheel
 # can be cleaned up by another process.
-# TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
         controller: Controllers) -> List[str]:
-    # TODO(tian): Make dependency installation command a method of cloud
-    # class and get all installation command for enabled clouds.
-    commands = []
     # We use <step>/<total> instead of strong formatting, as we need to update
     # the <total> at the end of the for loop, and python does not support
     # partial string formatting.
     prefix_str = ('[<step>/<total>] Check & install cloud dependencies '
                   'on controller: ')
+    commands: List[str] = []
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
-    empty_str = ' ' * 10
-    aws_dependencies_installation = (
-        'pip list | grep boto3 > /dev/null 2>&1 || pip install '
-        'botocore>=1.29.10 boto3>=1.26.1; '
-        # Need to separate the installation of awscli from above because some
-        # other clouds will install boto3 but not awscli.
-        'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
-        'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
-    setup_clouds: List[str] = []
+    empty_str = ' ' * 20
+
+    # All python dependencies will be accumulated and then installed in one
+    # command at the end. This is very fast if the packages are already
+    # installed, so we don't check that.
+    python_packages: Set[str] = set()
+
+    # add flask to the controller dependencies for dashboard
+    python_packages.add('flask')
+
+    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
+                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
+
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
-        if isinstance(
-                clouds,
-            (clouds.Lambda, clouds.SCP, clouds.Fluidstack, clouds.Paperspace)):
-            # no need to install any cloud dependencies for lambda, scp,
-            # fluidstack and paperspace
-            continue
-        if isinstance(cloud, clouds.AWS):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
-            commands.append(f'echo -en "\\r{step_prefix}AWS{empty_str}" && ' +
-                            aws_dependencies_installation)
-            setup_clouds.append(str(cloud))
-        elif isinstance(cloud, clouds.Azure):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
+        cloud_python_dependencies: List[str] = copy.deepcopy(
+            dependencies.extras_require[cloud.canonical_name()])
+
+        if isinstance(cloud, clouds.Azure):
+            # azure-cli cannot be normally installed by uv.
+            # See comments in sky/skylet/constants.py.
+            cloud_python_dependencies.remove(dependencies.AZURE_CLI)
+
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{step_prefix}Azure{empty_str}" && '
-                'pip list | grep azure-cli > /dev/null 2>&1 || '
-                'pip install "azure-cli>=2.31.0" azure-core '
-                '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
-            # Have to separate this installation of az blob storage from above
-            # because this is newly-introduced and not part of azure-cli. We
-            # need a separate installed check for this.
-            commands.append(
-                'pip list | grep azure-storage-blob > /dev/null 2>&1 || '
-                'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
-            setup_clouds.append(str(cloud))
+                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
+                f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
+                f'"{dependencies.AZURE_CLI}" > /dev/null 2>&1')
         elif isinstance(cloud, clouds.GCP):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
-            commands.append(
-                f'echo -en "\\r{step_prefix}GCP{empty_str}" && '
-                'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-                'pip install "google-api-python-client>=2.69.0" '
-                '> /dev/null 2>&1')
-            # Have to separate the installation of google-cloud-storage from
-            # above because for a VM launched on GCP, the VM may have
-            # google-api-python-client installed alone.
-            commands.append(
-                'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
-                'pip install google-cloud-storage > /dev/null 2>&1')
-            commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
-            setup_clouds.append(str(cloud))
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
+                            f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
         elif isinstance(cloud, clouds.Kubernetes):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
                 f'echo -en "\\r{step_prefix}Kubernetes{empty_str}" && '
-                'pip list | grep kubernetes > /dev/null 2>&1 || '
-                'pip install "kubernetes>=20.0.0" > /dev/null 2>&1 &&'
                 # Install k8s + skypilot dependencies
                 'sudo bash -c "if '
                 '! command -v curl &> /dev/null || '
@@ -275,54 +250,36 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
-            setup_clouds.append(str(cloud))
         elif isinstance(cloud, clouds.Cudo):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{step_prefix}Cudo{empty_str}" && '
-                'pip list | grep cudo-compute > /dev/null 2>&1 || '
-                'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
+                f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
-            setup_clouds.append(str(cloud))
-        elif isinstance(cloud, clouds.RunPod):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
-            commands.append(f'echo -en "\\r{step_prefix}RunPod{empty_str}" && '
-                            'pip list | grep runpod > /dev/null 2>&1 || '
-                            'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-            setup_clouds.append(str(cloud))
-        elif isinstance(cloud, clouds.OCI):
-            step_prefix = prefix_str.replace('<step>',
-                                             str(len(setup_clouds) + 1))
-            commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
-                            'pip list | grep oci > /dev/null 2>&1 || '
-                            'pip install oci > /dev/null 2>&1')
-            setup_clouds.append(str(cloud))
-        if controller == Controllers.JOBS_CONTROLLER:
-            if isinstance(cloud, clouds.IBM):
-                step_prefix = prefix_str.replace('<step>',
-                                                 str(len(setup_clouds) + 1))
-                commands.append(
-                    f'echo -en "\\r{step_prefix}IBM{empty_str}" '
-                    '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
-                    'pip install ibm-cloud-sdk-core ibm-vpc '
-                    'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
-                setup_clouds.append(str(cloud))
+        elif isinstance(cloud, clouds.IBM):
+            if controller != Controllers.JOBS_CONTROLLER:
+                # We only need IBM deps on the jobs controller.
+                cloud_python_dependencies = []
+
+        python_packages.update(cloud_python_dependencies)
+
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        step_prefix = prefix_str.replace('<step>', str(len(setup_clouds) + 1))
-        commands.append(
-            f'echo -en "\\r{step_prefix}Cloudflare{empty_str}" && ' +
-            aws_dependencies_installation)
-        setup_clouds.append(cloudflare.NAME)
+        python_packages.update(dependencies.extras_require['cloudflare'])
 
+    packages_string = ' '.join([f'"{package}"' for package in python_packages])
+    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    commands.append(
+        f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
+        f'{constants.SKY_UV_PIP_CMD} install {packages_string} > /dev/null 2>&1'
+    )
+
+    total_commands = len(commands)
     finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
     commands.append(f'echo -e "\\r{finish_prefix}done.{empty_str}"')
+
     commands = [
-        command.replace('<total>', str(len(setup_clouds)))
-        for command in commands
+        command.replace('<total>', str(total_commands)) for command in commands
     ]
     return commands
 
@@ -380,11 +337,19 @@ def download_and_stream_latest_job_log(
         else:
             log_dir = list(log_dirs.values())[0]
             log_file = os.path.join(log_dir, 'run.log')
-
             # Print the logs to the console.
+            # TODO(zhwu): refactor this into log_utils, along with the
+            # refactoring for the log_lib.tail_logs.
             try:
                 with open(log_file, 'r', encoding='utf-8') as f:
-                    print(f.read())
+                    # Stream the logs to the console without reading the whole
+                    # file into memory.
+                    start_streaming = False
+                    for line in f:
+                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                            start_streaming = True
+                        if start_streaming:
+                            print(line, end='', flush=True)
             except FileNotFoundError:
                 logger.error('Failed to find the logs for the user '
                              f'program at {log_file}.')
@@ -687,9 +652,26 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     still sync up any storage mounts with local source paths (which do not
     undergo translation).
     """
+
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
+
+    def _sub_path_join(sub_path: Optional[str], path: str) -> str:
+        if sub_path is None:
+            return path
+        return os.path.join(sub_path, path).strip('/')
+
+    def assert_no_bucket_creation(store: storage_lib.AbstractStore) -> None:
+        if store.is_sky_managed:
+            # Bucket was created, this should not happen since use configured
+            # the bucket and we assumed it already exists.
+            store.delete()
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.StorageBucketCreateError(
+                    f'Jobs bucket {store.name!r} does not exist.  '
+                    'Please check jobs.bucket configuration in '
+                    'your SkyPilot config.')
 
     run_id = common_utils.get_usage_run_id()[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
@@ -717,11 +699,27 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             ux_utils.spinner_message(
                 f'Translating {msg} to SkyPilot Storage...'))
 
+    # Get the bucket name for the workdir and file mounts,
+    # we store all these files in same bucket from config.
+    bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    store_kwargs: Dict[str, Any] = {}
+    if bucket_wth_prefix is None:
+        store_type = store_cls = sub_path = None
+        storage_account_name = region = None
+        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
+            username=common_utils.get_cleaned_username(), id=run_id)
+    else:
+        store_type, store_cls, bucket_name, sub_path, storage_account_name, \
+            region = storage_lib.StoreType.get_fields_from_store_url(
+                bucket_wth_prefix)
+        if storage_account_name is not None:
+            store_kwargs['storage_account_name'] = storage_account_name
+        if region is not None:
+            store_kwargs['region'] = region
+
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
     if task.workdir is not None:
-        bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(), id=run_id)
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
@@ -729,14 +727,28 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             raise ValueError(
                 f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
                 'workdir and file_mounts contains it as the target.')
-        new_storage_mounts[
-            constants.
-            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': workdir,
-                'persistent': False,
-                'mode': 'COPY',
-            })
+        bucket_sub_path = _sub_path_join(
+            sub_path,
+            constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id))
+        stores = None
+        if store_type is not None:
+            assert store_cls is not None
+            with sky_logging.silent():
+                stores = {
+                    store_type: store_cls(name=bucket_name,
+                                          source=workdir,
+                                          _bucket_sub_path=bucket_sub_path,
+                                          **store_kwargs)
+                }
+                assert_no_bucket_creation(stores[store_type])
+
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=workdir,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _bucket_sub_path=bucket_sub_path)
+        new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
         logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
@@ -754,27 +766,37 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(),
-            id=f'{run_id}-{i}',
-        )
-        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
-            'name': bucket_name,
-            'source': src,
-            'persistent': False,
-            'mode': 'COPY',
-        })
+        bucket_sub_path = _sub_path_join(
+            sub_path, constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
+        stores = None
+        if store_type is not None:
+            assert store_cls is not None
+            with sky_logging.silent():
+                store = store_cls(name=bucket_name,
+                                  source=src,
+                                  _bucket_sub_path=bucket_sub_path,
+                                  **store_kwargs)
+
+                stores = {store_type: store}
+                assert_no_bucket_creation(stores[store_type])
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=src,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _bucket_sub_path=bucket_sub_path)
+        new_storage_mounts[dst] = storage_obj
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
                     f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
+    file_mounts_tmp_subpath = _sub_path_join(
+        sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
     local_fm_path = os.path.join(
         tempfile.gettempdir(),
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
-    file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
-        username=common_utils.get_cleaned_username(), id=run_id)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
         path)
     if copy_mounts_with_file_in_src:
@@ -783,14 +805,27 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             src_to_file_id[src] = i
             os.link(os.path.abspath(os.path.expanduser(src)),
                     os.path.join(local_fm_path, f'file-{i}'))
+        stores = None
+        if store_type is not None:
+            assert store_cls is not None
+            with sky_logging.silent():
+                stores = {
+                    store_type: store_cls(
+                        name=bucket_name,
+                        source=local_fm_path,
+                        _bucket_sub_path=file_mounts_tmp_subpath,
+                        **store_kwargs)
+                }
+                assert_no_bucket_creation(stores[store_type])
+        storage_obj = storage_lib.Storage(
+            name=bucket_name,
+            source=local_fm_path,
+            persistent=False,
+            mode=storage_lib.StorageMode.MOUNT,
+            stores=stores,
+            _bucket_sub_path=file_mounts_tmp_subpath)
 
-        new_storage_mounts[
-            file_mount_remote_tmp_dir] = storage_lib.Storage.from_yaml_config({
-                'name': file_bucket_name,
-                'source': local_fm_path,
-                'persistent': False,
-                'mode': 'MOUNT',
-            })
+        new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
         if file_mount_remote_tmp_dir in original_storage_mounts:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
@@ -800,8 +835,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         sources = list(src_to_file_id.keys())
         sources_str = '\n    '.join(sources)
         logger.info(f'  {colorama.Style.DIM}Files (listed below) '
-                    f' -> storage: {file_bucket_name}:'
+                    f' -> storage: {bucket_name}:'
                     f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+
     rich_utils.force_update_status(
         ux_utils.spinner_message('Uploading translated local files/folders'))
     task.update_storage_mounts(new_storage_mounts)
@@ -817,7 +853,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             ux_utils.spinner_message('Uploading local sources to storage[/]  '
                                      '[dim]View storages: sky storage ls'))
     try:
-        task.sync_storage_mounts()
+        task.sync_storage_mounts(force_sync=bucket_wth_prefix is not None)
     except (ValueError, exceptions.NoCloudAccessError) as e:
         if 'No enabled cloud for storage' in str(e) or isinstance(
                 e, exceptions.NoCloudAccessError):
@@ -847,10 +883,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage_obj.stores.keys())[0]
-        store_object = storage_obj.stores[store_type]
+        curr_store_type = list(storage_obj.stores.keys())[0]
+        store_object = storage_obj.stores[curr_store_type]
         bucket_url = storage_lib.StoreType.get_endpoint_url(
-            store_object, file_bucket_name)
+            store_object, bucket_name)
+        bucket_url += f'/{file_mounts_tmp_subpath}'
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -867,8 +904,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            store_object = storage_obj.stores[store_type]
+            curr_store_type = store_types[0]
+            store_object = storage_obj.stores[curr_store_type]
             storage_obj.source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             storage_obj.force_delete = True
@@ -885,8 +922,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            store_object = storage_obj.stores[store_type]
+            curr_store_type = store_types[0]
+            store_object = storage_obj.stores[curr_store_type]
             source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({

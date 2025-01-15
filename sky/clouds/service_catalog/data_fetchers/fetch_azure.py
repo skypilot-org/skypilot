@@ -64,7 +64,7 @@ FAMILY_NAME_TO_SKYPILOT_GPU_NAME = {
     'standardNVSv2Family': 'M60',
     'standardNVSv3Family': 'M60',
     'standardNVPromoFamily': 'M60',
-    'standardNVSv4Family': 'Radeon MI25',
+    'standardNVSv4Family': 'MI25',
     'standardNDSFamily': 'P40',
     'StandardNVADSA10v5Family': 'A10',
     'StandardNCadsH100v5Family': 'H100',
@@ -134,7 +134,7 @@ def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
         content_str = r.content.decode('ascii')
         content = json.loads(content_str)
         items = content.get('Items', [])
-        if len(items) == 0:
+        if not items:
             break
         all_items += items
         url = content.get('NextPageLink')

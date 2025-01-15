@@ -66,7 +66,8 @@ def create_table(cursor, conn):
         spot_job_id INTEGER,
         task_id INTEGER DEFAULT 0,
         task_name TEXT,
-        specs TEXT)""")
+        specs TEXT,
+        local_log_file TEXT DEFAULT NULL)""")
     conn.commit()
 
     db_utils.add_column_to_table(cursor, conn, 'spot', 'failure_reason', 'TEXT')
@@ -103,6 +104,8 @@ def create_table(cursor, conn):
                                  value_to_replace_existing_entries=json.dumps({
                                      'max_restarts_on_errors': 0,
                                  }))
+    db_utils.add_column_to_table(cursor, conn, 'spot', 'local_log_file',
+                                 'TEXT DEFAULT NULL')
 
     # `job_info` contains the mapping from job_id to the job_name.
     # In the future, it may contain more information about each job.
@@ -157,6 +160,7 @@ columns = [
     'task_id',
     'task_name',
     'specs',
+    'local_log_file',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
     'job_name',
@@ -512,6 +516,20 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             callback_func('CANCELLED')
 
 
+def set_local_log_file(job_id: int, task_id: Optional[int],
+                       local_log_file: str):
+    """Set the local log file for a job."""
+    filter_str = 'spot_job_id=(?)'
+    filter_args = [local_log_file, job_id]
+    if task_id is not None:
+        filter_str += ' AND task_id=(?)'
+        filter_args.append(task_id)
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            'UPDATE spot SET local_log_file=(?) '
+            f'WHERE {filter_str}', filter_args)
+
+
 # ======== utility functions ========
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
@@ -546,6 +564,33 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
+def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
+    """Get all job ids by name."""
+    name_filter = ''
+    field_values = []
+    if name is not None:
+        # We match the job name from `job_info` for the jobs submitted after
+        # #1982, and from `spot` for the jobs submitted before #1982, whose
+        # job_info is not available.
+        name_filter = ('WHERE (job_info.name=(?) OR '
+                       '(job_info.name IS NULL AND spot.task_name=(?)))')
+        field_values = [name, name]
+
+    # Left outer join is used here instead of join, because the job_info does
+    # not contain the managed jobs submitted before #1982.
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            f"""\
+            SELECT DISTINCT spot.spot_job_id
+            FROM spot
+            LEFT OUTER JOIN job_info
+            ON spot.spot_job_id=job_info.spot_job_id
+            {name_filter}
+            ORDER BY spot.spot_job_id DESC""", field_values).fetchall()
+        job_ids = [row[0] for row in rows if row[0] is not None]
+        return job_ids
+
+
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -573,7 +618,7 @@ def get_latest_task_id_status(
     If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
-    if len(id_statuses) == 0:
+    if not id_statuses:
         return None, None
     task_id, status = next(
         ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
@@ -601,7 +646,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
             WHERE spot_job_id=(?)
             ORDER BY task_id ASC""", (job_id,)).fetchall()
         reason = [r[0] for r in reason if r[0] is not None]
-        if len(reason) == 0:
+        if not reason:
             return None
         return reason[0]
 
@@ -664,3 +709,17 @@ def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
             WHERE spot_job_id=(?) AND task_id=(?)""",
             (job_id, task_id)).fetchone()
         return json.loads(task_specs[0])
+
+
+def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
+    """Get the local log directory for a job."""
+    filter_str = 'spot_job_id=(?)'
+    filter_args = [job_id]
+    if task_id is not None:
+        filter_str += ' AND task_id=(?)'
+        filter_args.append(task_id)
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        local_log_file = cursor.execute(
+            f'SELECT local_log_file FROM spot '
+            f'WHERE {filter_str}', filter_args).fetchone()
+        return local_log_file[-1] if local_log_file else None

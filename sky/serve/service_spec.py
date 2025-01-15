@@ -2,12 +2,13 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
 from sky import serve
 from sky.serve import constants
+from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -185,9 +186,12 @@ class SkyServiceSpec:
         return SkyServiceSpec.from_yaml_config(config['service'])
 
     def to_yaml_config(self) -> Dict[str, Any]:
-        config = dict()
+        config: Dict[str, Any] = {}
 
-        def add_if_not_none(section, key, value, no_empty: bool = False):
+        def add_if_not_none(section: str,
+                            key: Optional[str],
+                            value: Any,
+                            no_empty: bool = False):
             if no_empty and not value:
                 return
             if value is not None:
@@ -230,8 +234,8 @@ class SkyServiceSpec:
                    ' with custom headers')
         return f'{method}{headers}'
 
-    def spot_policy_str(self):
-        policy_strs = []
+    def spot_policy_str(self) -> str:
+        policy_strs: List[str] = []
         if (self.dynamic_ondemand_fallback is not None and
                 self.dynamic_ondemand_fallback):
             policy_strs.append('Dynamic on-demand fallback')
@@ -327,5 +331,6 @@ class SkyServiceSpec:
         return self._use_ondemand_fallback
 
     @property
-    def load_balancing_policy(self) -> Optional[str]:
-        return self._load_balancing_policy
+    def load_balancing_policy(self) -> str:
+        return lb_policies.LoadBalancingPolicy.make_policy_name(
+            self._load_balancing_policy)

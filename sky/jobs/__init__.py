@@ -9,6 +9,7 @@ from sky.jobs.core import cancel
 from sky.jobs.core import launch
 from sky.jobs.core import queue
 from sky.jobs.core import queue_from_kubernetes_pod
+from sky.jobs.core import sync_down_logs
 from sky.jobs.core import tail_logs
 from sky.jobs.recovery_strategy import DEFAULT_RECOVERY_STRATEGY
 from sky.jobs.recovery_strategy import RECOVERY_STRATEGIES
@@ -37,6 +38,7 @@ __all__ = [
     'queue',
     'queue_from_kubernetes_pod',
     'tail_logs',
+    'sync_down_logs',
     # utils
     'ManagedJobCodeGen',
     'format_job_table',
