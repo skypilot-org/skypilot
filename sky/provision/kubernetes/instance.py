@@ -35,12 +35,9 @@ TAG_POD_INITIALIZED = 'skypilot-initialized'
 
 
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
-    head_pod_name = None
-    for pod_name, pod in pods.items():
-        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
-            head_pod_name = pod_name
-            break
-    return head_pod_name
+    return next((pod_name for pod_name, pod in pods.items()
+                 if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'),
+                None)
 
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
