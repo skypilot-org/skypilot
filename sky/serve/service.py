@@ -130,7 +130,20 @@ def _cleanup(service_name: str) -> bool:
     return failed
 
 
-def _start(service_name: str, tmp_task_yaml: str, job_id: int, is_recovery: bool = False):
+def is_recovery_mode(service_name: str) -> bool:
+    """Check if service exists in database to determine recovery mode.
+
+    Args:
+        service_name: Name of the service to check
+
+    Returns:
+        True if service exists in database, indicating recovery mode
+    """
+    service = serve_state.get_service_from_name(service_name)
+    return service is not None
+
+
+def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     """Starts the service."""
     # Generate ssh key pair to avoid race condition when multiple sky.launch
     # are executed at the same time.
@@ -141,6 +154,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, is_recovery: bool
     # Already checked before submit to controller.
     assert task.service is not None, task
     service_spec = task.service
+
+    is_recovery = is_recovery_mode(service_name)
+
     if not is_recovery:
         if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
             cleanup_storage(tmp_task_yaml)
@@ -161,8 +177,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, is_recovery: bool
                 raise ValueError(f'Service {service_name} already exists.')
 
         # Add initial version information to the service state.
-        serve_state.add_or_update_version(service_name, constants.INITIAL_VERSION,
-                                        service_spec)
+        serve_state.add_or_update_version(service_name,
+                                          constants.INITIAL_VERSION,
+                                          service_spec)
 
     # Create the service working directory.
     service_dir = os.path.expanduser(
@@ -190,8 +207,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, is_recovery: bool
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
             if is_recovery:
                 # In recovery mode, use the ports from the database
-                controller_port = serve_state.get_service_controller_port(service_name)
-                load_balancer_port = serve_state.get_service_load_balancer_port(service_name)
+                controller_port = serve_state.get_service_controller_port(
+                    service_name)
+                load_balancer_port = serve_state.get_service_load_balancer_port(
+                    service_name)
             else:
                 controller_port = common_utils.find_free_port(
                     constants.CONTROLLER_PORT_START)
@@ -219,7 +238,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, is_recovery: bool
             controller_process.start()
             if not is_recovery:
                 serve_state.set_service_controller_port(service_name,
-                                                    controller_port)
+                                                        controller_port)
 
             # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
@@ -242,8 +261,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int, is_recovery: bool
                 args=(controller_addr, load_balancer_port, policy_name))
             load_balancer_process.start()
             if not is_recovery:
-                serve_state.set_service_load_balancer_port(service_name,
-                                                       load_balancer_port)
+                serve_state.set_service_load_balancer_port(
+                    service_name, load_balancer_port)
 
         while True:
             _handle_signal(service_name)
@@ -288,11 +307,8 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the service job.')
-    parser.add_argument('--is-recovery',
-                        action='store_true',
-                        help='Whether this is a recovery mode start.')
     args = parser.parse_args()
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    _start(args.service_name, args.task_yaml, args.job_id, args.is_recovery)
+    _start(args.service_name, args.task_yaml, args.job_id)
