@@ -620,10 +620,12 @@ def get_latest_task_id_status(
     id_statuses = _get_all_task_ids_statuses(job_id)
     if not id_statuses:
         return None, None
-    task_id, status = id_statuses[-1]
-    for task_id, status in id_statuses:
-        if not status.is_terminal():
-            break
+    task_id, status = next(
+        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
+        id_statuses[-1],
+    )
+    # Unpack the tuple first, or it triggers a Pylint's bug on recognizing
+    # the return type.
     return task_id, status
 
 

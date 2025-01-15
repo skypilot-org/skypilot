@@ -38,7 +38,7 @@ PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'
-QUEUE_KUBERNETES_SERVE = 'kubernetes_serve'
+QUEUE_GKE = 'gke'
 # Only aws, gcp, azure, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
@@ -54,7 +54,9 @@ SERVE_CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD_SERVE,
     'gcp': QUEUE_GENERIC_CLOUD_SERVE,
     'azure': QUEUE_GENERIC_CLOUD_SERVE,
-    'kubernetes': QUEUE_KUBERNETES_SERVE
+    # Now we run kubernetes on local cluster, so it should be find if we run
+    # serve tests on same queue as kubernetes.
+    'kubernetes': QUEUE_KUBERNETES
 }
 
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
@@ -98,6 +100,7 @@ def _extract_marked_tests(file_path: str,
         clouds_to_include = []
         clouds_to_exclude = []
         is_serve_test = 'serve' in marks
+        run_on_gke = 'requires_gke' in marks
         for mark in marks:
             if mark.startswith('no_'):
                 clouds_to_exclude.append(mark[3:])
@@ -130,13 +133,15 @@ def _extract_marked_tests(file_path: str,
                 f'but we only have credentials for {final_clouds_to_include}. '
                 f'clouds {excluded_clouds} are skipped.')
         function_cloud_map[function_name] = (final_clouds_to_include, [
-            cloud_queue_map[cloud] for cloud in final_clouds_to_include
+            QUEUE_GKE if run_on_gke else cloud_queue_map[cloud]
+            for cloud in final_clouds_to_include
         ])
     return function_cloud_map
 
 
 def _generate_pipeline(test_file: str,
-                       filter_marks: List[str]) -> Dict[str, Any]:
+                       filter_marks: List[str],
+                       auto_retry: bool = False) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
     function_cloud_map = _extract_marked_tests(test_file, filter_marks)
@@ -153,6 +158,11 @@ def _generate_pipeline(test_file: str,
                 },
                 'if': f'build.env("{cloud}") == "1"'
             }
+            if auto_retry:
+                step['retry'] = {
+                    # Automatically retry 2 times on any failure by default.
+                    'automatic': True
+                }
             steps.append(step)
     return {'steps': steps}
 
@@ -180,7 +190,7 @@ def _convert_release(test_files: List[str], filter_marks: List[str]):
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file, filter_marks)
+        pipeline = _generate_pipeline(test_file, filter_marks, auto_retry=True)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.

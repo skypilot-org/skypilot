@@ -584,7 +584,7 @@ def test_kubernetes_context_failover():
                 'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
                 '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
                 'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
-                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
+                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
                 # H100 should not in the current context
