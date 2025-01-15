@@ -100,18 +100,18 @@ _SERVE_STATUS_WAIT = (
     'done; '
     # 2. Once controller is ready, check provisioning vs. vCPU=2
     'provisioning_count=$(echo "$s" | grep "PROVISIONING" | wc -l); '
-    'vcpu_count=$(echo "$s" | grep "vCPU=2" | wc -l); '
-    'until [ "$provisioning_count" -eq "$vcpu_count" ]; '
+    'vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    'until [ "$provisioning_count" -eq "$vcpu_in_provision" ]; '
     'do '
     '    echo "Waiting for provisioning resource repr ready..."; '
-    '    echo "PROVISIONING: $provisioning_count, vCPU=2: $vcpu_count"; '
+    '    echo "PROVISIONING: $provisioning_count, vCPU: $vcpu_in_provision"; '
     '    sleep 5; '
     '    s=$(sky serve status {name}); '
     '    provisioning_count=$(echo "$s" | grep "PROVISIONING" | wc -l); '
-    '    vcpu_count=$(echo "$s" | grep "vCPU=2" | wc -l); '
+    '    vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
     'done; '
     # 3. Provisioning is complete
-    'echo "Provisioning complete. PROVISIONING: $provisioning_count, vCPU=2: $vcpu_count"; '
+    'echo "Provisioning complete. PROVISIONING: $provisioning_count, vCPU=2: $vcpu_in_provision"; '
     'echo "$s"')
 
 
