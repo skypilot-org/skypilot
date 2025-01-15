@@ -34,9 +34,13 @@ TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
 
 
+def _is_head(pod) -> bool:
+    return pod.metadata.labels.get(constants.TAG_RAY_NODE_KIND) == 'head'
+
+
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
     return next((pod_name for pod_name, pod in pods.items()
-                 if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'),
+                 if _is_head(pod)),
                 None)
 
 
@@ -806,8 +810,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     # Process created pods
     for pod in pods:
         created_pods[pod.metadata.name] = pod
-        if head_pod_name is None and pod.metadata.labels.get(
-                constants.TAG_RAY_NODE_KIND) == 'head':
+        if head_pod_name is None and _is_head(pod):
             head_pod_name = pod.metadata.name
 
     networking_mode = network_utils.get_networking_mode(
@@ -961,9 +964,6 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    def _is_head(pod) -> bool:
-        return pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head'
-
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
         if _is_head(pod) and worker_only:
@@ -1019,7 +1019,7 @@ def get_cluster_info(
                 tags=pod.metadata.labels,
             )
         ]
-        if pod.metadata.labels[constants.TAG_RAY_NODE_KIND] == 'head':
+        if _is_head(pod):
             head_pod_name = pod_name
             head_spec = pod.spec
             assert head_spec is not None, pod
