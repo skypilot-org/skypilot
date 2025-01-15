@@ -655,7 +655,9 @@ def stream_logs(job_id: Optional[int],
 
             time.sleep(log_lib.SKY_LOG_WAITING_GAP_SECONDS)
 
-        # See also log_lib.tail_logs.
+        # This code is based on log_lib.tail_logs. We can't use that code
+        # exactly because state works differently between managed jobs and
+        # normal jobs.
         with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
             # Note: we do not need to care about start_stream_at here, since
             # that should be in the job log printed above.
