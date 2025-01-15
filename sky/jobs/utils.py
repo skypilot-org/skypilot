@@ -13,6 +13,7 @@ import shlex
 import shutil
 import textwrap
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -20,6 +21,7 @@ import colorama
 import filelock
 from typing_extensions import Literal
 
+import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
@@ -30,6 +32,7 @@ from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -37,7 +40,6 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import sky
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -81,6 +83,30 @@ class UserSignal(enum.Enum):
 
 
 # ====== internal functions ======
+def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
+    """Terminate the cluster."""
+    retry_cnt = 0
+    while True:
+        try:
+            usage_lib.messages.usage.set_internal()
+            sky.down(cluster_name)
+            return
+        except exceptions.ClusterDoesNotExist:
+            # The cluster is already down.
+            logger.debug(f'The cluster {cluster_name} is already down.')
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            retry_cnt += 1
+            if retry_cnt >= max_retry:
+                raise RuntimeError(
+                    f'Failed to terminate the cluster {cluster_name}.') from e
+            logger.error(
+                f'Failed to terminate the cluster {cluster_name}. Retrying.'
+                f'Details: {common_utils.format_exception(e)}')
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
+
+
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
