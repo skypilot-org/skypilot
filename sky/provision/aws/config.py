@@ -279,7 +279,7 @@ def _is_subnet_public(ec2, subnet_id, vpc_id: Optional[str]) -> bool:
     logger.debug(f'subnet {subnet_id} route tables: {route_tables}')
     if _has_igw_route(route_tables):
         return True
-    if len(route_tables) > 0:
+    if route_tables:
         return False
 
     # Handle the case that a "main" route table is implicitly associated with
@@ -383,10 +383,13 @@ def _usable_subnets(
         raise exc
 
     if not subnets:
+        vpc_msg = (f'Does a default VPC exist in region '
+                   f'{ec2.meta.client.meta.region_name}? ') if (
+                       vpc_id_of_sg is None) else ''
         _skypilot_log_error_and_exit_for_failover(
-            'No usable subnets found, try '
-            'manually creating an instance in your specified region to '
-            'populate the list of subnets and trying this again. '
+            f'No usable subnets found. {vpc_msg}'
+            'Try manually creating an instance in your specified region to '
+            'populate the list of subnets and try again. '
             'Note that the subnet must map public IPs '
             'on instance launch unless you set `use_internal_ips: true` in '
             'the `provider` config.')
@@ -454,7 +457,7 @@ def _vpc_id_from_security_group_ids(ec2, sg_ids: List[str]) -> Any:
 
     no_sg_msg = ('Failed to detect a security group with id equal to any of '
                  'the configured SecurityGroupIds.')
-    assert len(vpc_ids) > 0, no_sg_msg
+    assert vpc_ids, no_sg_msg
 
     return vpc_ids[0]
 
@@ -495,6 +498,11 @@ def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
+    # If no VPC is specified, use the default VPC.
+    # We filter only for default VPCs to avoid using subnets that users may
+    # not want SkyPilot to use.
+    if vpc_id_of_sg is None:
+        all_subnets = [s for s in all_subnets if s.vpc.is_default]
     subnets, vpc_id = _usable_subnets(
         ec2,
         user_specified_subnets=None,

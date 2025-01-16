@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
        script.setAttribute('data-button-position-bottom', '100px');
+       script.setAttribute('data-user-analytics-fingerprint-enabled', 'true');
        script.async = true;
        document.head.appendChild(script);
 });
@@ -25,14 +26,9 @@ document.addEventListener('DOMContentLoaded', function () {
 document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
-        { selector: '.toctree-l1 > a', text: 'Managed Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Pixtral (Mistral AI)' },
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Reserved, Capacity Blocks, DWS' },
-        { selector: '.toctree-l1 > a', text: 'Llama 3.2 (Meta)' },
         { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
         { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
-        { selector: '.toctree-l1 > a', text: 'Concept: Sky Computing' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

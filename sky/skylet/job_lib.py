@@ -12,7 +12,7 @@ import signal
 import sqlite3
 import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import colorama
 import filelock
@@ -162,13 +162,17 @@ class JobStatus(enum.Enum):
     def nonterminal_statuses(cls) -> List['JobStatus']:
         return [cls.INIT, cls.SETTING_UP, cls.PENDING, cls.RUNNING]
 
-    def is_terminal(self):
+    def is_terminal(self) -> bool:
         return self not in self.nonterminal_statuses()
 
-    def __lt__(self, other):
+    @classmethod
+    def user_code_failure_states(cls) -> Sequence['JobStatus']:
+        return (cls.FAILED, cls.FAILED_SETUP)
+
+    def __lt__(self, other: 'JobStatus') -> bool:
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
-    def colored_str(self):
+    def colored_str(self) -> str:
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
@@ -586,7 +590,7 @@ def update_job_status(job_ids: List[int],
     This function should only be run on the remote instance with ray>=2.4.0.
     """
     echo = logger.info if not silent else logger.debug
-    if len(job_ids) == 0:
+    if not job_ids:
         return []
 
     statuses = []

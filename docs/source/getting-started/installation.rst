@@ -59,6 +59,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
           pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[do]"
           pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
@@ -303,7 +304,7 @@ RunPod
 
 .. code-block:: shell
   
-  pip install "runpod>=1.5.1"
+  pip install "runpod>=1.6.1"
   runpod config
 
 

@@ -1,5 +1,5 @@
 #!/bin/bash
-# Refer to https://skypilot.readthedocs.io/en/latest/reservations/existing-machines.html for details on how to use this script.
+# Refer to https://docs.skypilot.co/en/latest/reservations/existing-machines.html for details on how to use this script.
 set -e
 
 # Colors for nicer UX
@@ -93,11 +93,11 @@ cleanup_agent_node() {
 
 check_gpu() {
     local NODE_IP=$1
-    run_remote "$NODE_IP" "
-        if command -v nvidia-smi &> /dev/null; then
-            nvidia-smi --list-gpus | grep 'GPU 0'
-        fi
-    "
+    if run_remote "$NODE_IP" "command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null"; then
+        return 0  # GPU detected
+    else
+        return 1  # No GPU detected
+    fi
 }
 
 # Pre-flight checks

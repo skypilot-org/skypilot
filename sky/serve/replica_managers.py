@@ -172,7 +172,7 @@ def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are the same in sky.serve.core.up
-    assert len(task.resources) >= 1, task
+    assert task.resources, task
     task_resources: 'resources.Resources' = list(task.resources)[0]
     # Already checked the resources have and only have one port
     # before upload the task yaml.
@@ -998,9 +998,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Re-raise the exception if it is not preempted.
                 raise
             job_status = list(job_statuses.values())[0]
-            if job_status in [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-            ]:
+            if job_status in job_lib.JobStatus.user_code_failure_states():
                 info.status_property.user_app_failed = True
                 serve_state.add_or_update_replica(self._service_name,
                                                   info.replica_id, info)
