@@ -130,6 +130,7 @@ extras_require: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
+    'vast': ['vastai-sdk>=0.1.3'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have
