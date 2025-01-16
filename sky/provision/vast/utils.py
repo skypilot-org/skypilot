@@ -93,7 +93,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         'env': '-e __SOURCE=skypilot',
         'onstart_cmd': ';'.join([
             'touch ~/.no_auto_tmux',
-            f'echo "{vast.vast().api_key}" > ~/.vast_api_key',
+            f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
         ]),
         'label': name,
         'image': image_name
