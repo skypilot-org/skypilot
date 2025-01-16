@@ -1,0 +1,12 @@
+resources:
+  cloud: aws
+  cpus: 2
+  labels:
+    other_labels: test
+
+
+setup: |
+  echo "setup"
+
+run: |
+  echo "run"

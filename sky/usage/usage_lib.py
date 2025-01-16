@@ -3,7 +3,6 @@
 import contextlib
 import datetime
 import enum
-import inspect
 import json
 import os
 import time
@@ -12,19 +11,28 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import click
-import requests
 
 import sky
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import inspect
+
+    import requests
+
     from sky import resources as resources_lib
     from sky import status_lib
     from sky import task as task_lib
+else:
+    # requests and inspect cost ~100ms to load, which can be postponed to
+    # collection phase or skipped if user specifies no collection
+    requests = adaptors_common.LazyImport('requests')
+    inspect = adaptors_common.LazyImport('inspect')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -432,8 +440,9 @@ def entrypoint_context(name: str, fallback: bool = False):
         with ux_utils.enable_traceback():
             trace = traceback.format_exc()
             messages.usage.stacktrace = trace
-            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            detailed_reason = getattr(e, 'detailed_reason', None)
+            if detailed_reason is not None:
+                messages.usage.stacktrace += '\nDetails: ' + detailed_reason
             messages.usage.exception = common_utils.remove_color(
                 common_utils.format_exception(e))
         raise

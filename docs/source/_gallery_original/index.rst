@@ -34,16 +34,17 @@ Contents
    :maxdepth: 1
    :caption: LLM Models
 
+   Vision Llama 3.2 (Meta) <llms/llama-3_2>
+   Llama 3.1 (Meta) <llms/llama-3_1>
+   Llama 3 (Meta) <llms/llama-3>
+   Llama 2 (Meta) <llms/llama-2>
+   CodeLlama (Meta) <llms/codellama>
    Pixtral (Mistral AI) <llms/pixtral>
    Mixtral (Mistral AI) <llms/mixtral>
    Mistral 7B (Mistral AI) <https://docs.mistral.ai/self-deployment/skypilot/>
-   DBRX (Databricks) <llms/dbrx>
-   Llama-2 (Meta) <llms/llama-2>
-   Llama-3 (Meta) <llms/llama-3>
-   Llama-3.1 (Meta) <llms/llama-3_1>
-   Qwen (Alibaba) <llms/qwen>
-   CodeLlama (Meta) <llms/codellama>
+   Qwen 2.5 (Alibaba) <llms/qwen>
    Gemma (Google) <llms/gemma>
+   DBRX (Databricks) <llms/dbrx>
 
 .. toctree::
    :maxdepth: 1

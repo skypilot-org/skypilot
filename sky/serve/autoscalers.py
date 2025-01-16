@@ -131,6 +131,10 @@ class Autoscaler:
         """Load dynamic states to autoscaler."""
         raise NotImplementedError
 
+    def get_decision_interval(self) -> int:
+        """Get the decision interval for the autoscaler."""
+        raise NotImplementedError
+
     def load_dynamic_states(self, dynamic_states: Dict[str, Any]) -> None:
         """Load dynamic states to autoscaler."""
         self.latest_version_ever_ready = dynamic_states.pop(
@@ -316,8 +320,8 @@ class RequestRateAutoscaler(Autoscaler):
         """Select outdated replicas to scale down."""
 
         if self.update_mode == serve_utils.UpdateMode.ROLLING:
-            latest_ready_replicas = []
-            old_nonterminal_replicas = []
+            latest_ready_replicas: List['replica_managers.ReplicaInfo'] = []
+            old_nonterminal_replicas: List['replica_managers.ReplicaInfo'] = []
             for info in replica_infos:
                 if info.version == self.latest_version:
                     if info.is_ready:

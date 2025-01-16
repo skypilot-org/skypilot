@@ -18,6 +18,10 @@ SkyPilot can run a container either as a task, or as the runtime environment of 
 Running Containers as Tasks
 ---------------------------
 
+.. note::
+
+    On Kubernetes, running Docker runtime in a pod is not recommended. Instead, :ref:`use your container as a runtime environment <docker-containers-as-runtime-environments>`.
+
 SkyPilot can run containerized applications directly as regular tasks. The default VM images provided by SkyPilot already have the Docker runtime pre-configured.
 
 To launch a containerized application, you can directly invoke :code:`docker run` in the :code:`run` section of your task.
@@ -172,6 +176,10 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
 
 Private Registries
 ^^^^^^^^^^^^^^^^^^
+
+.. note::
+
+    These instructions do not apply if you use SkyPilot to launch on Kubernetes clusters. Instead, see :ref:`Using Images from Private Repositories in Kubernetes<kubernetes-custom-images-private-repos>` for more.
 
 When using this mode, to access Docker images hosted on private registries,
 you can provide the registry authentication details using :ref:`task environment variables <env-vars>`:

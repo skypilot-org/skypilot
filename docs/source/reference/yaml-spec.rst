@@ -22,8 +22,8 @@ Available fields:
     # If a relative path is used, it's evaluated relative to the location from 
     # which `sky` is called.
     #
-    # If a .gitignore file (or a .git/info/exclude file) exists in the working
-    # directory, files and directories listed in it will be excluded from syncing.
+    # To exclude files from syncing, see 
+    # https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
     workdir: ~/my-task-code
 
     # Number of nodes (optional; defaults to 1) to launch including the head node.
@@ -51,18 +51,18 @@ Available fields:
       #
       #   To specify a single type of accelerator:
       #     Format: <name>:<count> (or simply <name>, short for a count of 1).
-      #     accelerators: V100:4
+      #     accelerators: H100:4
       #
       #   To specify an ordered list of accelerators (try the accelerators in
       #   the specified order):
       #     Format: [<name>:<count>, ...]
-      #     accelerators: ['K80:1', 'V100:1', 'T4:1']
+      #     accelerators: ['L4:1', 'H100:1', 'A100:1']
       #
       #   To specify an unordered set of accelerators (optimize all specified
       #   accelerators together, and try accelerator with lowest cost first):
       #     Format: {<name>:<count>, ...}
-      #     accelerators: {'K80:1', 'V100:1', 'T4:1'}
-      accelerators: V100:4
+      #     accelerators: {'L4:1', 'H100:1', 'A100:1'}
+      accelerators: H100:8
 
       # Number of vCPUs per node (optional).
       #
@@ -107,6 +107,10 @@ Available fields:
       #
       # default: EAGER_NEXT_REGION
       job_recovery: none
+      # Or, to allow up to 3 restarts (default: 0) on user code errors:
+      # job_recovery:
+      #   strategy: EAGER_NEXT_REGION
+      #   max_restarts_on_errors: 3
 
       # Disk size in GB to allocate for OS (mounted at /). Increase this if you
       # have a large working directory or tasks that write out large outputs.
@@ -172,9 +176,9 @@ Available fields:
       # tpu_vm: True  # True to use TPU VM (the default); False to use TPU node.
 
       # Custom image id (optional, advanced). The image id used to boot the
-      # instances. Only supported for AWS and GCP (for non-docker image). If not
-      # specified, SkyPilot will use the default debian-based image suitable for
-      # machine learning tasks.
+      # instances. Only supported for AWS, GCP, OCI and IBM (for non-docker image).
+      # If not specified, SkyPilot will use the default debian-based image
+      # suitable for machine learning tasks.
       #
       # Docker support
       # You can specify docker image to use by setting the image_id to
@@ -200,7 +204,7 @@ Available fields:
       #   image_id:
       #     us-east-1: ami-0729d913a335efca7
       #     us-west-2: ami-050814f384259894c
-      image_id: ami-0868a20f5a3bf9702
+      #
       # GCP
       # To find GCP images: https://cloud.google.com/compute/docs/images
       # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
@@ -211,6 +215,24 @@ Available fields:
       # To find Azure images: https://docs.microsoft.com/en-us/azure/virtual-machines/linux/cli-ps-findimage
       # image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
       #
+      # OCI
+      # To find OCI images: https://docs.oracle.com/en-us/iaas/images
+      # You can choose the image with OS version from the following image tags 
+      # provided by SkyPilot:
+      #   image_id: skypilot:gpu-ubuntu-2204
+      #   image_id: skypilot:gpu-ubuntu-2004
+      #   image_id: skypilot:gpu-oraclelinux9
+      #   image_id: skypilot:gpu-oraclelinux8
+      #   image_id: skypilot:cpu-ubuntu-2204
+      #   image_id: skypilot:cpu-ubuntu-2004
+      #   image_id: skypilot:cpu-oraclelinux9
+      #   image_id: skypilot:cpu-oraclelinux8
+      #
+      # It is also possible to specify your custom image's OCID with OS type,
+      # for example:
+      #   image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaaywwfvy67wwe7f24juvjwhyjn3u7g7s3wzkhduxcbewzaeki2nt5q:oraclelinux
+      #   image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaa5tnuiqevhoyfnaa5pqeiwjv6w5vf6w4q2hpj3atyvu3yd6rhlhyq:ubuntu
+      #
       # IBM
       # Create a private VPC image and paste its ID in the following format:
       # image_id: <unique_image_id>
@@ -220,6 +242,7 @@ Available fields:
       # https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-ibm-cloud-vpc-infrastructure
       # To use a more limited but easier to manage tool:
       # https://github.com/IBM/vpc-img-inst
+      image_id: ami-0868a20f5a3bf9702
 
       # Labels to apply to the instances (optional).
       #
@@ -249,9 +272,9 @@ Available fields:
       any_of:
         - cloud: aws
           region: us-west-2
-          acceraltors: V100
+          accelerators: H100
         - cloud: gcp
-          acceraltors: A100
+          accelerators: H100
 
 
     # Environment variables (optional). These values can be accessed in the
@@ -303,7 +326,7 @@ Available fields:
       /datasets-storage:
         name: sky-dataset  # Name of storage, optional when source is bucket URI
         source: /local/path/datasets  # Source path, can be local or bucket URI. Optional, do not specify to create an empty bucket.
-        store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', or 'ibm'; default: None. Optional.
+        store: s3  # Could be either 's3', 'gcs', 'azure', 'r2', 'oci', or 'ibm'; default: None. Optional.
         persistent: True  # Defaults to True; can be set to false to delete bucket after cluster is downed. Optional.
         mode: MOUNT  # Either MOUNT or COPY. Defaults to MOUNT. Optional.
 
@@ -353,7 +376,7 @@ In additional to the above fields, SkyPilot also supports the following experime
     #
     # The following fields can be overridden. Please refer to docs of Advanced
     # Configuration for more details of those fields:
-    # https://skypilot.readthedocs.io/en/latest/reference/config.html
+    # https://docs.skypilot.co/en/latest/reference/config.html
     config_overrides:
         docker:
             run_options: ...

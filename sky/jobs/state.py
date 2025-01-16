@@ -2,6 +2,7 @@
 # TODO(zhwu): maybe use file based status instead of database, so
 # that we can easily switch to a s3-based storage.
 import enum
+import json
 import pathlib
 import sqlite3
 import time
@@ -11,6 +12,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import colorama
 
 from sky import sky_logging
+from sky.utils import common_utils
 from sky.utils import db_utils
 
 if typing.TYPE_CHECKING:
@@ -20,15 +22,6 @@ CallbackType = Callable[[str], None]
 
 logger = sky_logging.init_logger(__name__)
 
-_DB_PATH = pathlib.Path('~/.sky/spot_jobs.db')
-_DB_PATH = _DB_PATH.expanduser().absolute()
-_DB_PATH.parents[0].mkdir(parents=True, exist_ok=True)
-_DB_PATH = str(_DB_PATH)
-
-# Module-level connection/cursor; thread-safe as the module is only imported
-# once.
-_CONN = sqlite3.connect(_DB_PATH)
-_CURSOR = _CONN.cursor()
 
 # === Database schema ===
 # `spot` table contains all the finest-grained tasks, including all the
@@ -41,56 +34,102 @@ _CURSOR = _CONN.cursor()
 # identifier/primary key for all the tasks. We will use `spot_job_id`
 # to identify the spot job.
 # TODO(zhwu): schema migration may be needed.
-_CURSOR.execute("""\
-    CREATE TABLE IF NOT EXISTS spot (
-    job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    job_name TEXT,
-    resources TEXT,
-    submitted_at FLOAT,
-    status TEXT,
-    run_timestamp TEXT CANDIDATE KEY,
-    start_at FLOAT DEFAULT NULL,
-    end_at FLOAT DEFAULT NULL,
-    last_recovered_at FLOAT DEFAULT -1,
-    recovery_count INTEGER DEFAULT 0,
-    job_duration FLOAT DEFAULT 0,
-    failure_reason TEXT,
-    spot_job_id INTEGER,
-    task_id INTEGER DEFAULT 0,
-    task_name TEXT)""")
-_CONN.commit()
+def create_table(cursor, conn):
+    # Enable WAL mode to avoid locking issues.
+    # See: issue #3863, #1441 and PR #1509
+    # https://github.com/microsoft/WSL/issues/2395
+    # TODO(romilb): We do not enable WAL for WSL because of known issue in WSL.
+    #  This may cause the database locked problem from WSL issue #1441.
+    if not common_utils.is_wsl():
+        try:
+            cursor.execute('PRAGMA journal_mode=WAL')
+        except sqlite3.OperationalError as e:
+            if 'database is locked' not in str(e):
+                raise
+            # If the database is locked, it is OK to continue, as the WAL mode
+            # is not critical and is likely to be enabled by other processes.
 
-db_utils.add_column_to_table(_CURSOR, _CONN, 'spot', 'failure_reason', 'TEXT')
-# Create a new column `spot_job_id`, which is the same for tasks of the
-# same managed job.
-# The original `job_id` no longer has an actual meaning, but only a legacy
-# identifier for all tasks in database.
-db_utils.add_column_to_table(_CURSOR,
-                             _CONN,
-                             'spot',
-                             'spot_job_id',
-                             'INTEGER',
-                             copy_from='job_id')
-db_utils.add_column_to_table(_CURSOR,
-                             _CONN,
-                             'spot',
-                             'task_id',
-                             'INTEGER DEFAULT 0',
-                             value_to_replace_existing_entries=0)
-db_utils.add_column_to_table(_CURSOR,
-                             _CONN,
-                             'spot',
-                             'task_name',
-                             'TEXT',
-                             copy_from='job_name')
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS spot (
+        job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        job_name TEXT,
+        resources TEXT,
+        submitted_at FLOAT,
+        status TEXT,
+        run_timestamp TEXT CANDIDATE KEY,
+        start_at FLOAT DEFAULT NULL,
+        end_at FLOAT DEFAULT NULL,
+        last_recovered_at FLOAT DEFAULT -1,
+        recovery_count INTEGER DEFAULT 0,
+        job_duration FLOAT DEFAULT 0,
+        failure_reason TEXT,
+        spot_job_id INTEGER,
+        task_id INTEGER DEFAULT 0,
+        task_name TEXT,
+        specs TEXT,
+        local_log_file TEXT DEFAULT NULL)""")
+    conn.commit()
 
-# `job_info` contains the mapping from job_id to the job_name.
-# In the future, it may contain more information about each job.
-_CURSOR.execute("""\
-    CREATE TABLE IF NOT EXISTS job_info (
-    spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT)""")
-_CONN.commit()
+    db_utils.add_column_to_table(cursor, conn, 'spot', 'failure_reason', 'TEXT')
+    # Create a new column `spot_job_id`, which is the same for tasks of the
+    # same managed job.
+    # The original `job_id` no longer has an actual meaning, but only a legacy
+    # identifier for all tasks in database.
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'spot',
+                                 'spot_job_id',
+                                 'INTEGER',
+                                 copy_from='job_id')
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'spot',
+                                 'task_id',
+                                 'INTEGER DEFAULT 0',
+                                 value_to_replace_existing_entries=0)
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'spot',
+                                 'task_name',
+                                 'TEXT',
+                                 copy_from='job_name')
+
+    # Specs is some useful information about the task, e.g., the
+    # max_restarts_on_errors value. It is stored in JSON format.
+    db_utils.add_column_to_table(cursor,
+                                 conn,
+                                 'spot',
+                                 'specs',
+                                 'TEXT',
+                                 value_to_replace_existing_entries=json.dumps({
+                                     'max_restarts_on_errors': 0,
+                                 }))
+    db_utils.add_column_to_table(cursor, conn, 'spot', 'local_log_file',
+                                 'TEXT DEFAULT NULL')
+
+    # `job_info` contains the mapping from job_id to the job_name.
+    # In the future, it may contain more information about each job.
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS job_info (
+        spot_job_id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT)""")
+    conn.commit()
+
+
+# Module-level connection/cursor; thread-safe as the module is only imported
+# once.
+def _get_db_path() -> str:
+    """Workaround to collapse multi-step Path ops for type checker.
+    Ensures _DB_PATH is str, avoiding Union[Path, str] inference.
+    """
+    path = pathlib.Path('~/.sky/spot_jobs.db')
+    path = path.expanduser().absolute()
+    path.parents[0].mkdir(parents=True, exist_ok=True)
+    return str(path)
+
+
+_DB_PATH = _get_db_path()
+db_utils.SQLiteConn(_DB_PATH, create_table)
 
 # job_duration is the time a job actually runs (including the
 # setup duration) before last_recover, excluding the provision
@@ -120,9 +159,11 @@ columns = [
     'job_id',
     'task_id',
     'task_name',
+    'specs',
+    'local_log_file',
     # columns from the job_info table
     '_job_info_job_id',  # This should be the same as job_id
-    'job_name'
+    'job_name',
 ]
 
 
@@ -275,7 +316,8 @@ def set_pending(job_id: int, task_id: int, task_name: str, resources_str: str):
 
 def set_submitted(job_id: int, task_id: int, run_timestamp: str,
                   submit_time: float, resources_str: str,
-                  callback_func: CallbackType):
+                  specs: Dict[str, Union[str,
+                                         int]], callback_func: CallbackType):
     """Set the task to submitted.
 
     Args:
@@ -285,6 +327,8 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             determine the log directory of the managed task.
         submit_time: The time when the managed task is submitted.
         resources_str: The resources string of the managed task.
+        specs: The specs of the managed task.
+        callback_func: The callback function.
     """
     # Use the timestamp in the `run_timestamp` ('sky-2022-10...'), to make
     # the log directory and submission time align with each other, so as to
@@ -298,11 +342,12 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             resources=(?),
             submitted_at=(?),
             status=(?),
-            run_timestamp=(?)
+            run_timestamp=(?),
+            specs=(?)
             WHERE spot_job_id=(?) AND
             task_id=(?)""",
             (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
-             run_timestamp, job_id, task_id))
+             run_timestamp, json.dumps(specs), job_id, task_id))
     callback_func('SUBMITTED')
 
 
@@ -471,6 +516,20 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             callback_func('CANCELLED')
 
 
+def set_local_log_file(job_id: int, task_id: Optional[int],
+                       local_log_file: str):
+    """Set the local log file for a job."""
+    filter_str = 'spot_job_id=(?)'
+    filter_args = [local_log_file, job_id]
+    if task_id is not None:
+        filter_str += ' AND task_id=(?)'
+        filter_args.append(task_id)
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            'UPDATE spot SET local_log_file=(?) '
+            f'WHERE {filter_str}', filter_args)
+
+
 # ======== utility functions ========
 def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
     """Get non-terminal job ids by name."""
@@ -505,6 +564,33 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
         return job_ids
 
 
+def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
+    """Get all job ids by name."""
+    name_filter = ''
+    field_values = []
+    if name is not None:
+        # We match the job name from `job_info` for the jobs submitted after
+        # #1982, and from `spot` for the jobs submitted before #1982, whose
+        # job_info is not available.
+        name_filter = ('WHERE (job_info.name=(?) OR '
+                       '(job_info.name IS NULL AND spot.task_name=(?)))')
+        field_values = [name, name]
+
+    # Left outer join is used here instead of join, because the job_info does
+    # not contain the managed jobs submitted before #1982.
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            f"""\
+            SELECT DISTINCT spot.spot_job_id
+            FROM spot
+            LEFT OUTER JOIN job_info
+            ON spot.spot_job_id=job_info.spot_job_id
+            {name_filter}
+            ORDER BY spot.spot_job_id DESC""", field_values).fetchall()
+        job_ids = [row[0] for row in rows if row[0] is not None]
+        return job_ids
+
+
 def _get_all_task_ids_statuses(
         job_id: int) -> List[Tuple[int, ManagedJobStatus]]:
     with db_utils.safe_cursor(_DB_PATH) as cursor:
@@ -532,12 +618,14 @@ def get_latest_task_id_status(
     If the job_id does not exist, (None, None) will be returned.
     """
     id_statuses = _get_all_task_ids_statuses(job_id)
-    if len(id_statuses) == 0:
+    if not id_statuses:
         return None, None
-    task_id, status = id_statuses[-1]
-    for task_id, status in id_statuses:
-        if not status.is_terminal():
-            break
+    task_id, status = next(
+        ((tid, st) for tid, st in id_statuses if not st.is_terminal()),
+        id_statuses[-1],
+    )
+    # Unpack the tuple first, or it triggers a Pylint's bug on recognizing
+    # the return type.
     return task_id, status
 
 
@@ -558,7 +646,7 @@ def get_failure_reason(job_id: int) -> Optional[str]:
             WHERE spot_job_id=(?)
             ORDER BY task_id ASC""", (job_id,)).fetchall()
         reason = [r[0] for r in reason if r[0] is not None]
-        if len(reason) == 0:
+        if not reason:
             return None
         return reason[0]
 
@@ -611,3 +699,27 @@ def get_latest_job_id() -> Optional[int]:
         for (job_id,) in rows:
             return job_id
         return None
+
+
+def get_task_specs(job_id: int, task_id: int) -> Dict[str, Any]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        task_specs = cursor.execute(
+            """\
+            SELECT specs FROM spot
+            WHERE spot_job_id=(?) AND task_id=(?)""",
+            (job_id, task_id)).fetchone()
+        return json.loads(task_specs[0])
+
+
+def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
+    """Get the local log directory for a job."""
+    filter_str = 'spot_job_id=(?)'
+    filter_args = [job_id]
+    if task_id is not None:
+        filter_str += ' AND task_id=(?)'
+        filter_args.append(task_id)
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        local_log_file = cursor.execute(
+            f'SELECT local_log_file FROM spot '
+            f'WHERE {filter_str}', filter_args).fetchone()
+        return local_log_file[-1] if local_log_file else None

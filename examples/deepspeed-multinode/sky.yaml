@@ -2,9 +2,15 @@
 #
 # This takes care constructing a "hostfile" to pass to DeepSpeed.
 #
+# If running on Kubernetes, use the nvidia/cuda:12.1.1-devel-ubuntu20.04 image
+# because DeepSpeed requires nvcc.
+#
 # Usage:
 #
 #   $ sky launch sky.yaml -r --down -c ds
+#
+#   If running on Kubernetes:
+#   $ sky launch sky.yaml -r --down -c ds --cloud kubernetes --image nvidia/cuda:12.1.1-devel-ubuntu20.04
 #
 #   # Optional: After the job starts running, you can log into the two nodes and
 #   # check gpustat:
@@ -18,9 +24,24 @@ resources:
   # accelerators: A100-80GB:1  # Azure, GCP, SCP
   # accelerators: A10G:1  # AWS. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
   # accelerators: T4:1  # AWS, Azure, GCP. Will OOM for (1) single_node/run_1.3b_lora.sh (2) multi_node/run_66b.sh.
+  # image_id: docker:nvidia/cuda:12.1.1-devel-ubuntu20.04  # Use this image if running on Kubernetes
+
 num_nodes: 2
 
+envs:
+  MY_VAR_1: "hello"
+  MY_VAR_2: "world"
+  # List of env vars to propagate to all nodes in deepspeed. If you add an env above, add it to this list.
+  DEEPSPEED_ENVS: "MY_VAR_1,MY_VAR_2,SKYPILOT_NODE_RANK"
+
 setup: |
+  if ! command -v git &> /dev/null
+  then
+      echo "git is not installed. Installing git..."
+      sudo apt-get update
+      sudo apt-get install -y git
+  fi
+  
   git clone https://github.com/microsoft/DeepSpeedExamples.git || true
   cd DeepSpeedExamples
   git checkout d7c42b4f34df91035e7ed3e0c51500bb53d0bc71
@@ -32,16 +53,19 @@ setup: |
     conda create -n deepspeed python=3.8 -y
     conda activate deepspeed
 
-    pip install deepspeed
+    pip install deepspeed==0.14.4
 
     cd applications/DeepSpeed-Chat
     pip install -r requirements.txt
+  
+    pip install transformers==4.44.0
 
     # Required by DeepSpeed in multi-node settings.
     #
     # NOTE(skypilot): DeepSpeed uses `pdsh` to log into each node and calls
     # `ninja --version`; so it has to be installed system-wide rather than in
     # the above 'deepspeed' conda env.
+    sudo apt-get update
     sudo apt-get -y install pdsh ninja-build
   fi
 
@@ -59,6 +83,10 @@ run: |
     # Prepare a hostfile.
     HOSTFILE_PATH=/tmp/hostfile.${SKYPILOT_TASK_ID}
     python -c "import os;n_gpus=os.environ['SKYPILOT_NUM_GPUS_PER_NODE'];print('\n'.join([f'{ip} slots={n_gpus}' for ip in os.environ['SKYPILOT_NODE_IPS'].splitlines()]))" > ${HOSTFILE_PATH}
+
+    # Generate .deepspeed_env to propagate env vars to all workers spawned by DeepSpeed.
+    echo "Generating .deepspeed_env"
+    python3 -c 'import os; f = open(".deepspeed_env", "w"); f.write("\n".join(["{}=\"{}\"".format(var, os.getenv(var, "")) for var in os.getenv("DEEPSPEED_ENVS").split(",")])); f.write("\n"); f.close()'
 
     echo "*******************************************"
     echo "Hostfile: ${HOSTFILE_PATH}"

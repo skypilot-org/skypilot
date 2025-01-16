@@ -1,4 +1,5 @@
 import copy
+import importlib
 import pathlib
 import textwrap
 
@@ -6,6 +7,7 @@ import pytest
 
 import sky
 from sky import skypilot_config
+import sky.exceptions
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
@@ -21,19 +23,19 @@ PROVISION_TIMEOUT = 600
 
 
 def _reload_config() -> None:
-    skypilot_config._dict = None
+    skypilot_config._dict = skypilot_config.Config()
+    skypilot_config._loaded_config_path = None
     skypilot_config._try_load_config()
 
 
 def _check_empty_config() -> None:
     """Check that the config is empty."""
-    assert not skypilot_config.loaded()
+    assert not skypilot_config.loaded(), (skypilot_config._dict,
+                                          skypilot_config._loaded_config_path)
     assert skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command'), None) is None
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       'default') == 'default'
-    with pytest.raises(RuntimeError):
-        skypilot_config.set_nested(('aws', 'ssh_proxy_command'), 'value')
 
 
 def _create_config_file(config_file_path: pathlib.Path) -> None:
@@ -96,6 +98,45 @@ def _create_task_yaml_file(task_file_path: pathlib.Path) -> None:
         setup: echo 'Setting up...'
         run: echo 'Running...'
         """))
+
+
+def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
+    task_file_path.write_text(
+        textwrap.dedent("""\
+        experimental:
+            config_overrides:
+                kubernetes:
+                    pod_config:
+                        metadata:
+                            labels:
+                                test-key: test-value
+                            annotations:
+                                abc: def
+                        spec:
+                            containers:
+                                - name:
+                            imagePullSecrets:
+                                - name: my-secret-2
+
+        setup: echo 'Setting up...'
+        run: echo 'Running...'
+        """))
+
+
+def test_nested_config(monkeypatch) -> None:
+    """Test that the nested config works."""
+    config = skypilot_config.Config()
+    config.set_nested(('aws', 'ssh_proxy_command'), 'value')
+    assert config == {'aws': {'ssh_proxy_command': 'value'}}
+
+    assert config.get_nested(('admin_policy',), 'default') == 'default'
+    config.set_nested(('aws', 'use_internal_ips'), True)
+    assert config == {
+        'aws': {
+            'ssh_proxy_command': 'value',
+            'use_internal_ips': True
+        }
+    }
 
 
 def test_no_config(monkeypatch) -> None:
@@ -316,6 +357,28 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
                ['imagePullSecrets']) == 1 and cluster_pod_config['spec'][
                    'imagePullSecrets'][0]['name'] == 'my-secret-2'
     assert cluster_pod_config['spec']['runtimeClassName'] == 'nvidia'
+
+
+def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
+                                        enable_all_clouds) -> None:
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+
+    _reload_config()
+    task_path = tmp_path / 'task.yaml'
+    _create_invalid_config_yaml_file(task_path)
+    task = sky.Task.from_yaml(task_path)
+
+    # Test Kubernetes pod_config invalid
+    cluster_name = 'test_k8s_config_with_invalid_config'
+    task.set_resources_override({'cloud': sky.Kubernetes()})
+    exception_occurred = False
+    try:
+        sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    except sky.exceptions.ResourcesUnavailableError:
+        exception_occurred = True
+    assert exception_occurred
 
 
 def test_gcp_config_with_override(monkeypatch, tmp_path,

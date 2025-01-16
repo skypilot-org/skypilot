@@ -35,7 +35,9 @@ rm -r  ~/.sky/wheels || true
 cd ../sky-master
 git pull origin master
 pip uninstall -y skypilot
-pip install -e ".[all]"
+pip install uv
+uv pip install --prerelease=allow "azure-cli>=2.65.0"
+uv pip install -e ".[all]"
 cd -
 
 conda env list | grep sky-back-compat-current || conda create -n sky-back-compat-current -y python=3.9
@@ -43,8 +45,18 @@ conda activate sky-back-compat-current
 conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 pip uninstall -y skypilot
-pip install -e ".[all]"
+pip install uv
+uv pip install --prerelease=allow "azure-cli>=2.65.0"
+uv pip install -e ".[all]"
 
+
+clear_resources() {
+  sky down ${CLUSTER_NAME}* -y
+  sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y
+}
+
+# Set trap to call cleanup on script exit
+trap clear_resources EXIT
 
 # exec + launch
 if [ "$start_from" -le 1 ]; then
@@ -167,8 +179,8 @@ MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
 if [ "$start_from" -le 7 ]; then
 conda activate sky-back-compat-master
 rm -r  ~/.sky/wheels || true
-sky spot launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
-sky spot launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
+sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
+sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
 conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
@@ -187,8 +199,5 @@ sky jobs logs -n "${MANAGED_JOB_JOB_NAME}-7-1" || exit 1
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
-echo "$s" | grep "CANCELLED" | wc -l | grep 1 || exit 1
+echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
 fi
-
-sky down ${CLUSTER_NAME}* -y
-sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y
