@@ -286,7 +286,7 @@ class Nebius(clouds.Cloud):
                 return False, (
                     f'EMPTY TOKEN \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
-                    f'        $ pip install nebius \n'
+                    f'        $ pip install git+https://github.com/nebius/pysdk@fee51b4DDD   \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
                     f'        $ echo $NB_TENANT_ID > ~/.nebius/NB_TENANT_ID.txt \n'
@@ -301,7 +301,7 @@ class Nebius(clouds.Cloud):
                 return False, (
                     f'{e.status} \n'  # First line is indented by 4 spaces
                     '    Credentials can be set up by running: \n'
-                    f'        $ pip install nebius \n'
+                    f'        $ pip install git+https://github.com/nebius/pysdk@fee51b4DDD   \n'
                     f'        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'
                     f'   Copy your project ID from the web console Project settings and save it to file \n'
                     f'        $ echo NB_TENANT_ID > ~/.nebius/NB_TENANT_ID.txt \n'
@@ -313,7 +313,7 @@ class Nebius(clouds.Cloud):
         except ImportError:
             return False, (
                 'Failed to import nebius.'
-                'To install, run: "pip install nebius" or "pip install sky[nebius]"'  # pylint: disable=line-too-long
+                'To install, run: "pip install git+https://github.com/nebius/pysdk@fee51b4DDD" or "pip install sky[nebius]"'  # pylint: disable=line-too-long
             )
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
