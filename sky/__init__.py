@@ -130,6 +130,7 @@ RunPod = clouds.RunPod
 Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
+Nebius = clouds.Nebius
 optimize = Optimizer.optimize
 
 __all__ = [
@@ -149,6 +150,7 @@ __all__ = [
     'SCP',
     'Vsphere',
     'Fluidstack',
+    'Nebius',
     'Optimizer',
     'OptimizeTarget',
     'backends',

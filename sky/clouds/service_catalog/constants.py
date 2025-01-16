@@ -4,4 +4,4 @@ CATALOG_SCHEMA_VERSION = 'v6'
 CATALOG_DIR = '~/.sky/catalogs'
 ALL_CLOUDS = ('aws', 'azure', 'gcp', 'ibm', 'lambda', 'scp', 'oci',
               'kubernetes', 'runpod', 'vast', 'vsphere', 'cudo', 'fluidstack',
-              'paperspace', 'do')
+              'paperspace', 'do', 'nebius')
