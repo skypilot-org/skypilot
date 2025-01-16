@@ -43,30 +43,6 @@ MAX_JOB_CHECKING_RETRY = 10
 _AUTODOWN_MINUTES = 5
 
 
-def terminate_cluster(cluster_name: str, max_retry: int = 3) -> None:
-    """Terminate the cluster."""
-    retry_cnt = 0
-    while True:
-        try:
-            usage_lib.messages.usage.set_internal()
-            sky.down(cluster_name)
-            return
-        except exceptions.ClusterDoesNotExist:
-            # The cluster is already down.
-            logger.debug(f'The cluster {cluster_name} is already down.')
-            return
-        except Exception as e:  # pylint: disable=broad-except
-            retry_cnt += 1
-            if retry_cnt >= max_retry:
-                raise RuntimeError(
-                    f'Failed to terminate the cluster {cluster_name}.') from e
-            logger.error(
-                f'Failed to terminate the cluster {cluster_name}. Retrying.'
-                f'Details: {common_utils.format_exception(e)}')
-            with ux_utils.enable_traceback():
-                logger.error(f'  Traceback: {traceback.format_exc()}')
-
-
 class StrategyExecutor:
     """Handle the launching, recovery and termination of managed job clusters"""
 
@@ -193,7 +169,7 @@ class StrategyExecutor:
                         f'{common_utils.format_exception(e)}\n'
                         'Terminating the cluster explicitly to ensure no '
                         'remaining job process interferes with recovery.')
-            terminate_cluster(self.cluster_name)
+            managed_job_utils.terminate_cluster(self.cluster_name)
 
     def _wait_until_job_starts_on_cluster(self) -> Optional[float]:
         """Wait for MAX_JOB_CHECKING_RETRY times until job starts on the cluster
@@ -380,7 +356,7 @@ class StrategyExecutor:
 
                 # If we get here, the launch did not succeed. Tear down the
                 # cluster and retry.
-                terminate_cluster(self.cluster_name)
+                managed_job_utils.terminate_cluster(self.cluster_name)
                 if max_retry is not None and retry_cnt >= max_retry:
                     # Retry forever if max_retry is None.
                     if raise_on_failure:
@@ -473,7 +449,7 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             # Step 2
             logger.debug('Terminating unhealthy cluster and reset cloud '
                          'region.')
-            terminate_cluster(self.cluster_name)
+            managed_job_utils.terminate_cluster(self.cluster_name)
 
             # Step 3
             logger.debug('Relaunch the cluster  without constraining to prior '
@@ -531,7 +507,7 @@ class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
 
         # Step 1
         logger.debug('Terminating unhealthy cluster and reset cloud region.')
-        terminate_cluster(self.cluster_name)
+        managed_job_utils.terminate_cluster(self.cluster_name)
 
         # Step 2
         logger.debug('Relaunch the cluster skipping the previously launched '

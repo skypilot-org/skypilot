@@ -243,7 +243,7 @@ class JobsController:
                     self._download_log_and_stream(task_id, handle)
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                recovery_strategy.terminate_cluster(cluster_name=cluster_name)
+                managed_job_utils.terminate_cluster(cluster_name=cluster_name)
                 return True
 
             # For single-node jobs, non-terminated job_status indicates a
@@ -342,7 +342,7 @@ class JobsController:
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    recovery_strategy.terminate_cluster(cluster_name)
+                    managed_job_utils.terminate_cluster(cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
@@ -478,7 +478,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
-        recovery_strategy.terminate_cluster(cluster_name)
+        managed_job_utils.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
         backend = cloud_vm_ray_backend.CloudVmRayBackend()

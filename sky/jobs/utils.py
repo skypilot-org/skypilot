@@ -13,6 +13,7 @@ import shlex
 import shutil
 import textwrap
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -21,6 +22,7 @@ import filelock
 import psutil
 from typing_extensions import Literal
 
+import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
@@ -32,6 +34,7 @@ from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
+from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
@@ -39,7 +42,6 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import sky
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
@@ -85,6 +87,43 @@ class UserSignal(enum.Enum):
 
 
 # ====== internal functions ======
+def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
+    """Terminate the cluster."""
+    retry_cnt = 0
+    # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
+    # metadata service throttling, the failed sky.down attempt can take 10-11
+    # seconds. In this case, we need the backoff to significantly reduce the
+    # rate of requests - that is, significantly increase the time between
+    # requests. We set the initial backoff to 15 seconds, so that once it grows
+    # exponentially it will quickly dominate the 10-11 seconds that we already
+    # see between requests. We set the max backoff very high, since it's
+    # generally much more important to eventually succeed than to fail fast.
+    backoff = common_utils.Backoff(
+        initial_backoff=15,
+        # 1.6 ** 5 = 10.48576 < 20, so we won't hit this with default max_retry
+        max_backoff_factor=20)
+    while True:
+        try:
+            usage_lib.messages.usage.set_internal()
+            sky.down(cluster_name)
+            return
+        except exceptions.ClusterDoesNotExist:
+            # The cluster is already down.
+            logger.debug(f'The cluster {cluster_name} is already down.')
+            return
+        except Exception as e:  # pylint: disable=broad-except
+            retry_cnt += 1
+            if retry_cnt >= max_retry:
+                raise RuntimeError(
+                    f'Failed to terminate the cluster {cluster_name}.') from e
+            logger.error(
+                f'Failed to terminate the cluster {cluster_name}. Retrying.'
+                f'Details: {common_utils.format_exception(e)}')
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
+            time.sleep(backoff.current_backoff())
+
+
 def get_job_status(backend: 'backends.CloudVmRayBackend',
                    cluster_name: str) -> Optional['job_lib.JobStatus']:
     """Check the status of the job running on a managed job cluster.
@@ -202,18 +241,9 @@ def update_managed_job_status(job_id: Optional[int] = None):
             cluster_name = generate_managed_job_cluster_name(task_name, job_id_)
             handle = global_user_state.get_handle_from_cluster_name(
                 cluster_name)
+            # If the cluster exists, terminate it.
             if handle is not None:
-                backend = backend_utils.get_backend_from_handle(handle)
-                # TODO(cooperc): Add backoff
-                max_retry = 3
-                for retry_cnt in range(max_retry):
-                    try:
-                        backend.teardown(handle, terminate=True)
-                        break
-                    except RuntimeError:
-                        logger.error('Failed to tear down the cluster '
-                                     f'{cluster_name!r}. Retrying '
-                                     f'[{retry_cnt}/{max_retry}].')
+                terminate_cluster(cluster_name)
 
         # The controller process for this managed job is not running: it must
         # have exited abnormally, and we should set the job status to
