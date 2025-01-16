@@ -2021,6 +2021,7 @@ class RetryingVmProvisioner(object):
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
                 _add_to_blocked_resources(self._blocked_resources, to_provision)
+                assert len(failover_history) > 0
                 resource_exceptions[to_provision] = failover_history[-1]
             else:
                 # If we reach here, it means that the existing cluster must have
@@ -2060,16 +2061,8 @@ class RetryingVmProvisioner(object):
                 # ends here.
                 table = log_utils.create_table(['Resource', 'Reason'])
                 for (resource, exception) in resource_exceptions.items():
-                    launched_resource_str = str(resource)
-                    # accelerator_args is way too long.
-                    # Convert from:
-                    #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-                    # to:
-                    #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-                    pattern = ', accelerator_args={.*}'
-                    launched_resource_str = re.sub(pattern, '...',
-                                                   launched_resource_str)
-                    table.add_row([launched_resource_str, exception])
+                    table.add_row(
+                        [resources_utils.format_resource(resource), exception])
                 table.max_table_width = shutil.get_terminal_size().columns
                 raise exceptions.ResourcesUnavailableError(
                     _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
