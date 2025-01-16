@@ -310,7 +310,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
     msg = (f'{outcome}.'
