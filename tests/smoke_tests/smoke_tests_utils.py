@@ -423,7 +423,7 @@ VALIDATE_LAUNCH_OUTPUT = (
     # └── To teardown the cluster:    sky down test
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-    'echo "$s" && echo "==Validating setup output==" && '
+    'echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '
