@@ -333,11 +333,11 @@ class ManagedJobScheduleState(enum.Enum):
     There is no well-defined mapping from the managed job status to schedule
     state or vice versa. (In fact, schedule state is defined on the job and
     status on the task.)
-    - INACTIVE or WAITING should only be seen when a job is PENDING
-    - ALIVE_WAITING should only be seen when a job is RECOVERING, or has
-      multiple tasks
+    - INACTIVE or WAITING should only be seen when a job is PENDING.
+    - ALIVE_WAITING should only be seen when a job is RECOVERING, has multiple
+      tasks, or needs to retry launching.
     - LAUNCHING and ALIVE can be seen in many different statuses.
-    - DONE should only be seen when a job is in a terimnal status.
+    - DONE should only be seen when a job is in a terminal status.
     Since state and status transitions are not atomic, it may be possible to
     briefly observe inconsistent states, like a job that just finished but
     hasn't yet transitioned to DONE.

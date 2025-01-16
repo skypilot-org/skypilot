@@ -3917,6 +3917,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if job_id is None:
             # generate code to get the job_id
             # if job_name is None, get all job_ids
+            # TODO: Only get the latest job_id, since that's the only one we use
             code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
                 job_name=job_name)
             returncode, job_ids, stderr = self.run_on_head(handle,
