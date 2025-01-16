@@ -19,6 +19,8 @@ Prerequisites
 
     If you do not have a Kubernetes cluster, refer to :ref:`Kubernetes Deployment Guides <kubernetes-deployment>` to set one up.
 
+    You can also deploy the API server on cloud VMs using an existing SkyPilot installation. See :ref:`sky-api-server-cloud-deploy`.
+
 Step 1: Create a namespace for the API server
 ---------------------------------------------
 
@@ -293,3 +295,57 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 .. code-block:: console
 
     $ helm upgrade --install skypilot-platform skypilot/skypilot-platform -f values.yaml
+
+
+.. _sky-api-server-cloud-deploy:
+
+Alternative: Deploy on cloud VMs
+--------------------------------
+
+You can also deploy the API server directly on cloud VMs using an existing SkyPilot installation.
+
+Step 1: Use SkyPilot to deploy the API server on a cloud VM
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Write the SkyPilot API server YAML file and use ``sky launch`` to deploy the API server:
+
+.. code-block:: console
+
+    # Write the YAML to a file
+    $ cat <<EOF > skypilot-api-server.yaml
+    resources:
+        cpus: 8+
+        memory: 16+
+        ports: 46580
+        image_id: docker:berkeleyskypilot/skypilot-beta:latest
+
+    run: |
+      sky api start --deploy
+    EOF
+
+    # Deploy the API server
+    $ sky launch -c api-server skypilot-api-server.yaml
+
+Step 2: Get the API server URL
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Once the API server is deployed, you can fetch the API server URL with:
+
+.. code-block:: console
+
+    $ sky status --endpoint 46580 api-server
+    http://a.b.c.d:46580
+
+
+Test the API server by curling the health endpoint:
+
+.. code-block:: console
+
+    $ curl ${ENDPOINT}/health
+    SkyPilot API Server: Healthy
+
+If all looks good, you can now start using the API server. Refer to :ref:`sky-api-server-connect` to connect your local SkyPilot client to the API server.
+
+.. tip::
+
+    If you are installing SkyPilot API client in the same environment, we recommend using a different python environment (venv, conda, etc.) to avoid conflicts with the SkyPilot installation used to deploy the API server.

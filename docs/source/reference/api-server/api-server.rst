@@ -68,6 +68,8 @@ Connecting to Remote API Server
 Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can configure your local SkyPilot
 to connect to it.
 
+We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See `uv <https://docs.astral.sh/uv/>`_ or `conda <https://docs.conda.io/en/latest/>`_ for creating an environment with different python versions.
+
 Install the SkyPilot client on your local machine:
 
 .. code-block:: console
