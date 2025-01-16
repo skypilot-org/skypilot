@@ -26,7 +26,6 @@ each other.
 import copy
 import datetime
 import functools
-import multiprocessing
 import os
 import shlex
 import shutil
@@ -1382,18 +1381,14 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
         sdk.tail_logs(cluster, job_id, follow=True)
 
 
-def _get_managed_jobs(
-        refresh: bool,
-        skip_finished: bool,
+def _handle_jobs_queue_request(
+        request_id: str,
         show_all: bool,
         limit_num_jobs_to_show: bool = False,
         is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
     Args:
-        refresh: Query the latest statuses, restarting the jobs controller if
-            stopped.
-        skip_finished: Show only in-progress jobs.
         show_all: Show all information of each job (e.g., region, price).
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
@@ -1412,8 +1407,7 @@ def _get_managed_jobs(
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        managed_jobs_ = sdk.get(
-            managed_jobs.queue(refresh=refresh, skip_finished=skip_finished))
+        managed_jobs_ = sdk.get(request_id)
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1464,10 +1458,12 @@ def _get_managed_jobs(
     return num_in_progress_jobs, msg
 
 
-def _get_services(service_names: Optional[List[str]],
-                  show_all: bool,
-                  show_endpoint: bool,
-                  is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+def _handle_services_request(
+        request_id: str,
+        service_names: Optional[List[str]],
+        show_all: bool,
+        show_endpoint: bool,
+        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
     Args:
@@ -1487,10 +1483,6 @@ def _get_services(service_names: Optional[List[str]],
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
         with sky_logging.silent():
-            if not service_names:
-                # Change empty list to None
-                service_names = None
-            request_id = serve_lib.status(service_names)
             service_records = sdk.stream_and_get(request_id)
             num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
@@ -1574,6 +1566,73 @@ def _status_kubernetes(show_all: bool):
         click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
                    'shown in the "SkyPilot clusters" section.'
                    f'{colorama.Style.RESET_ALL}')
+
+
+def _show_endpoint(query_clusters: Optional[List[str]],
+                   cluster_records: List[Dict[str, Any]], ip: bool,
+                   endpoints: bool, endpoint: Optional[int]) -> None:
+    show_endpoints = endpoints or endpoint is not None
+    show_single_endpoint = endpoint is not None
+    if len(cluster_records) != 1:
+        with ux_utils.print_exception_no_traceback():
+            plural = 's' if len(cluster_records) > 1 else ''
+            if cluster_records:
+                cluster_num = str(len(cluster_records))
+            else:
+                cluster_num = (f'{query_clusters[0]!r}'
+                               if query_clusters else 'No')
+            verb = 'found' if cluster_records else 'not found'
+            cause = 'a single'
+            if query_clusters and len(query_clusters) > 1:
+                cause = 'an existing'
+            raise ValueError(
+                _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
+                    cluster_num=cluster_num,
+                    plural=plural,
+                    verb=verb,
+                    cause=cause,
+                    property='IP address' if ip else 'endpoint(s)',
+                    flag='ip' if ip else
+                    ('endpoint port' if show_single_endpoint else 'endpoints')))
+
+    cluster_record = cluster_records[0]
+    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
+                               'is not in UP status.')
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Querying IP address is not supported '
+                             'for local clusters.')
+
+    head_ip = handle.external_ips()[0]
+    # The endpoint request is relatively fast, so we don't add special handling
+    # for keyboard interrupt and abort the request to avoid additional latency.
+    if show_endpoints:
+        if endpoint:
+            request_id = sdk.endpoints(cluster_record['name'], endpoint)
+            cluster_endpoints = sdk.stream_and_get(request_id)
+            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+            if not cluster_endpoint:
+                raise click.Abort(f'Endpoint {endpoint} not found for cluster '
+                                  f'{cluster_record["name"]!r}.')
+            click.echo(cluster_endpoint)
+        else:
+            request_id = sdk.endpoints(cluster_record['name'])
+            cluster_endpoints = sdk.stream_and_get(request_id)
+            assert isinstance(cluster_endpoints, dict)
+            if not cluster_endpoints:
+                raise click.Abort(f'No endpoint found for cluster '
+                                  f'{cluster_record["name"]!r}.')
+            for port, port_endpoint in cluster_endpoints.items():
+                click.echo(f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
+                           f'{colorama.Style.RESET_ALL}: '
+                           f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'{port_endpoint}{colorama.Style.RESET_ALL}')
+        return
+    click.echo(head_ip)
+    return
 
 
 @cli.command()
@@ -1708,246 +1767,158 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if kubernetes:
         _status_kubernetes(verbose)
         return
-    # Using a pool with 2 worker to run the managed job query and sky serve
-    # service query in parallel to speed up. The pool provides a AsyncResult
-    # object that can be used as a future.
-    with multiprocessing.Pool(2) as pool:
-        # Do not show job queue if user specifies clusters, and if user
-        # specifies --ip or --endpoint(s).
-        show_managed_jobs = show_managed_jobs and not any(
-            [clusters, ip, endpoints])
-        show_endpoints = endpoints or endpoint is not None
-        show_single_endpoint = endpoint is not None
-        if show_managed_jobs:
-            # Run managed job query in parallel to speed up the status query.
-            managed_jobs_future = pool.apply_async(
-                _get_managed_jobs,
-                kwds=dict(refresh=False,
-                          skip_finished=True,
-                          show_all=False,
-                          limit_num_jobs_to_show=not all,
-                          is_called_by_user=False))
+    # Do not show job queue if user specifies clusters, and if user
+    # specifies --ip or --endpoint(s).
+    show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
+    if show_managed_jobs:
+        managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
+                                                           skip_finished=True)
+    show_endpoints = endpoints or endpoint is not None
+    show_single_endpoint = endpoint is not None
+    show_services = show_services and not clusters and not ip
+    if show_services:
+        # Run the sky serve service query in parallel to speed up the
+        # status query.
+        service_status_request_id = serve_lib.status(service_names=None)
 
-        show_services = show_services and not clusters and not ip
-        if show_services:
-            # Run the sky serve service query in parallel to speed up the
-            # status query.
-            services_future = pool.apply_async(_get_services,
-                                               kwds=dict(
-                                                   service_names=None,
-                                                   show_all=False,
-                                                   show_endpoint=False,
-                                                   is_called_by_user=False))
-        if ip or show_endpoints:
-            if refresh:
-                raise click.UsageError(
-                    'Using --ip or --endpoint(s) with --refresh is not'
-                    'supported for now. To fix, refresh first, '
-                    'then query the IP or endpoint.')
-
-            if ip and show_endpoints:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify both --ip and --endpoint(s) '
-                        'at the same time.')
-
-            if endpoint is not None and endpoints:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify both --endpoint and --endpoints '
-                        'at the same time.')
-
-            if len(clusters) != 1:
-                with ux_utils.print_exception_no_traceback():
-                    plural = 's' if len(clusters) > 1 else ''
-                    cluster_num = (str(len(clusters)) if clusters else 'No')
-                    cause = 'a single' if len(clusters) > 1 else 'an existing'
-                    raise ValueError(
-                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=cluster_num,
-                            plural=plural,
-                            verb='specified',
-                            cause=cause,
-                            property='IP address' if ip else 'endpoint(s)',
-                            flag='ip' if ip else
-                            ('endpoint port'
-                             if show_single_endpoint else 'endpoints')))
-        else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                       f'{colorama.Style.RESET_ALL}')
-        query_clusters: Optional[List[str]] = None if not clusters else clusters
-        refresh_mode = common.StatusRefreshMode.NONE
+    if ip or show_endpoints:
         if refresh:
-            refresh_mode = common.StatusRefreshMode.FORCE
-        cluster_records = _get_cluster_records_and_set_ssh_config(
-            query_clusters, refresh_mode, all_users)
+            raise click.UsageError(
+                'Using --ip or --endpoint(s) with --refresh is not'
+                'supported for now. To fix, refresh first, '
+                'then query the IP or endpoint.')
 
-        # TOOD(zhwu): setup the ssh config for status
-        if ip or show_endpoints:
-            if len(cluster_records) != 1:
-                with ux_utils.print_exception_no_traceback():
-                    plural = 's' if len(cluster_records) > 1 else ''
-                    cluster_num = (str(len(cluster_records))
-                                   if cluster_records else f'{clusters[0]!r}')
-                    verb = 'found' if cluster_records else 'not found'
-                    cause = 'a single' if len(clusters) > 1 else 'an existing'
-                    raise ValueError(
-                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=cluster_num,
-                            plural=plural,
-                            verb=verb,
-                            cause=cause,
-                            property='IP address' if ip else 'endpoint(s)',
-                            flag='ip' if ip else
-                            ('endpoint port'
-                             if show_single_endpoint else 'endpoints')))
+        if ip and show_endpoints:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both --ip and --endpoint(s) '
+                                 'at the same time.')
 
-            cluster_record = cluster_records[0]
-            if cluster_record['status'] != status_lib.ClusterStatus.UP:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
-                                       'is not in UP status.')
-            handle = cluster_record['handle']
-            if not isinstance(handle, backends.CloudVmRayResourceHandle):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Querying IP address is not supported '
-                                     'for local clusters.')
+        if endpoint is not None and endpoints:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both --endpoint and --endpoints '
+                    'at the same time.')
 
-            head_ip = handle.external_ips()[0]
-            if show_endpoints:
-                if endpoint:
-                    request_id = sdk.endpoints(cluster_record['name'], endpoint)
-                    cluster_endpoints = sdk.stream_and_get(request_id)
-                    cluster_endpoint = cluster_endpoints.get(
-                        str(endpoint), None)
-                    if not cluster_endpoint:
-                        raise click.Abort(
-                            f'Endpoint {endpoint} not found for cluster '
-                            f'{cluster_record["name"]!r}.')
-                    click.echo(cluster_endpoint)
-                else:
-                    request_id = sdk.endpoints(cluster_record['name'])
-                    cluster_endpoints = sdk.stream_and_get(request_id)
-                    assert isinstance(cluster_endpoints, dict)
-                    if not cluster_endpoints:
-                        raise click.Abort(f'No endpoint found for cluster '
-                                          f'{cluster_record["name"]!r}.')
-                    for port, port_endpoint in cluster_endpoints.items():
-                        click.echo(
-                            f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
-                            f'{colorama.Style.RESET_ALL}: '
-                            f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                            f'{port_endpoint}{colorama.Style.RESET_ALL}')
-                return
-            click.echo(head_ip)
-            return
-        hints = []
-        normal_clusters = []
-        controllers = []
-        for cluster_record in cluster_records:
-            cluster_name = cluster_record['name']
-            controller = controller_utils.Controllers.from_name(cluster_name)
-            if controller is not None:
-                controllers.append(cluster_record)
-            else:
-                normal_clusters.append(cluster_record)
+        if len(clusters) != 1:
+            with ux_utils.print_exception_no_traceback():
+                plural = 's' if len(clusters) > 1 else ''
+                cluster_num = (str(len(clusters)) if clusters else 'No')
+                cause = 'a single' if len(clusters) > 1 else 'an existing'
+                raise ValueError(
+                    _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
+                        cluster_num=cluster_num,
+                        plural=plural,
+                        verb='specified',
+                        cause=cause,
+                        property='IP address' if ip else 'endpoint(s)',
+                        flag='ip' if ip else
+                        ('endpoint port'
+                         if show_single_endpoint else 'endpoints')))
+    else:
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
+    query_clusters: Optional[List[str]] = None if not clusters else clusters
+    refresh_mode = common.StatusRefreshMode.NONE
+    if refresh:
+        refresh_mode = common.StatusRefreshMode.FORCE
+    cluster_records = _get_cluster_records_and_set_ssh_config(
+        query_clusters, refresh_mode, all_users)
 
-        num_pending_autostop = 0
-        num_pending_autostop += status_utils.show_status_table(
-            normal_clusters + controllers, verbose, all_users)
+    # TOOD(zhwu): setup the ssh config for status
+    if ip or show_endpoints:
+        _show_endpoint(query_clusters, cluster_records, ip, endpoints, endpoint)
+        return
+    hints = []
+    normal_clusters = []
+    controllers = []
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        controller = controller_utils.Controllers.from_name(cluster_name)
+        if controller is not None:
+            controllers.append(cluster_record)
+        else:
+            normal_clusters.append(cluster_record)
 
-        def _try_get_future_result(future) -> Tuple[bool, Any]:
-            result = None
-            interrupted = False
+    num_pending_autostop = 0
+    num_pending_autostop += status_utils.show_status_table(
+        normal_clusters + controllers, verbose, all_users)
+
+    managed_jobs_query_interrupted = False
+    if show_managed_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs{colorama.Style.RESET_ALL}')
+        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
             try:
-                result = future.get()
+                num_in_progress_jobs, msg = _handle_jobs_queue_request(
+                    managed_jobs_queue_request_id,
+                    show_all=False,
+                    limit_num_jobs_to_show=not all,
+                    is_called_by_user=False)
             except KeyboardInterrupt:
-                pool.terminate()
-                interrupted = True
-            return interrupted, result
-
-        managed_jobs_query_interrupted = False
-        if show_managed_jobs:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed jobs{colorama.Style.RESET_ALL}')
-            with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
-                managed_jobs_query_interrupted, result = _try_get_future_result(
-                    managed_jobs_future)
-                if managed_jobs_query_interrupted:
-                    # Set to -1, so that the controller is not considered
-                    # down, and the hint for showing sky jobs queue
-                    # will still be shown.
-                    num_in_progress_jobs = -1
-                    msg = 'KeyboardInterrupt'
-                else:
-                    num_in_progress_jobs, msg = result
-
-            click.echo(msg)
-            if num_in_progress_jobs is not None:
-                # jobs controller is UP.
-                job_info = ''
-                if num_in_progress_jobs > 0:
-                    plural_and_verb = ' is'
-                    if num_in_progress_jobs > 1:
-                        plural_and_verb = 's are'
-                    job_info = (
-                        f'{num_in_progress_jobs} managed job{plural_and_verb} '
-                        'in progress')
-                    if (num_in_progress_jobs >
-                            _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
-                        job_info += (
-                            f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
-                            'ones shown)')
-                    job_info += '. '
-                hints.append(
-                    controller_utils.Controllers.JOBS_CONTROLLER.value.
-                    in_progress_hint.format(job_info=job_info))
-
-        if show_services:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Services{colorama.Style.RESET_ALL}')
-            num_services = None
-            if managed_jobs_query_interrupted:
-                # The pool is terminated, so we cannot run the service query.
+                sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
+                managed_jobs_query_interrupted = True
+                # Set to -1, so that the controller is not considered
+                # down, and the hint for showing sky jobs queue
+                # will still be shown.
+                num_in_progress_jobs = -1
                 msg = 'KeyboardInterrupt'
-            else:
-                with rich_utils.client_status('[cyan]Checking services[/]'):
-                    interrupted, result = _try_get_future_result(
-                        services_future)
-                    if interrupted:
-                        num_services = -1
-                        msg = 'KeyboardInterrupt'
-                    else:
-                        num_services, msg = result
-            click.echo(msg)
-            if num_services is not None:
-                hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                             value.in_progress_hint)
 
-        if show_managed_jobs or show_services:
-            try:
-                pool.close()
-                pool.join()
-            except SystemExit as e:
-                # This is to avoid a "Exception ignored" problem caused by
-                # ray worker setting the sigterm handler to sys.exit(15)
-                # (see ray/_private/worker.py).
-                # TODO (zhwu): Remove any importing of ray in SkyPilot.
-                if e.code != 15:
-                    raise
+        click.echo(msg)
+        if num_in_progress_jobs is not None:
+            # jobs controller is UP.
+            job_info = ''
+            if num_in_progress_jobs > 0:
+                plural_and_verb = ' is'
+                if num_in_progress_jobs > 1:
+                    plural_and_verb = 's are'
+                job_info = (
+                    f'{num_in_progress_jobs} managed job{plural_and_verb} '
+                    'in progress')
+                if num_in_progress_jobs > _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS:
+                    job_info += (
+                        f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
+                        'ones shown)')
+                job_info += '. '
+            hints.append(
+                controller_utils.Controllers.JOBS_CONTROLLER.value.
+                in_progress_hint.format(job_info=job_info))
 
-        if num_pending_autostop > 0 and not refresh:
-            # Don't print this hint if there's no pending autostop or user has
-            # already passed --refresh.
-            plural_and_verb = ' has'
-            if num_pending_autostop > 1:
-                plural_and_verb = 's have'
-            hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
-                         'auto{stop,down} scheduled. Refresh statuses with: '
-                         f'{colorama.Style.BRIGHT}sky status --refresh'
-                         f'{colorama.Style.RESET_ALL}')
-        if hints:
-            click.echo('\n' + '\n'.join(hints))
+    if show_services:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Services{colorama.Style.RESET_ALL}')
+        num_services = None
+        if managed_jobs_query_interrupted:
+            msg = 'KeyboardInterrupt'
+        else:
+            with rich_utils.client_status('[cyan]Checking services[/]'):
+                try:
+                    num_services, msg = _handle_services_request(
+                        service_status_request_id,
+                        service_names=None,
+                        show_all=False,
+                        show_endpoint=False,
+                        is_called_by_user=False)
+                except KeyboardInterrupt:
+                    sdk.api_cancel(service_status_request_id, silent=True)
+                    num_services = -1
+                    msg = 'KeyboardInterrupt'
+        click.echo(msg)
+        if num_services is not None:
+            hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                         value.in_progress_hint)
+
+    if num_pending_autostop > 0 and not refresh:
+        # Don't print this hint if there's no pending autostop or user has
+        # already passed --refresh.
+        plural_and_verb = ' has'
+        if num_pending_autostop > 1:
+            plural_and_verb = 's have'
+        hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
+                     'auto{stop,down} scheduled. Refresh statuses with: '
+                     f'{colorama.Style.BRIGHT}sky status --refresh'
+                     f'{colorama.Style.RESET_ALL}')
+    if hints:
+        click.echo('\n' + '\n'.join(hints))
 
 
 @cli.command()
@@ -4010,10 +3981,11 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
     """
     click.secho('Fetching managed job statuses...', fg='yellow')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
-        _, msg = _get_managed_jobs(refresh=refresh,
-                                   skip_finished=skip_finished,
-                                   show_all=verbose,
-                                   is_called_by_user=True)
+        managed_jobs_request_id = managed_jobs.queue(
+            refresh=refresh, skip_finished=skip_finished)
+        _, msg = _handle_jobs_queue_request(managed_jobs_request_id,
+                                            show_all=verbose,
+                                            is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -4564,10 +4536,12 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     """
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
-        _, msg = _get_services(service_names,
-                               show_all=verbose,
-                               show_endpoint=endpoint,
-                               is_called_by_user=True)
+        service_status_request_id = serve_lib.status(service_names)
+        _, msg = _handle_services_request(service_status_request_id,
+                                          service_names=service_names,
+                                          show_all=verbose,
+                                          show_endpoint=endpoint,
+                                          is_called_by_user=True)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
