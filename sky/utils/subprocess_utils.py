@@ -3,6 +3,7 @@ from multiprocessing import pool
 import os
 import random
 import resource
+import shlex
 import subprocess
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple, Union
@@ -298,3 +299,39 @@ def kill_process_daemon(process_pid: int) -> None:
         # Disable input
         stdin=subprocess.DEVNULL,
     )
+
+
+def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
+    """Launch a new process that will not be a child of the current process.
+
+    This will launch bash in a new session, which will launch the given cmd.
+    This will ensure that cmd is in its own process tree, and once bash exits,
+    will not be an ancestor of the current process. This is useful for job
+    launching.
+
+    Returns the pid of the launched cmd.
+    """
+    # Use nohup to ensure the job driver process is a separate process tree,
+    # instead of being a child of the current process. This is important to
+    # avoid a chain of driver processes (job driver can call schedule_step() to
+    # submit new jobs, and the new job can also call schedule_step()
+    # recursively).
+    #
+    # echo $! will output the PID of the last background process started in the
+    # current shell, so we can retrieve it and record in the DB.
+    #
+    # TODO(zhwu): A more elegant solution is to use another daemon process to be
+    # in charge of starting these driver processes, instead of starting them in
+    # the current process.
+    wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
+                   f'</dev/null >{log_output} 2>&1 & echo $!')
+    proc = subprocess.run(wrapped_cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL,
+                          start_new_session=True,
+                          check=True,
+                          shell=True,
+                          text=True)
+    # Get the PID of the detached process
+    return int(proc.stdout.strip())

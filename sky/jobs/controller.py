@@ -16,6 +16,7 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import recovery_strategy
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
@@ -46,12 +47,10 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
-    def __init__(self, job_id: int, dag_yaml: str,
-                 retry_until_up: bool) -> None:
+    def __init__(self, job_id: int, dag_yaml: str) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
-        self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
@@ -174,7 +173,7 @@ class JobsController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._retry_until_up)
+            cluster_name, self._backend, task, self._job_id)
         managed_job_state.set_submitted(
             self._job_id,
             task_id,
@@ -202,6 +201,7 @@ class JobsController:
                                       task_id=task_id,
                                       start_time=remote_job_submitted_at,
                                       callback_func=callback_func)
+
         while True:
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -424,11 +424,11 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
+def _run_controller(job_id: int, dag_yaml: str):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    jobs_controller = JobsController(job_id, dag_yaml, retry_until_up)
+    jobs_controller = JobsController(job_id, dag_yaml)
     jobs_controller.run()
 
 
@@ -485,7 +485,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         backend.teardown_ephemeral_storage(task)
 
 
-def start(job_id, dag_yaml, retry_until_up):
+def start(job_id, dag_yaml):
     """Start the controller."""
     controller_process = None
     cancelling = False
@@ -499,8 +499,7 @@ def start(job_id, dag_yaml, retry_until_up):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml,
-                                                           retry_until_up))
+                                                     args=(job_id, dag_yaml))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
@@ -562,6 +561,8 @@ def start(job_id, dag_yaml, retry_until_up):
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky jobs logs --controller {job_id}'))
 
+        scheduler.job_done(job_id)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -569,9 +570,6 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the controller job.')
-    parser.add_argument('--retry-until-up',
-                        action='store_true',
-                        help='Retry until the cluster is up.')
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
@@ -579,4 +577,4 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml, args.retry_until_up)
+    start(args.job_id, args.dag_yaml)

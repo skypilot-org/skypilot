@@ -18,6 +18,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
+import psutil
 from typing_extensions import Literal
 
 from sky import backends
@@ -26,6 +27,7 @@ from sky import global_user_state
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -69,8 +71,10 @@ _JOB_CANCELLED_MESSAGE = (
 # The maximum time to wait for the managed job status to transition to terminal
 # state, after the job finished. This is a safeguard to avoid the case where
 # the managed job status fails to be updated and keep the `sky jobs logs`
-# blocking for a long time.
-_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 25
+# blocking for a long time. This should be significantly longer than the
+# JOB_STATUS_CHECK_GAP_SECONDS to avoid timing out before the controller can
+# update the state.
+_FINAL_JOB_STATUS_WAIT_TIMEOUT_SECONDS = 40
 
 
 class UserSignal(enum.Enum):
@@ -105,57 +109,154 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     return status
 
 
-def update_managed_job_status(job_id: Optional[int] = None):
-    """Update managed job status if the controller job failed abnormally.
+def _controller_process_alive(pid: int, job_id: int) -> bool:
+    """Check if the controller process is alive."""
+    try:
+        process = psutil.Process(pid)
+        # The last two args of the command line should be --job-id <id>
+        job_args = process.cmdline()[-2:]
+        return process.is_running() and job_args == ['--job-id', str(job_id)]
+    except psutil.NoSuchProcess:
+        return False
 
-    Check the status of the controller job. If it is not running, it must have
-    exited abnormally, and we should set the job status to FAILED_CONTROLLER.
-    `end_at` will be set to the current timestamp for the job when above
-    happens, which could be not accurate based on the frequency this function
-    is called.
+
+def update_managed_job_status(job_id: Optional[int] = None):
+    """Update managed job status if the controller process failed abnormally.
+
+    Check the status of the controller process. If it is not running, it must
+    have exited abnormally, and we should set the job status to
+    FAILED_CONTROLLER. `end_at` will be set to the current timestamp for the job
+    when above happens, which could be not accurate based on the frequency this
+    function is called.
+
+    Note: we expect that job_id, if provided, refers to a nonterminal job.
     """
+
     if job_id is None:
+        # Warning: it's totally possible for the managed job to transition to
+        # a terminal status during the course of this function. The set_failed()
+        # called below will not update the state for jobs that already have a
+        # terminal status, so it should be fine.
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
     else:
         job_ids = [job_id]
     for job_id_ in job_ids:
-        controller_status = job_lib.get_status(job_id_)
-        if controller_status is None or controller_status.is_terminal():
-            logger.error(f'Controller for job {job_id_} has exited abnormally. '
-                         'Setting the job status to FAILED_CONTROLLER.')
-            tasks = managed_job_state.get_managed_jobs(job_id_)
-            for task in tasks:
-                task_name = task['job_name']
-                # Tear down the abnormal cluster to avoid resource leakage.
-                cluster_name = generate_managed_job_cluster_name(
-                    task_name, job_id_)
-                handle = global_user_state.get_handle_from_cluster_name(
-                    cluster_name)
-                if handle is not None:
-                    backend = backend_utils.get_backend_from_handle(handle)
-                    max_retry = 3
-                    for retry_cnt in range(max_retry):
-                        try:
-                            backend.teardown(handle, terminate=True)
-                            break
-                        except RuntimeError:
-                            logger.error('Failed to tear down the cluster '
-                                         f'{cluster_name!r}. Retrying '
-                                         f'[{retry_cnt}/{max_retry}].')
 
-            # The controller job for this managed job is not running: it must
-            # have exited abnormally, and we should set the job status to
-            # FAILED_CONTROLLER.
-            # The `set_failed` will only update the task's status if the
-            # status is non-terminal.
-            managed_job_state.set_failed(
-                job_id_,
-                task_id=None,
-                failure_type=managed_job_state.ManagedJobStatus.
-                FAILED_CONTROLLER,
-                failure_reason=
-                'Controller process has exited abnormally. For more details,'
-                f' run: sky jobs logs --controller {job_id_}')
+        failure_reason = None
+
+        tasks = managed_job_state.get_managed_jobs(job_id_)
+        schedule_state = tasks[0]['schedule_state']
+        if schedule_state is None:
+            # Backwards compatibility: this job was submitted when ray was still
+            # used for managing the parallelism of job controllers.
+            # TODO(cooperc): Remove before 0.11.0.
+            controller_status = job_lib.get_status(job_id_)
+            if controller_status is None or controller_status.is_terminal():
+                logger.error(f'Controller process for legacy job {job_id_} is '
+                             'in an unexpected state.')
+                failure_reason = 'Legacy job is in an unexpected state'
+
+                # Continue to mark the job as failed.
+            else:
+                # Still running.
+                continue
+        else:
+            pid = tasks[0]['controller_pid']
+            if pid is None:
+                if schedule_state in (
+                        managed_job_state.ManagedJobScheduleState.INACTIVE,
+                        managed_job_state.ManagedJobScheduleState.WAITING):
+                    # Job has not been scheduled yet.
+                    continue
+                elif (schedule_state ==
+                      managed_job_state.ManagedJobScheduleState.LAUNCHING):
+                    # This should only be the case for a very short period of
+                    # time between marking the job as submitted and writing the
+                    # launched controller process pid back to the database (see
+                    # scheduler.maybe_schedule_next_jobs).
+                    # TODO(cooperc): Find a way to detect if we get stuck in
+                    # this state.
+                    logger.info(f'Job {job_id_} is in LAUNCHING state, '
+                                'but controller process hasn\'t started yet.')
+                    continue
+                # All other statuses are unexpected. Proceed to mark as failed.
+                logger.error(f'Expected to find a controller pid for state '
+                             f'{schedule_state.value} but found none.')
+                failure_reason = ('No controller pid set for '
+                                  f'{schedule_state.value}')
+            else:
+                logger.debug(f'Checking controller pid {pid}')
+                if _controller_process_alive(pid, job_id_):
+                    # The controller is still running.
+                    continue
+                # Otherwise, proceed to mark the job as failed.
+                logger.error(f'Controller process for {job_id_} seems to be '
+                             'dead.')
+                failure_reason = 'Controller process is dead'
+
+        logger.error(f'Controller process for job {job_id_} has exited '
+                     'abnormally. Setting the job status to FAILED_CONTROLLER.')
+        for task in tasks:
+            task_name = task['job_name']
+            # Tear down the abnormal cluster to avoid resource leakage.
+            cluster_name = generate_managed_job_cluster_name(task_name, job_id_)
+            handle = global_user_state.get_handle_from_cluster_name(
+                cluster_name)
+            if handle is not None:
+                backend = backend_utils.get_backend_from_handle(handle)
+                # TODO(cooperc): Add backoff
+                max_retry = 3
+                for retry_cnt in range(max_retry):
+                    try:
+                        backend.teardown(handle, terminate=True)
+                        break
+                    except RuntimeError:
+                        logger.error('Failed to tear down the cluster '
+                                     f'{cluster_name!r}. Retrying '
+                                     f'[{retry_cnt}/{max_retry}].')
+
+        # The controller process for this managed job is not running: it must
+        # have exited abnormally, and we should set the job status to
+        # FAILED_CONTROLLER.
+        # The `set_failed` will only update the task's status if the
+        # status is non-terminal.
+        managed_job_state.set_failed(
+            job_id_,
+            task_id=None,
+            failure_type=managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
+            failure_reason=
+            f'Controller process has exited abnormally ({failure_reason}). For '
+            f'more details, run: sky jobs logs --controller {job_id_}')
+        scheduler.job_done(job_id_, idempotent=True)
+
+    # Some jobs may be in a terminal status, but are not yet DONE. For instance,
+    # they may be still cleaning up resources, etc. Such jobs won't be captured
+    # by the above check, which only looks at nonterminal jobs. So, check the
+    # controller liveness of all jobs that should have live controller
+    # processes.
+    for job_info in managed_job_state.get_schedule_live_jobs(job_id):
+        if not job_info['controller_pid']:
+            # Technically, a job with no controller process but in LAUNCHING
+            # schedule state can happen very briefly after the job is set to
+            # LAUNCHING but before the controller process is actually spawned.
+            # However, if we observe any state other than LAUNCHING, something
+            # is clearly wrong.
+            if (job_info['schedule_state'] !=
+                    managed_job_state.ManagedJobScheduleState.LAUNCHING):
+                logger.error(
+                    f'Missing controller PID for {job_info["job_id"]}. '
+                    'Setting to DONE.')
+                scheduler.job_done(job_info['job_id'])
+            else:
+                logger.info(f'LAUNCHING job {job_info["job_id"]} has no '
+                            'controller process yet. Skipping.')
+
+        elif not _controller_process_alive(job_info['controller_pid'],
+                                           job_info['job_id']):
+            logger.error(
+                f'Controller process for job {job_info["job_id"]} is not '
+                'alive. Marking the job as DONE.')
+            scheduler.job_done(job_info['job_id'])
 
 
 def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
@@ -546,15 +647,75 @@ def stream_logs(job_id: Optional[int],
                         'instead.')
             job_id = managed_job_ids.pop()
         assert job_id is not None, (job_id, job_name)
-        # TODO: keep the following code sync with
-        # job_lib.JobLibCodeGen.tail_logs, we do not directly call that function
-        # as the following code need to be run in the current machine, instead
-        # of running remotely.
-        run_timestamp = job_lib.get_run_timestamp(job_id)
-        if run_timestamp is None:
-            return f'No managed job contrller log found with job_id {job_id}.'
-        log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
-        log_lib.tail_logs(job_id=job_id, log_dir=log_dir, follow=follow)
+
+        controller_log_path = os.path.join(
+            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
+            f'{job_id}.log')
+        job_status = None
+
+        # Wait for the log file to be written
+        while not os.path.exists(controller_log_path):
+            if not follow:
+                # Assume that the log file hasn't been written yet. Since we
+                # aren't following, just return.
+                return ''
+
+            job_status = managed_job_state.get_status(job_id)
+            if job_status is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(f'Job {job_id} not found.')
+            # We shouldn't count CANCELLING as terminal here, the controller is
+            # still cleaning up.
+            if (job_status.is_terminal() and job_status !=
+                    managed_job_state.ManagedJobStatus.CANCELLING):
+                # Don't keep waiting. If the log file is not created by this
+                # point, it never will be. This job may have been submitted
+                # using an old version that did not create the log file, so this
+                # is not considered an exceptional case.
+                return ''
+
+            time.sleep(log_lib.SKY_LOG_WAITING_GAP_SECONDS)
+
+        # This code is based on log_lib.tail_logs. We can't use that code
+        # exactly because state works differently between managed jobs and
+        # normal jobs.
+        with open(controller_log_path, 'r', newline='', encoding='utf-8') as f:
+            # Note: we do not need to care about start_stream_at here, since
+            # that should be in the job log printed above.
+            for line in f:
+                print(line, end='')
+            # Flush.
+            print(end='', flush=True)
+
+            if follow:
+                while True:
+                    # Print all new lines, if there are any.
+                    line = f.readline()
+                    while line is not None and line != '':
+                        print(line, end='')
+                        line = f.readline()
+
+                    # Flush.
+                    print(end='', flush=True)
+
+                    # Check if the job if finished.
+                    job_status = managed_job_state.get_status(job_id)
+                    assert job_status is not None, (job_id, job_name)
+                    if job_status.is_terminal():
+                        break
+
+                    time.sleep(log_lib.SKY_LOG_TAILING_GAP_SECONDS)
+
+                # Wait for final logs to be written.
+                time.sleep(1 + log_lib.SKY_LOG_TAILING_GAP_SECONDS)
+
+            # Print any remaining logs including incomplete line.
+            print(f.read(), end='', flush=True)
+
+        if follow:
+            return ux_utils.finishing_message(
+                f'Job finished (status: {job_status}).')
+
         return ''
 
     if job_id is None:
@@ -590,6 +751,7 @@ def dump_managed_job_queue() -> str:
             job_duration = 0
         job['job_duration'] = job_duration
         job['status'] = job['status'].value
+        job['schedule_state'] = job['schedule_state'].value
 
         cluster_name = generate_managed_job_cluster_name(
             job['task_name'], job['job_id'])
@@ -691,11 +853,18 @@ def format_job_table(
             status_counts[managed_job_status.value] += 1
 
     columns = [
-        'ID', 'TASK', 'NAME', 'RESOURCES', 'SUBMITTED', 'TOT. DURATION',
-        'JOB DURATION', '#RECOVERIES', 'STATUS'
+        'ID',
+        'TASK',
+        'NAME',
+        'RESOURCES',
+        'SUBMITTED',
+        'TOT. DURATION',
+        'JOB DURATION',
+        '#RECOVERIES',
+        'STATUS',
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'FAILURE']
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'DESCRIPTION']
     if tasks_have_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -714,7 +883,25 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
+    def generate_description(failure_reason: Optional[str],
+                             schedule_state: Optional[str]) -> str:
+        description = ''
+        if schedule_state is not None:
+            description += f'Scheduler: {schedule_state}'
+            if failure_reason is not None:
+                description += ', '
+        if failure_reason is not None:
+            description += f'Failure: {failure_reason}'
+
+        if description == '':
+            return '-'
+
+        return description
+
     for job_hash, job_tasks in jobs.items():
+        if show_all:
+            schedule_state = job_tasks[0]['schedule_state']
+
         if len(job_tasks) > 1:
             # Aggregate the tasks into a new row in the table.
             job_name = job_tasks[0]['job_name']
@@ -737,7 +924,6 @@ def format_job_table(
                     end_at = None
                 recovery_cnt += task['recovery_count']
 
-            failure_reason = job_tasks[current_task_id]['failure_reason']
             job_duration = log_utils.readable_time_duration(0,
                                                             job_duration,
                                                             absolute=True)
@@ -763,11 +949,13 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
+                schedule_state = job_tasks[0]['schedule_state']
+                failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
-                    failure_reason if failure_reason is not None else '-',
+                    generate_description(failure_reason, schedule_state),
                 ])
             if tasks_have_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -795,13 +983,17 @@ def format_job_table(
                 task['status'].colored_str(),
             ]
             if show_all:
+                # schedule_state is only set at the job level, so if we have
+                # more than one task, only display on the aggregated row.
+                schedule_state = (task['schedule_state']
+                                  if len(job_tasks) == 1 else None)
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
                     task['cluster_resources'],
                     task['region'],
-                    task['failure_reason']
-                    if task['failure_reason'] is not None else '-',
+                    generate_description(task['failure_reason'],
+                                         schedule_state),
                 ])
             if tasks_have_user:
                 values.insert(0, task.get('user', '-'))
@@ -875,7 +1067,7 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_all_job_ids_by_name(cls, job_name: str) -> str:
+    def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
         from sky.utils import common_utils
         job_id = managed_job_state.get_all_job_ids_by_name({job_name!r})
@@ -896,6 +1088,7 @@ class ManagedJobCodeGen:
         # should be removed in v0.8.0.
         code = textwrap.dedent("""\
         import os
+        import time
 
         from sky.skylet import job_lib, log_lib
         from sky.skylet import constants
@@ -920,7 +1113,7 @@ class ManagedJobCodeGen:
         dag_name = managed_job_dag.name
         # Add the managed job to queue table.
         code = textwrap.dedent(f"""\
-            managed_job_state.set_job_name({job_id}, {dag_name!r})
+            managed_job_state.set_job_info({job_id}, {dag_name!r})
             """)
         for task_id, task in enumerate(managed_job_dag.tasks):
             resources_str = backend_utils.get_task_resources_str(
