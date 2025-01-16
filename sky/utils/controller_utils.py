@@ -765,80 +765,87 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Hard link the files in src to a temporary directory, and upload folder.
     file_mounts_tmp_subpath = _sub_path_join(
         sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
-    local_fm_path = os.path.join(
-        tempfile.gettempdir(),
-        constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
-    os.makedirs(local_fm_path, exist_ok=True)
-    file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
-        path)
-    if copy_mounts_with_file_in_src:
-        src_to_file_id = {}
-        for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
-            src_to_file_id[src] = i
-            os.link(os.path.abspath(os.path.expanduser(src)),
-                    os.path.join(local_fm_path, f'file-{i}'))
-        stores = None
-        if store_type is not None:
-            stores = [store_type]
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=local_fm_path,
-            persistent=False,
-            mode=storage_lib.StorageMode.MOUNT,
-            stores=stores,
-            _is_sky_managed=not bucket_wth_prefix,
-            _bucket_sub_path=file_mounts_tmp_subpath)
+    base_tmp_dir = os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
+    os.makedirs(base_tmp_dir, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
+        local_fm_path = os.path.join(
+            temp_path, constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
+        os.makedirs(local_fm_path, exist_ok=True)
+        file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
+            path)
+        if copy_mounts_with_file_in_src:
+            src_to_file_id = {}
+            for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
+                src_to_file_id[src] = i
+                os.link(os.path.abspath(os.path.expanduser(src)),
+                        os.path.join(local_fm_path, f'file-{i}'))
+            stores = None
+            if store_type is not None:
+                stores = [store_type]
+            storage_obj = storage_lib.Storage(
+                name=bucket_name,
+                source=local_fm_path,
+                persistent=False,
+                mode=storage_lib.StorageMode.MOUNT,
+                stores=stores,
+                _is_sky_managed=not bucket_wth_prefix,
+                _bucket_sub_path=file_mounts_tmp_subpath)
 
-        new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
-        if file_mount_remote_tmp_dir in original_storage_mounts:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Failed to translate file mounts, due to the default '
-                    f'destination {file_mount_remote_tmp_dir} '
-                    'being taken.')
-        sources = list(src_to_file_id.keys())
-        sources_str = '\n    '.join(sources)
-        logger.info(f'  {colorama.Style.DIM}Files (listed below) '
-                    f' -> storage: {bucket_name}:'
-                    f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+            new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+            if file_mount_remote_tmp_dir in original_storage_mounts:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Failed to translate file mounts, due to the default '
+                        f'destination {file_mount_remote_tmp_dir} '
+                        'being taken.')
+            sources = list(src_to_file_id.keys())
+            sources_str = '\n    '.join(sources)
+            logger.info(f'  {colorama.Style.DIM}Files (listed below) '
+                        f' -> storage: {bucket_name}:'
+                        f'\n    {sources_str}{colorama.Style.RESET_ALL}')
 
-    rich_utils.force_update_status(
-        ux_utils.spinner_message('Uploading translated local files/folders'))
-    task.update_storage_mounts(new_storage_mounts)
-
-    # Step 4: Upload storage from sources
-    # Upload the local source to a bucket. The task will not be executed
-    # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote jobs controller.
-    if task.storage_mounts:
-        # There may be existing (non-translated) storage mounts, so log this
-        # whenever task.storage_mounts is non-empty.
         rich_utils.force_update_status(
-            ux_utils.spinner_message('Uploading local sources to storage[/]  '
-                                     '[dim]View storages: sky storage ls'))
-    try:
-        task.sync_storage_mounts()
-    except (ValueError, exceptions.NoCloudAccessError) as e:
-        if 'No enabled cloud for storage' in str(e) or isinstance(
-                e, exceptions.NoCloudAccessError):
-            data_src = None
-            if has_local_source_paths_file_mounts:
-                data_src = 'file_mounts'
-            if has_local_source_paths_workdir:
-                if data_src:
-                    data_src += ' and workdir'
-                else:
-                    data_src = 'workdir'
-            store_enabled_clouds = ', '.join(storage_lib.STORE_ENABLED_CLOUDS)
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(
-                    f'Unable to use {data_src} - no cloud with object store '
-                    'is enabled. Please enable at least one cloud with '
-                    f'object store support ({store_enabled_clouds}) by running '
-                    f'`sky check`, or remove {data_src} from your task.'
-                    '\nHint: If you do not have any cloud access, you may still'
-                    ' download data and code over the network using curl or '
-                    'other tools in the `setup` section of the task.') from None
+            ux_utils.spinner_message(
+                'Uploading translated local files/folders'))
+        task.update_storage_mounts(new_storage_mounts)
+
+        # Step 4: Upload storage from sources
+        # Upload the local source to a bucket. The task will not be executed
+        # locally, so we need to upload the files/folders to the bucket manually
+        # here before sending the task to the remote jobs controller.
+        if task.storage_mounts:
+            # There may be existing (non-translated) storage mounts, so log this
+            # whenever task.storage_mounts is non-empty.
+            rich_utils.force_update_status(
+                ux_utils.spinner_message(
+                    'Uploading local sources to storage[/]  '
+                    '[dim]View storages: sky storage ls'))
+        try:
+            task.sync_storage_mounts()
+        except (ValueError, exceptions.NoCloudAccessError) as e:
+            if 'No enabled cloud for storage' in str(e) or isinstance(
+                    e, exceptions.NoCloudAccessError):
+                data_src = None
+                if has_local_source_paths_file_mounts:
+                    data_src = 'file_mounts'
+                if has_local_source_paths_workdir:
+                    if data_src:
+                        data_src += ' and workdir'
+                    else:
+                        data_src = 'workdir'
+                store_enabled_clouds = ', '.join(
+                    storage_lib.STORE_ENABLED_CLOUDS)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        f'Unable to use {data_src} - no cloud with object '
+                        'store support is enabled. Please enable at least one '
+                        'cloud with object store support '
+                        f'({store_enabled_clouds}) by running `sky check`, or '
+                        f'remove {data_src} from your task.'
+                        '\nHint: If you do not have any cloud access, you may '
+                        'still download data and code over the network using '
+                        'curl or other tools in the `setup` section of the '
+                        'task.') from None
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
