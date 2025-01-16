@@ -409,6 +409,10 @@ class ListAcceleratorCountsBody(RequestBody):
 class LocalUpBody(RequestBody):
     """The request body for the local up endpoint."""
     gpus: bool = True
+    ips: Optional[List[str]] = None
+    ssh_user: Optional[str] = None
+    ssh_key: Optional[str] = None
+    cleanup: bool = False
 
 
 class ServeTerminateReplicaBody(RequestBody):

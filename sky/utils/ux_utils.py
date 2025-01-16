@@ -146,13 +146,24 @@ def starting_message(message: str) -> str:
 
 def finishing_message(message: str,
                       log_path: Optional[Union[str, 'pathlib.Path']] = None,
-                      is_local: bool = False) -> str:
-    """Gets the finishing message for the given message."""
+                      is_local: bool = False,
+                      follow_up_message: Optional[str] = None) -> str:
+    """Gets the finishing message for the given message.
+
+    Args:
+        message: The main message to be displayed.
+        log_path: The log path to be displayed in the message.
+        is_local: Whether the log path is local or on remote API server.
+        follow_up_message: A message to be displayed after the main message.
+          The follow up message is not colored.
+    """
     # We have to reset the color before the message, because sometimes if a
     # previous spinner with dimmed color overflows in a narrow terminal, the
     # color might be messed up.
+    follow_up_message = follow_up_message if (follow_up_message
+                                              is not None) else ''
     success_prefix = (f'{colorama.Style.RESET_ALL}{colorama.Fore.GREEN}✓ '
-                      f'{message}{colorama.Style.RESET_ALL}')
+                      f'{message}{colorama.Style.RESET_ALL}{follow_up_message}')
     if log_path is None:
         return success_prefix
     path_hint = log_path_hint(log_path, is_local)

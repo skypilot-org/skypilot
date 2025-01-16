@@ -64,7 +64,7 @@ run_remote() {
     local NODE_IP=$1
     local CMD=$2
     # echo -e "${YELLOW}Running command on $NODE_IP...${NC}"
-    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER@$NODE_IP" "$CMD"
+    ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_KEY" "$USER@$NODE_IP" "$CMD"
 }
 
 # Function to uninstall k3s and clean up the state on a remote machine
@@ -93,11 +93,11 @@ cleanup_agent_node() {
 
 check_gpu() {
     local NODE_IP=$1
-    run_remote "$NODE_IP" "
-        if command -v nvidia-smi &> /dev/null; then
-            nvidia-smi --list-gpus | grep 'GPU 0'
-        fi
-    "
+    if run_remote "$NODE_IP" "command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null"; then
+        return 0  # GPU detected
+    else
+        return 1  # No GPU detected
+    fi
 }
 
 # Pre-flight checks
@@ -167,7 +167,7 @@ for NODE in $WORKER_NODES; do
 done
 # Step 3: Configure local kubectl to connect to the cluster
 progress_message "Configuring local kubectl to connect to the cluster..."
-scp -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER@$HEAD_NODE":~/.kube/config ~/.kube/config
+scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_KEY" "$USER@$HEAD_NODE":~/.kube/config ~/.kube/config
 
 # Back up the original kubeconfig file if it exists
 KUBECONFIG_FILE="$HOME/.kube/config"

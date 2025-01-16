@@ -1289,13 +1289,26 @@ def storage_delete(name: str) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.public_api
-def local_up(gpus: bool) -> server_common.RequestId:
+def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
+             ssh_key: Optional[str], cleanup: bool) -> server_common.RequestId:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
         request_id: The request ID of the local up request.
     """
-    body = payloads.LocalUpBody(gpus=gpus)
+    # We do not allow local up when the API server is running remotely since it
+    # will modify the kubeconfig.
+    # TODO: move this check to server.
+    if not server_common.is_api_server_local():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'sky local up is only supported when running SkyPilot locally.')
+
+    body = payloads.LocalUpBody(gpus=gpus,
+                                ips=ips,
+                                ssh_user=ssh_user,
+                                ssh_key=ssh_key,
+                                cleanup=cleanup)
     response = requests.post(f'{server_common.get_server_url()}/local_up',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1306,6 +1319,13 @@ def local_up(gpus: bool) -> server_common.RequestId:
 @annotations.public_api
 def local_down() -> server_common.RequestId:
     """Tears down the Kubernetes cluster started by local_up."""
+    # We do not allow local up when the API server is running remotely since it
+    # will modify the kubeconfig.
+    # TODO: move this check to remote server.
+    if not server_common.is_api_server_local():
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('sky local down is only supported when running '
+                             'SkyPilot locally.')
     response = requests.post(f'{server_common.get_server_url()}/local_down')
     return server_common.get_request_id(response)
 
