@@ -90,8 +90,15 @@ class UserSignal(enum.Enum):
 def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
     """Terminate the cluster."""
     retry_cnt = 0
+    # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
+    # metadata service throttling, the failed sky.down attempt can take 10-11
+    # seconds. In this case, we need the backoff to significantly reduce the
+    # rate of requests - that is, significantly increase the time between
+    # requests. We set the initial backoff to 15 seconds, so that once it grows
+    # exponentially it will quickly dominate the 10-11 seconds that we already
+    # see between requests. We set the max backoff very high, since it's
+    # generally much more important to eventually succeed than to fail fast.
     backoff = common_utils.Backoff(
-        # Each attempt may take around 10s, so we back off longer than that.
         initial_backoff=15,
         # 1.6 ** 5 = 10.48576 < 20, so we won't hit this with default max_retry
         max_backoff_factor=20)
