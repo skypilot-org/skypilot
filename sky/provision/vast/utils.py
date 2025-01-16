@@ -91,7 +91,10 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         'direct': True,
         'ssh': True,
         'env': '-e __SOURCE=skypilot',
-        'onstart_cmd': 'touch ~/.no_auto_tmux;apt install lsof',
+        'onstart_cmd': ';'.join([
+            'touch ~/.no_auto_tmux',
+            f'echo "{vast.vast().api_key}" > ~/.vast_api_key',
+        ]),
         'label': name,
         'image': image_name
     }
