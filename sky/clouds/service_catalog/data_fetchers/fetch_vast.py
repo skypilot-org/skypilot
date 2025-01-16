@@ -5,6 +5,7 @@
 # positive for the fnctions.
 #
 # pylint: disable=assignment-from-no-return
+import collections
 import csv
 import json
 import math
