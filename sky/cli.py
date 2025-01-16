@@ -169,6 +169,27 @@ def _get_cluster_records_and_set_ssh_config(
                 handle.docker_user,
                 handle.ssh_user,
             )
+        else:
+            # If the cluster is not UP or does not have IPs, we need to remove
+            # the cluster from the SSH config.
+            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+
+    # Clean up SSH configs for clusters that do not exist.
+    #
+    # We do this in a conservative way: only when a query is made for all users
+    # or specific clusters. Without those, the table returned only contains the
+    # current user's clusters, and the information is not enough for
+    # removing clusters, because SkyPilot has no idea whether to remove
+    # ssh config of a cluster from another user.
+    clusters_exists = set(record['name'] for record in cluster_records)
+    if clusters is not None:
+        for cluster in clusters:
+            if cluster not in clusters_exists:
+                cluster_utils.SSHConfigHelper.remove_cluster(cluster)
+    elif all_users:
+        for cluster_name in cluster_utils.SSHConfigHelper.list_cluster_names():
+            if cluster_name not in clusters_exists:
+                cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
 
     return cluster_records
 
@@ -3093,6 +3114,10 @@ def _down_or_stop_clusters(
                 _async_call_or_wait(
                     request_id, async_call,
                     server_constants.REQUEST_NAME_PREFIX + operation)
+                if not async_call:
+                    # Remove the cluster from the SSH config file as soon as it
+                    # is stopped or downed.
+                    cluster_utils.SSHConfigHelper.remove_cluster(name)
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '

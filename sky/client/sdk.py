@@ -1481,7 +1481,11 @@ def stream_and_get(request_id: Optional[str] = None,
         # 5 seconds to connect, no read timeout
         timeout=(5, None),
         stream=True)
-    if response.status_code != 200:
+    if response.status_code in [404, 400]:
+        detail = response.json().get('detail')
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Failed to stream logs: {detail}')
+    elif response.status_code != 200:
         return get(request_id)
     return _stream_response(request_id, response)
 

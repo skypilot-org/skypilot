@@ -587,7 +587,7 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
         if request_task is None:
             print(f'No task with request ID {request_id}', flush=True)
             raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id} not found')
+                status_code=404, detail=f'Request {request_id!r} not found')
         if request_task.status > requests_lib.RequestStatus.RUNNING:
             return request_task.encode()
         # Sleep 0 to yield, so other coroutines can run. This busy waiting
@@ -622,7 +622,7 @@ async def log_streamer(request_id: Optional[str],
 
         if request_task is None:
             raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id} not found')
+                status_code=404, detail=f'Request {request_id!r} not found')
         request_id = request_task.request_id
 
         # Do not show the waiting spinner if the request is a fast, non-blocking
@@ -674,8 +674,8 @@ async def log_streamer(request_id: Optional[str],
                     if request_task.status > requests_lib.RequestStatus.RUNNING:
                         if (request_task.status ==
                                 requests_lib.RequestStatus.CANCELLED):
-                            yield (f'{request_task.name!r} request {request_id}'
-                                   ' cancelled\n')
+                            yield (f'{request_task.name!r} request '
+                                   f'{request_id!r} cancelled\n')
                         break
                 if not follow:
                     break
@@ -769,7 +769,7 @@ async def stream(
         if request_task is None:
             print(f'No task with request ID {request_id}')
             raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id} not found')
+                status_code=404, detail=f'Request {request_id!r} not found')
         log_path_to_stream = request_task.log_path
     else:
         assert log_path is not None, (request_id, log_path)
@@ -788,7 +788,11 @@ async def stream(
                                   ]) != str(resolved_logs_directory):
                 raise fastapi.HTTPException(
                     status_code=400,
-                    detail=f'Unauthorized log path: {log_path}')
+                    detail=f'Unauthorized log path: {log_path!r}')
+            elif not resolved_log_path.exists():
+                raise fastapi.HTTPException(
+                    status_code=404,
+                    detail=f'Log path {log_path!r} does not exist')
 
         log_path_to_stream = resolved_log_path
     return fastapi.responses.StreamingResponse(
@@ -857,7 +861,7 @@ async def api_status(
         request_task = requests_lib.get_request(request_id)
         if request_task is None:
             raise fastapi.HTTPException(
-                status_code=404, detail=f'Request {request_id} not found')
+                status_code=404, detail=f'Request {request_id!r} not found')
         return [request_task.readable_encode()]
 
 

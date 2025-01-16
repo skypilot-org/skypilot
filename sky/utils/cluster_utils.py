@@ -1,6 +1,7 @@
 """Utility functions for cluster yaml file."""
 
 import functools
+import glob
 import os
 import re
 import textwrap
@@ -331,8 +332,18 @@ class SSHConfigHelper(object):
         Args:
             cluster_name: Cluster name.
         """
+
         with timeline.FileLockEvent(
                 cls.ssh_conf_per_cluster_lock_path.format(cluster_name)):
             cluster_config_path = os.path.expanduser(
                 cls.ssh_cluster_path.format(cluster_name))
             common_utils.remove_file_if_exists(cluster_config_path)
+
+    @classmethod
+    def list_cluster_names(cls) -> List[str]:
+        """List all names of clusters with SSH config set up."""
+        cluster_config_dir = os.path.expanduser(cls.ssh_cluster_path.format(''))
+        return [
+            os.path.basename(path)
+            for path in glob.glob(os.path.join(cluster_config_dir, '*'))
+        ]
