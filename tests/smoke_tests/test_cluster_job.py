@@ -266,6 +266,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
 
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+@pytest.mark.no_vast # Vast doesn't guarantee exactly 8 CPUs, only at least.
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
