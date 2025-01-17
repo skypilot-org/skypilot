@@ -172,16 +172,13 @@ def _start_api_server(api_server_reload: bool = False, deploy: bool = False):
     server_url = get_server_url()
     assert server_url == DEFAULT_SERVER_URL, (
         f'server url {server_url} is not a local url')
-    with filelock.FileLock(
-            os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
-        with rich_utils.client_status('Starting SkyPilot API server'):
-            logger.info(f'{colorama.Style.DIM}Failed to connect to '
-                        f'SkyPilot API server at {server_url}. '
-                        'Starting a local server.'
-                        f'{colorama.Style.RESET_ALL}')
-            start_uvicorn_in_background(reload=api_server_reload, deploy=deploy)
-            logger.info(
-                ux_utils.finishing_message('SkyPilot API server started.'))
+    with rich_utils.client_status('Starting SkyPilot API server'):
+        logger.info(f'{colorama.Style.DIM}Failed to connect to '
+                    f'SkyPilot API server at {server_url}. '
+                    'Starting a local server.'
+                    f'{colorama.Style.RESET_ALL}')
+        start_uvicorn_in_background(reload=api_server_reload, deploy=deploy)
+        logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
 def check_server_healthy_or_start(func):
@@ -199,7 +196,14 @@ def check_server_healthy_or_start(func):
             if server_url != DEFAULT_SERVER_URL:
                 with ux_utils.print_exception_no_traceback():
                     raise exceptions.ApiServerConnectionError(server_url)
-            _start_api_server(api_server_reload, deploy)
+            with filelock.FileLock(
+                    os.path.expanduser(
+                        constants.API_SERVER_CREATION_LOCK_PATH)):
+                # Check again if server is already running. Other processes may
+                # have started the server while we were waiting for the lock.
+                api_server_info = get_api_server_status()
+                if api_server_info.status == ApiServerStatus.UNHEALTHY:
+                    _start_api_server(api_server_reload, deploy)
         elif api_server_info.status == ApiServerStatus.VERSION_MISMATCH:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(
