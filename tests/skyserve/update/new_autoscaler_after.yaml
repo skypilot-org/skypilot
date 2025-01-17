@@ -12,7 +12,8 @@ resources:
   use_spot: true
   cpus: 2+
 
-workdir: examples/serve/http_server
+setup: |
+  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
 
 run: |
   if [ $SKYPILOT_SERVE_REPLICA_ID -eq 7 ]; then

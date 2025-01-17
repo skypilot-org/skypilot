@@ -976,7 +976,7 @@ def terminate_instances(
         _terminate_node(namespace, context, pod_name)
 
     # Run pod termination in parallel
-    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(),
+    subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
                                      _NUM_THREADS)
 
 
