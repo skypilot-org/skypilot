@@ -102,8 +102,6 @@ def run_in_parallel(func: Callable,
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
 
-    The function 'func' should raise a CommandError if the command fails.
-
     Args:
         func: The function to run in parallel
         args: Iterable of arguments to pass to func
@@ -112,19 +110,23 @@ def run_in_parallel(func: Callable,
 
     Returns:
       A list of the return values of the function func, in the same order as the
-      arguments.
+        arguments.
+
+    Raises:
+        Exception: The first exception encountered.
     """
+    # Short-circuit for short lists
     if len(args) == 0:
         return []
-    # Short-circuit for single element
     if len(args) == 1:
         return [func(args[0])]
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    processes = num_threads if num_threads is not None else get_parallel_threads(
-    )
+
+    processes = (num_threads
+                 if num_threads is not None else get_parallel_threads())
+
     with pool.ThreadPool(processes=processes) as p:
-        # Run the function in parallel on the arguments, keeping the order.
-        return list(p.imap(func, args))
+        ordered_iterators = p.imap(func, args)
+        return list(ordered_iterators)
 
 
 def handle_returncode(returncode: int,
