@@ -105,6 +105,7 @@ def test_oci_mounts():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -320,6 +321,7 @@ def test_kubernetes_context_switch():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires AWS
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -1059,6 +1061,7 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1084,6 +1087,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         pytest.param(storage_lib.StoreType.S3, marks=pytest.mark.aws),
@@ -1137,6 +1141,7 @@ class TestStorageWithCredentials:
         assert tmp_local_storage_obj_with_sub_path.name not in out.decode(
             'utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
@@ -1179,6 +1184,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item not in out for item in storage_obj_name])
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1205,6 +1211,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item in out for item in storage_obj_names])
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1236,6 +1243,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1255,6 +1263,7 @@ class TestStorageWithCredentials:
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
@@ -1275,6 +1284,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
@@ -1358,6 +1368,7 @@ class TestStorageWithCredentials:
                     source=nonexist_bucket_url.format(
                         random_name=nonexist_bucket_name))
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'private_bucket',
@@ -1384,6 +1395,7 @@ class TestStorageWithCredentials:
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
@@ -1425,6 +1437,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
@@ -1437,6 +1450,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1465,6 +1479,7 @@ class TestStorageWithCredentials:
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
@@ -1486,6 +1501,7 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
@@ -1564,6 +1580,7 @@ class TestStorageWithCredentials:
         if handle:
             storage_obj.delete()
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('region', [
         'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-south-1',
@@ -1596,6 +1613,7 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in output, (
             f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('region', [
         'northamerica-northeast1', 'northamerica-northeast2', 'us-central1',
