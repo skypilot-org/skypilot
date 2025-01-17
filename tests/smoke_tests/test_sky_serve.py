@@ -84,7 +84,7 @@ _TEARDOWN_SERVICE = (
 _SERVE_ENDPOINT_WAIT = (
     'export ORIGIN_SKYPILOT_DEBUG=$SKYPILOT_DEBUG; export SKYPILOT_DEBUG=0; '
     'endpoint=$(sky serve status --endpoint {name}); '
-    'until ! echo "$endpoint" | grep "Controller is initializing"; '
+    'until ! echo "$endpoint" | grep -qE "Controller is initializing|^-$"; '
     'do echo "Waiting for serve endpoint to be ready..."; '
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
