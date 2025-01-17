@@ -7,12 +7,19 @@ import json
 from multiprocessing import pool as mp_pool
 import os
 import subprocess
+import typing
 from typing import List, Optional, Set
 import urllib
 
 import numpy as np
-import pandas as pd
 import requests
+
+from sky.adaptors import common as adaptors_common
+
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
 US_REGIONS = {
     'centralus',
@@ -57,7 +64,7 @@ FAMILY_NAME_TO_SKYPILOT_GPU_NAME = {
     'standardNVSv2Family': 'M60',
     'standardNVSv3Family': 'M60',
     'standardNVPromoFamily': 'M60',
-    'standardNVSv4Family': 'Radeon MI25',
+    'standardNVSv4Family': 'MI25',
     'standardNDSFamily': 'P40',
     'StandardNVADSA10v5Family': 'A10',
     'StandardNCadsH100v5Family': 'H100',
@@ -86,6 +93,16 @@ def get_regions() -> List[str]:
 # We have to manually remove it.
 DEPRECATED_FAMILIES = ['standardNVSv2Family']
 
+# Azure has those fractional A10 instance types, which still shows has 1 A10 GPU
+# in the API response. We manually changing the number of GPUs to a float here.
+# Ref: https://learn.microsoft.com/en-us/azure/virtual-machines/nva10v5-series
+# TODO(zhwu,tian): Support fractional GPUs on k8s as well.
+# TODO(tian): Maybe we should support literally fractional count, i.e. A10:1/6
+# instead of float point count (A10:0.167).
+AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS = {
+    f'Standard_NV{vcpu}ads_A10_v5': round(vcpu / 36, 3) for vcpu in [6, 12, 18]
+}
+
 USEFUL_COLUMNS = [
     'InstanceType', 'AcceleratorName', 'AcceleratorCount', 'vCPUs', 'MemoryGiB',
     'GpuInfo', 'Price', 'SpotPrice', 'Region', 'Generation'
@@ -103,7 +120,7 @@ def get_pricing_url(region: Optional[str] = None) -> str:
     return f'https://prices.azure.com/api/retail/prices?$filter={filters_str}'
 
 
-def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
+def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
     all_items = []
     url = get_pricing_url(region)
     print(f'Getting pricing for {region}, url: {url}')
@@ -117,18 +134,22 @@ def get_pricing_df(region: Optional[str] = None) -> pd.DataFrame:
         content_str = r.content.decode('ascii')
         content = json.loads(content_str)
         items = content.get('Items', [])
-        if len(items) == 0:
+        if not items:
             break
         all_items += items
         url = content.get('NextPageLink')
     print(f'Done fetching pricing {region}')
     df = pd.DataFrame(all_items)
     assert 'productName' in df.columns, (region, df.columns)
-    return df[(~df['productName'].str.contains(' Windows')) &
-              (df['unitPrice'] > 0)]
+    # Filter out the cloud services and windows products.
+    # Some H100 series use ' Win' instead of ' Windows', e.g.
+    # Virtual Machines NCCadsv5 Srs Win
+    return df[
+        (~df['productName'].str.contains(' Win| Cloud Services| CloudServices'))
+        & (df['unitPrice'] > 0)]
 
 
-def get_sku_df(region_set: Set[str]) -> pd.DataFrame:
+def get_sku_df(region_set: Set[str]) -> 'pd.DataFrame':
     print('Fetching SKU list')
     # To get a complete list, --all option is necessary.
     proc = subprocess.run(
@@ -253,6 +274,19 @@ def get_all_regions_instance_types_df(region_set: Set[str]):
         [df, df.apply(get_additional_columns, axis='columns')],
         axis='columns',
     )
+
+    def _upd_a10_gpu_count(row):
+        new_gpu_cnt = AZURE_FRACTIONAL_A10_INS_TYPE_TO_NUM_GPUS.get(
+            row['InstanceType'])
+        if new_gpu_cnt is not None:
+            return new_gpu_cnt
+        return row['AcceleratorCount']
+
+    # Manually update the GPU count for fractional A10 instance types.
+    # Those instance types have fractional GPU count, but Azure API returns
+    # 1 GPU count for them. We manually update the GPU count here.
+    df_ret['AcceleratorCount'] = df_ret.apply(_upd_a10_gpu_count,
+                                              axis='columns')
 
     # As of Dec 2023, a few H100 instance types fetched from Azure APIs do not
     # have pricing:

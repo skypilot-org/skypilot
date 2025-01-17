@@ -1,0 +1,13 @@
+service:
+  readiness_probe:
+    path: /health
+    initial_delay_seconds: 10
+  replicas: 1
+
+resources:
+  cpus: 2
+  ports: 8081
+
+workdir: tests/skyserve/failures
+
+run: python3 probing.py

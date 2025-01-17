@@ -1,4 +1,3 @@
-import importlib
 import tempfile
 from typing import List, Optional
 
@@ -23,18 +22,16 @@ def enable_all_clouds_in_monkeypatch(
     if enabled_clouds is None:
         enabled_clouds = list(clouds.CLOUD_REGISTRY.values())
     monkeypatch.setattr(
-        'sky.global_user_state.get_enabled_clouds',
-        lambda: enabled_clouds,
+        'sky.check.get_cached_enabled_clouds_or_refresh',
+        lambda *_args, **_kwargs: enabled_clouds,
     )
     monkeypatch.setattr('sky.check.check', lambda *_args, **_kwargs: None)
-    config_file_backup = tempfile.NamedTemporaryFile(
-        prefix='tmp_backup_config_default', delete=False)
-    monkeypatch.setattr('sky.clouds.gcp.GCP_CONFIG_SKY_BACKUP_PATH',
-                        config_file_backup.name)
+    config_file = tempfile.NamedTemporaryFile(prefix='tmp_config_default',
+                                              delete=False)
     monkeypatch.setattr(
         'sky.clouds.gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH',
-        config_file_backup.name)
-    monkeypatch.setenv('OCI_CONFIG', config_file_backup.name)
+        config_file.name)
+    monkeypatch.setenv('OCI_CONFIG', config_file.name)
 
     az_mappings = pd.read_csv('tests/default_aws_az_mappings.csv')
 
@@ -67,7 +64,26 @@ def enable_all_clouds_in_monkeypatch(
     monkeypatch.setattr(
         'sky.provision.kubernetes.utils.detect_gpu_label_formatter',
         lambda *_args, **_kwargs: [kubernetes_utils.SkyPilotLabelFormatter, {}])
-    monkeypatch.setattr('sky.provision.kubernetes.utils.detect_gpu_resource',
-                        lambda *_args, **_kwargs: [True, []])
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.detect_accelerator_resource',
+        lambda *_args, **_kwargs: [True, []])
     monkeypatch.setattr('sky.provision.kubernetes.utils.check_instance_fits',
                         lambda *_args, **_kwargs: [True, ''])
+    monkeypatch.setattr('sky.provision.kubernetes.utils.get_spot_label',
+                        lambda *_args, **_kwargs: [None, None])
+    monkeypatch.setattr(
+        'sky.provision.kubernetes.utils.is_kubeconfig_exec_auth',
+        lambda *_args, **_kwargs: [False, None])
+
+    # monkeypatch class Kubernetes.
+    monkeypatch.setattr(
+        'sky.clouds.kubernetes.Kubernetes.regions_with_offering',
+        lambda *_args, **_kwargs: [clouds.Region('my-k8s-cluster-context')])
+
+    def kubernetes_validate_region_zone(self, region, zone):
+        if region == 'my-k8s-cluster-context':
+            return region, zone
+        raise ValueError(f'Invalid region: {region}, zone: {zone}')
+
+    monkeypatch.setattr('sky.clouds.kubernetes.Kubernetes.validate_region_zone',
+                        kubernetes_validate_region_zone)

@@ -7,7 +7,7 @@ workdir: .
 
 envs:
   MODEL_NAME: tiiuae/falcon-7b # [ybelkada/falcon-7b-sharded-bf16, tiiuae/falcon-7b, tiiuae/falcon-40b]
-  WANDB_API_KEY: $WANDB_KEY # Change to your own wandb key
+  WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
   OUTPUT_BUCKET_NAME: # Set a unique name for the bucket which will store model weights
 
 file_mounts:

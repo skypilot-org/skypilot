@@ -1,0 +1,77 @@
+# The template for the jobs controller
+
+name: {{dag_name}}
+
+file_mounts:
+  {{remote_user_yaml_path}}: {{user_yaml_path}}
+  {%- if local_user_config_path is not none %}
+  {{remote_user_config_path}}: {{local_user_config_path}}
+  {%- endif %}
+  {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
+  {{remote_catalog_path}}: {{local_catalog_path}}
+  {%- endfor %}
+
+setup: |
+  {{ sky_activate_python_env }}
+  # Disable the pip version check to avoid the warning message, which makes the
+  # output hard to read.
+  export PIP_DISABLE_PIP_VERSION_CHECK=1
+
+  {%- for cmd in cloud_dependencies_installation_commands %}
+  {{cmd}}
+  {%- endfor %}
+
+  {% if is_dev %}
+  # Internal: disable logging for manually logging into the jobs controller for debugging.
+  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% endif %}
+
+  # Create systemd service file
+  mkdir -p ~/.config/systemd/user/
+
+  # Create systemd user service file
+  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
+  [Unit]
+  Description=SkyPilot Jobs Dashboard
+  After=network.target
+
+  [Service]
+  Environment="PATH={{ sky_python_env_path }}:\$PATH"
+  Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
+  Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
+  Restart=always
+  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
+  StandardError=append:/home/$USER/.sky/job-dashboard.log
+  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
+
+  [Install]
+  WantedBy=default.target
+  EOF
+
+  if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; then
+    systemctl --user daemon-reload
+    systemctl --user enable --now skypilot-dashboard
+  else
+    echo "Systemd user services not found. Setting up SkyPilot dashboard manually."
+    # Kill any old dashboard processes
+    ps aux | grep -v nohup | grep -v grep | grep -- '-m sky.jobs.dashboard.dashboard' \
+      | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
+    # Launch the dashboard in the background if not already running
+    (ps aux | grep -v nohup | grep -v grep | grep -q -- '-m sky.jobs.dashboard.dashboard') || \
+      (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &)
+  fi
+
+run: |
+  {{ sky_activate_python_env }}
+  # Submit the job to the scheduler.
+  # Note: The job is already in the `spot` table, marked as PENDING.
+  # CloudVmRayBackend._exec_code_on_head() calls
+  # managed_job_codegen.set_pending() before we get here.
+  python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID
+
+
+envs:
+{%- for env_name, env_value in controller_envs.items() %}
+  {{env_name}}: {{env_value}}
+{%- endfor %}

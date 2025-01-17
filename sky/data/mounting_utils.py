@@ -1,9 +1,11 @@
 """Helper functions for object store mounting in Sky Storage"""
 import random
+import shlex
 import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.utils import command_runner
 
 # Values used to construct mounting commands
 _STAT_CACHE_TTL = '5s'
@@ -11,7 +13,13 @@ _STAT_CACHE_CAPACITY = 4096
 _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
-GCSFUSE_VERSION = '1.3.0'
+GCSFUSE_VERSION = '2.2.0'
+# https://github.com/Azure/azure-storage-fuse/releases
+BLOBFUSE2_VERSION = '2.2.0'
+_BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
+_BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
+                       '{storage_account_name}_{container_name}')
+RCLONE_VERSION = 'v1.68.2'
 
 
 def get_s3_mount_install_cmd() -> str:
@@ -19,16 +27,23 @@ def get_s3_mount_install_cmd() -> str:
     install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
                    'releases/download/0.24.0-romilb-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
-                   'sudo chmod +x /usr/local/bin/goofys')
+                   'sudo chmod 755 /usr/local/bin/goofys')
     return install_cmd
 
 
-def get_s3_mount_cmd(bucket_name: str, mount_path: str) -> str:
+# pylint: disable=invalid-name
+def get_s3_mount_cmd(bucket_name: str,
+                     mount_path: str,
+                     _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an S3 bucket using goofys."""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
     mount_cmd = ('goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'{bucket_name} {mount_path}')
+                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 
 
@@ -42,28 +57,109 @@ def get_gcs_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_gcs_mount_cmd(bucket_name: str, mount_path: str) -> str:
+# pylint: disable=invalid-name
+def get_gcs_mount_cmd(bucket_name: str,
+                      mount_path: str,
+                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount a GCS bucket using gcsfuse."""
+    bucket_sub_path_arg = f'--only-dir {_bucket_sub_path} '\
+        if _bucket_sub_path else ''
     mount_cmd = ('gcsfuse -o allow_other '
                  '--implicit-dirs '
                  f'--stat-cache-capacity {_STAT_CACHE_CAPACITY} '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--rename-dir-limit {_RENAME_DIR_LIMIT} '
+                 f'{bucket_sub_path_arg}'
                  f'{bucket_name} {mount_path}')
     return mount_cmd
 
 
-def get_r2_mount_cmd(r2_credentials_path: str, r2_profile_name: str,
-                     endpoint_url: str, bucket_name: str,
-                     mount_path: str) -> str:
+def get_az_mount_install_cmd() -> str:
+    """Returns a command to install AZ Container mount utility blobfuse2."""
+    install_cmd = ('sudo apt-get update; '
+                   'sudo apt-get install -y '
+                   '-o Dpkg::Options::="--force-confdef" '
+                   'fuse3 libfuse3-dev && '
+                   'wget -nc https://github.com/Azure/azure-storage-fuse'
+                   f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
+                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
+                   '-O /tmp/blobfuse2.deb && '
+                   'sudo dpkg --install /tmp/blobfuse2.deb && '
+                   f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
+
+    return install_cmd
+
+
+# pylint: disable=invalid-name
+def get_az_mount_cmd(container_name: str,
+                     storage_account_name: str,
+                     mount_path: str,
+                     storage_account_key: Optional[str] = None,
+                     _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to mount an AZ Container using blobfuse2.
+
+    Args:
+        container_name: Name of the mounting container.
+        storage_account_name: Name of the storage account the given container
+            belongs to.
+        mount_path: Path where the container will be mounting.
+        storage_account_key: Access key for the given storage account.
+        _bucket_sub_path: Sub path of the mounting container.
+
+    Returns:
+        str: Command used to mount AZ container with blobfuse2.
+    """
+    # Storage_account_key is set to None when mounting public container, and
+    # mounting public containers are not officially supported by blobfuse2 yet.
+    # Setting an empty SAS token value is a suggested workaround.
+    # https://github.com/Azure/azure-storage-fuse/issues/1338
+    if storage_account_key is None:
+        key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
+    else:
+        key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
+
+    cache_path = _BLOBFUSE_CACHE_DIR.format(
+        storage_account_name=storage_account_name,
+        container_name=container_name)
+    # The line below ensures the cache directory is new before mounting to
+    # avoid "config error in file_cache [temp directory not empty]" error, which
+    # can occur after stopping and starting the same cluster on Azure.
+    # This helps ensure a clean state for blobfuse2 operations.
+    remote_boot_time_cmd = 'date +%s -d "$(uptime -s)"'
+    if _bucket_sub_path is None:
+        bucket_sub_path_arg = ''
+    else:
+        bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
+    # TODO(zpoint): clear old cache that has been created in the previous boot.
+    mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
+                 f'{key_env_var} '
+                 f'blobfuse2 {mount_path} --allow-other --no-symlinks '
+                 '-o umask=022 -o default_permissions '
+                 f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
+                 f'{bucket_sub_path_arg}'
+                 f'--container-name {container_name}')
+    return mount_cmd
+
+
+# pylint: disable=invalid-name
+def get_r2_mount_cmd(r2_credentials_path: str,
+                     r2_profile_name: str,
+                     endpoint_url: str,
+                     bucket_name: str,
+                     mount_path: str,
+                     _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to install R2 mount utility goofys."""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
     mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
                  f'AWS_PROFILE={r2_profile_name} goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--endpoint {endpoint_url} '
-                 f'{bucket_name} {mount_path}')
+                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 
 
@@ -75,9 +171,12 @@ def get_cos_mount_install_cmd() -> str:
     return install_cmd
 
 
-def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
-                      bucket_rclone_profile: str, bucket_name: str,
-                      mount_path: str) -> str:
+def get_cos_mount_cmd(rclone_config_data: str,
+                      rclone_config_path: str,
+                      bucket_rclone_profile: str,
+                      bucket_name: str,
+                      mount_path: str,
+                      _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # creates a fusermount soft link on older (<22) Ubuntu systems for
     # rclone's mount utility.
@@ -89,12 +188,78 @@ def get_cos_mount_cmd(rclone_config_data: str, rclone_config_path: str,
                                 'mkdir -p ~/.config/rclone/ && '
                                 f'echo "{rclone_config_data}" >> '
                                 f'{rclone_config_path}')
+    if _bucket_sub_path is None:
+        sub_path_arg = f'{bucket_name}/{_bucket_sub_path}'
+    else:
+        sub_path_arg = f'/{bucket_name}'
     # --daemon will keep the mounting process running in the background.
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
-                 f'{bucket_rclone_profile}:{bucket_name} {mount_path} '
+                 f'{bucket_rclone_profile}:{sub_path_arg} {mount_path} '
                  '--daemon')
     return mount_cmd
+
+
+def get_rclone_install_cmd() -> str:
+    """ RClone installation for both apt-get and rpm.
+    This would be common command.
+    """
+    # pylint: disable=line-too-long
+    install_cmd = (
+        f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-amd64.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.deb)))'
+        f' || (which rclone > /dev/null || (cd ~ > /dev/null'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-amd64.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.rpm))')
+    return install_cmd
+
+
+def get_oci_mount_cmd(mount_path: str, store_name: str, region: str,
+                      namespace: str, compartment: str, config_file: str,
+                      config_profile: str) -> str:
+    """ OCI specific RClone mount command for oci object storage. """
+    # pylint: disable=line-too-long
+    mount_cmd = (
+        f'sudo chown -R `whoami` {mount_path}'
+        f' && rclone config create oos_{store_name} oracleobjectstorage'
+        f' provider user_principal_auth namespace {namespace}'
+        f' compartment {compartment} region {region}'
+        f' oci-config-file {config_file}'
+        f' oci-config-profile {config_profile}'
+        f' && sed -i "s/oci-config-file/config_file/g;'
+        f' s/oci-config-profile/config_profile/g" ~/.config/rclone/rclone.conf'
+        f' && ([ ! -f /bin/fusermount3 ] && sudo ln -s /bin/fusermount /bin/fusermount3 || true)'
+        f' && (grep -q {mount_path} /proc/mounts || rclone mount oos_{store_name}:{store_name} {mount_path} --daemon --allow-non-empty)'
+    )
+    return mount_cmd
+
+
+def get_rclone_version_check_cmd() -> str:
+    """ RClone version check. This would be common command. """
+    return f'rclone --version | grep -q {RCLONE_VERSION}'
+
+
+def _get_mount_binary(mount_cmd: str) -> str:
+    """Returns mounting binary in string given as the mount command.
+
+    Args:
+        mount_cmd: Command used to mount a cloud storage.
+
+    Returns:
+        str: Name of the binary used to mount a cloud storage.
+    """
+    if 'goofys' in mount_cmd:
+        return 'goofys'
+    elif 'gcsfuse' in mount_cmd:
+        return 'gcsfuse'
+    elif 'blobfuse2' in mount_cmd:
+        return 'blobfuse2'
+    else:
+        assert 'rclone' in mount_cmd
+        return 'rclone'
 
 
 def get_mounting_script(
@@ -120,8 +285,7 @@ def get_mounting_script(
     Returns:
         str: Mounting script as a str.
     """
-
-    mount_binary = mount_cmd.split()[0]
+    mount_binary = _get_mount_binary(mount_cmd)
     installed_check = f'[ -x "$(command -v {mount_binary})" ]'
     if version_check_cmd is not None:
         installed_check += f' && {version_check_cmd}'
@@ -129,6 +293,8 @@ def get_mounting_script(
     script = textwrap.dedent(f"""
         #!/usr/bin/env bash
         set -e
+
+        {command_runner.ALIAS_SUDO_TO_EMPTY_FOR_ROOT_CMD}
 
         MOUNT_PATH={mount_path}
         MOUNT_BINARY={mount_binary}
@@ -194,23 +360,11 @@ def get_mounting_command(
     script = get_mounting_script(mount_path, mount_cmd, install_cmd,
                                  version_check_cmd)
 
-    # TODO(romilb): Get direct bash script to work like so:
-    # command = f'bash <<-\EOL' \
-    #           f'{script}' \
-    #           'EOL'
-
-    # TODO(romilb): This heredoc should have EOF after script, but it
-    #  fails with sky's ssh pipeline. Instead, we don't use EOF and use )
-    #  as the end of heredoc. This raises a warning (here-document delimited
-    #  by end-of-file) that can be safely ignored.
-
     # While these commands are run sequentially for each storage object,
     # we add random int to be on the safer side and avoid collisions.
     script_path = f'~/.sky/mount_{random.randint(0, 1000000)}.sh'
-    first_line = r'(cat <<-\EOF > {}'.format(script_path)
-    command = (f'{first_line}'
-               f'{script}'
-               f') && chmod +x {script_path}'
-               f' && bash {script_path}'
-               f' && rm {script_path}')
+    command = (f'echo {shlex.quote(script)} > {script_path} && '
+               f'chmod +x {script_path} && '
+               f'bash {script_path} && '
+               f'rm {script_path}')
     return command

@@ -1,7 +1,9 @@
 """Exceptions."""
 import enum
 import typing
-from typing import List, Optional
+from typing import List, Optional, Sequence
+
+from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
     from sky import status_lib
@@ -46,28 +48,34 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class InvalidCloudConfigs(Exception):
+    """Raised when invalid configurations are provided for a given cloud."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
-    """Raised when a spot job fails prechecks before provision.
+    """Raised when a managed job fails prechecks before provision.
+
     Developer note: For now this should only be used by managed
-    spot code path (technically, this can/should be raised by the
+    jobs code path (technically, this can/should be raised by the
     lower-level sky.launch()). Please refer to the docstring of
-    `spot.recovery_strategy._launch` for more details about when
+    `jobs.recovery_strategy._launch` for more details about when
     the error will be raised.
 
     Args:
-        reasons: (List[Exception]) The reasons why the prechecks failed.
+        reasons: (Sequence[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, reasons: List[Exception]) -> None:
+    def __init__(self, reasons: Sequence[Exception]) -> None:
         super().__init__()
-        self.reasons = list(reasons)
+        self.reasons = reasons
 
 
-class SpotJobReachedMaxRetriesError(Exception):
-    """Raised when a spot job fails to be launched after maximum retries.
+class ManagedJobReachedMaxRetriesError(Exception):
+    """Raised when a managed job fails to be launched after maximum retries.
 
-    Developer note: For now this should only be used by managed spot code
-    path. Please refer to the docstring of `spot.recovery_strategy._launch`
+    Developer note: For now this should only be used by managed jobs code
+    path. Please refer to the docstring of `jobs.recovery_strategy._launch`
     for more details about when the error will be raised.
     """
     pass
@@ -94,8 +102,16 @@ class CommandError(Exception):
         self.command = command
         self.error_msg = error_msg
         self.detailed_reason = detailed_reason
-        message = (f'Command {command} failed with return code {returncode}.'
-                   f'\n{error_msg}')
+
+        if not command:
+            message = error_msg
+        else:
+            if (len(command) > 100 and
+                    not env_options.Options.SHOW_DEBUG_INFO.get()):
+                # Chunck the command to avoid overflow.
+                command = command[:100] + '...'
+            message = (f'Command {command} failed with return code '
+                       f'{returncode}.\n{error_msg}')
         super().__init__(message)
 
 
@@ -113,6 +129,13 @@ class ClusterNotUpError(Exception):
 
 class ClusterSetUpError(Exception):
     """Raised when a cluster has setup error."""
+    pass
+
+
+class ClusterDoesNotExist(ValueError):
+    """Raise when trying to operate on a cluster that does not exist."""
+    # This extends ValueError for compatibility reasons - we used to throw
+    # ValueError instead of this.
     pass
 
 
@@ -181,8 +204,14 @@ class StorageExternalDeletionError(StorageBucketGetError):
     pass
 
 
-class FetchIPError(Exception):
-    """Raised when fetching the IP fails."""
+class NonExistentStorageAccountError(StorageExternalDeletionError):
+    # Error raise when storage account provided through config.yaml or read
+    # from store handle(local db) does not exist.
+    pass
+
+
+class FetchClusterInfoError(Exception):
+    """Raised when fetching the cluster info fails."""
 
     class Reason(enum.Enum):
         HEAD = 'HEAD'
@@ -203,8 +232,8 @@ class ClusterStatusFetchingError(Exception):
     pass
 
 
-class SpotUserCancelledError(Exception):
-    """Raised when a spot user cancels the job."""
+class ManagedJobUserCancelledError(Exception):
+    """Raised when a user cancels a managed job."""
     pass
 
 
@@ -267,3 +296,13 @@ class ServeUserTerminatedError(Exception):
 
 class PortDoesNotExistError(Exception):
     """Raised when the port does not exist."""
+
+
+class UserRequestRejectedByPolicy(Exception):
+    """Raised when a user request is rejected by an admin policy."""
+    pass
+
+
+class NoClusterLaunchedError(Exception):
+    """No cluster launched, so cleanup can be skipped during failover."""
+    pass

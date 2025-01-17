@@ -1,0 +1,29 @@
+# Creates an ingress for the skytest pod in cpu_test_pod.yaml
+# Assumes the nginx ingress controller is installed and exposed through a service of type LoadBalancer.
+#
+# Usage:
+#   kubectl apply -f cpu_test_pod.yaml
+#   kubectl apply -f ingress_test.yaml
+#
+# Access the server by running:
+#   IP=$(kubectl get service ingress-nginx-controller -n ingress-nginx -o jsonpath='{.status.loadBalancer.ingress[*].ip}')
+#   curl http://$IP/skytest
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: skytest-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      - path: /skytest
+        pathType: Prefix
+        backend:
+          service:
+            name: skytest-svc
+            port:
+              number: 8080

@@ -31,7 +31,14 @@ def generate_kind_config(path: str,
         extraArgs:
           "service-node-port-range": {port_start}-{port_end}
     nodes:
-    - role: control-plane""")
+    - role: control-plane
+      kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    """)
     if gpus:
         preamble += textwrap.indent(
             textwrap.dedent("""
@@ -45,7 +52,7 @@ def generate_kind_config(path: str,
     if num_nodes > 1:
         for _ in range(1, num_nodes):
             suffix += """- role: worker\n"""
-    with open(path, 'w') as f:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(preamble)
         for port in range(port_start, port_end + 1):
             f.write(f"""

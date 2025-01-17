@@ -1,0 +1,37 @@
+envs:
+  MODEL_NAME: mistralai/Pixtral-12B-2409
+  HF_TOKEN:
+
+service:
+  replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content:
+            - type: text
+              text: "Are you alive?"
+      max_tokens: 1
+
+resources:
+  accelerators: {L40, L40S, A100, A100-80GB}
+  cpus: 2+
+  disk_tier: best
+  ports: 8081  # Expose to internet traffic.
+
+setup: |
+  # Requires 0.6.1 for Pixtral support.
+  pip install vllm==0.6.1
+
+run: |
+  echo 'Starting vllm api server...'
+
+  export OMP_NUM_THREADS=8
+  vllm serve $MODEL_NAME --tokenizer_mode mistral \
+    --limit_mm_per_prompt 'image=4' \
+    --max_num_batched_tokens 16384 \
+    --max-model-len 10240 \
+    --port 8081

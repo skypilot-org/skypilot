@@ -1,0 +1,24 @@
+# SkyServe YAML to run HuggingFace TGI
+#
+# Usage:
+#   sky serve up -n tgi huggingface-tgi.yaml \
+#     [--env MODEL_ID=<model-id-on-huggingface>]
+# Then visit the endpoint printed in the console. You could also
+# check the endpoint by running:
+#   sky serve status --endpoint tgi
+
+envs:
+  MODEL_ID: lmsys/vicuna-13b-v1.5
+
+service:
+  readiness_probe: /health
+  replicas: 2
+
+resources:
+  ports: 8080
+  accelerators: A100:1
+
+run: |
+  docker run --gpus all --shm-size 1g -p 8080:80 \
+    -v ~/data:/data ghcr.io/huggingface/text-generation-inference \
+    --model-id $MODEL_ID

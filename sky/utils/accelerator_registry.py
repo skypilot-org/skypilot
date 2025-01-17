@@ -3,6 +3,7 @@ import typing
 from typing import Optional
 
 from sky.clouds import service_catalog
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -29,8 +30,7 @@ if typing.TYPE_CHECKING:
 # 3. (For SkyPilot dev) What to do if I want to add a new accelerator?
 #
 # Append its case-sensitive canonical name to this list. The name must match
-# `AcceleratorName` in the service catalog, or what we define in
-# `onprem_utils.get_local_cluster_accelerators`.
+# `AcceleratorName` in the service catalog.
 _ACCELERATORS = [
     'A100',
     'A10G',
@@ -89,14 +89,17 @@ def canonicalize_accelerator_name(accelerator: str,
     if accelerator.lower() in mapping:
         return mapping[accelerator.lower()]
 
-    # _ACCELERATORS may not be comprehensive.
-    # Users may manually add new accelerators to the catalogs, or download new
-    # catalogs (that have new accelerators) without upgrading SkyPilot.
-    # To cover such cases, we should search the accelerator name
-    # in the service catalog.
-    searched = service_catalog.list_accelerators(name_filter=accelerator,
-                                                 case_sensitive=False,
-                                                 clouds=cloud_str)
+    # Listing accelerators can be time-consuming since canonicalizing usually
+    # involves catalog reading with cache not warmed up.
+    with rich_utils.safe_status('Listing accelerators...'):
+        # _ACCELERATORS may not be comprehensive.
+        # Users may manually add new accelerators to the catalogs, or download
+        # new catalogs (that have new accelerators) without upgrading SkyPilot.
+        # To cover such cases, we should search the accelerator name
+        # in the service catalog.
+        searched = service_catalog.list_accelerators(name_filter=accelerator,
+                                                     case_sensitive=False,
+                                                     clouds=cloud_str)
     names = list(searched.keys())
 
     # Exact match.
@@ -107,7 +110,7 @@ def canonicalize_accelerator_name(accelerator: str,
         return names[0]
 
     # Do not print an error message here. Optimizer will handle it.
-    if len(names) == 0:
+    if not names:
         return accelerator
 
     # Currently unreachable.

@@ -16,11 +16,11 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
-import colorama
 import jinja2
 import jsonschema
 import yaml
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import ux_utils
@@ -60,11 +60,18 @@ def get_usage_run_id() -> str:
     return _usage_run_id
 
 
-def get_user_hash() -> str:
+def get_user_hash(force_fresh_hash: bool = False) -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
     hostname changes causing a new user hash to be generated.
+
+    Args:
+        force_fresh_hash: Bypasses the cached hash in USER_HASH_FILE and the
+            hash in the USER_ID_ENV_VAR and forces a fresh user-machine hash
+            to be generated. Used by `kubernetes.ssh_key_secret_field_name` to
+            avoid controllers sharing the same ssh key field name as the
+            local client.
     """
 
     def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
@@ -76,14 +83,15 @@ def get_user_hash() -> str:
             return False
         return len(user_hash) == USER_HASH_LENGTH
 
-    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-    if _is_valid_user_hash(user_hash):
-        assert user_hash is not None
-        return user_hash
+    if not force_fresh_hash:
+        user_hash = os.getenv(constants.USER_ID_ENV_VAR)
+        if _is_valid_user_hash(user_hash):
+            assert user_hash is not None
+            return user_hash
 
-    if os.path.exists(_USER_HASH_FILE):
+    if not force_fresh_hash and os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
-        with open(_USER_HASH_FILE, 'r') as f:
+        with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
             user_hash = f.read().strip()
         if _is_valid_user_hash(user_hash):
@@ -95,8 +103,13 @@ def get_user_hash() -> str:
         # A fallback in case the hash is invalid.
         user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    with open(_USER_HASH_FILE, 'w') as f:
-        f.write(user_hash)
+    if not force_fresh_hash:
+        # Do not cache to file if force_fresh_hash is True since the file may
+        # be intentionally using a different hash, e.g. we want to keep the
+        # user_hash for usage collection the same on the jobs/serve controller
+        # as users' local client.
+        with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
+            f.write(user_hash)
     return user_hash
 
 
@@ -117,23 +130,56 @@ def base36_encode(hex_str: str) -> str:
     return _base36_encode(int_value)
 
 
-def make_cluster_name_on_cloud(cluster_name: str,
+def check_cluster_name_is_valid(cluster_name: Optional[str]) -> None:
+    """Errors out on invalid cluster names.
+
+    Bans (including but not limited to) names that:
+    - are digits-only
+    - start with invalid character, like hyphen
+
+    Raises:
+        exceptions.InvalidClusterNameError: If the cluster name is invalid.
+    """
+    if cluster_name is None:
+        return
+    valid_regex = constants.CLUSTER_NAME_VALID_REGEX
+    if re.fullmatch(valid_regex, cluster_name) is None:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidClusterNameError(
+                f'Cluster name "{cluster_name}" is invalid; '
+                'ensure it is fully matched by regex (e.g., '
+                'only contains letters, numbers and dash): '
+                f'{valid_regex}')
+
+
+def make_cluster_name_on_cloud(display_name: str,
                                max_length: Optional[int] = 15,
                                add_user_hash: bool = True) -> str:
     """Generate valid cluster name on cloud that is unique to the user.
 
-    This is to map the cluster name to a valid length for cloud providers, e.g.
-    GCP limits the length of the cluster name to 35 characters. If the cluster
-    name with user hash is longer than max_length:
+    This is to map the cluster name to a valid length and character set for
+    cloud providers,
+    - e.g. GCP limits the length of the cluster name to 35 characters. If the
+    cluster name with user hash is longer than max_length:
       1. Truncate it to max_length - cluster_hash - user_hash_length.
       2. Append the hash of the cluster name
+    - e.g. some cloud providers don't allow for uppercase letters, periods,
+    or underscores, so we convert it to lower case and replace those
+    characters with hyphens
 
     Args:
-        cluster_name: The cluster name to be truncated and hashed.
+        display_name: The cluster name to be truncated, hashed, and
+            transformed.
         max_length: The maximum length of the cluster name. If None, no
             truncation is performed.
         add_user_hash: Whether to append user hash to the cluster name.
     """
+
+    cluster_name_on_cloud = re.sub(r'[._]', '-', display_name).lower()
+    if display_name != cluster_name_on_cloud:
+        logger.debug(
+            f'The user specified cluster name {display_name} might be invalid '
+            f'on the cloud, we convert it to {cluster_name_on_cloud}.')
     user_hash = ''
     if add_user_hash:
         user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
@@ -141,20 +187,20 @@ def make_cluster_name_on_cloud(cluster_name: str,
     user_hash_length = len(user_hash)
 
     if (max_length is None or
-            len(cluster_name) <= max_length - user_hash_length):
-        return f'{cluster_name}{user_hash}'
+            len(cluster_name_on_cloud) <= max_length - user_hash_length):
+        return f'{cluster_name_on_cloud}{user_hash}'
     # -1 is for the dash between cluster name and cluster name hash.
     truncate_cluster_name_length = (max_length - CLUSTER_NAME_HASH_LENGTH - 1 -
                                     user_hash_length)
-    truncate_cluster_name = cluster_name[:truncate_cluster_name_length]
+    truncate_cluster_name = cluster_name_on_cloud[:truncate_cluster_name_length]
     if truncate_cluster_name.endswith('-'):
         truncate_cluster_name = truncate_cluster_name.rstrip('-')
-    assert truncate_cluster_name_length > 0, (cluster_name, max_length)
-    cluster_name_hash = hashlib.md5(cluster_name.encode()).hexdigest()
+    assert truncate_cluster_name_length > 0, (cluster_name_on_cloud, max_length)
+    display_name_hash = hashlib.md5(display_name.encode()).hexdigest()
     # Use base36 to reduce the length of the hash.
-    cluster_name_hash = base36_encode(cluster_name_hash)
+    display_name_hash = base36_encode(display_name_hash)
     return (f'{truncate_cluster_name}'
-            f'-{cluster_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
+            f'-{display_name_hash[:CLUSTER_NAME_HASH_LENGTH]}{user_hash}')
 
 
 def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
@@ -166,12 +212,16 @@ def cluster_name_in_hint(cluster_name: str, cluster_name_on_cloud: str) -> str:
 def get_global_job_id(job_timestamp: str,
                       cluster_name: Optional[str],
                       job_id: str,
-                      task_id: Optional[int] = None) -> str:
+                      task_id: Optional[int] = None,
+                      is_managed_job: bool = False) -> str:
     """Returns a unique job run id for each job run.
 
     A job run is defined as the lifetime of a job that has been launched.
     """
-    global_job_id = f'{job_timestamp}_{cluster_name}_id-{job_id}'
+    managed_job_str = 'managed-' if is_managed_job else ''
+    _, sep, timestamp = job_timestamp.partition('sky-')
+    job_timestamp = f'{sep}{managed_job_str}{timestamp}'
+    global_job_id = f'{job_timestamp}_{cluster_name}_{job_id}'
     if task_id is not None:
         global_job_id += f'-{task_id}'
     return global_job_id
@@ -182,11 +232,11 @@ class Backoff:
     MULTIPLIER = 1.6
     JITTER = 0.4
 
-    def __init__(self, initial_backoff: int = 5, max_backoff_factor: int = 5):
+    def __init__(self, initial_backoff: float = 5, max_backoff_factor: int = 5):
         self._initial = True
         self._backoff = 0.0
-        self._inital_backoff = initial_backoff
-        self._max_backoff = max_backoff_factor * self._inital_backoff
+        self._initial_backoff = initial_backoff
+        self._max_backoff = max_backoff_factor * self._initial_backoff
 
     # https://github.com/grpc/grpc/blob/2d4f3c56001cd1e1f85734b2f7c5ce5f2797c38a/doc/connection-backoff.md
     # https://github.com/grpc/grpc/blob/5fc3ff82032d0ebc4bf252a170ebe66aacf9ed9d/src/core/lib/backoff/backoff.cc
@@ -195,7 +245,7 @@ class Backoff:
         """Backs off once and returns the current backoff in seconds."""
         if self._initial:
             self._initial = False
-            self._backoff = min(self._inital_backoff, self._max_backoff)
+            self._backoff = min(self._initial_backoff, self._max_backoff)
         else:
             self._backoff = min(self._backoff * self.MULTIPLIER,
                                 self._max_backoff)
@@ -209,7 +259,6 @@ def get_pretty_entry_point() -> str:
 
     Example return values:
         $ sky launch app.yaml  # 'sky launch app.yaml'
-        $ sky gpunode  # 'sky gpunode'
         $ python examples/app.py  # 'app.py'
     """
     argv = sys.argv
@@ -250,14 +299,14 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path) -> Dict[str, Any]:
-    with open(path, 'r') as f:
+def read_yaml(path: str) -> Dict[str, Any]:
+    with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
 
 
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
-    with open(path, 'r') as f:
+    with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load_all(f)
         configs = list(config)
         if not configs:
@@ -266,12 +315,13 @@ def read_yaml_all(path: str) -> List[Dict[str, Any]]:
         return configs
 
 
-def dump_yaml(path, config) -> None:
-    with open(path, 'w') as f:
+def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
+                                       Dict[str, Any]]) -> None:
+    with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
-def dump_yaml_str(config):
+def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -281,16 +331,17 @@ def dump_yaml_str(config):
                 super().write_line_break()
 
     if isinstance(config, list):
-        dump_func = yaml.dump_all
+        dump_func = yaml.dump_all  # type: ignore
     else:
-        dump_func = yaml.dump
+        dump_func = yaml.dump  # type: ignore
     return dump_func(config,
                      Dumper=LineBreakDumper,
                      sort_keys=False,
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
+def make_decorator(cls, name_or_fn: Union[str, Callable],
+                   **ctx_kwargs) -> Callable:
     """Make the cls a decorator.
 
     class cls:
@@ -311,7 +362,6 @@ def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
 
             @functools.wraps(f)
             def _record(*args, **kwargs):
-                nonlocal name_or_fn
                 with cls(name_or_fn, **ctx_kwargs):
                     return f(*args, **kwargs)
 
@@ -325,7 +375,6 @@ def make_decorator(cls, name_or_fn: Union[str, Callable], **ctx_kwargs):
 
         @functools.wraps(name_or_fn)
         def _record(*args, **kwargs):
-            nonlocal name_or_fn
             f = name_or_fn
             func_name = getattr(f, '__qualname__', f.__name__)
             module_name = getattr(f, '__module__', '')
@@ -401,9 +450,9 @@ def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
     Example:
-        >>> e = sky.exceptions.FetchIPError()
+        >>> e = sky.exceptions.FetchClusterInfoError()
         >>> class_fullname(e.__class__)
-        'sky.exceptions.FetchIPError'
+        'sky.exceptions.FetchClusterInfoError'
 
     Args:
         cls: The class to get the full name.
@@ -427,11 +476,9 @@ def format_exception(e: Union[Exception, SystemExit, KeyboardInterrupt],
     Returns:
         A string that represents the exception.
     """
-    bright = colorama.Style.BRIGHT
-    reset = colorama.Style.RESET_ALL
     if use_bracket:
-        return f'{bright}[{class_fullname(e.__class__)}]{reset} {e}'
-    return f'{bright}{class_fullname(e.__class__)}:{reset} {e}'
+        return f'[{class_fullname(e.__class__)}] {e}'
+    return f'{class_fullname(e.__class__)}: {e}'
 
 
 def remove_color(s: str):
@@ -529,20 +576,27 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
                            'The `envs` field contains invalid keys:\n' +
                            e.message)
             else:
-                err_msg = err_msg_prefix + 'The following fields are invalid:'
+                err_msg = err_msg_prefix
+                assert isinstance(e.schema, dict), 'Schema must be a dictionary'
                 known_fields = set(e.schema.get('properties', {}).keys())
+                assert isinstance(e.instance,
+                                  dict), 'Instance must be a dictionary'
                 for field in e.instance:
                     if field not in known_fields:
                         most_similar_field = difflib.get_close_matches(
                             field, known_fields, 1)
                         if most_similar_field:
-                            err_msg += (f'\nInstead of {field!r}, did you mean '
+                            err_msg += (f'Instead of {field!r}, did you mean '
                                         f'{most_similar_field[0]!r}?')
                         else:
-                            err_msg += f'\nFound unsupported field {field!r}.'
+                            err_msg += f'Found unsupported field {field!r}.'
         else:
+            message = e.message
+            # Object in jsonschema is represented as dict in Python. Replace
+            # 'object' with 'dict' for better readability.
+            message = message.replace('type \'object\'', 'type \'dict\'')
             # Example e.json_path value: '$.resources'
-            err_msg = (err_msg_prefix + e.message +
+            err_msg = (err_msg_prefix + message +
                        f'. Check problematic field(s): {e.json_path}')
 
     if err_msg:
@@ -551,14 +605,19 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
 
 def get_cleaned_username(username: str = '') -> str:
-    """Cleans the username as some cloud provider have limitation on
-    characters usage such as dot (.) is not allowed in GCP.
+    """Cleans the username. Underscores are allowed, as we will
+     handle it when mapping to the cluster_name_on_cloud in
+     common_utils.make_cluster_name_on_cloud.
 
     Clean up includes:
      1. Making all characters lowercase
-     2. Removing any non-alphanumeric characters (excluding hyphens)
+     2. Removing any non-alphanumeric characters (excluding hyphens and
+        underscores)
      3. Removing any numbers and/or hyphens at the start of the username.
      4. Removing any hyphens at the end of the username
+     5. Truncate the username to 63 characters, as requested by GCP labels
+
+    Dots are removed due to: https://cloud.google.com/compute/docs/labeling-resources#requirements # pylint: disable=line-too-long
 
     e.g. 1SkY-PiLot2- becomes sky-pilot2
 
@@ -567,13 +626,14 @@ def get_cleaned_username(username: str = '') -> str:
     """
     username = username or getpass.getuser()
     username = username.lower()
-    username = re.sub(r'[^a-z0-9-]', '', username)
+    username = re.sub(r'[^a-z0-9-_]', '', username)
     username = re.sub(r'^[0-9-]+', '', username)
     username = re.sub(r'-$', '', username)
+    username = username[:63]
     return username
 
 
-def fill_template(template_name: str, variables: Dict,
+def fill_template(template_name: str, variables: Dict[str, Any],
                   output_path: str) -> None:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
@@ -581,7 +641,7 @@ def fill_template(template_name: str, variables: Dict,
     template_path = os.path.join(root_dir, 'templates', template_name)
     if not os.path.exists(template_path):
         raise FileNotFoundError(f'Template "{template_name}" does not exist.')
-    with open(template_path) as fin:
+    with open(template_path, 'r', encoding='utf-8') as fin:
         template = fin.read()
     output_path = os.path.abspath(os.path.expanduser(output_path))
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
@@ -589,5 +649,70 @@ def fill_template(template_name: str, variables: Dict,
     # Write out yaml config.
     j2_template = jinja2.Template(template)
     content = j2_template.render(**variables)
-    with open(output_path, 'w') as fout:
+    with open(output_path, 'w', encoding='utf-8') as fout:
         fout.write(content)
+
+
+def deprecated_function(
+        func: Callable,
+        name: str,
+        deprecated_name: str,
+        removing_version: str,
+        override_argument: Optional[Dict[str, Any]] = None) -> Callable:
+    """Decorator for creating deprecated functions, for backward compatibility.
+
+    It will result in a warning being emitted when the function is used.
+    """
+
+    @functools.wraps(func)
+    def new_func(*args, **kwargs):
+        override_argument_str = ''
+        if override_argument:
+            override_argument_str = ', '.join(
+                f'{k}={v}' for k, v in override_argument.items())
+        logger.warning(
+            f'Call to deprecated function {deprecated_name}, which will be '
+            f'removed in {removing_version}. Please use '
+            f'{name}({override_argument_str}) instead.')
+        return func(*args, **kwargs)
+
+    return new_func
+
+
+def truncate_long_string(s: str, max_length: int = 35) -> str:
+    """Truncate a string to a maximum length, preserving whole words."""
+    if len(s) <= max_length:
+        return s
+    splits = s.split(' ')
+    if len(splits[0]) > max_length:
+        return splits[0][:max_length] + '...'  # Use '…'?
+    # Truncate on word boundary.
+    i = 0
+    total = 0
+    for i, part in enumerate(splits):
+        total += len(part)
+        if total >= max_length:
+            break
+    prefix = ' '.join(splits[:i])
+    if len(prefix) < max_length:
+        prefix += s[len(prefix):max_length]
+    return prefix + '...'
+
+
+def hash_file(path: str, hash_alg: str) -> 'hashlib._Hash':
+    # In python 3.11, hashlib.file_digest is available, but for <3.11 we have to
+    # do it manually.
+    # This implementation is simplified from the implementation in CPython.
+    # TODO(cooperc): Use hashlib.file_digest once we move to 3.11+.
+    # Beware of f.read() as some files may be larger than memory.
+    with open(path, 'rb') as f:
+        file_hash = hashlib.new(hash_alg)
+        buf = bytearray(2**18)
+        view = memoryview(buf)
+        while True:
+            size = f.readinto(buf)
+            if size == 0:
+                # EOF
+                break
+            file_hash.update(view[:size])
+        return file_hash

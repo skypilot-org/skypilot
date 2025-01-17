@@ -1,7 +1,7 @@
 envs:
-  HF_TOKEN: <your-huggingface-token> # Change to your own huggingface token
-  ARTIFACT_BUCKET_NAME: YOUR_OWN_BUCKET_NAME # Change to your own bucket name
-  WANDB_API_KEY: "" # Change to your own wandb api key
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+  ARTIFACT_BUCKET_NAME: # TODO: Fill with your unique bucket name, or use --env to pass.
+  WANDB_API_KEY: # TODO: Fill with your own WANDB_API_KEY, or use --env to pass.
   MODEL_SIZE: 7
   USE_XFORMERS: 1
 

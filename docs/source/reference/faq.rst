@@ -1,18 +1,20 @@
 .. _sky-faq:
 
 Frequently Asked Questions
-------------------------------------------------
+==========================
 
 
 .. contents::
     :local:
-    :depth: 1
+    :depth: 2
 
+Git and GitHub
+--------------
 
-Can I clone private GitHub repositories in a task's ``setup`` commands?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+How to clone private GitHub repositories in a task's ``setup`` commands?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Yes, provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_.
+This is possible provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_.
 For example, run the following on your laptop:
 
 .. code-block:: bash
@@ -29,6 +31,38 @@ Then, any SkyPilot clusters launched from this machine would be able to clone pr
       git clone git@github.com:your-proj/your-repo.git
 
 Note: currently, cloning private repositories in the ``run`` commands is not supported yet.
+
+How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Currently, there is a difference in whether ``.git`` is synced up depending on the command used:
+
+- For regular ``sky launch``, the workdir's ``.git`` is synced up by default.
+- For managed jobs ``sky jobs launch``, the workdir's ``.git`` is excluded by default.
+
+In the second case, to ensure the workdir's ``.git`` is synced up for managed spot jobs, you can explicitly add a file mount to sync it up:
+
+.. code-block:: yaml
+
+  workdir: .
+  file_mounts:
+    ~/sky_workdir/.git: .git
+
+This can be useful if your jobs use certain experiment tracking tools that depend on the ``.git`` directory to track code changes.
+
+File mounting (``file_mounts``)
+-------------------------------
+
+How to make SkyPilot clusters use my Weights & Biases credentials?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Install the wandb library on your laptop and login to your account via ``wandb login``.
+Then, add the following lines in your task yaml file:
+
+.. code-block:: yaml
+
+  file_mounts:
+    ~/.netrc: ~/.netrc
 
 How to mount additional files into a cloned repository?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -56,18 +90,6 @@ To get around this, mount the files to a different path, then symlink to them.  
     ln -s /tmp/tmp.txt ~/code-repo/
 
 
-
-How to make SkyPilot clusters use my Weights & Biases credentials?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Install the wandb library on your laptop and login to your account via ``wandb login``.
-Then, add the following lines in your task yaml file:
-
-.. code-block:: yaml
-
-  file_mounts:
-    ~/.netrc: ~/.netrc
-
 How to update an existing cluster's ``file_mounts`` without rerunning ``setup``?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -75,23 +97,9 @@ If you have edited the ``file_mounts`` section (e.g., by adding some files) and 
 
 To avoid rerunning the ``setup`` commands, pass the ``--no-setup`` flag to ``sky launch``.
 
-How can I launch a VS Code tunnel using a SkyPilot task definition?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To launch a VS Code tunnel using a SkyPilot task definition, you can use the following task definition:
-
-.. code-block:: yaml
-
-    setup: |
-      sudo snap install --classic code
-      # if `snap` is not available, you can try the following commands instead:
-      # wget https://go.microsoft.com/fwlink/?LinkID=760868 -O vscode.deb
-      # sudo apt install ./vscode.deb -y
-      # rm vscode.deb
-    run: |
-      code tunnel --accept-server-license-terms
-
-Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
+Region settings
+---------------
 
 How to launch VMs in a subset of regions only (e.g., Europe only)?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -183,3 +191,41 @@ You can customize the catalog files to your needs.
 For example, if you have access to special regions of GCP, add the data to ``~/.sky/catalogs/<schema-version>/gcp.csv``.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
+
+Package Installation
+---------------------
+
+Unable to import PyTorch in a SkyPilot task.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For `PyTorch <https://pytorch.org/>`_ installation, if you are using the default SkyPilot images (not passing in `--image-id`), ``pip install torch`` should work.
+
+But if you use your own image which has an older NVIDIA driver (535.161.08 or lower) and you install the default PyTorch, you may encounter the following error:
+
+.. code-block:: bash
+
+  ImportError: /home/azureuser/miniconda3/lib/python3.10/site-packages/torch/lib/../../nvidia/cusparse/lib/libcusparse.so.12: undefined symbol: __nvJitLinkComplete_12_4, version libnvJitLink.so.12
+
+You will need to install a PyTorch version that is compatible with your NVIDIA driver, e.g., ``pip install torch --index-url https://download.pytorch.org/whl/cu121``.
+
+
+Miscellaneous
+-------------
+
+How can I launch a VS Code tunnel using a SkyPilot task definition?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+To launch a VS Code tunnel using a SkyPilot task definition, you can use the following task definition:
+
+.. code-block:: yaml
+
+    setup: |
+      sudo snap install --classic code
+      # if `snap` is not available, you can try the following commands instead:
+      # wget https://go.microsoft.com/fwlink/?LinkID=760868 -O vscode.deb
+      # sudo apt install ./vscode.deb -y
+      # rm vscode.deb
+    run: |
+      code tunnel --accept-server-license-terms
+
+Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
+

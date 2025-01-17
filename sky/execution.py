@@ -2,82 +2,30 @@
 
 See `Stage` for a Task's life cycle.
 """
-import copy
 import enum
-import os
-import tempfile
-from typing import Any, List, Optional, Tuple, Union
-import uuid
+from typing import List, Optional, Tuple, Union
 
 import colorama
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
-from sky import spot
-from sky import task as task_lib
+from sky import status_lib
 from sky.backends import backend_utils
-from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import common_utils
+from sky.utils import admin_policy_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
-from sky.utils import env_options
+from sky.utils import resources_utils
 from sky.utils import rich_utils
-from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-
-# Message thrown when APIs sky.{exec,launch,spot_launch}() received a string
-# instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
-# this.
-_ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
-Expected a sky.Task or sky.Dag but received a string.
-
-If you meant to run a command, make it a Task's run command:
-
-    task = sky.Task(run=command)
-
-The command can then be run as:
-
-  sky.exec(task, cluster_name=..., ...)
-  # Or use {'V100': 1}, 'V100:0.5', etc.
-  task.set_resources(sky.Resources(accelerators='V100:1'))
-  sky.exec(task, cluster_name=..., ...)
-
-  sky.launch(task, ...)
-
-  sky.spot_launch(task, ...)
-""".strip()
-
-
-def _convert_to_dag(entrypoint: Any) -> 'sky.Dag':
-    """Convert the entrypoint to a sky.Dag.
-
-    Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
-    """
-    # Not suppressing stacktrace: when calling this via API user may want to
-    # see their own program in the stacktrace. Our CLI impl would not trigger
-    # these errors.
-    if isinstance(entrypoint, str):
-        raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
-    elif isinstance(entrypoint, sky.Dag):
-        return copy.deepcopy(entrypoint)
-    elif isinstance(entrypoint, task_lib.Task):
-        entrypoint = copy.deepcopy(entrypoint)
-        with sky.Dag() as dag:
-            dag.add(entrypoint)
-            dag.name = entrypoint.name
-        return dag
-    else:
-        raise TypeError(
-            'Expected a sky.Task or sky.Dag but received argument of type: '
-            f'{type(entrypoint)}')
 
 
 class Stage(enum.Enum):
@@ -108,8 +56,9 @@ def _maybe_clone_disk_from_cluster(clone_disk_from: Optional[str],
     with rich_utils.safe_status('Creating image from source cluster '
                                 f'{clone_disk_from!r}'):
         image_id = original_cloud.create_image_from_cluster(
-            clone_disk_from,
-            handle.cluster_name_on_cloud,
+            cluster_name=resources_utils.ClusterName(
+                display_name=clone_disk_from,
+                name_on_cloud=handle.cluster_name_on_cloud),
             region=handle.launched_resources.region,
             zone=handle.launched_resources.zone,
         )
@@ -159,9 +108,10 @@ def _execute(
     idle_minutes_to_autostop: Optional[int] = None,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    skip_unnecessary_provisioning: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     """Execute an entrypoint.
@@ -179,8 +129,9 @@ def _execute(
         Note that if errors occur during provisioning/data syncing/setting up,
         the cluster will not be torn down for debugging purposes.
       stream_logs: bool; whether to stream all tasks' outputs to the client.
-      handle: Optional[backends.ResourceHandle]; if provided, execution will use
-        an existing backend cluster handle instead of provisioning a new one.
+      handle: Optional[backends.ResourceHandle]; if provided, execution will
+        attempt to use an existing backend cluster handle instead of
+        provisioning a new one.
       backend: Backend; backend to use for executing the tasks. Defaults to
         CloudVmRayBackend()
       retry_until_up: bool; whether to retry the provisioning until the cluster
@@ -201,6 +152,11 @@ def _execute(
       idle_minutes_to_autostop: int; if provided, the cluster will be set to
         autostop after this many minutes of idleness.
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
+      clone_disk_from: Optional[str]; if set, clone the disk from the specified
+        cluster.
+      skip_unecessary_provisioning: bool; if True, compare the calculated
+        cluster config to the current cluster's config. If they match, shortcut
+        provisioning even if we have Stage.PROVISION.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -209,21 +165,32 @@ def _execute(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    dag = _convert_to_dag(entrypoint)
+
+    dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
+    if not dag.policy_applied:
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster_name,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            ),
+        )
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
-    if task.need_spot_recovery:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Spot recovery is specified in the task. To launch the '
-                'managed spot job, please use: sky spot launch')
+    if any(r.job_recovery is not None for r in task.resources):
+        logger.warning(
+            f'{colorama.Style.DIM}The task has `job_recovery` specified, '
+            'but is launched as an unmanaged job. It will be ignored.'
+            'To enable job recovery, use managed jobs: sky jobs launch.'
+            f'{colorama.Style.RESET_ALL}')
 
     cluster_exists = False
     if cluster_name is not None:
-        existing_handle = global_user_state.get_handle_from_cluster_name(
-            cluster_name)
-        cluster_exists = existing_handle is not None
+        cluster_record = global_user_state.get_cluster_from_name(cluster_name)
+        cluster_exists = cluster_record is not None
         # TODO(woosuk): If the cluster exists, print a warning that
         # `cpus` and `memory` are not used as a job scheduling constraint,
         # unlike `gpus`.
@@ -233,8 +200,12 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if task.num_nodes > 1:
-        requested_features.add(clouds.CloudImplementationFeatures.MULTI_NODE)
+    if controller_utils.Controllers.from_name(cluster_name) is not None:
+        requested_features.add(
+            clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+
+    # Add requested features from the task
+    requested_features |= task.get_required_cloud_features()
 
     backend = backend if backend is not None else backends.CloudVmRayBackend()
     if isinstance(backend, backends.CloudVmRayBackend):
@@ -255,9 +226,14 @@ def _execute(
                             '(after all jobs finish).'
                             f'{colorama.Style.RESET_ALL}')
                 idle_minutes_to_autostop = 1
-            stages.remove(Stage.DOWN)
-            if not down:
-                requested_features.add(clouds.CloudImplementationFeatures.STOP)
+            if Stage.DOWN in stages:
+                stages.remove(Stage.DOWN)
+            if idle_minutes_to_autostop >= 0:
+                requested_features.add(
+                    clouds.CloudImplementationFeatures.AUTO_TERMINATE)
+                if not down:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.STOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
@@ -274,17 +250,20 @@ def _execute(
                                               task)
 
     if not cluster_exists:
+        # If spot is launched on serve or jobs controller, we don't need to
+        # print out the hint.
         if (Stage.PROVISION in stages and task.use_spot and
-                not _is_launched_by_spot_controller):
+                not _is_launched_by_jobs_controller and
+                not _is_launched_by_sky_serve_controller):
             yellow = colorama.Fore.YELLOW
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
             logger.info(
                 f'{yellow}Launching an unmanaged spot task, which does not '
                 f'automatically recover from preemptions.{reset}\n{yellow}To '
-                'get automatic recovery, use managed spot instead: '
-                f'{reset}{bold}sky spot launch{reset} {yellow}or{reset} '
-                f'{bold}sky.spot_launch(){reset}.')
+                'get automatic recovery, use managed job instead: '
+                f'{reset}{bold}sky jobs launch{reset} {yellow}or{reset} '
+                f'{bold}sky.jobs.launch(){reset}.')
 
         if Stage.OPTIMIZE in stages:
             if task.best_resources is None:
@@ -295,6 +274,13 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
+
+                    controller = controller_utils.Controllers.from_name(
+                        cluster_name)
+                    if controller is not None:
+                        logger.info(
+                            f'Choosing resources for {controller.value.name}...'
+                        )
                     dag = sky.optimize(dag, minimize=optimize_target)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
@@ -309,13 +295,18 @@ def _execute(
 
     try:
         if Stage.PROVISION in stages:
-            if handle is None:
-                handle = backend.provision(task,
-                                           task.best_resources,
-                                           dryrun=dryrun,
-                                           stream_logs=stream_logs,
-                                           cluster_name=cluster_name,
-                                           retry_until_up=retry_until_up)
+            assert handle is None or skip_unnecessary_provisioning, (
+                'Provisioning requested, but handle is already set. PROVISION '
+                'should be excluded from stages or '
+                'skip_unecessary_provisioning should be set. ')
+            handle = backend.provision(
+                task,
+                task.best_resources,
+                dryrun=dryrun,
+                stream_logs=stream_logs,
+                cluster_name=cluster_name,
+                retry_until_up=retry_until_up,
+                skip_unnecessary_provisioning=skip_unnecessary_provisioning)
 
         if handle is None:
             assert dryrun, ('If not dryrun, handle must be set or '
@@ -323,11 +314,18 @@ def _execute(
             logger.info('Dryrun finished.')
             return None, None
 
-        if Stage.SYNC_WORKDIR in stages and not dryrun:
-            if task.workdir is not None:
-                backend.sync_workdir(handle, task.workdir)
+        do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
+                      task.workdir is not None)
+        do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
+                          (task.file_mounts is not None or
+                           task.storage_mounts is not None))
+        if do_workdir or do_file_mounts:
+            logger.info(ux_utils.starting_message('Mounting files.'))
 
-        if Stage.SYNC_FILE_MOUNTS in stages and not dryrun:
+        if do_workdir:
+            backend.sync_workdir(handle, task.workdir)
+
+        if do_file_mounts:
             backend.sync_file_mounts(handle, task.file_mounts,
                                      task.storage_mounts)
 
@@ -360,23 +358,6 @@ def _execute(
                 backend.teardown_ephemeral_storage(task)
                 backend.teardown(handle, terminate=True)
     finally:
-        controller = controller_utils.Controllers.from_name(cluster_name)
-        if controller is None and not _is_launched_by_sky_serve_controller:
-            # UX: print live clusters to make users aware (to save costs).
-            #
-            # Don't print if this job is launched by the spot controller,
-            # because spot jobs are serverless, there can be many of them, and
-            # users tend to continuously monitor spot jobs using `sky spot
-            # status`. Also don't print if this job is a skyserve controller
-            # job or launched by a skyserve controller job, because the
-            # redirect for this subprocess.run won't success and it will
-            # pollute the controller logs.
-            #
-            # Disable the usage collection for this status command.
-            env = dict(os.environ,
-                       **{env_options.Options.DISABLE_LOGGING.value: '1'})
-            subprocess_utils.run(
-                'sky status --no-show-spot-jobs --no-show-services', env=env)
         print()
         print('\x1b[?25h', end='')  # Show cursor.
     return job_id, handle
@@ -398,9 +379,10 @@ def launch(
     detach_run: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    fast: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
-    _is_launched_by_spot_controller: bool = False,
+    _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -452,6 +434,8 @@ def launch(
         clone_disk_from: [Experimental] if set, clone the disk from the
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
+        fast: [Experimental] If the cluster is already up and available,
+            skip provisioning and setup steps.
 
     Example:
         .. code-block:: python
@@ -495,22 +479,71 @@ def launch(
         controller_utils.check_cluster_name_not_controller(
             cluster_name, operation_str='sky.launch')
 
+    handle = None
+    stages = None
+    skip_unnecessary_provisioning = False
+    # Check if cluster exists and we are doing fast provisioning
+    if fast and cluster_name is not None:
+        cluster_status, maybe_handle = (
+            backend_utils.refresh_cluster_status_handle(cluster_name))
+        if cluster_status == status_lib.ClusterStatus.INIT:
+            # If the cluster is INIT, it may be provisioning. We want to prevent
+            # concurrent calls from queueing up many sequential reprovision
+            # attempts. Since provisioning will hold the cluster status lock, we
+            # wait to hold that lock by force refreshing the status. This will
+            # block until the cluster finishes provisioning, then correctly see
+            # that it is UP.
+            # TODO(cooperc): If multiple processes launched in parallel see that
+            # the cluster is STOPPED or does not exist, they will still all try
+            # to provision it, since we do not hold the lock continuously from
+            # the status check until the provision call. Fixing this requires a
+            # bigger refactor.
+            cluster_status, maybe_handle = (
+                backend_utils.refresh_cluster_status_handle(
+                    cluster_name,
+                    force_refresh_statuses=[
+                        # If the cluster is INIT, we want to try to grab the
+                        # status lock, which should block until provisioning is
+                        # finished.
+                        status_lib.ClusterStatus.INIT,
+                    ],
+                    # Wait indefinitely to obtain the lock, so that we don't
+                    # have multiple processes launching the same cluster at
+                    # once.
+                    cluster_status_lock_timeout=-1,
+                ))
+        if cluster_status == status_lib.ClusterStatus.UP:
+            handle = maybe_handle
+            stages = [
+                # Provisioning will be short-circuited if the existing
+                # cluster config hash matches the calculated one.
+                Stage.PROVISION,
+                Stage.SYNC_WORKDIR,
+                Stage.SYNC_FILE_MOUNTS,
+                Stage.PRE_EXEC,
+                Stage.EXEC,
+                Stage.DOWN,
+            ]
+            skip_unnecessary_provisioning = True
+
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
         down=down,
         stream_logs=stream_logs,
-        handle=None,
+        handle=handle,
         backend=backend,
         retry_until_up=retry_until_up,
         optimize_target=optimize_target,
+        stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
         detach_run=detach_run,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
-        _is_launched_by_spot_controller=_is_launched_by_spot_controller,
+        skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+        _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
     )
@@ -566,8 +599,9 @@ def exec(  # pylint: disable=redefined-builtin
             submitted.
 
     Raises:
-        ValueError: if the specified cluster does not exist or is not in UP
-            status.
+        ValueError: if the specified cluster is not in UP status.
+        sky.exceptions.ClusterDoesNotExist: if the specified cluster does not
+            exist.
         sky.exceptions.NotSupportedError: if the specified cluster is a
             controller that does not support this operation.
 
@@ -606,109 +640,3 @@ def exec(  # pylint: disable=redefined-builtin
         cluster_name=cluster_name,
         detach_run=detach_run,
     )
-
-
-@usage_lib.entrypoint
-def spot_launch(
-    task: Union['sky.Task', 'sky.Dag'],
-    name: Optional[str] = None,
-    stream_logs: bool = True,
-    detach_run: bool = False,
-    retry_until_up: bool = False,
-):
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a managed spot job.
-
-    Please refer to the sky.cli.spot_launch for the document.
-
-    Args:
-        task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
-          managed spot job.
-        name: Name of the spot job.
-        detach_run: Whether to detach the run.
-
-    Raises:
-        ValueError: cluster does not exist.
-        sky.exceptions.NotSupportedError: the feature is not supported.
-    """
-    entrypoint = task
-    dag_uuid = str(uuid.uuid4().hex[:4])
-
-    dag = _convert_to_dag(entrypoint)
-    assert dag.is_chain(), ('Only single-task or chain DAG is '
-                            'allowed for spot_launch.', dag)
-
-    dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
-
-    task_names = set()
-    for task_ in dag.tasks:
-        if task_.name in task_names:
-            raise ValueError(
-                f'Task name {task_.name!r} is duplicated in the DAG. Either '
-                'change task names to be unique, or specify the DAG name only '
-                'and comment out the task names (so that they will be auto-'
-                'generated) .')
-        task_names.add(task_.name)
-
-    dag_utils.fill_default_spot_config_in_dag_for_spot_launch(dag)
-
-    for task_ in dag.tasks:
-        controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task_, path='spot')
-
-    with tempfile.NamedTemporaryFile(prefix=f'spot-dag-{dag.name}-',
-                                     mode='w') as f:
-        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
-        controller_name = spot.SPOT_CONTROLLER_NAME
-        prefix = spot.SPOT_TASK_YAML_PREFIX
-        remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
-        remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
-        controller_resources = (controller_utils.get_controller_resources(
-            controller_type='spot',
-            controller_resources_config=spot.constants.CONTROLLER_RESOURCES))
-
-        vars_to_fill = {
-            'remote_user_yaml_path': remote_user_yaml_path,
-            'user_yaml_path': f.name,
-            'spot_controller': controller_name,
-            # Note: actual spot cluster name will be <task.name>-<spot job ID>
-            'dag_name': dag.name,
-            'retry_until_up': retry_until_up,
-            'remote_user_config_path': remote_user_config_path,
-            **controller_utils.shared_controller_vars_to_fill(
-                'spot',
-                remote_user_config_path=remote_user_config_path,
-            ),
-        }
-
-        yaml_path = os.path.join(spot.SPOT_CONTROLLER_YAML_PREFIX,
-                                 f'{name}-{dag_uuid}.yaml')
-        common_utils.fill_template(spot.SPOT_CONTROLLER_TEMPLATE,
-                                   vars_to_fill,
-                                   output_path=yaml_path)
-        controller_task = task_lib.Task.from_yaml(yaml_path)
-        assert len(controller_task.resources) == 1, controller_task
-        # Backward compatibility: if the user changed the
-        # spot-controller.yaml.j2 to customize the controller resources,
-        # we should use it.
-        controller_task_resources = list(controller_task.resources)[0]
-        if not controller_task_resources.is_empty():
-            controller_resources = controller_task_resources
-        controller_task.set_resources(controller_resources)
-
-        controller_task.spot_dag = dag
-        assert len(controller_task.resources) == 1
-
-        print(f'{colorama.Fore.YELLOW}'
-              f'Launching managed spot job {dag.name!r} from spot controller...'
-              f'{colorama.Style.RESET_ALL}')
-        print('Launching spot controller...')
-        _execute(
-            entrypoint=controller_task,
-            stream_logs=stream_logs,
-            cluster_name=controller_name,
-            detach_run=detach_run,
-            idle_minutes_to_autostop=constants.
-            CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-            retry_until_up=True,
-        )

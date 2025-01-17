@@ -274,7 +274,7 @@ def test_instance_type_from_cpu_memory(monkeypatch, capfd):
     assert 'n2-highcpu-4' in stdout  # GCP, 4 vCPUs, 4 GB memory
     assert 'c6i.xlarge' in stdout  # AWS, 4 vCPUs, 8 GB memory
     assert 'Standard_F4s_v2' in stdout  # Azure, 4 vCPUs, 8 GB memory
-    assert 'gpu_1x_rtx6000' in stdout  # Lambda, 14 vCPUs, 46 GB memory
+    assert 'cpu_4x_general' in stdout  # Lambda, 4 vCPUs, 16 GB memory
 
     _test_resources_launch(monkeypatch, accelerators='T4')
     stdout, _ = capfd.readouterr()
@@ -468,8 +468,8 @@ def test_invalid_image(monkeypatch):
     assert 'Cloud must be specified' in str(e.value)
 
     with pytest.raises(ValueError) as e:
-        _test_resources(monkeypatch, cloud=sky.Azure(), image_id='some-image')
-    assert 'only supported for AWS/GCP/IBM/OCI' in str(e.value)
+        _test_resources(monkeypatch, cloud=sky.Lambda(), image_id='some-image')
+    assert 'only supported for AWS/GCP/Azure/IBM/OCI/Kubernetes' in str(e.value)
 
 
 def test_valid_image(monkeypatch):
@@ -647,8 +647,6 @@ def _test_optimize_speed(resources: sky.Resources):
 def test_optimize_speed(enable_all_clouds, monkeypatch):
     _test_optimize_speed(sky.Resources(cpus=4))
     for cloud in clouds.CLOUD_REGISTRY.values():
-        if cloud.is_same_cloud(sky.Local()):
-            continue
         _test_optimize_speed(sky.Resources(cloud, cpus='4+'))
     _test_optimize_speed(sky.Resources(cpus='4+', memory='4+'))
     _test_optimize_speed(
@@ -665,7 +663,8 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
     _test_resources_launch(monkeypatch, zone='us-west2-a')
 
     # Maps to AWS.
-    _test_resources_launch(monkeypatch, region='us-east-2')
+    # Not use us-east-2 or us-west-1 as it is also supported by Lambda.
+    _test_resources_launch(monkeypatch, region='eu-south-1')
     _test_resources_launch(monkeypatch, zone='us-west-2a')
 
     # `sky launch`
@@ -690,7 +689,7 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
 
     # Detailed hints.
     # ValueError: Invalid (region None, zone 'us-west-2-a') for any cloud among
-    # [AWS, Azure, GCP, IBM, Lambda, Local, OCI, SCP]. Details:
+    # [AWS, Azure, GCP, IBM, Lambda, OCI, SCP]. Details:
     # Cloud   Hint
     # -----   ----
     # AWS     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west-2a'?
@@ -698,7 +697,6 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
     # GCP     Invalid zone 'us-west-2-a' Did you mean one of these: 'us-west2-a'?
     # IBM     Invalid zone 'us-west-2-a'
     # Lambda  Lambda Cloud does not support zones.
-    # Local   Local cloud does not support zones.
     # OCI     Invalid zone 'us-west-2-a'
     # SCP     SCP Cloud does not support zones.
     with pytest.raises(ValueError) as e:
@@ -741,7 +739,7 @@ def test_disk_tier_mismatch(enable_all_clouds):
             sky.Resources(cloud=cloud, disk_tier=tier)
         for unsupported_tier in (set(resources_utils.DiskTier) -
                                  cloud._SUPPORTED_DISK_TIERS):
-            with pytest.raises(exceptions.NotSupportedError) as e:
+            with pytest.raises(ValueError) as e:
                 sky.Resources(cloud=cloud, disk_tier=unsupported_tier)
             assert f'is not supported' in str(e.value), str(e.value)
 
@@ -768,9 +766,16 @@ def test_optimize_disk_tier(enable_all_clouds):
         map(clouds.CLOUD_REGISTRY.get,
             ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
 
-    # Only AWS, GCP, OCI supports HIGH disk tier.
+    # Only AWS, GCP, Azure, OCI supports HIGH disk tier.
     high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
     high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
     assert high_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get,
-            ['aws', 'gcp', 'oci'])), high_tier_candidates
+            ['aws', 'gcp', 'azure', 'oci'])), high_tier_candidates
+
+    # Only AWS, GCP supports ULTRA disk tier.
+    ultra_tier_resources = sky.Resources(
+        disk_tier=resources_utils.DiskTier.ULTRA)
+    ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
+    assert ultra_tier_candidates == set(
+        map(clouds.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates

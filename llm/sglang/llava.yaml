@@ -1,0 +1,34 @@
+service:
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe: /health
+  # How many replicas to manage.
+  replicas: 2
+
+envs:
+  MODEL_NAME: liuhaotian/llava-v1.6-vicuna-7b
+  TOKENIZER_NAME: llava-hf/llava-1.5-7b-hf
+
+resources:
+  accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
+  ports:
+    - 8000
+
+setup: |
+  conda activate sglang
+  if [ $? -ne 0 ]; then
+    conda create -n sglang python=3.10 -y
+    conda activate sglang
+  fi
+
+  pip list | grep sglang || pip install "sglang[all]"
+  pip list | grep transformers || pip install transformers==4.37.2
+
+
+
+run: |
+  conda activate sglang
+  echo 'Starting sglang openai api server...'
+  export PATH=$PATH:/sbin/
+  python -m sglang.launch_server --model-path $MODEL_NAME --tokenizer-path $TOKENIZER_NAME \
+  --chat-template vicuna_v1.1 --host 0.0.0.0 --port 8000
+

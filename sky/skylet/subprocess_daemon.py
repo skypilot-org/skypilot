@@ -1,28 +1,58 @@
 """Sky subprocess daemon.
-
 Wait for parent_pid to exit, then SIGTERM (or SIGKILL if needed) the child
 processes of proc_pid.
 """
-
 import argparse
+import os
 import sys
 import time
 
 import psutil
-from ray.dashboard.modules.job import common as job_common
-from ray.dashboard.modules.job import sdk as job_sdk
-import requests
 
-from sky.skylet import job_lib
+
+def daemonize():
+    """Detaches the process from its parent process with double-forking.
+
+    This detachment is crucial in the context of SkyPilot and Ray job. When
+    'sky cancel' is executed, it uses Ray's stop job API to terminate the job.
+    Without daemonization, this subprocess_daemon process will still be a child
+    of the parent process which would be terminated along with the parent
+    process, ray::task or the cancel request for jobs, which is launched with
+    Ray job. Daemonization ensures this process survives the 'sky cancel'
+    command, allowing it to prevent orphaned processes of Ray job.
+    """
+    # First fork: Creates a child process identical to the parent
+    if os.fork() > 0:
+        # Parent process exits, allowing the child to run independently
+        sys.exit()
+
+    # Continues to run from first forked child process.
+    # Detach from parent environment.
+    os.setsid()
+
+    # Second fork: Creates a grandchild process
+    if os.fork() > 0:
+        # First child exits, orphaning the grandchild
+        sys.exit()
+    # Continues execution in the grandchild process
+    # This process is now fully detached from the original parent and terminal
+
 
 if __name__ == '__main__':
-
+    daemonize()
     parser = argparse.ArgumentParser()
     parser.add_argument('--parent-pid', type=int, required=True)
     parser.add_argument('--proc-pid', type=int, required=True)
-    parser.add_argument('--local-ray-job-id', type=str, required=False)
+    parser.add_argument(
+        '--initial-children',
+        type=str,
+        default='',
+        help=(
+            'Comma-separated list of initial children PIDs. This is to guard '
+            'against the case where the target process has already terminated, '
+            'while the children are still running.'),
+    )
     args = parser.parse_args()
-    local_ray_job_id = args.local_ray_job_id
 
     process = None
     parent_process = None
@@ -32,57 +62,47 @@ if __name__ == '__main__':
     except psutil.NoSuchProcess:
         pass
 
-    if process is None:
-        sys.exit()
+    # Initialize children list from arguments
+    children = []
+    if args.initial_children:
+        for pid in args.initial_children.split(','):
+            try:
+                child = psutil.Process(int(pid))
+                children.append(child)
+            except (psutil.NoSuchProcess, ValueError):
+                pass
 
-    wait_for_process = False
-    # Local Ray Job ID is only used in the Sky On-prem case.
-    # If Local Ray job id is passed in, wait until the job
-    # is done/cancelled/failed.
-    if local_ray_job_id is None:
-        wait_for_process = True
-    else:
-        try:
-            # Polls the Job submission client to check job status.
-            port = job_lib.get_job_submission_port()
-            client = job_sdk.JobSubmissionClient(f'http://127.0.0.1:{port}')
-            while True:
-                status_info = client.get_job_status(local_ray_job_id)
-                status = status_info.status
-                if status in {
-                        job_common.JobStatus.SUCCEEDED,
-                        job_common.JobStatus.STOPPED,
-                        job_common.JobStatus.FAILED
-                }:
-                    break
-                time.sleep(1)
-        except (requests.exceptions.ConnectionError, RuntimeError) as e:
-            print(e)
-            wait_for_process = True
-
-    if wait_for_process and parent_process is not None:
-        # Wait for either parent or target process to exit.
+    if process is not None and parent_process is not None:
+        # Wait for either parent or target process to exit
         while process.is_running() and parent_process.is_running():
+            try:
+                tmp_children = process.children(recursive=True)
+                if tmp_children:
+                    children = tmp_children
+            except psutil.NoSuchProcess:
+                pass
             time.sleep(1)
 
-    try:
-        children = process.children(recursive=True)
-        children.append(process)
-    except psutil.NoSuchProcess:
+    if process is not None:
+        # Kill the target process first to avoid having more children, or fail
+        # the process due to the children being defunct.
+        children = [process] + children
+
+    if not children:
         sys.exit()
 
-    for pid in children:
+    for child in children:
         try:
-            pid.terminate()
+            child.terminate()
         except psutil.NoSuchProcess:
-            pass
+            continue
 
     # Wait 30s for the processes to exit gracefully.
     time.sleep(30)
 
     # SIGKILL if they're still running.
-    for pid in children:
+    for child in children:
         try:
-            pid.kill()
+            child.kill()
         except psutil.NoSuchProcess:
-            pass
+            continue

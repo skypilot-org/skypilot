@@ -53,12 +53,12 @@ run: |
               'index': node_rank
           }
       }
-  with open(f'/tmp/{os.environ.get("SKYPILOT_JOB_ID")}', 'w') as f:
+  with open(f'/tmp/{os.environ.get("SKYPILOT_TASK_ID")}', 'w') as f:
       json.dump(tf_config, f)
   EOF
   
   # Read and set TF_CONFIG from file
-  export TF_CONFIG=$(cat /tmp/$SKYPILOT_JOB_ID)
+  export TF_CONFIG=$(cat /tmp/$SKYPILOT_TASK_ID)
   echo $TF_CONFIG
   
   # ======== Run the training script ========

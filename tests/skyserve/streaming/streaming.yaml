@@ -1,0 +1,13 @@
+service:
+  readiness_probe: /
+  replicas: 1
+
+resources:
+  cpus: 2+
+  ports: 8080
+
+workdir: tests/skyserve/streaming
+
+setup: pip install fastapi uvicorn
+
+run: python server.py

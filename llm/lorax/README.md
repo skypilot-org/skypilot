@@ -1,7 +1,10 @@
+<!-- $REMOVE -->
 # LoRAX: Multi-LoRA inference server that scales to 1000s of fine-tuned LLMs
+<!-- $END_REMOVE -->
+<!-- $UNCOMMENT# LoRAX: Multi-LoRA Inference Server -->
 
 <p align="center">
-    <img src="https://github.com/predibase/lorax/blob/main/docs/images/lorax_guy.png" alt="LoRAX" style="width:200px;" />
+    <img src="https://i.imgur.com/OUapRYC.png" alt="LoRAX" style="width:200px;" />
 </p>
 
 [LoRAX](https://github.com/predibase/lorax) (LoRA eXchange) is a framework that allows users to serve thousands of fine-tuned LLMs on a single GPU, dramatically reducing the cost of serving without compromising on throughput or latency. It works by dynamically loading multiple fine-tuned "adapters" (LoRAs, etc.) on top of a single base model at runtime. Concurrent requests for different adapters can be processed together in a single batch, allowing LoRAX to maintain near linear throughput scaling as the number of adapters increases.
@@ -37,7 +40,7 @@ sky launch -c lorax-cluster lorax.yaml
 
 By default, this config will deploy `Mistral-7B-Instruct`, but this can be overridden by running `sky launch` with the argument `--env MODEL_ID=<my_model>`.
 
-**NOTE:** This config will launch the instance on a public IP. It's highly recommended to secure the instance within a private subnet. See the [Advanced Configurations](https://skypilot.readthedocs.io/en/latest/reference/config.html#config-yaml) section of the SkyPilot docs for options to run within VPC and setup private IPs.
+**NOTE:** This config will launch the instance on a public IP. It's highly recommended to secure the instance within a private subnet. See the [Advanced Configurations](https://docs.skypilot.co/en/latest/reference/config.html#config-yaml) section of the SkyPilot docs for options to run within VPC and setup private IPs.
 
 ## Prompt LoRAX w/ base model
 
@@ -88,7 +91,7 @@ Here are some other interesting Mistral-7B fine-tuned models to test out:
 - [IlyaGusev/saiga_mistral_7b_lora](https://huggingface.co/IlyaGusev/saiga_mistral_7b_lora): Russian chatbot based on `Open-Orca/Mistral-7B-OpenOrca`.
 - [Undi95/Mistral-7B-roleplay_alpaca-lora](https://huggingface.co/Undi95/Mistral-7B-roleplay_alpaca-lora): Fine-tuned using role-play prompts.
 
-You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=-lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
+You can find more LoRA adapters [here](https://huggingface.co/models?pipeline_tag=text-generation&sort=trending&search=lora), or try fine-tuning your own with [PEFT](https://github.com/huggingface/peft) or [Ludwig](https://ludwig.ai).
 
 ## Stop the deployment
 

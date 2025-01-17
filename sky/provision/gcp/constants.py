@@ -142,7 +142,7 @@ FIREWALL_RULES_TEMPLATE = [
 ]
 
 # A list of permissions required to run SkyPilot on GCP.
-# Keep this in sync with https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
+# Keep this in sync with https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
 VM_MINIMAL_PERMISSIONS = [
     'compute.disks.create',
     'compute.disks.list',
@@ -165,7 +165,10 @@ VM_MINIMAL_PERMISSIONS = [
     'compute.projects.get',
     'compute.zoneOperations.get',
     'iam.roles.get',
-    'iam.serviceAccounts.actAs',
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service-account level.
+    # Check: sky.provision.gcp.config::_is_permission_satisfied
+    # 'iam.serviceAccounts.actAs',
     'iam.serviceAccounts.get',
     'serviceusage.services.enable',
     'serviceusage.services.list',
@@ -174,9 +177,27 @@ VM_MINIMAL_PERMISSIONS = [
     'resourcemanager.projects.getIamPolicy',
 ]
 
+# Permissions implied by GCP built-in roles. We hardcode these here, as we
+# cannot get the permissions of built-in role from the GCP Python API.
+# The lists are not exhaustive, but should cover the permissions listed in
+# VM_MINIMAL_PERMISSIONS.
+# Check: sky.provision.gcp.config::_is_permission_satisfied
+BUILTIN_ROLE_TO_PERMISSIONS = {
+    'roles/iam.serviceAccountUser': ['iam.serviceAccounts.actAs'],
+    'roles/iam.serviceAccountViewer': [
+        'iam.serviceAccounts.get', 'iam.serviceAccounts.getIamPolicy'
+    ],
+    # TODO(zhwu): Add more built-in roles to make the permission check more
+    # robust.
+}
+
 FIREWALL_PERMISSIONS = [
     'compute.firewalls.create',
     'compute.firewalls.delete',
+]
+
+RESERVATION_PERMISSIONS = [
+    'compute.reservations.list',
 ]
 
 TPU_MINIMAL_PERMISSIONS = [
@@ -193,3 +214,9 @@ POLL_INTERVAL = 1
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
 MAX_POLLS_STOP = MAX_POLLS * 8
+
+# MIG constants
+MANAGED_INSTANCE_GROUP_CONFIG = 'managed-instance-group'
+DEFAULT_MANAGED_INSTANCE_GROUP_PROVISION_TIMEOUT = 900  # 15 minutes
+MIG_NAME_PREFIX = 'sky-mig-'
+INSTANCE_TEMPLATE_NAME_PREFIX = 'sky-it-'

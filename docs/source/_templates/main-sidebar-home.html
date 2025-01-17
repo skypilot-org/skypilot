@@ -1,0 +1,16 @@
+{# Displays the TOC-subtree for pages nested under the currently active top-level TOCtree element. #}
+<nav class="bd-docs-nav bd-links" aria-label="{{ _('SkyPilot') }}">
+    <!-- <p class="bd-links__title" role="heading" aria-level="1">{{ _("SkyPilot") }}</p> -->
+    <div class="bd-toc-item navbar-nav">
+    {{- generate_toctree_html(
+    "sidebar",
+    startdepth=0,
+    show_nav_level=theme_show_nav_level | int,
+    maxdepth=theme_navigation_depth | int,
+    collapse=True,
+    includehidden=theme_sidebar_includehidden | tobool,
+    titles_only=True
+    )
+    -}}
+    </div>
+</nav>

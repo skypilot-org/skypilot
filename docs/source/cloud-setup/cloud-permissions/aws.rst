@@ -148,7 +148,7 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
     :align: center
     :alt: AWS Add Policy
 
-8. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy.
+8. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy. Note that enabling S3 access is required to use :ref:`managed-jobs` with `workdir` or `file_mounts` for now.
 
 .. image:: ../../images/screenshots/aws/aws-s3-policy.png
     :width: 80%
@@ -223,7 +223,7 @@ IAM Role Creation
 
 Using a specific VPC
 -----------------------
-By default, SkyPilot uses the "default" VPC in each region.
+By default, SkyPilot uses the "default" VPC in each region. If a region does not have a `default VPC <https://docs.aws.amazon.com/vpc/latest/userguide/work-with-default-vpc.html#create-default-vpc>`_, SkyPilot will not be able to use the region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
 file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``

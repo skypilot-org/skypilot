@@ -1,14 +1,18 @@
 """Analyze the new catalog fetched with the original."""
-
+import typing
 from typing import List
 
-import pandas as pd
-
+from sky.adaptors import common as adaptors_common
 from sky.clouds.service_catalog import common
 
+if typing.TYPE_CHECKING:
+    import pandas as pd
+else:
+    pd = adaptors_common.LazyImport('pandas')
 
-def resource_diff(original_df: pd.DataFrame, new_df: pd.DataFrame,
-                  check_tuple: List[str]) -> pd.DataFrame:
+
+def resource_diff(original_df: 'pd.DataFrame', new_df: 'pd.DataFrame',
+                  check_tuple: List[str]) -> 'pd.DataFrame':
     """Returns the difference between two dataframes."""
     original_resources = original_df[check_tuple]
     new_resources = new_df[check_tuple]
@@ -27,13 +31,11 @@ CLOUD_CHECKS = {
 
 table = {}
 
-for cloud in CLOUD_CHECKS:
+for cloud, current_check_tuple in CLOUD_CHECKS.items():
     result = {}
     print(f'=> Checking {cloud}')
     original_catalog_df = common.read_catalog(f'{cloud}.csv')
     new_catalog_df = pd.read_csv(f'{cloud}.csv')
-
-    current_check_tuple = CLOUD_CHECKS[cloud]
 
     resource_diff_df = resource_diff(original_catalog_df, new_catalog_df,
                                      current_check_tuple)

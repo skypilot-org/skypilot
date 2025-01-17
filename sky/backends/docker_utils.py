@@ -112,7 +112,8 @@ def create_dockerfile(
     dockerfile_contents += '\n' + DOCKERFILE_RUNCMD.format(run_command=cmd)
 
     # Write Dockerfile
-    with open(os.path.join(build_dir, 'Dockerfile'), 'w') as f:
+    with open(os.path.join(build_dir, 'Dockerfile'), 'w',
+              encoding='utf-8') as f:
         f.write(dockerfile_contents)
 
     img_metadata['workdir_name'] = workdir_name
@@ -227,6 +228,6 @@ def bash_codegen(workdir_name: str,
     multiline_cmds = f'cd /{workdir_name}\n{multiline_cmds}'
     script_contents = make_bash_from_multiline(multiline_cmds)
     if out_path:
-        with open(out_path, 'w') as fp:
+        with open(out_path, 'w', encoding='utf-8') as fp:
             fp.write(script_contents)
     return script_contents

@@ -1,6 +1,6 @@
 # SkyServe cancel example
 
-This example demonstrates the redirect support canceling a request.
+This example demonstrates the SkyServe load balancer support canceling a request.
 
 ## Running the example
 
@@ -33,7 +33,7 @@ Client disconnected, stopping computation.
 You can also run
 
 ```bash
-curl -L http://<endpoint>/
+curl http://<endpoint>/
 ```
 
 and manually Ctrl + C to cancel the request and see logs.

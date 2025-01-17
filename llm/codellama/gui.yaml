@@ -38,7 +38,9 @@ run: |
       "model_name": "codellama/CodeLlama-70b-Instruct-hf",
       "api_base": "http://${ENDPOINT}/v1",
       "api_key": "empty",
-      "model_path": "codellama/CodeLlama-70b-Instruct-hf"
+      "model_path": "codellama/CodeLlama-70b-Instruct-hf",
+      "anony_only": false,
+      "api_type": "openai"
     }
   }
   EOF
@@ -47,4 +49,4 @@ run: |
 
   echo 'Starting gradio server...'
   python -u -m fastchat.serve.gradio_web_server --share \
-    --register-openai-compatible-models ~/model_info.json | tee ~/gradio.log
+    --register ~/model_info.json | tee ~/gradio.log

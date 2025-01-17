@@ -257,7 +257,7 @@ class VsphereClient:
         # hard code here. should support configure later.
         profile_name = 'skypilot_policy'
         storage_profile_id = None
-        if len(profile_ids) > 0:
+        if profile_ids:
             profiles = pm.PbmRetrieveContent(profileIds=profile_ids)
             for profile in profiles:
                 if profile_name in profile.name:
@@ -320,8 +320,8 @@ def get_vsphere_credentials(name=None):
     """
     credential_path = os.path.expanduser(CREDENTIALS_PATH)
     assert os.path.exists(
-        credential_path), f' Missing credential file at {credential_path}.'
-    with open(credential_path, 'r') as file:
+        credential_path), f'Missing credential file at {credential_path}.'
+    with open(credential_path, 'r', encoding='utf-8') as file:
         credential = yaml.safe_load(file)
         vcenters = credential['vcenters']
         if name is None:

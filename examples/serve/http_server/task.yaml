@@ -13,7 +13,7 @@ service:
   replicas: 2
 
 resources:
-  ports: 8081
+  ports: 8080
   cpus: 2+
 
 workdir: examples/serve/http_server

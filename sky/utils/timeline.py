@@ -9,6 +9,7 @@ import json
 import os
 import threading
 import time
+import traceback
 from typing import Callable, Optional, Union
 
 import filelock
@@ -48,9 +49,9 @@ class Event:
             'ph': 'B',
             'ts': f'{time.time() * 10 ** 6: .3f}',
         })
+        event_begin['args'] = {'stack': '\n'.join(traceback.format_stack())}
         if self._message is not None:
-            event_begin['args'] = {'message': self._message}
-        global _events
+            event_begin['args']['message'] = self._message
         _events.append(event_begin)
 
     def end(self):
@@ -61,7 +62,6 @@ class Event:
         })
         if self._message is not None:
             event_end['args'] = {'message': self._message}
-        global _events
         _events.append(event_end)
 
     def __enter__(self):
@@ -79,11 +79,9 @@ def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
 class FileLockEvent:
     """Serve both as a file lock and event for the lock."""
 
-    def __init__(self, lockfile: Union[str, os.PathLike]):
+    def __init__(self, lockfile: Union[str, os.PathLike], timeout: float = -1):
         self._lockfile = lockfile
-        # TODO(mraheja): remove pylint disabling when filelock version updated
-        # pylint: disable=abstract-class-instantiated
-        self._lock = filelock.FileLock(self._lockfile)
+        self._lock = filelock.FileLock(self._lockfile, timeout)
         self._hold_lock_event = Event(f'[FileLock.hold]:{self._lockfile}')
 
     def acquire(self):
@@ -127,7 +125,7 @@ def _save_timeline(file_path: str):
         }
     }
     os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-    with open(file_path, 'w') as f:
+    with open(file_path, 'w', encoding='utf-8') as f:
         json.dump(json_output, f)
 
 

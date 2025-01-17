@@ -6,98 +6,60 @@
 # The specific model used here should fit on GPU with 16GB memory.
 #
 # After the script completes, the model checkpoints will be saved in
-# ~/sky_workdir/nemo_experiments/megatron_gpt/checkpoints on the head node.
+# /ckpts (configurable through CHECKPOINT_PATH env var) on the head node.
 #
 # Usage:
-#   sky launch -s -c nemo_gpt nemo_gpt_singlenode.yaml
+#   sky launch -c nemo_gpt nemo_gpt_singlenode.yaml
 #
 #   # Or try on spot A100 GPUs:
 #   sky launch -c nemo_gpt nemo_gpt_singlenode.yaml --use-spot --gpus A100:1
-#
-#   # The setup will take some time (~1 hr), feel free to ctrl-c once the setup script starts
-#   # You can reconnect to log stream using `sky logs nemo_gpt_train`
 #
 #   # Terminate cluster after you're done
 #   sky down nemo_gpt
 
 resources:
-  cpus: 6+
-  accelerators: A100:1
+  cpus: 8+
+  memory: 64+
+  accelerators: A100-80GB:1
+  image_id: docker:nvcr.io/nvidia/nemo:24.05
 
 num_nodes: 1
 
 envs:
-  DATASET_ROOT: $HOME/wiki/
+  DATASET_ROOT: /wiki
+  CHECKPOINT_PATH: /ckpts
+
+
+file_mounts:
+  ${DATASET_ROOT}:
+    source: gs://sky-wiki-data    # This is a read-only bucket provided by SkyPilot for the dataset
+    mode: COPY
 
 setup: |
-  # ============== Dependency Setup ==============
-  conda activate nemo
-  if [ $? -eq 0 ]; then
-      echo "Nemo conda env exists"
-  else
-      echo "Setup start"
+  conda deactivate
   
-      conda create -y --name nemo python==3.10.12
-      conda activate nemo
-  
-      # Install PyTorch
-      pip3 install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu118
-      
-      # Install nemo
+  # Clone NeMo repo if not already present
+  if [ ! -d NeMo ]; then
       git clone https://github.com/NVIDIA/NeMo.git
-      cd NeMo
-      git checkout b4ad7eaa7873d632391d6985aa6b359f39c20bab
-      pip install Cython
-      pip install .[all]
-      cd ..
+      cd NeMo 
+      git checkout 5df8e11255802a2ce2f33db6362e60990e215b64
+  fi
   
-      # Install megatron-core
-      # We install in editable mode because setup.py does not install all 
-      # required modules if we install in non-editable mode.
-      git clone https://github.com/NVIDIA/Megatron-LM
-      cd Megatron-LM
-      git checkout dc21350806361564b8ce61d4a8d247cb195cc5f0
-      pip install -e .  
-      cd ..
-      
-      # Install ninja for faster compilation
-      pip install ninja packaging
-  
-      # Install transformer engine and flash-attn (Takes ~1hr to compile)
-      MAX_JOBS=4 pip install flash-attn==2.0.4 --no-build-isolation # Version upper capped by TransformerEngine
-      MAX_JOBS=4 pip install git+https://github.com/NVIDIA/TransformerEngine.git@stable
-      
-      pip install pytorch-extension
-  
-      # Install Apex
-      git clone https://github.com/NVIDIA/apex.git
-      cd apex
-      git checkout 52e18c894223800cb611682dce27d88050edf1de
-      pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./
-      cd ..
-        
-      # Install gsutil if it doesn't exist
-      if ! command -v gsutil &> /dev/null
-      then
-          pip install gsutil
-      else
-          echo "gsutil exists"
-      fi
+  # Install gsutil if it doesn't exist
+  if ! command -v gsutil &> /dev/null
+  then
+      pip install gsutil
+  else
+      echo "gsutil exists"
   fi
 
 run: |
-  conda activate nemo
-  # ============= Data Download =============
-  # We download pre-processed data from a read-only bucket at gs://sky-wiki-data
-  # For more on how to pre-process data, see nemo_gpt3_preprocessing.yaml
+  conda deactivate
+
+  # Kill any existing megatron processes
+  pkill -f -9 megatron
   
-  if [ -f ${DATASET_ROOT}/hfbpe_gpt_training_data_text_document.bin ]; then
-      echo "Data already downloaded"
-  else
-      echo "Head node downloading data to shared bucket."
-      mkdir -p $DATASET_ROOT
-      gsutil -m cp gs://sky-wiki-data/{gpt2-merges.txt,gpt2-vocab.json,hfbpe_gpt_training_data_text_document.bin,hfbpe_gpt_training_data_text_document.idx} ${DATASET_ROOT}
-  fi 
+  mkdir -p ${CHECKPOINT_PATH}
   
   # ============= Training =============    
   python NeMo/examples/nlp/language_modeling/megatron_gpt_pretraining.py  \
@@ -107,12 +69,13 @@ run: |
     trainer.num_nodes=1 \
     trainer.max_epochs=null \
     trainer.max_steps=300000 \
-    trainer.val_check_interval=300 \
+    trainer.val_check_interval=50 \
     trainer.log_every_n_steps=50 \
     trainer.limit_val_batches=50 \
     trainer.limit_test_batches=50 \
     trainer.accumulate_grad_batches=1 \
     trainer.precision=16 \
+    model.mcore_gpt=True \
     model.micro_batch_size=6 \
     model.global_batch_size=192 \
     model.tensor_model_parallel_size=1 \
@@ -143,6 +106,7 @@ run: |
     exp_manager.resume_if_exists=True \
     exp_manager.resume_ignore_no_checkpoint=True \
     exp_manager.create_checkpoint_callback=True \
+    +exp_manager.checkpoint_callback_params.dirpath=${CHECKPOINT_PATH} \
     exp_manager.checkpoint_callback_params.monitor=val_loss \
     exp_manager.checkpoint_callback_params.save_top_k=3 \
     exp_manager.checkpoint_callback_params.mode=min \

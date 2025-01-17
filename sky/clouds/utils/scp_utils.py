@@ -49,7 +49,7 @@ class Metadata:
 
     def __getitem__(self, instance_id: str) -> Dict[str, Any]:
         assert os.path.exists(self.path), 'Metadata file not found'
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         return metadata.get(instance_id)
 
@@ -57,7 +57,7 @@ class Metadata:
                                                                  Any]]) -> None:
         # Read from metadata file
         if os.path.exists(self.path):
-            with open(self.path, 'r') as f:
+            with open(self.path, 'r', encoding='utf-8') as f:
                 metadata = json.load(f)
         else:
             metadata = {}
@@ -65,35 +65,35 @@ class Metadata:
         if value is None:
             if instance_id in metadata:
                 metadata.pop(instance_id)  # del entry
-            if len(metadata) == 0:
+            if not metadata:
                 if os.path.exists(self.path):
                     os.remove(self.path)
                 return
         else:
             metadata[instance_id] = value
         # Write to metadata file
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f)
 
     def refresh(self, instance_ids: List[str]) -> None:
         """Remove all tags for instances not in instance_ids."""
         if not os.path.exists(self.path):
             return
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
         for instance_id in list(metadata.keys()):
             if instance_id not in instance_ids:
                 del metadata[instance_id]
-        if len(metadata) == 0:
+        if not metadata:
             os.remove(self.path)
             return
-        with open(self.path, 'w') as f:
+        with open(self.path, 'w', encoding='utf-8') as f:
             json.dump(metadata, f)
 
     def keys(self):
         if not os.path.exists(self.path):
             return []
-        with open(self.path, 'r') as f:
+        with open(self.path, 'r', encoding='utf-8') as f:
             metadata = json.load(f)
             return list(metadata.keys())
 
@@ -156,7 +156,7 @@ class SCPClient:
     def __init__(self) -> None:
         self.credentials = os.path.expanduser(CREDENTIALS_PATH)
         assert os.path.exists(self.credentials), 'Credentials not found'
-        with open(self.credentials, 'r') as f:
+        with open(self.credentials, 'r', encoding='utf-8') as f:
             lines = [line.strip() for line in f.readlines() if ' = ' in line]
             self._credentials = {
                 line.split(' = ')[0]: line.split(' = ')[1] for line in lines
@@ -223,6 +223,7 @@ class SCPClient:
     def create_security_group(self, zone_id, vpc, sg_name):
         url = f'{API_ENDPOINT}/security-group/v3/security-groups'
         request_body = {
+            'loggable': False,
             'securityGroupName': sg_name,
             'serviceZoneId': zone_id,
             'vpcId': vpc,
@@ -409,7 +410,7 @@ class SCPClient:
             parameter.append('vpcId=' + vpc_id)
         if sg_name is not None:
             parameter.append('securityGroupName=' + sg_name)
-        if len(parameter) > 0:
+        if parameter:
             url = url + '?' + '&'.join(parameter)
         return self._get(url)
 

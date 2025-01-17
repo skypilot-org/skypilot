@@ -1,4 +1,4 @@
-# sharedfs-pingpong - a demo to illustrate SkyPilot Storage's mounting feature.
+# sharedfs-pingpong - a demo to illustrate SkyPilot's bucket mounting feature.
 #
 # This program implements coordination between processes using a shared file
 # system they can access. Each process reads data from <process-id>.txt, prints

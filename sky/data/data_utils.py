@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import textwrap
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import urllib.parse
 
@@ -15,14 +16,24 @@ from filelock import FileLock
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import aws
+from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.skylet import log_lib
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 Client = Any
 
 logger = sky_logging.init_logger(__name__)
+
+AZURE_CONTAINER_URL = (
+    'https://{storage_account_name}.blob.core.windows.net/{container_name}')
+
+# Retry 5 times by default for delayed propagation to Azure system
+# when creating Storage Account.
+_STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT = 5
 
 
 def split_s3_path(s3_path: str) -> Tuple[str, str]:
@@ -47,6 +58,28 @@ def split_gcs_path(gcs_path: str) -> Tuple[str, str]:
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
+
+
+def split_az_path(az_path: str) -> Tuple[str, str, str]:
+    """Splits Path into Storage account and Container names and Relative Path
+
+    Args:
+        az_path: Container Path,
+          e.g. https://azureopendatastorage.blob.core.windows.net/nyctlc
+
+    Returns:
+        str: Name of the storage account
+        str: Name of the container
+        str: Paths of the file/directory defined within the container
+    """
+    path_parts = az_path.replace('https://', '').split('/')
+    service_endpoint = path_parts.pop(0)
+    service_endpoint_parts = service_endpoint.split('.')
+    storage_account_name = service_endpoint_parts[0]
+    container_name = path_parts.pop(0)
+    path = '/'.join(path_parts)
+
+    return storage_account_name, container_name, path
 
 
 def split_r2_path(r2_path: str) -> Tuple[str, str]:
@@ -90,12 +123,15 @@ def split_cos_path(s3_path: str) -> Tuple[str, str, str]:
     return bucket_name, data_path, region
 
 
-def create_s3_client(region: str = 'us-east-2') -> Client:
+def create_s3_client(region: Optional[str] = None) -> Client:
     """Helper method that connects to Boto3 client for S3 Bucket
 
     Args:
-      region: str; Region name, e.g. us-west-1, us-east-2
+      region: str; Region name, e.g. us-west-1, us-east-2. If None, default
+        region us-east-1 is used.
     """
+    if region is None:
+        region = 'us-east-1'
     return aws.client('s3', region_name=region)
 
 
@@ -121,6 +157,145 @@ def verify_gcs_bucket(name: str) -> bool:
         return True
     except gcp.not_found_exception():
         return False
+
+
+def create_az_client(client_type: str, **kwargs: Any) -> Client:
+    """Helper method that connects to AZ client for diverse Resources.
+
+    Args:
+      client_type: str; specify client type, e.g. storage, resource, container
+
+    Returns:
+        Client object facing AZ Resource of the 'client_type'.
+    """
+    resource_group_name = kwargs.pop('resource_group_name', None)
+    container_url = kwargs.pop('container_url', None)
+    storage_account_name = kwargs.pop('storage_account_name', None)
+    refresh_client = kwargs.pop('refresh_client', False)
+    if client_type == 'container':
+        # We do not assert on resource_group_name as it is set to None when the
+        # container_url is for public container with user access.
+        assert container_url is not None, ('container_url must be provided for '
+                                           'container client')
+        assert storage_account_name is not None, ('storage_account_name must '
+                                                  'be provided for container '
+                                                  'client')
+
+    if refresh_client:
+        azure.get_client.cache_clear()
+
+    subscription_id = azure.get_subscription_id()
+    client = azure.get_client(client_type,
+                              subscription_id,
+                              container_url=container_url,
+                              storage_account_name=storage_account_name,
+                              resource_group_name=resource_group_name)
+    return client
+
+
+def verify_az_bucket(storage_account_name: str, container_name: str) -> bool:
+    """Helper method that checks if the AZ Container exists
+
+    Args:
+      storage_account_name: str; Name of the storage account
+      container_name: str; Name of the container
+
+    Returns:
+      True if the container exists, False otherwise.
+    """
+    container_url = AZURE_CONTAINER_URL.format(
+        storage_account_name=storage_account_name,
+        container_name=container_name)
+    resource_group_name = azure.get_az_resource_group(storage_account_name)
+    container_client = create_az_client(
+        client_type='container',
+        container_url=container_url,
+        storage_account_name=storage_account_name,
+        resource_group_name=resource_group_name)
+    return container_client.exists()
+
+
+def get_az_storage_account_key(
+    storage_account_name: str,
+    resource_group_name: Optional[str] = None,
+    storage_client: Optional[Client] = None,
+    resource_client: Optional[Client] = None,
+) -> Optional[str]:
+    """Returns access key of the given name of storage account.
+
+    Args:
+        storage_account_name: Name of the storage account
+        resource_group_name: Name of the resource group the
+            passed storage account belongs to.
+        storage_clent: Client object facing Storage
+        resource_client: Client object facing Resource
+
+    Returns:
+        One of the two access keys to the given storage account, or None if
+        the account is not found.
+    """
+    if resource_client is None:
+        resource_client = create_az_client('resource')
+    if storage_client is None:
+        storage_client = create_az_client('storage')
+    if resource_group_name is None:
+        resource_group_name = azure.get_az_resource_group(
+            storage_account_name, storage_client)
+    # resource_group_name is None when using a public container or
+    # a private container not belonging to the user.
+    if resource_group_name is None:
+        return None
+
+    attempt = 0
+    backoff = common_utils.Backoff()
+    while True:
+        storage_account_keys = None
+        resources = resource_client.resources.list_by_resource_group(
+            resource_group_name)
+        # resource group is either created or read when Storage initializes.
+        assert resources is not None
+        for resource in resources:
+            if (resource.type == 'Microsoft.Storage/storageAccounts' and
+                    resource.name == storage_account_name):
+                assert storage_account_keys is None
+                keys = storage_client.storage_accounts.list_keys(
+                    resource_group_name, storage_account_name)
+                storage_account_keys = [key.value for key in keys.keys]
+        # If storage account was created right before call to this method,
+        # it is possible to fail to retrieve the key as the creation did not
+        # propagate to Azure yet. We retry several times.
+        if storage_account_keys is None:
+            attempt += 1
+            time.sleep(backoff.current_backoff())
+            if attempt > _STORAGE_ACCOUNT_KEY_RETRIEVE_MAX_ATTEMPT:
+                raise RuntimeError('Failed to obtain key value of storage '
+                                   f'account {storage_account_name!r}. '
+                                   'Check if the storage account was created.')
+            continue
+        # Azure provides two sets of working storage account keys and we use
+        # one of it.
+        storage_account_key = storage_account_keys[0]
+        return storage_account_key
+
+
+def is_az_container_endpoint(endpoint_url: str) -> bool:
+    """Checks if provided url follows a valid container endpoint naming format.
+
+    Args:
+      endpoint_url: Url of container endpoint.
+        e.g. https://azureopendatastorage.blob.core.windows.net/nyctlc
+
+    Returns:
+      bool: True if the endpoint is valid, False otherwise.
+    """
+    # Storage account must be length of 3-24
+    # Reference: https://learn.microsoft.com/en-us/azure/azure-resource-manager/management/resource-name-rules#microsoftstorage # pylint: disable=line-too-long
+    pattern = re.compile(
+        r'^https://([a-z0-9]{3,24})\.blob\.core\.windows\.net(/[^/]+)*$')
+    match = pattern.match(endpoint_url)
+    if match is None:
+        return False
+    return True
 
 
 def create_r2_client(region: str = 'auto') -> Client:
@@ -256,6 +431,7 @@ def _group_files_by_dir(
 def parallel_upload(source_path_list: List[str],
                     filesync_command_generator: Callable[[str, List[str]], str],
                     dirsync_command_generator: Callable[[str, str], str],
+                    log_path: str,
                     bucket_name: str,
                     access_denied_message: str,
                     create_dirs: bool = False,
@@ -271,6 +447,7 @@ def parallel_upload(source_path_list: List[str],
             for a list of files belonging to the same dir.
         dirsync_command_generator: Callable that generates rsync command
             for a directory.
+        log_path: Path to the log file.
         access_denied_message: Message to intercept from the underlying
             upload utility when permissions are insufficient. Used in
             exception handling.
@@ -303,7 +480,7 @@ def parallel_upload(source_path_list: List[str],
         p.starmap(
             run_upload_cli,
             zip(commands, [access_denied_message] * len(commands),
-                [bucket_name] * len(commands)))
+                [bucket_name] * len(commands), [log_path] * len(commands)))
 
 
 def get_gsutil_command() -> Tuple[str, str]:
@@ -344,37 +521,31 @@ def get_gsutil_command() -> Tuple[str, str]:
     return gsutil_alias, alias_gen
 
 
-def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
-    # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
-    # to a log file.
-    with subprocess.Popen(command,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.DEVNULL,
-                          shell=True) as process:
-        stderr = []
-        assert process.stderr is not None  # for mypy
-        while True:
-            line = process.stderr.readline()
-            if not line:
-                break
-            str_line = line.decode('utf-8')
-            stderr.append(str_line)
-            if access_denied_message in str_line:
-                process.kill()
-                with ux_utils.print_exception_no_traceback():
-                    raise PermissionError(
-                        'Failed to upload files to '
-                        'the remote bucket. The bucket does not have '
-                        'write permissions. It is possible that '
-                        'the bucket is public.')
-        returncode = process.wait()
-        if returncode != 0:
-            stderr_str = '\n'.join(stderr)
-            with ux_utils.print_exception_no_traceback():
-                logger.error(stderr_str)
-                raise exceptions.StorageUploadError(
-                    f'Upload to bucket failed for store {bucket_name}. '
-                    'Please check the logs.')
+def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
+                   log_path: str):
+    returncode, stdout, stderr = log_lib.run_with_log(
+        command,
+        log_path,
+        shell=True,
+        require_outputs=True,
+        # We need to use bash as some of the cloud commands uses bash syntax,
+        # such as [[ ... ]]
+        executable='/bin/bash')
+    if access_denied_message in stderr:
+        with ux_utils.print_exception_no_traceback():
+            raise PermissionError('Failed to upload files to '
+                                  'the remote bucket. The bucket does not have '
+                                  'write permissions. It is possible that '
+                                  'the bucket is public.')
+    if returncode != 0:
+        with ux_utils.print_exception_no_traceback():
+            logger.error(stderr)
+            raise exceptions.StorageUploadError(
+                f'Upload to bucket failed for store {bucket_name}. '
+                f'Please check the logs: {log_path}')
+    if not stdout:
+        logger.debug('No file uploaded. This could be due to an error or '
+                     'because all files already exist on the cloud.')
 
 
 def get_cos_regions() -> List[str]:
@@ -468,14 +639,14 @@ class Rclone():
         os.makedirs(os.path.dirname(rclone_config_path), exist_ok=True)
         # create rclone.conf if doesn't exist
         if not os.path.isfile(rclone_config_path):
-            open(rclone_config_path, 'w').close()
+            open(rclone_config_path, 'w', encoding='utf-8').close()
 
         # write back file without profile: [bucket_name]
         # to which the new bucket profile is appended
         with FileLock(rclone_config_path + '.lock'):
             profiles_to_keep = Rclone._remove_bucket_profile_rclone(
                 bucket_name, cloud)
-            with open(f'{rclone_config_path}', 'w') as file:
+            with open(f'{rclone_config_path}', 'w', encoding='utf-8') as file:
                 if profiles_to_keep:
                     file.writelines(profiles_to_keep)
                     if profiles_to_keep[-1].strip():
@@ -492,7 +663,8 @@ class Rclone():
          if bucket exists, else empty string"""
         bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
             bucket_name, cloud)
-        with open(Rclone._RCLONE_ABS_CONFIG_PATH) as file:
+        with open(Rclone._RCLONE_ABS_CONFIG_PATH, 'r',
+                  encoding='utf-8') as file:
             bucket_profile_found = False
             for line in file:
                 if line.lstrip().startswith('#'):  # skip user's comments.
@@ -526,7 +698,7 @@ class Rclone():
                 bucket_name, cloud)
 
             # write back file without profile: [bucket_rclone_profile]
-            with open(f'{rclone_config_path}', 'w') as file:
+            with open(f'{rclone_config_path}', 'w', encoding='utf-8') as file:
                 file.writelines(profiles_to_keep)
 
     @staticmethod
@@ -538,7 +710,7 @@ class Rclone():
             bucket_name, cloud)
         rclone_config_path = Rclone._RCLONE_ABS_CONFIG_PATH
 
-        with open(f'{rclone_config_path}', 'r') as file:
+        with open(f'{rclone_config_path}', 'r', encoding='utf-8') as file:
             lines = file.readlines()  # returns a list of the file's lines
             # delete existing bucket profile matching:
             # '[profile_prefix+bucket_name]'
@@ -562,3 +734,14 @@ class Rclone():
                 lines_to_keep.append(line)
 
         return lines_to_keep
+
+
+def split_oci_path(oci_path: str) -> Tuple[str, str]:
+    """Splits OCI Path into Bucket name and Relative Path to Bucket
+    Args:
+      oci_path: str; OCI Path, e.g. oci://imagenet/train/
+    """
+    path_parts = oci_path.replace('oci://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key

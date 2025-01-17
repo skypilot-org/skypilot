@@ -1,5 +1,8 @@
 name: minimal
 
+resources:
+  use_spot: true
+
 setup: |
   echo "running setup"
   pip install tqdm

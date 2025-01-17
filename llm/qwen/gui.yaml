@@ -1,0 +1,44 @@
+# Starts a GUI server that connects to the Qwen OpenAI API server.
+#
+# Refer to llm/qwen/README.md for more details.
+#
+# Usage:
+#
+#  1. If you have a endpoint started on a cluster (sky launch):
+#     `sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky status --ip qwen):8000`
+#  2. If you have a SkyPilot Service started (sky serve up) called qwen:
+#     `sky launch -c qwen-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint qwen)`
+#
+# After the GUI server is started, you will see a gradio link in the output and
+# you can click on it to open the GUI.
+
+envs:
+  ENDPOINT: x.x.x.x:3031 # Address of the API server running qwen.
+  MODEL_NAME: Qwen/Qwen1.5-72B-Chat
+
+resources:
+  cpus: 2
+
+setup: |
+  conda activate qwen
+  if [ $? -ne 0 ]; then
+    conda create -n qwen python=3.10 -y
+    conda activate qwen
+  fi
+
+  # Install Gradio for web UI.
+  pip install gradio openai
+
+run: |
+  conda activate qwen
+  export PATH=$PATH:/sbin
+  WORKER_IP=$(hostname -I | cut -d' ' -f1)
+  CONTROLLER_PORT=21001
+  WORKER_PORT=21002
+
+  echo 'Starting gradio server...'
+  git clone https://github.com/vllm-project/vllm.git || true
+  python vllm/examples/gradio_openai_chatbot_webserver.py \
+    -m $MODEL_NAME \
+    --port 8811 \
+    --model-url http://$ENDPOINT/v1 | tee ~/gradio.log

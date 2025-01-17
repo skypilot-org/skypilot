@@ -1,4 +1,4 @@
-# A example yaml for serving Mixtral model from Mistral.ai with an OpenAI API.
+# A example yaml for serving Mixtral model from Mistral AI with an OpenAI API.
 # Usage:
 #  1. Launch on a single instance: `sky launch -c mixtral ./serve.yaml`
 #  2. Scale up to multiple instances with a single endpoint:
@@ -11,6 +11,7 @@ service:
       messages:
         - role: user
           content: Hello! What is your name?
+      max_tokens: 1
     initial_delay_seconds: 1200
   replica_policy:
     min_replicas: 2
@@ -26,11 +27,8 @@ setup: |
     conda create -n mixtral -y python=3.10
     conda activate mixtral
   fi
-  # We have to manually install Torch otherwise apex & xformers won't build
-  pip list | grep torch || pip install "torch>=2.0.0"
-
-  pip list | grep vllm || pip install "git+https://github.com/vllm-project/vllm.git"
-  pip install git+https://github.com/huggingface/transformers
+  pip install transformers==4.38.0
+  pip install vllm==0.3.2
   pip list | grep megablocks || pip install megablocks
 
 run: |

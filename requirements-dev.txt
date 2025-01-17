@@ -1,6 +1,6 @@
 # formatting
 yapf==0.32.0
-pylint==2.8.2
+pylint==2.14.5
 # formatting the node_providers code from upstream ray-project/ray project
 black==22.10.0
 # https://github.com/edaniszewski/pylint-quotes

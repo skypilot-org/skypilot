@@ -3,7 +3,6 @@
 import contextlib
 import datetime
 import enum
-import inspect
 import json
 import os
 import time
@@ -12,19 +11,28 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import click
-import requests
 
 import sky
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import inspect
+
+    import requests
+
     from sky import resources as resources_lib
     from sky import status_lib
     from sky import task as task_lib
+else:
+    # requests and inspect cost ~100ms to load, which can be postponed to
+    # collection phase or skipped if user specifies no collection
+    requests = adaptors_common.LazyImport('requests')
+    inspect = adaptors_common.LazyImport('inspect')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -140,6 +148,7 @@ class UsageMessageToReport(MessageToReport):
         #: Requested number of nodes
         self.task_num_nodes: Optional[int] = None  # update_actual_task
         # YAMLs converted to JSON.
+        # TODO: include the skypilot config used in task yaml.
         self.user_task_yaml: Optional[List[Dict[
             str, Any]]] = None  # update_user_task_yaml
         self.actual_task: Optional[List[Dict[str,
@@ -190,6 +199,9 @@ class UsageMessageToReport(MessageToReport):
                 self.task_accelerators = list(resources.accelerators.keys())[0]
                 self.task_num_accelerators = resources.accelerators[
                     self.task_accelerators]
+            else:
+                self.task_accelerators = None
+                self.task_num_accelerators = None
 
     def update_task_id(self, task_id: int):
         self.task_id = task_id
@@ -224,6 +236,9 @@ class UsageMessageToReport(MessageToReport):
                              f'{resources.accelerators}.')
             self.accelerators = list(resources.accelerators.keys())[0]
             self.num_accelerators = resources.accelerators[self.accelerators]
+        else:
+            self.accelerators = None
+            self.num_accelerators = None
 
         self.num_nodes = num_nodes
         self.resources = resources.to_yaml_config()
@@ -361,7 +376,7 @@ def prepare_json_from_yaml_config(
         yaml_info = [yaml_config_or_path]
         comment_lines = []
     else:
-        with open(yaml_config_or_path, 'r') as f:
+        with open(yaml_config_or_path, 'r', encoding='utf-8') as f:
             lines = f.readlines()
             comment_lines = [line for line in lines if line.startswith('#')]
         yaml_info = common_utils.read_yaml_all(yaml_config_or_path)
@@ -404,7 +419,7 @@ def entrypoint_context(name: str, fallback: bool = False):
     if not env_options.Options.DISABLE_LOGGING.get():
         os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
         try:
-            with open(privacy_policy_indicator, 'x'):
+            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
                 click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
         except FileExistsError:
             pass
@@ -425,8 +440,9 @@ def entrypoint_context(name: str, fallback: bool = False):
         with ux_utils.enable_traceback():
             trace = traceback.format_exc()
             messages.usage.stacktrace = trace
-            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+            detailed_reason = getattr(e, 'detailed_reason', None)
+            if detailed_reason is not None:
+                messages.usage.stacktrace += '\nDetails: ' + detailed_reason
             messages.usage.exception = common_utils.remove_color(
                 common_utils.format_exception(e))
         raise
