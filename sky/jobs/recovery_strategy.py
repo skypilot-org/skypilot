@@ -69,7 +69,7 @@ class StrategyExecutor:
 
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
-             task: 'task_lib.Task') -> 'StrategyExecutor':
+             task: 'task_lib.Task', job_id: int) -> 'StrategyExecutor':
         """Create a strategy from a task."""
 
         resource_list = list(task.resources)
@@ -97,7 +97,7 @@ class StrategyExecutor:
                                  from_str(job_recovery_name))
         assert job_recovery_strategy is not None, job_recovery_name
         return job_recovery_strategy(cluster_name, backend, task,
-                                     max_restarts_on_errors)
+                                     max_restarts_on_errors, job_id)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.

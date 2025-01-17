@@ -174,7 +174,7 @@ class JobsController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task)
+            cluster_name, self._backend, task, self._job_id)
         managed_job_state.set_submitted(
             self._job_id,
             task_id,
