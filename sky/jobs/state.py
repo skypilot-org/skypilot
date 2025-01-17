@@ -230,12 +230,12 @@ class ManagedJobStatus(enum.Enum):
     # RECOVERING: The cluster is preempted, and the controller process is
     # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
-    # Terminal statuses
-    # SUCCEEDED: The job is finished successfully.
-    SUCCEEDED = 'SUCCEEDED'
     # CANCELLING: The job is requested to be cancelled by the user, and the
     # controller is cleaning up the cluster.
     CANCELLING = 'CANCELLING'
+    # Terminal statuses
+    # SUCCEEDED: The job is finished successfully.
+    SUCCEEDED = 'SUCCEEDED'
     # CANCELLED: The job is cancelled by the user. When the managed job is in
     # CANCELLED status, the cluster has been cleaned up.
     CANCELLED = 'CANCELLED'
@@ -281,7 +281,6 @@ class ManagedJobStatus(enum.Enum):
             cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER,
-            cls.CANCELLING,
             cls.CANCELLED,
         ]
 

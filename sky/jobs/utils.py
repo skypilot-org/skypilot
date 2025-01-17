@@ -694,10 +694,7 @@ def stream_logs(job_id: Optional[int],
             if job_status is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(f'Job {job_id} not found.')
-            # We shouldn't count CANCELLING as terminal here, the controller is
-            # still cleaning up.
-            if (job_status.is_terminal() and job_status !=
-                    managed_job_state.ManagedJobStatus.CANCELLING):
+            if job_status.is_terminal():
                 # Don't keep waiting. If the log file is not created by this
                 # point, it never will be. This job may have been submitted
                 # using an old version that did not create the log file, so this
@@ -729,6 +726,10 @@ def stream_logs(job_id: Optional[int],
                     print(end='', flush=True)
 
                     # Check if the job if finished.
+                    # TODO(cooperc): The controller can still be
+                    # cleaning up if job is in a terminal status
+                    # (e.g. SUCCEEDED). We want to follow those logs
+                    # too. Use DONE instead?
                     job_status = managed_job_state.get_status(job_id)
                     assert job_status is not None, (job_id, job_name)
                     if job_status.is_terminal():
