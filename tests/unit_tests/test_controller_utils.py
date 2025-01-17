@@ -12,8 +12,8 @@ from sky.utils import controller_utils
 @pytest.mark.parametrize(
     ('controller_type', 'custom_controller_resources_config', 'expected'), [
         ('jobs', {}, {
-            'cpus': '8+',
-            'memory': '3x',
+            'cpus': '4+',
+            'memory': '8x',
             'disk_size': 50
         }),
         ('jobs', {
@@ -21,7 +21,7 @@ from sky.utils import controller_utils
             'disk_size': 100
         }, {
             'cpus': '4+',
-            'memory': '3x',
+            'memory': '8x',
             'disk_size': 100
         }),
         ('serve', {}, {
