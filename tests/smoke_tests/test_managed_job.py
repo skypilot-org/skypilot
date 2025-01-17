@@ -103,7 +103,7 @@ def test_job_pipeline(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'spot-pipeline',
         [
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml -y -d',
+            f'sky jobs launch -n {name} --cloud {generic_cloud} tests/test_yamls/pipeline.yaml -y -d',
             'sleep 5',
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
@@ -173,7 +173,7 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'managed_jobs_pipeline_failed_setup',
         [
-            f'sky jobs launch -n {name} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
+            f'sky jobs launch -n {name} --cloud {generic_cloud} -y -d tests/test_yamls/failed_setup_pipeline.yaml',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
