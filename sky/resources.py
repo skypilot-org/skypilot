@@ -241,6 +241,7 @@ class Resources:
         self._set_accelerators(accelerators, accelerator_args)
 
     def validate(self):
+        self._try_canonicalize_accelerators()
         self._try_validate_and_set_region_zone()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
@@ -575,13 +576,6 @@ class Resources:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
 
-            # Canonicalize the accelerator names.
-            accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(
-                    acc, self._cloud): acc_count
-                for acc, acc_count in accelerators.items()
-            }
-
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
@@ -636,6 +630,22 @@ class Resources:
         """Whether a resource needs cleanup after preemption or failure."""
         assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption_or_failure(self)
+
+    def _try_canonicalize_accelerators(self) -> None:
+        """Try to canonicalize the accelerators attribute.
+
+        We don't canonicalize accelerators during creation of Resources object
+        because it may check Kubernetes accelerators online. It requires
+        Kubernetes credentias which may not be available locally when a remote
+        API server is used.
+        """
+        if self._accelerators is None:
+            return
+        self._accelerators = {
+            accelerator_registry.canonicalize_accelerator_name(
+                acc, self._cloud): acc_count
+            for acc, acc_count in self._accelerators.items()
+        }
 
     def _try_validate_and_set_region_zone(self) -> None:
         """Try to validate and set the region and zone attribute.
