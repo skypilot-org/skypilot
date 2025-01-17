@@ -3693,7 +3693,6 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         if not storages:
             click.echo('No storage(s) to delete.')
             return
-        names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
     if names:
@@ -3707,9 +3706,17 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
                 abort=True,
                 show_default=True)
 
-    request_ids = subprocess_utils.run_in_parallel(sdk.storage_delete, names)
-    for request_id in request_ids:
-        _async_call_or_wait(request_id, async_call, 'sky.storage')
+    request_ids = {}
+    for name in names:
+        request_ids[name] = sdk.storage_delete(name)
+
+    for name, request_id in request_ids.items():
+        try:
+            _async_call_or_wait(request_id, async_call, 'sky.storage')
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
+                         f'{common_utils.format_exception(e, use_bracket=True)}'
+                         f'{colorama.Style.RESET_ALL}')
 
 
 @cli.group(cls=_NaturalOrderGroup, hidden=True)
@@ -3750,18 +3757,6 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@click.option(
-    '--retry-until-up/--no-retry-until-up',
-    '-r/-no-r',
-    default=None,
-    is_flag=True,
-    required=False,
-    help=(
-        '(Default: True; this flag is deprecated and will be removed in a '
-        'future release.) Whether to retry provisioning infinitely until the '
-        'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
-        'applies to launching all managed jobs (both the initial and '
-        'any recovery attempts), not the jobs controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3798,7 +3793,6 @@ def jobs_launch(
     disk_tier: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
-    retry_until_up: Optional[bool],
     yes: bool,
     fast: bool,
     async_call: bool,
@@ -3843,19 +3837,6 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-    # Deprecation. We set the default behavior to be retry until up, and the
-    # flag `--retry-until-up` is deprecated. We can remove the flag in 0.8.0.
-    if retry_until_up is not None:
-        flag_str = '--retry-until-up'
-        if not retry_until_up:
-            flag_str = '--no-retry-until-up'
-        click.secho(
-            f'Flag {flag_str} is deprecated and will be removed in a '
-            'future release (managed jobs will always be retried). '
-            'Please file an issue if this does not work for you.',
-            fg='yellow')
-    else:
-        retry_until_up = True
 
     # Deprecation. The default behavior is fast, and the flag will be removed.
     # The flag was not present in 0.7.x (only nightly), so we will remove before
@@ -3888,7 +3869,6 @@ def jobs_launch(
 
     request_id = managed_jobs.launch(dag,
                                      name,
-                                     retry_until_up=retry_until_up,
                                      fast=fast,
                                      need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
@@ -4080,19 +4060,31 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     required=False,
     help='Query the latest job logs, restarting the jobs controller if stopped.'
 )
+@click.option('--sync-down',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool):
-    """Tail the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool):
+    """Tail or sync down the log of a managed job."""
     log_request_id = None
     try:
-        log_request_id = managed_jobs.tail_logs(name=name,
-                                                job_id=job_id,
-                                                follow=follow,
-                                                controller=controller,
-                                                refresh=refresh)
-        sdk.stream_and_get(log_request_id)
+        if sync_down:
+            managed_jobs.download_logs(name=name,
+                                       job_id=job_id,
+                                       controller=controller,
+                                       refresh=refresh)
+        else:
+            log_request_id = managed_jobs.tail_logs(name=name,
+                                                    job_id=job_id,
+                                                    follow=follow,
+                                                    controller=controller,
+                                                    refresh=refresh)
+            sdk.stream_and_get(log_request_id)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

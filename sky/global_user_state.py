@@ -16,7 +16,6 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
 
-from sky import clouds
 from sky import models
 from sky import sky_logging
 from sky.utils import common_utils
@@ -26,6 +25,7 @@ from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     from sky import backends
+    from sky import clouds
     from sky.data import Storage
 
 logger = sky_logging.init_logger(__name__)
@@ -793,14 +793,14 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
     return [row[0] for row in rows]
 
 
-def get_cached_enabled_clouds() -> List[clouds.Cloud]:
+def get_cached_enabled_clouds() -> List['clouds.Cloud']:
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_ENABLED_CLOUDS_KEY,))
     ret = []
     for (value,) in rows:
         ret = json.loads(value)
         break
-    enabled_clouds: List[clouds.Cloud] = []
+    enabled_clouds: List['clouds.Cloud'] = []
     for c in ret:
         try:
             cloud = registry.CLOUD_REGISTRY.from_str(c)
@@ -908,7 +908,7 @@ def get_storage_names_start_with(starts_with: str) -> List[str]:
 
 
 def get_storage() -> List[Dict[str, Any]]:
-    rows = _DB.cursor.execute('select * from storage')
+    rows = _DB.cursor.execute('SELECT * FROM storage')
     records = []
     for name, launched_at, handle, last_use, status in rows:
         # TODO: use namedtuple instead of dict

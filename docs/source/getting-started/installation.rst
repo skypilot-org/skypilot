@@ -304,7 +304,7 @@ RunPod
 
 .. code-block:: shell
   
-  pip install "runpod>=1.5.1"
+  pip install "runpod>=1.6.1"
   runpod config
 
 

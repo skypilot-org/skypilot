@@ -426,7 +426,7 @@ def launch(
             cluster's job queue. Idleness gets reset whenever setting-up/
             running/pending jobs are found in the job queue. Setting this
             flag is equivalent to running
-            ``sky.launch(..., detach_run=True, ...)`` and then
+            ``sky.launch(...)`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
             will not be autostopped.
         down: Tear down the cluster after all jobs finish (successfully or

@@ -1289,9 +1289,12 @@ def _fill_in_launchable_resources(
                        if resources.cloud is not None else enabled_clouds)
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
-        for cloud in clouds_list:
-            feasible_resources = cloud.get_feasible_launchable_resources(
-                resources, num_nodes=task.num_nodes)
+
+        feasible_list = subprocess_utils.run_in_parallel(
+            lambda cloud, r=resources, n=task.num_nodes:
+            (cloud, cloud.get_feasible_launchable_resources(r, n)),
+            clouds_list)
+        for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
             if feasible_resources.resources_list:

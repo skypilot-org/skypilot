@@ -25,9 +25,9 @@ from sky.utils import log_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
-_SKY_LOG_WAITING_GAP_SECONDS = 1
-_SKY_LOG_WAITING_MAX_RETRY = 5
-_SKY_LOG_TAILING_GAP_SECONDS = 0.2
+SKY_LOG_WAITING_GAP_SECONDS = 1
+SKY_LOG_WAITING_MAX_RETRY = 5
+SKY_LOG_TAILING_GAP_SECONDS = 0.2
 # Peek the head of the lines to check if we need to start
 # streaming when tail > 0.
 PEEK_HEAD_LINES_FOR_START_STREAM = 20
@@ -335,7 +335,7 @@ def _follow_job_logs(file,
             ]:
                 if wait_last_logs:
                     # Wait all the logs are printed before exit.
-                    time.sleep(1 + _SKY_LOG_TAILING_GAP_SECONDS)
+                    time.sleep(1 + SKY_LOG_TAILING_GAP_SECONDS)
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
@@ -344,7 +344,7 @@ def _follow_job_logs(file,
                       flush=True)
                 return
 
-            time.sleep(_SKY_LOG_TAILING_GAP_SECONDS)
+            time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
             status = job_lib.get_status_no_lock(job_id)
 
 
@@ -425,15 +425,15 @@ def tail_logs(job_id: Optional[int],
         retry_cnt += 1
         if os.path.exists(log_path) and status != job_lib.JobStatus.INIT:
             break
-        if retry_cnt >= _SKY_LOG_WAITING_MAX_RETRY:
+        if retry_cnt >= SKY_LOG_WAITING_MAX_RETRY:
             print(
                 f'{colorama.Fore.RED}ERROR: Logs for '
                 f'{job_str} (status: {status.value}) does not exist '
                 f'after retrying {retry_cnt} times.{colorama.Style.RESET_ALL}')
             return
-        print(f'INFO: Waiting {_SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
+        print(f'INFO: Waiting {SKY_LOG_WAITING_GAP_SECONDS}s for the logs '
               'to be written...')
-        time.sleep(_SKY_LOG_WAITING_GAP_SECONDS)
+        time.sleep(SKY_LOG_WAITING_GAP_SECONDS)
         status = job_lib.update_job_status([job_id], silent=True)[0]
 
     start_stream_at = LOG_FILE_START_STREAMING_AT

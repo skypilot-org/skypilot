@@ -1,7 +1,7 @@
 from unittest import mock
 
 from sky.exceptions import ClusterDoesNotExist
-from sky.jobs import recovery_strategy
+from sky.jobs import utils
 
 
 @mock.patch('sky.core.down')
@@ -16,7 +16,7 @@ def test_terminate_cluster_retry_on_value_error(mock_set_internal,
     ]
 
     # Call should succeed after retries
-    recovery_strategy.terminate_cluster('test-cluster')
+    utils.terminate_cluster('test-cluster')
 
     # Verify sky.down was called 3 times
     assert mock_sky_down.call_count == 3
@@ -38,7 +38,7 @@ def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,
     mock_sky_down.side_effect = ClusterDoesNotExist('test-cluster')
 
     # Call should succeed silently
-    recovery_strategy.terminate_cluster('test-cluster')
+    utils.terminate_cluster('test-cluster')
 
     # Verify sky.down was called once
     assert mock_sky_down.call_count == 1

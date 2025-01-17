@@ -10,6 +10,7 @@ import requests
 from sky import sky_logging
 from sky.server import common as server_common
 from sky.server.requests import payloads
+from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -25,7 +26,6 @@ logger = sky_logging.init_logger(__name__)
 def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
-    retry_until_up: bool = False,
     fast: bool = False,
     need_confirmation: bool = False,
 ) -> server_common.RequestId:
@@ -37,7 +37,6 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
         managed job.
         name: Name of the managed job.
-        retry_until_up: Whether to retry until the job is up.
         fast: [Deprecated] Does nothing, and will be removed soon. We will
         always use fast mode as it's fully safe now.
         need_confirmation: Whether to show a confirmation prompt before
@@ -72,7 +71,6 @@ def launch(
     body = payloads.JobsLaunchBody(
         task=dag_str,
         name=name,
-        retry_until_up=retry_until_up,
         fast=fast,
     )
     response = requests.post(
@@ -209,6 +207,49 @@ def tail_logs(name: Optional[str],
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
     )
+    return server_common.get_request_id(response=response)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def download_logs(
+        name: Optional[str],
+        job_id: Optional[int],
+        refresh: bool,
+        controller: bool,
+        local_dir: str = constants.SKY_LOGS_DIRECTORY
+) -> server_common.RequestId:
+    """Sync down logs of managed jobs.
+
+    Please refer to sky.cli.job_logs for documentation.
+
+    Args:
+        name: Name of the managed job to sync down logs.
+        job_id: ID of the managed job to sync down logs.
+        refresh: Whether to restart the jobs controller if it is stopped.
+        controller: Whether to sync down logs from the jobs controller.
+        local_dir: Local directory to sync down logs.
+
+    Returns:
+        The request ID of the sync down logs request.
+
+    Request Raises:
+        ValueError: invalid arguments.
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+    """
+    body = payloads.JobsDownloadLogsBody(
+        name=name,
+        job_id=job_id,
+        refresh=refresh,
+        controller=controller,
+        local_dir=local_dir,
+    )
+    response = requests.post(
+        f'{server_common.get_server_url()}/jobs/download_logs',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None),
+    )
+    # TODO(zhwu): Download the logs from the controller.
     return server_common.get_request_id(response=response)
 
 

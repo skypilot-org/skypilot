@@ -385,10 +385,13 @@ def _usable_subnets(
         raise exc
 
     if not subnets:
+        vpc_msg = (f'Does a default VPC exist in region '
+                   f'{ec2.meta.client.meta.region_name}? ') if (
+                       vpc_id_of_sg is None) else ''
         _skypilot_log_error_and_exit_for_failover(
-            'No usable subnets found, try '
-            'manually creating an instance in your specified region to '
-            'populate the list of subnets and trying this again. '
+            f'No usable subnets found. {vpc_msg}'
+            'Try manually creating an instance in your specified region to '
+            'populate the list of subnets and try again. '
             'Note that the subnet must map public IPs '
             'on instance launch unless you set `use_internal_ips: true` in '
             'the `provider` config.')
@@ -497,6 +500,11 @@ def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
+    # If no VPC is specified, use the default VPC.
+    # We filter only for default VPCs to avoid using subnets that users may
+    # not want SkyPilot to use.
+    if vpc_id_of_sg is None:
+        all_subnets = [s for s in all_subnets if s.vpc.is_default]
     subnets, vpc_id = _usable_subnets(
         ec2,
         user_specified_subnets=None,

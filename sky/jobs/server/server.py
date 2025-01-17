@@ -67,7 +67,22 @@ async def logs(
         request_name='jobs.logs',
         request_body=jobs_logs_body,
         func=core.tail_logs,
-        schedule_type=requests.ScheduleType.NON_BLOCKING,
+        schedule_type=requests.ScheduleType.NON_BLOCKING
+        if jobs_logs_body.refresh else requests.ScheduleType.BLOCKING,
+    )
+
+
+@router.post('/download_logs')
+async def download_logs(
+        request: fastapi.Request,
+        jobs_download_logs_body: payloads.JobsDownloadLogsBody) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='jobs.download_logs',
+        request_body=jobs_download_logs_body,
+        func=core.download_logs,
+        schedule_type=requests.ScheduleType.NON_BLOCKING
+        if jobs_download_logs_body.refresh else requests.ScheduleType.BLOCKING,
     )
 
 

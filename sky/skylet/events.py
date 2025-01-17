@@ -12,6 +12,8 @@ import yaml
 from sky import clouds
 from sky import sky_logging
 from sky.backends import cloud_vm_ray_backend
+from sky.jobs import scheduler as managed_job_scheduler
+from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.serve import serve_utils
 from sky.skylet import autostop_lib
@@ -67,12 +69,13 @@ class JobSchedulerEvent(SkyletEvent):
         job_lib.scheduler.schedule_step(force_update_jobs=True)
 
 
-class ManagedJobUpdateEvent(SkyletEvent):
-    """Skylet event for updating managed job status."""
+class ManagedJobEvent(SkyletEvent):
+    """Skylet event for updating and scheduling managed jobs."""
     EVENT_INTERVAL_SECONDS = 300
 
     def _run(self):
         managed_job_utils.update_managed_job_status()
+        managed_job_scheduler.maybe_schedule_next_jobs()
 
 
 class ServiceUpdateEvent(SkyletEvent):
@@ -116,7 +119,8 @@ class AutostopEvent(SkyletEvent):
             logger.debug('autostop_config not set. Skipped.')
             return
 
-        if job_lib.is_cluster_idle():
+        if (job_lib.is_cluster_idle() and
+                not managed_job_state.get_num_alive_jobs()):
             idle_minutes = (time.time() -
                             autostop_lib.get_last_active_time()) // 60
             logger.debug(

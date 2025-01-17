@@ -567,6 +567,7 @@ def test_tpu_vm_pod():
 
 # ---------- TPU Pod Slice on GKE. ----------
 @pytest.mark.tpu
+@pytest.mark.requires_gke
 @pytest.mark.kubernetes
 def test_tpu_pod_slice_gke():
     name = smoke_tests_utils.get_cluster_name()
@@ -876,6 +877,7 @@ def test_add_and_remove_pod_annotations_with_autostop():
 
 
 # ---------- Container logs from task on Kubernetes ----------
+@pytest.mark.requires_gke
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -1431,6 +1433,7 @@ def test_aws_custom_image():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.requires_gke
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
     'image_id',
@@ -1572,7 +1575,7 @@ def test_azure_disk_tier():
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.Azure.max_cluster_name_length())
-        region = 'westus2'
+        region = 'eastus2'
         test = smoke_tests_utils.Test(
             'azure-disk-tier-' + disk_tier.value,
             [
@@ -1594,7 +1597,7 @@ def test_azure_best_tier_failover():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Azure.max_cluster_name_length())
-    region = 'westus2'
+    region = 'eastus2'
     test = smoke_tests_utils.Test(
         'azure-best-tier-failover',
         [

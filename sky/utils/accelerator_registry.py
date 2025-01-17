@@ -3,6 +3,7 @@ import typing
 from typing import Optional
 
 from sky.clouds import service_catalog
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -30,8 +31,30 @@ if typing.TYPE_CHECKING:
 #
 # Append its case-sensitive canonical name to this list. The name must match
 # `AcceleratorName` in the service catalog.
-
-_accelerator_df = service_catalog.common.read_catalog('common/accelerators.csv')
+_ACCELERATORS = [
+    'A100',
+    'A10G',
+    'Gaudi HL-205',
+    'Inferentia',
+    'Trainium',
+    'K520',
+    'K80',
+    'M60',
+    'Radeon Pro V520',
+    'T4',
+    'T4g',
+    'V100',
+    'V100-32GB',
+    'Virtex UltraScale (VU9P)',
+    'A10',
+    'A100-80GB',
+    'P100',
+    'P40',
+    'Radeon MI25',
+    'P4',
+    'L4',
+    'H100',
+]
 
 # List of non-GPU accelerators that are supported by our backend for job queue
 # scheduling.
@@ -62,14 +85,31 @@ def canonicalize_accelerator_name(accelerator: str,
         return accelerator.lower()
 
     # Common case: do not read the catalog files.
-    df = _accelerator_df[_accelerator_df['AcceleratorName'].str.contains(
-        accelerator, case=False, regex=True)]
-    names = []
-    for name, clouds in df[['AcceleratorName', 'Clouds']].values:
-        if accelerator.lower() == name.lower():
-            return name
-        if cloud_str is None or cloud_str in clouds:
-            names.append(name)
+    mapping = {name.lower(): name for name in _ACCELERATORS}
+    if accelerator.lower() in mapping:
+        return mapping[accelerator.lower()]
+
+    # Listing accelerators can be time-consuming since canonicalizing usually
+    # involves catalog reading with cache not warmed up.
+    with rich_utils.safe_status('Listing accelerators...'):
+        # _ACCELERATORS may not be comprehensive.
+        # Users may manually add new accelerators to the catalogs, or download
+        # new catalogs (that have new accelerators) without upgrading SkyPilot.
+        # To cover such cases, we should search the accelerator name
+        # in the service catalog.
+        searched = service_catalog.list_accelerators(name_filter=accelerator,
+                                                     case_sensitive=False,
+                                                     clouds=cloud_str)
+    names = list(searched.keys())
+
+    # Exact match.
+    if accelerator in names:
+        return accelerator
+
+    if len(names) == 1:
+        return names[0]
+
+    # Do not print an error message here. Optimizer will handle it.
     if not names:
         return accelerator
     if len(names) == 1:

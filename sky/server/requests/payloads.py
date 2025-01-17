@@ -279,7 +279,6 @@ class JobsLaunchBody(RequestBody):
     """The request body for the jobs launch endpoint."""
     task: str
     name: Optional[str]
-    retry_until_up: bool
     fast: bool = False
 
     def to_kwargs(self) -> Dict[str, Any]:
@@ -433,3 +432,12 @@ class StreamBody(pydantic.BaseModel):
     log_path: Optional[str] = None
     tail: Optional[int] = None
     plain_logs: bool = True
+
+
+class JobsDownloadLogsBody(RequestBody):
+    """The request body for the jobs download logs endpoint."""
+    name: Optional[str]
+    job_id: Optional[int]
+    refresh: bool = False
+    controller: bool = False
+    local_dir: str = constants.SKY_LOGS_DIRECTORY
