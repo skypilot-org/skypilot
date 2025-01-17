@@ -692,7 +692,13 @@ def _create_serve_controller_deployment(
     pvc_name = f'{cluster_name_on_cloud}-data'
     _create_persistent_volume_claim(namespace, context, pvc_name)
 
-    mount_path = '/home/sky/.sky/serve'  # TODO(andyl): use a constant here
+    # The reason we mount the whole /home/sky/.sky instead of just
+    # /home/sky/.sky/serve is that k8s changes the ownership of the
+    # mounted directory to root:root. If we only mount /home/sky/.sky/serve,
+    # the serve controller will not be able to create the serve directory.
+    # pylint: disable=line-too-long
+    # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
+    mount_path = '/home/sky/.sky'  # TODO(andyl): use a constant here
     volume_mounts = [{'name': 'serve-data', 'mountPath': mount_path}]
 
     volumes = [{
@@ -712,37 +718,6 @@ def _create_serve_controller_deployment(
             container['volumeMounts'].extend(volume_mounts)
         else:
             container['volumeMounts'] = volume_mounts
-
-    # pod_spec['spec']['securityContext'] = {
-    #     'fsGroup': 1000  # Ensure group permissions for mounted volumes
-    # }
-    # for container in pod_spec['spec']['containers']:
-    #     container['securityContext'] = {
-    #         'runAsUser': 1000,  # Run as sky user
-    #         'runAsGroup': 1000
-    #     }
-
-    # init_container = {
-    #     'name': 'init-fix-permissions',
-    #     'image': 'busybox',
-    #     'command': [
-    #         'sh', '-c',
-    #         (
-    #             'chown -R 1000:1000 /home/sky/.sky && '
-    #             'chmod -R 755 /home/sky/.sky && '
-    #             'mkdir -p /home/sky/.sky/.runtime_files && '
-    #             'chown -R 1000:1000 /home/sky/.sky/.runtime_files && '
-    #             'chmod -R 755 /home/sky/.sky/.runtime_files'
-    #         )
-    #     ],
-    #     'volumeMounts': [
-    #         {'name': 'serve-data', 'mountPath': '/home/sky/.sky/serve'}
-    #     ],
-    # }
-    # if 'initContainers' in pod_spec['spec']:
-    #     pod_spec['spec']['initContainers'].append(init_container)
-    # else:
-    #     pod_spec['spec']['initContainers'] = [init_container]
 
     template_metadata = pod_spec.pop('metadata')
 
@@ -954,9 +929,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             deployment_spec = _create_serve_controller_deployment(
                 pod_spec_copy, cluster_name_on_cloud, namespace, context)
             print('try to create deployment')
-            import yaml
-            with open('deployment_spec.yaml', 'w') as f:
-                yaml.dump(deployment_spec, f)
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(
