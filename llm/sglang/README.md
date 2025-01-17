@@ -21,7 +21,7 @@ sky check
 ```
 
 ## Serving vision-language model LLaVA with SGLang for more traffic using SkyServe
-1. Create a [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html) with a  `service` section:
+1. Create a [`SkyServe Service YAML`](https://docs.skypilot.co/en/latest/serving/service-yaml-spec.html) with a  `service` section:
 
 ```yaml
 service:
@@ -33,7 +33,7 @@ service:
 
 The entire Service YAML can be found here: [llava.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/sglang/llava.yaml).
 
-2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
 sky serve up -n sglang-llava llava.yaml
 ```
@@ -63,7 +63,7 @@ ENDPOINT=$(sky serve status --endpoint sglang-llava)
 
 4. Once it status is `READY`, you can use the endpoint to talk to the model with both text and image inputs:
 <figure align="center">
-  <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/examples/quick_start/images/cat.jpeg" alt="" width="50%">
+  <img src="https://raw.githubusercontent.com/sgl-project/sglang/main/examples/frontend_language/quick_start/images/cat.jpeg" alt="" width="50%">
   <figcaption>Input image to the LLaVA model.</figcaption>
 </figure>
 
@@ -80,7 +80,7 @@ curl $ENDPOINT/v1/chat/completions \
             {
                 "type": "image_url",
                 "image_url": {
-                    "url": "https://raw.githubusercontent.com/sgl-project/sglang/main/examples/quick_start/images/cat.jpeg"
+                    "url": "https://raw.githubusercontent.com/sgl-project/sglang/main/examples/frontend_language/quick_start/images/cat.jpeg"
                 }
             }
         ]
@@ -117,7 +117,7 @@ You should get a similar response as the following:
 ## Serving Llama-2 with SGLang for more traffic using SkyServe
 1. The process is the same as serving LLaVA, but with the model path changed to Llama-2. Below are example commands for reference.
 
-2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
 sky serve up -n sglang-llama2 llama2.yaml --env HF_TOKEN=<your-huggingface-token>
 ```

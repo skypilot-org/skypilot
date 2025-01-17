@@ -2,11 +2,13 @@
 import json
 import os
 import textwrap
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import yaml
 
+from sky import serve
 from sky.serve import constants
+from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -29,13 +31,7 @@ class SkyServiceSpec:
         base_ondemand_fallback_replicas: Optional[int] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
-        # The following arguments are deprecated.
-        # TODO(ziming): remove this after 2 minor release, i.e. 0.6.0.
-        # Deprecated: Always be True
-        auto_restart: Optional[bool] = None,
-        # Deprecated: replaced by the target_qps_per_replica.
-        qps_upper_threshold: Optional[float] = None,
-        qps_lower_threshold: Optional[float] = None,
+        load_balancing_policy: Optional[str] = None,
     ) -> None:
         if max_replicas is not None and max_replicas < min_replicas:
             with ux_utils.print_exception_no_traceback():
@@ -62,21 +58,13 @@ class SkyServiceSpec:
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
-        # TODO(tian): Following field are deprecated. Remove after 2 minor
-        # release, i.e. 0.6.0.
-        if qps_upper_threshold is not None or qps_lower_threshold is not None:
+        # Add the check for unknown load balancing policies
+        if (load_balancing_policy is not None and
+                load_balancing_policy not in serve.LB_POLICIES):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    'Field `qps_upper_threshold` and `qps_lower_threshold`'
-                    'under `replica_policy` are deprecated. '
-                    'Please use target_qps_per_replica instead.')
-        if auto_restart is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Field `auto_restart` under `replica_policy` is deprecated.'
-                    'Currently, SkyServe will cleanup failed replicas'
-                    'and auto restart it to keep the service running.')
-
+                    f'Unknown load balancing policy: {load_balancing_policy}. '
+                    f'Available policies: {list(serve.LB_POLICIES.keys())}')
         self._readiness_path: str = readiness_path
         self._initial_delay_seconds: int = initial_delay_seconds
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
@@ -91,6 +79,7 @@ class SkyServiceSpec:
             int] = base_ondemand_fallback_replicas
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
+        self._load_balancing_policy: Optional[str] = load_balancing_policy
 
         self._use_ondemand_fallback: bool = (
             self.dynamic_ondemand_fallback is not None and
@@ -160,14 +149,8 @@ class SkyServiceSpec:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
-            service_config['qps_upper_threshold'] = policy_section.get(
-                'qps_upper_threshold', None)
-            service_config['qps_lower_threshold'] = policy_section.get(
-                'qps_lower_threshold', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
-            service_config['auto_restart'] = policy_section.get(
-                'auto_restart', None)
             service_config['upscale_delay_seconds'] = policy_section.get(
                 'upscale_delay_seconds', None)
             service_config['downscale_delay_seconds'] = policy_section.get(
@@ -178,6 +161,8 @@ class SkyServiceSpec:
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
 
+        service_config['load_balancing_policy'] = config.get(
+            'load_balancing_policy', None)
         return SkyServiceSpec(**service_config)
 
     @staticmethod
@@ -201,9 +186,12 @@ class SkyServiceSpec:
         return SkyServiceSpec.from_yaml_config(config['service'])
 
     def to_yaml_config(self) -> Dict[str, Any]:
-        config = dict()
+        config: Dict[str, Any] = {}
 
-        def add_if_not_none(section, key, value, no_empty: bool = False):
+        def add_if_not_none(section: str,
+                            key: Optional[str],
+                            value: Any,
+                            no_empty: bool = False):
             if no_empty and not value:
                 return
             if value is not None:
@@ -233,6 +221,8 @@ class SkyServiceSpec:
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
                         self.downscale_delay_seconds)
+        add_if_not_none('load_balancing_policy', None,
+                        self._load_balancing_policy)
         return config
 
     def probe_str(self):
@@ -244,8 +234,8 @@ class SkyServiceSpec:
                    ' with custom headers')
         return f'{method}{headers}'
 
-    def spot_policy_str(self):
-        policy_strs = []
+    def spot_policy_str(self) -> str:
+        policy_strs: List[str] = []
         if (self.dynamic_ondemand_fallback is not None and
                 self.dynamic_ondemand_fallback):
             policy_strs.append('Dynamic on-demand fallback')
@@ -284,6 +274,7 @@ class SkyServiceSpec:
             Readiness probe timeout seconds:  {self.readiness_timeout_seconds}
             Replica autoscaling policy:       {self.autoscaling_policy_str()}
             Spot Policy:                      {self.spot_policy_str()}
+            Load Balancing Policy:            {self.load_balancing_policy}
         """)
 
     @property
@@ -338,3 +329,8 @@ class SkyServiceSpec:
     @property
     def use_ondemand_fallback(self) -> bool:
         return self._use_ondemand_fallback
+
+    @property
+    def load_balancing_policy(self) -> str:
+        return lb_policies.LoadBalancingPolicy.make_policy_name(
+            self._load_balancing_policy)

@@ -2,10 +2,14 @@
 import dataclasses
 import enum
 import itertools
+import json
+import math
 import re
 import typing
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 
+from sky import skypilot_config
+from sky.clouds import cloud_registry
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -133,32 +137,46 @@ def simplify_ports(ports: List[str]) -> List[str]:
     return port_set_to_ranges(port_ranges_to_set(ports))
 
 
+def format_resource(resource: 'resources_lib.Resources',
+                    simplify: bool = False) -> str:
+    if simplify:
+        cloud = resource.cloud
+        if resource.accelerators is None:
+            vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
+                resource.instance_type)
+            hardware = f'vCPU={int(vcpu)}'
+        else:
+            hardware = f'{resource.accelerators}'
+        spot = '[Spot]' if resource.use_spot else ''
+        return f'{cloud}({spot}{hardware})'
+    else:
+        # accelerator_args is way too long.
+        # Convert from:
+        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
+        # to:
+        #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
+        pattern = ', accelerator_args={.*}'
+        launched_resource_str = re.sub(pattern, '...', str(resource))
+        return launched_resource_str
+
+
 def get_readable_resources_repr(handle: 'backends.CloudVmRayResourceHandle',
                                 simplify: bool = False) -> str:
     if (handle.launched_nodes is not None and
             handle.launched_resources is not None):
-        if simplify:
-            cloud = handle.launched_resources.cloud
-            if handle.launched_resources.accelerators is None:
-                vcpu, _ = cloud.get_vcpus_mem_from_instance_type(
-                    handle.launched_resources.instance_type)
-                hardware = f'vCPU={int(vcpu)}'
-            else:
-                hardware = f'{handle.launched_resources.accelerators}'
-            spot = '[Spot]' if handle.launched_resources.use_spot else ''
-            return f'{handle.launched_nodes}x {cloud}({spot}{hardware})'
-        else:
-            launched_resource_str = str(handle.launched_resources)
-            # accelerator_args is way too long.
-            # Convert from:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}, accelerator_args={'runtime_version': '2.12.0'}  # pylint: disable=line-too-long
-            # to:
-            #  GCP(n1-highmem-8, {'tpu-v2-8': 1}...)
-            pattern = ', accelerator_args={.*}'
-            launched_resource_str = re.sub(pattern, '...',
-                                           launched_resource_str)
-            return f'{handle.launched_nodes}x {launched_resource_str}'
+        return (f'{handle.launched_nodes}x '
+                f'{format_resource(handle.launched_resources, simplify)}')
     return _DEFAULT_MESSAGE_HANDLE_INITIALIZING
+
+
+def make_ray_custom_resources_str(
+        resource_dict: Optional[Dict[str, Union[int, float]]]) -> Optional[str]:
+    """Convert resources to Ray custom resources format."""
+    if resource_dict is None:
+        return None
+    # Ray does not allow fractional resources, so we need to ceil the values.
+    ceiled_dict = {k: math.ceil(v) for k, v in resource_dict.items()}
+    return json.dumps(ceiled_dict, separators=(',', ':'))
 
 
 @dataclasses.dataclass
@@ -177,3 +195,24 @@ class FeasibleResources:
     resources_list: List['resources_lib.Resources']
     fuzzy_candidate_list: List[str]
     hint: Optional[str]
+
+
+def need_to_query_reservations() -> bool:
+    """Checks if we need to query reservations from cloud APIs.
+
+    We need to query reservations if:
+    - The cloud has specific reservations.
+    - The cloud prioritizes reservations over on-demand instances.
+
+    This is useful to skip the potentially expensive reservation query for
+    clouds that do not use reservations.
+    """
+    for cloud_str in cloud_registry.CLOUD_REGISTRY.keys():
+        cloud_specific_reservations = skypilot_config.get_nested(
+            (cloud_str, 'specific_reservations'), None)
+        cloud_prioritize_reservations = skypilot_config.get_nested(
+            (cloud_str, 'prioritize_reservations'), False)
+        if (cloud_specific_reservations is not None or
+                cloud_prioritize_reservations):
+            return True
+    return False

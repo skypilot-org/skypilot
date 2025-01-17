@@ -14,7 +14,7 @@ from sky.utils import ux_utils
 POLL_INTERVAL = 5
 MAX_POLLS = 60 // POLL_INTERVAL
 # Stopping instances can take several minutes, so we increase the timeout
-MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 8
+MAX_POLLS_FOR_UP_OR_STOP = MAX_POLLS * 16
 
 logger = sky_logging.init_logger(__name__)
 
@@ -286,12 +286,13 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
+    # https://docs.digitalocean.com/reference/paperspace/core/commands/machines/#show
     status_map = {
         'starting': status_lib.ClusterStatus.INIT,
         'restarting': status_lib.ClusterStatus.INIT,
         'upgrading': status_lib.ClusterStatus.INIT,
         'provisioning': status_lib.ClusterStatus.INIT,
-        'stopping': status_lib.ClusterStatus.INIT,
+        'stopping': status_lib.ClusterStatus.STOPPED,
         'serviceready': status_lib.ClusterStatus.INIT,
         'ready': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,

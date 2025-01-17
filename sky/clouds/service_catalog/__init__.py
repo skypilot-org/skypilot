@@ -10,6 +10,7 @@ from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -31,8 +32,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if single:
         clouds = [clouds]  # type: ignore
 
-    results = []
-    for cloud in clouds:
+    def _execute_catalog_method(cloud: str):
         try:
             cloud_module = importlib.import_module(
                 f'sky.clouds.service_catalog.{cloud.lower()}_catalog')
@@ -46,7 +46,11 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
             raise AttributeError(
                 f'Module "{cloud}_catalog" does not '
                 f'implement the "{method_name}" method') from None
-        results.append(method(*args, **kwargs))
+        return method(*args, **kwargs)
+
+    results = subprocess_utils.run_in_parallel(_execute_catalog_method,
+                                               args=list(clouds),
+                                               num_threads=len(clouds))
     if single:
         return results[0]
     return results
@@ -238,7 +242,7 @@ def get_default_instance_type(cpus: Optional[str] = None,
 
 def get_accelerators_from_instance_type(
         instance_type: str,
-        clouds: CloudFilter = None) -> Optional[Dict[str, int]]:
+        clouds: CloudFilter = None) -> Optional[Dict[str, Union[int, float]]]:
     """Returns the accelerators from a instance type."""
     return _map_clouds_catalog(clouds, 'get_accelerators_from_instance_type',
                                instance_type)
@@ -324,9 +328,8 @@ def get_common_gpus() -> List[str]:
         'A100',
         'A100-80GB',
         'H100',
-        'K80',
         'L4',
-        'M60',
+        'L40S',
         'P100',
         'T4',
         'V100',
@@ -337,13 +340,13 @@ def get_common_gpus() -> List[str]:
 def get_tpus() -> List[str]:
     """Returns a list of TPU names."""
     # TODO(wei-lin): refactor below hard-coded list.
-    # There are many TPU configurations available, we show the three smallest
-    # and the largest configuration for the latest gen TPUs.
+    # There are many TPU configurations available, we show the some smallest
+    # ones for each generation, and people should find larger ones with
+    # sky show-gpus tpu.
     return [
-        'tpu-v2-512', 'tpu-v3-2048', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
-        'tpu-v4-3968', 'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8',
-        'tpu-v5litepod-256', 'tpu-v5p-8', 'tpu-v5p-32', 'tpu-v5p-128',
-        'tpu-v5p-12288'
+        'tpu-v2-8', 'tpu-v3-8', 'tpu-v4-8', 'tpu-v4-16', 'tpu-v4-32',
+        'tpu-v5litepod-1', 'tpu-v5litepod-4', 'tpu-v5litepod-8', 'tpu-v5p-8',
+        'tpu-v5p-16', 'tpu-v5p-32', 'tpu-v6e-1', 'tpu-v6e-4', 'tpu-v6e-8'
     ]
 
 

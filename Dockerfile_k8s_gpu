@@ -7,7 +7,7 @@ ARG DEBIAN_FRONTEND=noninteractive
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
@@ -36,24 +36,20 @@ SHELL ["/bin/bash", "-c"]
 
 # Install conda and other dependencies
 # Keep the conda and Ray versions below in sync with the ones in skylet.constants
+# Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
 RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
     bash Miniconda3-Linux-x86_64.sh -b && \
     eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
     grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
     rm Miniconda3-Linux-x86_64.sh && \
-    pip install wheel Click colorama cryptography jinja2 jsonschema networkx  \
-    oauth2client pandas pendulum PrettyTable rich tabulate filelock packaging  \
-    'protobuf<4.0.0' pulp pycryptodome==3.12.0 docker kubernetes==28.1.0  \
-    grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
+    export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    python3 -m venv ~/skypilot-runtime && \
+    PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
+    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
     curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# Add /home/sky/.local/bin/ to PATH
-RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
-
-# Copy SkyPilot code base. This is required for the ssh jump pod to find the
-# lifecycle management scripts
-COPY --chown=sky . /skypilot/sky/
+    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

@@ -105,6 +105,7 @@ from sky.data import StorageMode
 from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
+from sky.jobs import ManagedJobStatus
 # TODO (zhwu): These imports are for backward compatibility, and spot APIs
 # should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
 from sky.jobs.core import spot_cancel
@@ -128,6 +129,7 @@ GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
 Kubernetes = clouds.Kubernetes
+K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
@@ -143,6 +145,7 @@ __all__ = [
     'GCP',
     'IBM',
     'Kubernetes',
+    'K8s',
     'Lambda',
     'OCI',
     'Paperspace',
@@ -161,6 +164,7 @@ __all__ = [
     'StoreType',
     'ClusterStatus',
     'JobStatus',
+    'ManagedJobStatus',
     # APIs
     'Dag',
     'Task',

@@ -96,7 +96,7 @@ When the service is up, we can check the status of the service and the replicas 
     http-server   3   1        -                          1 mins ago  1x GCP(vCPU=2)        PROVISIONING  us-east1     
     http-server   4   1        -                          1 min ago   1x GCP(vCPU=2)        PROVISIONING  us-central1
 
-When the required number of spot replicas are not available, SkyServe will provision the number of on-demand replicas needed to meet the target number of replicas. For example, when the target number is 2 and only 1 spot replica is ready, SkyServe will provision 1 on-demand replica to meet the target number of replicas. 
+When the required number of spot replicas are not available, SkyServe will provision on-demand replicas to meet the target number of replicas. For example, when the target number is 2 and no spot replicas are ready, SkyServe will provision 2 on-demand replicas to meet the target number of replicas. 
 
 .. code-block:: console
 

@@ -20,7 +20,7 @@ SETUP_ENV_VARS_CMD = (
     '{ if [ $(id -u) -ne 0 ]; then echo "sudo"; else echo ""; fi; } && '
     'printenv | while IFS=\'=\' read -r key value; do echo "export $key=\\\"$value\\\""; done > '  # pylint: disable=line-too-long
     '~/container_env_var.sh && '
-    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh'
+    '$(prefix_cmd) mv ~/container_env_var.sh /etc/profile.d/container_env_var.sh;'
 )
 
 # Docker daemon may not be ready when the machine is firstly started. The error
@@ -37,6 +37,13 @@ class DockerLoginConfig:
     username: str
     password: str
     server: str
+
+    def format_image(self, image: str) -> str:
+        """Format the image name with the server prefix."""
+        server_prefix = f'{self.server}/'
+        if not image.startswith(server_prefix):
+            return f'{server_prefix}{image}'
+        return image
 
     @classmethod
     def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
@@ -220,9 +227,7 @@ class DockerInitializer:
                 wait_for_docker_daemon=True)
             # We automatically add the server prefix to the image name if
             # the user did not add it.
-            server_prefix = f'{docker_login_config.server}/'
-            if not specific_image.startswith(server_prefix):
-                specific_image = f'{server_prefix}{specific_image}'
+            specific_image = docker_login_config.format_image(specific_image)
 
         if self.docker_config.get('pull_before_run', True):
             assert specific_image, ('Image must be included in config if ' +
@@ -253,12 +258,13 @@ class DockerInitializer:
             # issue with nvidia container toolkit:
             # https://github.com/NVIDIA/nvidia-container-toolkit/issues/48
             self._run(
-                '[ -f /etc/docker/daemon.json ] || '
+                '{ which jq || sudo apt update && sudo apt install -y jq; } && '
+                '{ [ -f /etc/docker/daemon.json ] || '
                 'echo "{}" | sudo tee /etc/docker/daemon.json;'
                 'sudo jq \'.["exec-opts"] = ["native.cgroupdriver=cgroupfs"]\' '
                 '/etc/docker/daemon.json > /tmp/daemon.json;'
                 'sudo mv /tmp/daemon.json /etc/docker/daemon.json;'
-                'sudo systemctl restart docker')
+                'sudo systemctl restart docker; } || true')
             user_docker_run_options = self.docker_config.get('run_options', [])
             start_command = docker_start_cmds(
                 specific_image,
@@ -335,12 +341,22 @@ class DockerInitializer:
 
     def _check_docker_installed(self):
         no_exist = 'NoExist'
-        cleaned_output = self._run(
-            f'command -v {self.docker_cmd} || echo {no_exist!r}')
-        if no_exist in cleaned_output or 'docker' not in cleaned_output:
-            logger.error(
-                f'{self.docker_cmd.capitalize()} not installed. Please use an '
-                f'image with {self.docker_cmd.capitalize()} installed.')
+        # SkyPilot: Add the current user to the docker group first (if needed),
+        # before checking if docker is installed to avoid permission issues.
+        docker_cmd = ('id -nG $USER | grep -qw docker || '
+                      'sudo usermod -aG docker $USER > /dev/null 2>&1;'
+                      f'command -v {self.docker_cmd} || echo {no_exist!r}')
+        cleaned_output = self._run(docker_cmd)
+        timeout = 60 * 10  # 10 minute timeout
+        start = time.time()
+        while no_exist in cleaned_output or 'docker' not in cleaned_output:
+            if time.time() - start > timeout:
+                logger.error(
+                    f'{self.docker_cmd.capitalize()} not installed. Please use '
+                    f'an image with {self.docker_cmd.capitalize()} installed.')
+                return
+            time.sleep(5)
+            cleaned_output = self._run(docker_cmd)
 
     def _check_container_status(self):
         if self.initialized:
@@ -424,8 +440,8 @@ class DockerInitializer:
     def _check_container_exited(self) -> bool:
         if self.initialized:
             return True
-        output = (self._run(check_docker_running_cmd(self.container_name,
-                                                     self.docker_cmd),
-                            wait_for_docker_daemon=True))
-        return 'false' in output.lower(
-        ) and 'no such object' not in output.lower()
+        output = self._run(check_docker_running_cmd(self.container_name,
+                                                    self.docker_cmd),
+                           wait_for_docker_daemon=True)
+        return ('false' in output.lower() and
+                'no such object' not in output.lower())
