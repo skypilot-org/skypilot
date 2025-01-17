@@ -276,7 +276,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         write = log_file.write
         flush = log_file.flush
         subprocess_out = log_file
-        test.echo(f'Test started. Log: less {log_file.name}')
+        test.echo(f'Test started. Log: less -r {log_file.name}')
 
     env_dict = os.environ.copy()
     if test.env:
@@ -336,7 +336,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         if log_to_stdout:
             raise Exception(f'test failed')
         else:
-            raise Exception(f'test failed: less {log_file.name}')
+            raise Exception(f'test failed: less -r {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
