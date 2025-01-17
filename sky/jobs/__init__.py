@@ -12,6 +12,7 @@ from sky.jobs.constants import JOBS_CONTROLLER_LOGS_DIR
 from sky.jobs.constants import JOBS_CONTROLLER_TEMPLATE
 from sky.jobs.constants import JOBS_CONTROLLER_YAML_PREFIX
 from sky.jobs.constants import JOBS_TASK_YAML_PREFIX
+from sky.jobs.recovery_strategy import StrategyExecutor
 from sky.jobs.state import ManagedJobStatus
 from sky.jobs.utils import dump_managed_job_queue
 from sky.jobs.utils import format_job_table
@@ -40,4 +41,5 @@ __all__ = [
     'format_job_table',
     'dump_managed_job_queue',
     'load_managed_job_queue',
+    'StrategyExecutor',
 ]

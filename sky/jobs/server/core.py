@@ -498,13 +498,13 @@ def stop_dashboard_forwarding(pid: int) -> None:
         pass
     logger.info('Forwarding port closed. Exiting.')
 
+
 @usage_lib.entrypoint
-def download_logs(
-        name: Optional[str],
-        job_id: Optional[int],
-        refresh: bool,
-        controller: bool,
-        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
+def download_logs(name: Optional[str],
+                  job_id: Optional[int],
+                  refresh: bool,
+                  controller: bool,
+                  local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -541,4 +541,3 @@ def download_logs(
                                        job_name=name,
                                        controller=controller,
                                        local_dir=local_dir)
-
