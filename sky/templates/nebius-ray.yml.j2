@@ -36,7 +36,6 @@ head_node_type: ray_head_default
 
 # Format: `REMOTE_PATH : LOCAL_PATH`
 file_mounts: {
-  "~/pysdk": "/Users/salik/Projects/pysdk", # TODO: remove after publish
   "{{sky_ray_yaml_remote_path}}": "{{sky_ray_yaml_local_path}}",
   "{{sky_remote_path}}/{{sky_wheel_hash}}": "{{sky_local_path}}",
 {%- for remote_path, local_path in credentials.items() %}
@@ -66,7 +65,6 @@ setup_commands:
   - mkdir -p ~/.ssh; touch ~/.ssh/config;
     {{ conda_installation_commands }}
     source ~/.bashrc;
-    {{ sky_pip_cmd }} install ./pysdk;
     {{ ray_skypilot_installation_commands }}
     sudo bash -c 'rm -rf /etc/security/limits.d; echo "* soft nofile 1048576" >> /etc/security/limits.conf; echo "* hard nofile 1048576" >> /etc/security/limits.conf';
     sudo grep -e '^DefaultTasksMax' /etc/systemd/system.conf || (sudo bash -c 'echo "DefaultTasksMax=infinity" >> /etc/systemd/system.conf'); sudo systemctl set-property user-$(id -u $(whoami)).slice TasksMax=infinity; sudo systemctl daemon-reload;

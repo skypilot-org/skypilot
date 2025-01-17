@@ -516,19 +516,10 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)
 
+
 def setup_nebius_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     get_or_generate_keys()
 
-    ########
-    # TODO #
-    ########
-    # TODO Ensure sky public key is registered on NebiusCloud
-    # If there is an API to add an ssh key to FluffyCloud, it will be
-    # useful here. If not, you can tell users to register the key
-    # themselves as part of FluffyCloud setup.
-
-    # Need to use ~ relative path because Ray uses the same
-    # path for finding the public key path on both local and head node.
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
     file_mounts = config['file_mounts']

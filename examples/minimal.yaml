@@ -9,7 +9,7 @@
 name: minimal
 
 resources:
-  cloud: aws
+  cloud: nebius
 
 setup: |
   echo "running setup"

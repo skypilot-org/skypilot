@@ -1,18 +1,20 @@
 """Nebius instance provisioning."""
-import os
 import time
 from time import sleep
 from typing import Any, Dict, List, Optional
+
+from nebius.sdk import SDK
 
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
 from sky.provision.nebius import utils
-from sky.provision.nebius.utils import delete_cluster, get_iam_token_project_id, POLL_INTERVAL, get_project_by_region
+from sky.provision.nebius.utils import delete_cluster
+from sky.provision.nebius.utils import get_iam_token_project_id
+from sky.provision.nebius.utils import get_project_by_region
+from sky.provision.nebius.utils import POLL_INTERVAL
 from sky.utils import common_utils
 from sky.utils import ux_utils
-
-from nebius.sdk import SDK
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
 
@@ -56,7 +58,8 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
 
 def _wait_all_pending(project_id: str, cluster_name_on_cloud: str) -> None:
     while True:
-        instances = _filter_instances(project_id, cluster_name_on_cloud, PENDING_STATUS)
+        instances = _filter_instances(project_id, cluster_name_on_cloud,
+                                      PENDING_STATUS)
         if not instances:
             break
         logger.info(f'Waiting for {len(instances)} instances to be ready.')
@@ -68,7 +71,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     """Runs instances for the given cluster."""
     project_id = get_project_by_region(region)
     _wait_all_pending(project_id, cluster_name_on_cloud)
-    running_instances = _filter_instances(project_id, cluster_name_on_cloud, ['RUNNING'])
+    running_instances = _filter_instances(project_id, cluster_name_on_cloud,
+                                          ['RUNNING'])
     head_instance_id = _get_head_instance_id(running_instances)
     to_start_count = config.count - len(running_instances)
     if to_start_count < 0:
@@ -91,14 +95,16 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
     created_instance_ids = []
     resumed_instance_ids = []
-    stopped_instances = _filter_instances(project_id, cluster_name_on_cloud, ['STOPPED'])
-    for stopped_instance in stopped_instances.keys():
+    stopped_instances = _filter_instances(project_id, cluster_name_on_cloud,
+                                          ['STOPPED'])
+    for stopped_instance, _ in stopped_instances.items():
         if to_start_count > 0:
             try:
                 utils.start(stopped_instance)
                 resumed_instance_ids.append(stopped_instance)
                 to_start_count -= 1
-                if stopped_instances[stopped_instance]['name'].endswith('-head'):
+                if stopped_instances[stopped_instance]['name'].endswith(
+                        '-head'):
                     head_instance_id = stopped_instance
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Start instance error: {e}')
@@ -114,8 +120,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 disk_size=config.node_config['DiskSize'],
-                user_data=config.node_config['UserData']
-            )
+                user_data=config.node_config['UserData'])
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -135,42 +140,47 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
+    del state
     project_id = get_project_by_region(region)
     _wait_all_pending(project_id, cluster_name_on_cloud)
 
 
 def stop_instances(
-        cluster_name_on_cloud: str,
-        provider_config: Optional[Dict[str, Any]] = None,
-        worker_only: bool = False,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
 ) -> None:
-    project_id = get_project_by_region(provider_config['region'])
-    exist_instances = _filter_instances(project_id, cluster_name_on_cloud, ['RUNNING'])
-    for instance in exist_instances:
-        utils.stop(instance)
+    del worker_only
+    if provider_config and provider_config['region']:
+        project_id = get_project_by_region(provider_config['region'])
+        exist_instances = _filter_instances(project_id, cluster_name_on_cloud,
+                                            ['RUNNING'])
+        for instance in exist_instances:
+            utils.stop(instance)
 
 
 def terminate_instances(
-        cluster_name_on_cloud: str,
-        provider_config: Optional[Dict[str, Any]] = None,
-        worker_only: bool = False,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    project_id = get_project_by_region(provider_config['region'])
-    instances = _filter_instances(project_id, cluster_name_on_cloud, None)
-    for inst_id, inst in instances.items():
-        logger.debug(f'Terminating instance {inst_id}: {inst}')
-        if worker_only and inst['name'].endswith('-head'):
-            continue
-        try:
-            utils.remove(inst_id)
-        except Exception as e:  # pylint: disable=broad-except
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'Failed to terminate instance {inst_id}: '
-                    f'{common_utils.format_exception(e, use_bracket=False)}'
-                ) from e
-    delete_cluster(cluster_name_on_cloud, project_id)
+    if provider_config and provider_config['region']:
+        project_id = get_project_by_region(provider_config['region'])
+        instances = _filter_instances(project_id, cluster_name_on_cloud, None)
+        for inst_id, inst in instances.items():
+            logger.debug(f'Terminating instance {inst_id}: {inst}')
+            if worker_only and inst['name'].endswith('-head'):
+                continue
+            try:
+                utils.remove(inst_id)
+            except Exception as e:  # pylint: disable=broad-except
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to terminate instance {inst_id}: '
+                        f'{common_utils.format_exception(e, use_bracket=False)}'
+                    ) from e
+        delete_cluster(cluster_name_on_cloud, project_id)
 
 
 def get_cluster_info(
@@ -179,7 +189,8 @@ def get_cluster_info(
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
     project_id = get_project_by_region(region)
     _wait_all_pending(project_id, cluster_name_on_cloud)
-    running_instances = _filter_instances(project_id, cluster_name_on_cloud, ['RUNNING'])
+    running_instances = _filter_instances(project_id, cluster_name_on_cloud,
+                                          ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
@@ -203,9 +214,9 @@ def get_cluster_info(
 
 
 def query_instances(
-        cluster_name_on_cloud: str,
-        provider_config: Optional[Dict[str, Any]] = None,
-        non_terminated_only: bool = True,
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
 ) -> Dict[str, Optional[status_lib.ClusterStatus]]:
     """See sky/provision/__init__.py"""
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
@@ -227,9 +238,10 @@ def query_instances(
         statuses[inst_id] = status
     return statuses
 
+
 def cleanup_ports(
-        cluster_name_on_cloud: str,
-        ports: List[str],
-        provider_config: Optional[Dict[str, Any]] = None,
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     del cluster_name_on_cloud, ports, provider_config  # Unused.

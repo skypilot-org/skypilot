@@ -21,13 +21,13 @@ from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
+from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
 from sky.clouds.vast import Vast
 from sky.clouds.vsphere import Vsphere
-from sky.clouds.nebius import Nebius
 
 __all__ = [
     'IBM',
