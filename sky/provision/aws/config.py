@@ -543,19 +543,41 @@ def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
     return sg_ids
 
 
-def _get_or_create_vpc_security_group(ec2, vpc_id: str,
-                                      expected_sg_name: str) -> Any:
-    # Figure out which security groups with this name exist for each VPC...
+def _get_security_groups(ec2, vpc_id: str, group_name: str) -> Optional[Any]:
+    """Get security group by VPC ID and group name."""
     vpc_to_existing_sg = {
         sg.vpc_id: sg for sg in _get_security_groups_from_vpc_ids(
             ec2,
             [vpc_id],
-            [expected_sg_name],
+            [group_name],
         )
     }
+    return vpc_to_existing_sg.get(vpc_id)
 
-    if vpc_id in vpc_to_existing_sg:
-        return vpc_to_existing_sg[vpc_id]
+
+def _get_or_create_vpc_security_group(ec2, vpc_id: str,
+                                      expected_sg_name: str) -> Any:
+    """Find or create a security group in the specified VPC.
+
+    Args:
+        ec2: The initialized EC2 client object.
+        vpc_id: The ID of the VPC where the security group should be queried
+            or created.
+        expected_sg_name: The expected name of the security group.
+
+    Returns:
+        The security group object containing the details of the security group.
+
+    Raises:
+        exceptions.NoClusterLaunchedError: If the security group creation fails
+            and is not due to an existing duplicate.
+        botocore.exceptions.ClientError: If the security group creation fails
+            due to AWS service issues.
+    """
+    # Figure out which security groups with this name exist for each VPC...
+    security_group = _get_security_groups(ec2, vpc_id, expected_sg_name)
+    if security_group is not None:
+        return security_group
 
     try:
         # create a new security group
@@ -565,17 +587,26 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
             VpcId=vpc_id,
         )
     except ec2.meta.client.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
+            # The security group already exists, but we didn't see it
+            # because of eventual consistency.
+            logger.warning(f'{expected_sg_name} already exists when creating.')
+            security_group = _get_security_groups(ec2, vpc_id, expected_sg_name)
+            assert (security_group is not None and
+                    security_group.group_name == expected_sg_name), \
+                f'Expected {expected_sg_name} but got {security_group}'
+            logger.info(
+                f'Found existing security group {colorama.Style.BRIGHT}'
+                f'{security_group.group_name}{colorama.Style.RESET_ALL} '
+                f'[id={security_group.id}]')
+            return security_group
         message = ('Failed to create security group. Error: '
                    f'{common_utils.format_exception(e)}')
         logger.warning(message)
         raise exceptions.NoClusterLaunchedError(message) from e
 
-    security_group = _get_security_groups_from_vpc_ids(ec2, [vpc_id],
-                                                       [expected_sg_name])
-
-    assert security_group, 'Failed to create security group'
-    security_group = security_group[0]
-
+    security_group = _get_security_groups(ec2, vpc_id, expected_sg_name)
+    assert security_group is not None, 'Failed to create security group'
     logger.info(f'Created new security group {colorama.Style.BRIGHT}'
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
                 f'[id={security_group.id}]')

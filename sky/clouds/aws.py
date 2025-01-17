@@ -471,7 +471,6 @@ class AWS(clouds.Cloud):
                     f' {security_group!r}. Please make sure the specified security group '
                     'has requested ports setup; or, leave out `aws.security_group_name` '
                     'in `~/.sky/config.yaml`.')
-
         return {
             'instance_type': r.instance_type,
             'custom_resources': custom_resources,
