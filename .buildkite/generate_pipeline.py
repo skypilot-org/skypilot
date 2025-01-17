@@ -69,7 +69,7 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
 
 
 def _extract_marked_tests(
-    file_path: str, filter_marks: List[str]
+        file_path: str, args: str
 ) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
@@ -84,18 +84,24 @@ def _extract_marked_tests(
     rerun failures. Additionally, the parallelism would be controlled by pytest
     instead of the buildkite job queue.
     """
-    cmd = f'pytest {file_path} --collect-only'
+    cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
+
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
+
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
         if clean_function_name in SKIP_TESTS:
             continue
+        if 'skip' in marks:
+            continue
+
         marks = marks.replace('\'', '').split(',')
         marks = [i.strip() for i in marks]
+
         function_name_marks_map[clean_function_name].update(marks)
 
         # extract parameter from function name
@@ -111,29 +117,18 @@ def _extract_marked_tests(
             function_name_param_map[clean_function_name].append(param)
 
     function_cloud_map = {}
-    filter_marks = set(filter_marks)
     for function_name, marks in function_name_marks_map.items():
-        if filter_marks and not filter_marks & marks:
-            continue
         clouds_to_include = []
-        clouds_to_exclude = []
         is_serve_test = 'serve' in marks
         run_on_gke = 'requires_gke' in marks
         for mark in marks:
-            if mark.startswith('no_'):
-                clouds_to_exclude.append(mark[3:])
-            else:
-                if mark not in PYTEST_TO_CLOUD_KEYWORD:
-                    # This mark does not specify a cloud, so we skip it.
-                    continue
-                clouds_to_include.append(PYTEST_TO_CLOUD_KEYWORD[mark])
+            if mark not in PYTEST_TO_CLOUD_KEYWORD:
+                # This mark does not specify a cloud, so we skip it.
+                continue
+            clouds_to_include.append(PYTEST_TO_CLOUD_KEYWORD[mark])
 
         clouds_to_include = (clouds_to_include
                              if clouds_to_include else DEFAULT_CLOUDS_TO_RUN)
-        clouds_to_include = [
-            cloud for cloud in clouds_to_include
-            if cloud not in clouds_to_exclude
-        ]
         cloud_queue_map = SERVE_CLOUD_QUEUE_MAP if is_serve_test else CLOUD_QUEUE_MAP
         final_clouds_to_include = [
             cloud for cloud in clouds_to_include if cloud in cloud_queue_map
@@ -161,13 +156,15 @@ def _extract_marked_tests(
             for cloud in final_clouds_to_include
         ], param_list)
 
+    return function_cloud_map
+
 
 def _generate_pipeline(test_file: str,
-                       filter_marks: List[str],
+                       args: str,
                        auto_retry: bool = False) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
-    function_cloud_map = _extract_marked_tests(test_file, filter_marks)
+    function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
@@ -183,8 +180,7 @@ def _generate_pipeline(test_file: str,
                     # Since they require different amount of resources and
                     # concurrency control.
                     'queue': queue
-                },
-                'if': f'build.env("{cloud}") == "1"'
+                }
             }
             if auto_retry:
                 step['retry'] = {
@@ -213,21 +209,19 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         yaml.dump(final_pipeline, file, default_flow_style=False)
 
 
-def _convert_release(test_files: List[str], filter_marks: List[str]):
+def _convert_release(test_files: List[str], args: str):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_release.yaml'
     output_file_pipelines = []
     for test_file in test_files:
         print(f'Converting {test_file} to {yaml_file_path}')
-        pipeline = _generate_pipeline(test_file, filter_marks, auto_retry=True)
+        pipeline = _generate_pipeline(test_file, args, auto_retry=True)
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     # Enable all clouds by default for release pipeline.
-    _dump_pipeline_to_file(yaml_file_path,
-                           output_file_pipelines,
-                           extra_env={cloud: '1' for cloud in CLOUD_QUEUE_MAP})
+    _dump_pipeline_to_file(yaml_file_path, output_file_pipelines)
 
 
-def _convert_quick_tests_core(test_files: List[str], filter_marks: List[str]):
+def _convert_quick_tests_core(test_files: List[str], args: List[str]):
     yaml_file_path = '.buildkite/pipeline_smoke_tests_quick_tests_core.yaml'
     output_file_pipelines = []
     for test_file in test_files:
@@ -235,7 +229,7 @@ def _convert_quick_tests_core(test_files: List[str], filter_marks: List[str]):
         # We want enable all clouds by default for each test function
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
-        pipeline = _generate_pipeline(test_file, filter_marks)
+        pipeline = _generate_pipeline(test_file, args)
         pipeline['steps'].append({
             'label': 'Backward compatibility test',
             'command': 'bash tests/backward_compatibility_tests.sh',
@@ -251,11 +245,10 @@ def _convert_quick_tests_core(test_files: List[str], filter_marks: List[str]):
 
 
 @click.command()
-@click.option(
-    '--filter-marks',
-    type=str,
-    help='Filter to include only a subset of pytest marks, e.g., managed_jobs')
-def main(filter_marks):
+@click.option('--args',
+              type=str,
+              help='Args to pass to pytest, e.g., --managed-jobs --aws')
+def main(args):
     test_files = os.listdir('tests/smoke_tests')
     release_files = []
     quick_tests_core_files = []
@@ -268,15 +261,11 @@ def main(filter_marks):
         else:
             release_files.append(test_file_path)
 
-    filter_marks = filter_marks or os.getenv('FILTER_MARKS')
-    if filter_marks:
-        filter_marks = filter_marks.split(',')
-        print(f'Filter marks: {filter_marks}')
-    else:
-        filter_marks = []
+    args = args or os.getenv('ARGS', '')
+    print(f'args: {args}')
 
-    _convert_release(release_files, filter_marks)
-    _convert_quick_tests_core(quick_tests_core_files, filter_marks)
+    _convert_release(release_files, args)
+    _convert_quick_tests_core(quick_tests_core_files, args)
 
 
 if __name__ == '__main__':
