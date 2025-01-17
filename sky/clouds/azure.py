@@ -198,6 +198,16 @@ class Azure(clouds.Cloud):
             # not the image location. Marketplace image is globally available.
             region = 'eastus'
         publisher, offer, sku, version = image_id.split(':')
+        # Since the Azure SDK requires explicitly specifying the image version number,
+        # when the version is "latest," we need to manually query the current latest version.
+        if version == 'latest':
+            versions = compute_client.virtual_machine_images.list(
+                location=region,
+                publisher_name=publisher,
+                offer=offer,
+                skus=sku)
+            latest_version = max(versions, key=lambda x: x.name)
+            version = latest_version.name
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
