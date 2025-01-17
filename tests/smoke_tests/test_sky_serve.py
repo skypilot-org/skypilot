@@ -517,34 +517,28 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
-    with smoke_tests_utils.increase_initial_delay_seconds_for_azure(
-            generic_cloud) as increase_initial_delay_seconds:
-        test = smoke_tests_utils.Test(
-            f'test-skyserve-update',
-            [
-                increase_initial_delay_seconds(
-                    f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml'
-                ),
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
-                increase_initial_delay_seconds(
-                    f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/new.yaml'
-                ),
-                # sleep before update is registered.
-                'sleep 20',
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'until curl http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
-                # Make sure the traffic is not mixed
-                'curl http://$endpoint | grep "Hi, new SkyPilot here"',
-                # The latest 2 version should be READY and the older versions should be shutting down
-                (_check_replica_in_status(name, [(2, False, 'READY'),
-                                                 (2, False, 'SHUTTING_DOWN')]) +
-                 _check_service_version(name, "2")),
-            ],
-            # _TEARDOWN_SERVICE.format(name=name),
-            timeout=20 * 60,
-        )
-        smoke_tests_utils.run_one_test(test)
+    test = smoke_tests_utils.Test(
+        f'test-skyserve-update',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/new.yaml',
+            # sleep before update is registered.
+            'sleep 20',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'until curl http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
+            # Make sure the traffic is not mixed
+            'curl http://$endpoint | grep "Hi, new SkyPilot here"',
+            # The latest 2 version should be READY and the older versions should be shutting down
+            (_check_replica_in_status(name, [(2, False, 'READY'),
+                                             (2, False, 'SHUTTING_DOWN')]) +
+             _check_service_version(name, "2")),
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
@@ -592,46 +586,40 @@ def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
 
-    with smoke_tests_utils.increase_initial_delay_seconds_for_azure(
-            generic_cloud) as increase_initial_delay_seconds:
-        test = smoke_tests_utils.Test(
-            f'test-skyserve-fast-update',
-            [
-                increase_initial_delay_seconds(
-                    f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml'
-                ),
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
-                increase_initial_delay_seconds(
-                    f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml'
-                ),
-                # sleep to wait for update to be registered.
-                'sleep 40',
-                # 2 on-deamnd (ready) + 1 on-demand (provisioning).
-                (
-                    _check_replica_in_status(
-                        name, [(2, False, 'READY'),
-                               (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]) +
-                    # Fast update will directly have the latest version ready.
-                    _check_service_version(name, "2")),
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
-                _check_service_version(name, "2"),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
-                # Test rolling update
-                f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
-                # sleep to wait for update to be registered.
-                'sleep 25',
-                # 2 on-deamnd (ready) + 1 on-demand (shutting down).
-                _check_replica_in_status(name, [(2, False, 'READY'),
-                                                (1, False, 'SHUTTING_DOWN')]),
-                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
-                _check_service_version(name, "3"),
-                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
-            ],
-            _TEARDOWN_SERVICE.format(name=name),
-            timeout=30 * 60,
-        )
-        smoke_tests_utils.run_one_test(test)
+    test = smoke_tests_utils.Test(
+        f'test-skyserve-fast-update',
+        [
+            f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 40',
+            # 2 on-deamnd (ready) + 1 on-demand (provisioning).
+            (
+                _check_replica_in_status(
+                    name, [(2, False, 'READY'),
+                           (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]) +
+                # Fast update will directly have the latest version ready.
+                _check_service_version(name, "2")),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
+            _check_service_version(name, "2"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            # Test rolling update
+            f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
+            # sleep to wait for update to be registered.
+            'sleep 25',
+            # 2 on-deamnd (ready) + 1 on-demand (shutting down).
+            _check_replica_in_status(name, [(2, False, 'READY'),
+                                            (1, False, 'SHUTTING_DOWN')]),
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+            _check_service_version(name, "3"),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.serve

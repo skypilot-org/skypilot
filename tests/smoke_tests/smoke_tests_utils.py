@@ -1,8 +1,6 @@
-import contextlib
 import enum
 import inspect
 import os
-import re
 import subprocess
 import sys
 import tempfile
@@ -439,41 +437,3 @@ VALIDATE_LAUNCH_OUTPUT = (
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
     'grep "Job ID:" && '
     'echo "$s" | grep -A 1 "Job ID:" | grep "Useful Commands"')
-
-
-def _increase_initial_delay_seconds(original_cmd: str,
-                                    seconds: int = BUMP_UP_SECONDS
-                                   ) -> Tuple[str, str]:
-    yaml_file = re.search(r'\s([^ ]+\.yaml)', original_cmd).group(1)
-    with open(yaml_file, 'r') as f:
-        yaml_content = f.read()
-    original_initial_delay_seconds = re.search(r'initial_delay_seconds: (\d+)',
-                                               yaml_content).group(1)
-    new_initial_delay_seconds = int(original_initial_delay_seconds) + seconds
-    yaml_content = re.sub(
-        r'initial_delay_seconds: \d+',
-        f'initial_delay_seconds: {new_initial_delay_seconds}', yaml_content)
-    f = tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False)
-    f.write(yaml_content)
-    f.flush()
-    return f.name, original_cmd.replace(yaml_file, f.name)
-
-
-@contextlib.contextmanager
-def increase_initial_delay_seconds_for_azure(cloud: str):
-    """Azure needs more initial delay seconds to reduce flakiness and failure during setup."""
-
-    def _context_func(original_cmd: str, seconds: int = BUMP_UP_SECONDS):
-        if cloud != 'azure':
-            return original_cmd
-        file_name, new_cmd = _increase_initial_delay_seconds(
-            original_cmd, seconds)
-        files.append(file_name)
-        return new_cmd
-
-    files = []
-    try:
-        yield _context_func
-    finally:
-        for file in files:
-            os.unlink(file)
