@@ -318,7 +318,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     if log_to_stdout:
         test.echo(msg)
     else:
-        msg += f'\nLog: less {log_file.name}\n'
+        msg += f'\nLog: less -r {log_file.name}\n'
         test.echo(msg)
         write(msg)
 
