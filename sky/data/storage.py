@@ -1090,7 +1090,7 @@ class Storage(object):
             logger.info('No backing stores found. Deleting storage.')
             assert self.name is not None
             global_user_state.remove_storage(self.name)
-        if store_type:
+        if store_type is not None:
             assert self.name is not None
             store = self.stores[store_type]
             assert store is not None, self
