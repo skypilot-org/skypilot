@@ -551,18 +551,6 @@ def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
     return sg_ids
 
 
-def _get_security_groups(ec2, vpc_id: str, group_name: str) -> Optional[Any]:
-    """Get security group by VPC ID and group name."""
-    vpc_to_existing_sg = {
-        sg.vpc_id: sg for sg in _get_security_groups_from_vpc_ids(
-            ec2,
-            [vpc_id],
-            [group_name],
-        )
-    }
-    return vpc_to_existing_sg.get(vpc_id)
-
-
 def _get_or_create_vpc_security_group(ec2, vpc_id: str,
                                       expected_sg_name: str) -> Any:
     """Find or create a security group in the specified VPC.
@@ -583,7 +571,8 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
             due to AWS service issues.
     """
     # Figure out which security groups with this name exist for each VPC...
-    security_group = _get_security_groups(ec2, vpc_id, expected_sg_name)
+    security_group = _get_security_group_from_vpc_id(ec2, vpc_id,
+                                                     expected_sg_name)
     if security_group is not None:
         return security_group
 
@@ -599,10 +588,11 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
             # The security group already exists, but we didn't see it
             # because of eventual consistency.
             logger.warning(f'{expected_sg_name} already exists when creating.')
-            security_group = _get_security_groups(ec2, vpc_id, expected_sg_name)
+            security_group = _get_security_group_from_vpc_id(
+                ec2, vpc_id, expected_sg_name)
             assert (security_group is not None and
-                    security_group.group_name == expected_sg_name), \
-                f'Expected {expected_sg_name} but got {security_group}'
+                     security_group.group_name == expected_sg_name),\
+                    f'Expected {expected_sg_name} but got {security_group}'
             logger.info(
                 f'Found existing security group {colorama.Style.BRIGHT}'
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
@@ -613,7 +603,8 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
         logger.warning(message)
         raise exceptions.NoClusterLaunchedError(message) from e
 
-    security_group = _get_security_groups(ec2, vpc_id, expected_sg_name)
+    security_group = _get_security_group_from_vpc_id(ec2, vpc_id,
+                                                     expected_sg_name)
     assert security_group is not None, 'Failed to create security group'
     logger.info(f'Created new security group {colorama.Style.BRIGHT}'
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
@@ -621,17 +612,17 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
     return security_group
 
 
-def _get_security_groups_from_vpc_ids(ec2, vpc_ids: List[str],
-                                      group_names: List[str]) -> List[Any]:
-    unique_vpc_ids = list(set(vpc_ids))
-    unique_group_names = set(group_names)
-
+def _get_security_group_from_vpc_id(ec2, vpc_id: str,
+                                    group_name: str) -> Optional[Any]:
+    """Get security group by VPC ID and group name."""
     existing_groups = list(
         ec2.security_groups.filter(Filters=[{
             'Name': 'vpc-id',
-            'Values': unique_vpc_ids
+            'Values': [vpc_id]
         }]))
-    filtered_groups = [
-        sg for sg in existing_groups if sg.group_name in unique_group_names
-    ]
-    return filtered_groups
+
+    for sg in existing_groups:
+        if sg.group_name == group_name:
+            return sg
+
+    return None
