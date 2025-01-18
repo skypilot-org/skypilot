@@ -902,6 +902,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_logs_sync_down():
     name = smoke_tests_utils.get_cluster_name()
