@@ -342,7 +342,9 @@ class ManagedJobScheduleState(enum.Enum):
     briefly observe inconsistent states, like a job that just finished but
     hasn't yet transitioned to DONE.
     """
-    # This job may have been created before the column was present.
+    # This job may have been created before scheduler was introduced in #4458.
+    # This state is not used by scheduler but just for backward compatibility.
+    # TODO(cooperc): remove this in v0.11.0
     INVALID = None
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
