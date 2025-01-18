@@ -313,6 +313,8 @@ _SPOT_STATUS_TO_COLOR = {
 class ManagedJobScheduleState(enum.Enum):
     """Captures the state of the job from the scheduler's perspective.
 
+    A job that predates the introduction of the scheduler will be INVALID.
+
     A newly created job will be INACTIVE.  The following transitions are valid:
     - INACTIVE -> WAITING: The job is "submitted" to the scheduler, and its job
       controller can be started.
