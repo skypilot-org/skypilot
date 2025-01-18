@@ -729,6 +729,7 @@ def write_cluster_config(
 
     cluster_name_on_cloud = common_utils.make_cluster_name_on_cloud(
         cluster_name, max_length=cloud.max_cluster_name_length())
+    print('cluster_name ', cluster_name_on_cloud)
 
     # This can raise a ResourcesUnavailableError when:
     #  * The region/zones requested does not appear in the catalog. It can be

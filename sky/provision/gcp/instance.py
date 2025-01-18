@@ -164,6 +164,8 @@ def _run_instances(region: str, cluster_name_on_cloud: str,
         resource = instance_utils.GCPTPUVMInstance
     else:
         raise ValueError(f'Unknown node type {node_type}')
+    
+    print('cluster_name_on_cloud ', cluster_name_on_cloud)
 
     filter_labels = {
         provision_constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud
