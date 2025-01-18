@@ -342,6 +342,8 @@ class ManagedJobScheduleState(enum.Enum):
     briefly observe inconsistent states, like a job that just finished but
     hasn't yet transitioned to DONE.
     """
+    # This job may have been created before the column was present.
+    INVALID = None
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
     # The job is waiting to transition to LAUNCHING for the first time. The
