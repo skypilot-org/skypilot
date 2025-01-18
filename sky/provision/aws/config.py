@@ -591,8 +591,8 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
             security_group = _get_security_group_from_vpc_id(
                 ec2, vpc_id, expected_sg_name)
             assert (security_group is not None and
-                     security_group.group_name == expected_sg_name),\
-                    f'Expected {expected_sg_name} but got {security_group}'
+                    security_group.group_name == expected_sg_name), (
+                        f'Expected {expected_sg_name} but got {security_group}')
             logger.info(
                 f'Found existing security group {colorama.Style.BRIGHT}'
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
