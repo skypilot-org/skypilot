@@ -615,23 +615,42 @@ class GCPComputeInstance(GCPInstance):
     @classmethod
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
                    labels: dict) -> None:
-        node = cls.load_resource().instances().get(
-            project=project_id,
-            instance=node_id,
-            zone=availability_zone,
-        ).execute(num_retries=GCP_CREATE_MAX_RETRIES)
-        body = {
-            'labels': dict(node['labels'], **labels),
-            'labelFingerprint': node['labelFingerprint'],
-        }
-        operation = (cls.load_resource().instances().setLabels(
-            project=project_id,
-            zone=availability_zone,
-            instance=node_id,
-            body=body,
-        ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
+        retry_cnt = 0
+        backoff = common_utils.Backoff(initial_backoff=constants.POLL_INTERVAL)
+        while True:
+            retry_cnt += 1
+            try:
+                node = cls.load_resource().instances().get(
+                    project=project_id,
+                    instance=node_id,
+                    zone=availability_zone,
+                ).execute(num_retries=GCP_CREATE_MAX_RETRIES)
+                body = {
+                    'labels': dict(node['labels'], **labels),
+                    'labelFingerprint': node['labelFingerprint'],
+                }
+                operation = (cls.load_resource().instances().setLabels(
+                    project=project_id,
+                    zone=availability_zone,
+                    instance=node_id,
+                    body=body,
+                ).execute(num_retries=GCP_CREATE_MAX_RETRIES))
 
-        cls.wait_for_operation(operation, project_id, zone=availability_zone)
+                cls.wait_for_operation(operation,
+                                       project_id,
+                                       zone=availability_zone)
+                break
+            except gcp.http_error_exception() as e:
+                if ('Labels fingerprint either invalid or resource '
+                        'labels have changed' in str(e) and
+                        retry_cnt < GCP_CREATE_MAX_RETRIES):
+                    logger.debug(f'set_labels: Labels fingerprint either '
+                                 f'invalid or resource labels have changed, '
+                                 f'retrying... [Attempt {retry_cnt+1}/'
+                                 f'{GCP_CREATE_MAX_RETRIES}]')
+                    time.sleep(backoff.current_backoff())
+                    continue
+                raise
 
     @classmethod
     def create_instances(
