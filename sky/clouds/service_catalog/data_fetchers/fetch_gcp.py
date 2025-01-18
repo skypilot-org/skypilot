@@ -47,10 +47,6 @@ TPU_RETRY_CNT = 3
 TPU_V4_ZONES = ['us-central2-b']
 # TPU v3 pods are available in us-east1-d, but hidden in the skus.
 # We assume the TPU prices are the same as us-central1.
-# TPU v6e's pricing info is not available on the SKUs. However, in
-# https://cloud.google.com/tpu/pricing, it listed the price for 4 regions:
-# us-east1, us-east5, europe-west4, and asia-northeast1. We hardcode them here
-# and filtered out the other regions (us-central{1,2}, us-south1).
 HIDDEN_TPU_DF = pd.read_csv(
     io.StringIO(
         textwrap.dedent("""\
@@ -62,49 +58,10 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-512,1,,,tpu-v3-512,512.0,153.6,us-east1,us-east1-d
  ,tpu-v3-1024,1,,,tpu-v3-1024,1024.0,307.2,us-east1,us-east1-d
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
- ,tpu-v6e-1,1,,,tpu-v6e-1,2.7,,us-east5,us-east5-b
- ,tpu-v6e-1,1,,,tpu-v6e-1,2.7,,us-east5,us-east5-c
- ,tpu-v6e-1,1,,,tpu-v6e-1,2.97,,europe-west4,europe-west4-a
- ,tpu-v6e-1,1,,,tpu-v6e-1,3.24,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-1,1,,,tpu-v6e-1,2.7,,us-east1,us-east1-d
- ,tpu-v6e-4,1,,,tpu-v6e-4,10.8,,us-east5,us-east5-b
- ,tpu-v6e-4,1,,,tpu-v6e-4,10.8,,us-east5,us-east5-c
- ,tpu-v6e-4,1,,,tpu-v6e-4,11.88,,europe-west4,europe-west4-a
- ,tpu-v6e-4,1,,,tpu-v6e-4,12.96,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-4,1,,,tpu-v6e-4,10.8,,us-east1,us-east1-d
- ,tpu-v6e-8,1,,,tpu-v6e-8,21.6,,us-east5,us-east5-b
- ,tpu-v6e-8,1,,,tpu-v6e-8,21.6,,us-east5,us-east5-c
- ,tpu-v6e-8,1,,,tpu-v6e-8,23.76,,europe-west4,europe-west4-a
- ,tpu-v6e-8,1,,,tpu-v6e-8,25.92,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-8,1,,,tpu-v6e-8,21.6,,us-east1,us-east1-d
- ,tpu-v6e-16,1,,,tpu-v6e-16,43.2,,us-east5,us-east5-b
- ,tpu-v6e-16,1,,,tpu-v6e-16,43.2,,us-east5,us-east5-c
- ,tpu-v6e-16,1,,,tpu-v6e-16,47.52,,europe-west4,europe-west4-a
- ,tpu-v6e-16,1,,,tpu-v6e-16,51.84,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-16,1,,,tpu-v6e-16,43.2,,us-east1,us-east1-d
- ,tpu-v6e-32,1,,,tpu-v6e-32,86.4,,us-east5,us-east5-b
- ,tpu-v6e-32,1,,,tpu-v6e-32,86.4,,us-east5,us-east5-c
- ,tpu-v6e-32,1,,,tpu-v6e-32,95.04,,europe-west4,europe-west4-a
- ,tpu-v6e-32,1,,,tpu-v6e-32,103.68,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-32,1,,,tpu-v6e-32,86.4,,us-east1,us-east1-d
- ,tpu-v6e-64,1,,,tpu-v6e-64,172.8,,us-east5,us-east5-b
- ,tpu-v6e-64,1,,,tpu-v6e-64,172.8,,us-east5,us-east5-c
- ,tpu-v6e-64,1,,,tpu-v6e-64,190.08,,europe-west4,europe-west4-a
- ,tpu-v6e-64,1,,,tpu-v6e-64,207.36,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-64,1,,,tpu-v6e-64,172.8,,us-east1,us-east1-d
- ,tpu-v6e-128,1,,,tpu-v6e-128,345.6,,us-east5,us-east5-b
- ,tpu-v6e-128,1,,,tpu-v6e-128,345.6,,us-east5,us-east5-c
- ,tpu-v6e-128,1,,,tpu-v6e-128,380.16,,europe-west4,europe-west4-a
- ,tpu-v6e-128,1,,,tpu-v6e-128,414.72,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-128,1,,,tpu-v6e-128,345.6,,us-east1,us-east1-d
- ,tpu-v6e-256,1,,,tpu-v6e-256,691.2,,us-east5,us-east5-b
- ,tpu-v6e-256,1,,,tpu-v6e-256,691.2,,us-east5,us-east5-c
- ,tpu-v6e-256,1,,,tpu-v6e-256,760.32,,europe-west4,europe-west4-a
- ,tpu-v6e-256,1,,,tpu-v6e-256,829.44,,asia-northeast1,asia-northeast1-b
- ,tpu-v6e-256,1,,,tpu-v6e-256,691.2,,us-east1,us-east1-d
  """)))
 
-TPU_V6E_MISSING_REGIONS = ['us-central1', 'us-central2', 'us-south1']
+# TPU V6e price for us-central2 is missing in the SKUs.
+TPU_V6E_MISSING_REGIONS = ['us-central2']
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
@@ -670,6 +627,8 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
                 return 'TpuV5p'
             assert tpu_version == 'v5litepod', tpu_version
             return 'TpuV5e'
+        if tpu_version.startswith('v6e'):
+            return 'TpuV6e'
         return f'Tpu-{tpu_version}'
 
     def get_tpu_price(row: pd.Series, spot: bool) -> Optional[float]:
@@ -684,10 +643,10 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         # whether the TPU is a single device or a pod.
         # For TPU-v4, the pricing is uniform, and thus the pricing API
         # only provides the price of TPU-v4 pods.
-        # The price shown for v5 TPU is per chip hour, so there is no 'Pod'
-        # keyword in the description.
+        # The price shown for v5 & v6e TPU is per chip hour, so there is
+        # no 'Pod' keyword in the description.
         is_pod = ((num_cores > 8 or tpu_version == 'v4') and
-                  not tpu_version.startswith('v5'))
+                  not tpu_version.startswith('v5') and tpu_version != 'v6e')
 
         for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
@@ -718,7 +677,9 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             # for v5e. Reference here:
             # https://cloud.google.com/tpu/docs/v5p#using-accelerator-type
             # https://cloud.google.com/tpu/docs/v5e#tpu-v5e-config
-            core_per_sku = (1 if tpu_version == 'v5litepod' else
+            # v6e is also per chip price. Reference here:
+            # https://cloud.google.com/tpu/docs/v6e#configurations
+            core_per_sku = (1 if tpu_version in ['v5litepod', 'v6e'] else
                             2 if tpu_version == 'v5p' else 8)
             tpu_core_price = tpu_device_price / core_per_sku
             tpu_price = num_cores * tpu_core_price
@@ -738,8 +699,6 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
             spot_str = 'spot ' if spot else ''
             print(f'The {spot_str}price of {tpu_name} in {tpu_region} is '
                   'not found in SKUs or hidden TPU price DF.')
-        # TODO(tian): Hack. Should investigate how to retrieve the price
-        # for TPU-v6e.
         if (tpu_name.startswith('tpu-v6e') and
                 tpu_region in TPU_V6E_MISSING_REGIONS):
             if not spot:

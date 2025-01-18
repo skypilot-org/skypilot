@@ -121,6 +121,12 @@ def _get_cloud_to_run(config) -> List[str]:
 
 
 def pytest_collection_modifyitems(config, items):
+    if config.option.collectonly:
+        for item in items:
+            full_name = item.nodeid
+            marks = [mark.name for mark in item.iter_markers()]
+            print(f"Collected {full_name} with marks: {marks}")
+
     skip_marks = {}
     skip_marks['slow'] = pytest.mark.skip(reason='need --runslow option to run')
     skip_marks['managed_jobs'] = pytest.mark.skip(

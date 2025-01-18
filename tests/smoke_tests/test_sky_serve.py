@@ -84,15 +84,50 @@ _TEARDOWN_SERVICE = (
 _SERVE_ENDPOINT_WAIT = (
     'export ORIGIN_SKYPILOT_DEBUG=$SKYPILOT_DEBUG; export SKYPILOT_DEBUG=0; '
     'endpoint=$(sky serve status --endpoint {name}); '
-    'until ! echo "$endpoint" | grep "Controller is initializing"; '
+    'until ! echo "$endpoint" | grep -qE "Controller is initializing|^-$"; '
     'do echo "Waiting for serve endpoint to be ready..."; '
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
 
-_SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
-                      'until ! echo "$s" | grep "Controller is initializing."; '
-                      'do echo "Waiting for serve status to be ready..."; '
-                      'sleep 5; s=$(sky serve status {name}); done; echo "$s"')
+_SERVE_STATUS_WAIT = (
+    's=$(sky serve status {name}); '
+    # Wait for "Controller is initializing." to disappear
+    'until ! echo "$s" | grep "Controller is initializing."; '
+    'do '
+    '    echo "Waiting for serve status to be ready..."; '
+    '    sleep 5; '
+    '    s=$(sky serve status {name}); '
+    'done; '
+    'echo "$s"')
+
+_WAIT_PROVISION_REPR = (
+    # Once controller is ready, check provisioning vs. vCPU=2. This is for
+    # the `_check_replica_in_status`, which will check number of `vCPU=2` in the
+    # `sky serve status` output and use that to suggest the number of replicas.
+    # However, replicas in provisioning state is possible to have a repr of `-`,
+    # since the desired `launched_resources` is not decided yet. This would
+    # cause an error when counting desired number of replicas. We wait for the
+    # representation of `vCPU=2` the same with number of provisioning replicas
+    # to avoid this error.
+    # NOTE(tian): This assumes the replica will not do failover, as the
+    # requested resources is only 2 vCPU and likely to be immediately available
+    # on every region, hence no failover. If the replica will go through
+    # failover
+    # Check #4565 for more information.
+    'num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
+    'num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    'until [ "$num_provisioning" -eq "$num_vcpu_in_provision" ]; '
+    'do '
+    '    echo "Waiting for provisioning resource repr ready..."; '
+    '    echo "PROVISIONING: $num_provisioning, vCPU: $num_vcpu_in_provision"; '
+    '    sleep 2; '
+    '    s=$(sky serve status {name}); '
+    '    num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
+    '    num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    'done; '
+    # Provisioning is complete
+    'echo "Provisioning complete. PROVISIONING: $num_provisioning, vCPU=2: $num_vcpu_in_provision"'
+)
 
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
@@ -141,7 +176,9 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
             resource_str = f'({spot_str}vCPU=2)'
         check_cmd += (f' echo "$s" | grep "{resource_str}" | '
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
-    return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
+    return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            f'{_WAIT_PROVISION_REPR.format(name=name)}; '
+            f'echo "$s"; {check_cmd}')
 
 
 def _check_service_version(service_name: str, version: str) -> str:
@@ -180,6 +217,7 @@ def test_skyserve_azure_http():
 
 @pytest.mark.kubernetes
 @pytest.mark.serve
+@pytest.mark.requires_gke
 def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()

@@ -1,0 +1,14 @@
+resources:
+  cpus: 2+
+  job_recovery:
+    max_restarts_on_errors: 1
+
+# Task 1: Always fails
+run: |
+  echo "Task 1 starting"
+  exit 1
+---
+# Task 2: Never reached due to Task 1 failure
+run: |
+  echo "Task 2 starting"
+  exit 0

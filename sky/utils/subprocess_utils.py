@@ -3,9 +3,10 @@ from multiprocessing import pool
 import os
 import random
 import resource
+import shlex
 import subprocess
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 import psutil
@@ -97,11 +98,9 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 
 def run_in_parallel(func: Callable,
-                    args: Iterable[Any],
+                    args: List[Any],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
-
-    The function 'func' should raise a CommandError if the command fails.
 
     Args:
         func: The function to run in parallel
@@ -111,14 +110,23 @@ def run_in_parallel(func: Callable,
 
     Returns:
       A list of the return values of the function func, in the same order as the
-      arguments.
+        arguments.
+
+    Raises:
+        Exception: The first exception encountered.
     """
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    processes = num_threads if num_threads is not None else get_parallel_threads(
-    )
+    # Short-circuit for short lists
+    if len(args) == 0:
+        return []
+    if len(args) == 1:
+        return [func(args[0])]
+
+    processes = (num_threads
+                 if num_threads is not None else get_parallel_threads())
+
     with pool.ThreadPool(processes=processes) as p:
-        # Run the function in parallel on the arguments, keeping the order.
-        return list(p.imap(func, args))
+        ordered_iterators = p.imap(func, args)
+        return list(ordered_iterators)
 
 
 def handle_returncode(returncode: int,
@@ -293,3 +301,39 @@ def kill_process_daemon(process_pid: int) -> None:
         # Disable input
         stdin=subprocess.DEVNULL,
     )
+
+
+def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
+    """Launch a new process that will not be a child of the current process.
+
+    This will launch bash in a new session, which will launch the given cmd.
+    This will ensure that cmd is in its own process tree, and once bash exits,
+    will not be an ancestor of the current process. This is useful for job
+    launching.
+
+    Returns the pid of the launched cmd.
+    """
+    # Use nohup to ensure the job driver process is a separate process tree,
+    # instead of being a child of the current process. This is important to
+    # avoid a chain of driver processes (job driver can call schedule_step() to
+    # submit new jobs, and the new job can also call schedule_step()
+    # recursively).
+    #
+    # echo $! will output the PID of the last background process started in the
+    # current shell, so we can retrieve it and record in the DB.
+    #
+    # TODO(zhwu): A more elegant solution is to use another daemon process to be
+    # in charge of starting these driver processes, instead of starting them in
+    # the current process.
+    wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
+                   f'</dev/null >{log_output} 2>&1 & echo $!')
+    proc = subprocess.run(wrapped_cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL,
+                          start_new_session=True,
+                          check=True,
+                          shell=True,
+                          text=True)
+    # Get the PID of the detached process
+    return int(proc.stdout.strip())

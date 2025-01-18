@@ -10,6 +10,8 @@ History:
    from ubuntu 20.04 to ubuntu 22.04, including:
    - GPU: skypilot:gpu-ubuntu-2004 -> skypilot:gpu-ubuntu-2204
    - CPU: skypilot:cpu-ubuntu-2004 -> skypilot:cpu-ubuntu-2204
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Support reuse existing
+   VCN for SkyServe.
 """
 import os
 
@@ -110,7 +112,14 @@ class OCIConfig:
         return compartment
 
     @classmethod
+    def get_vcn_ocid(cls, region):
+        # Will reuse the regional VCN if specified.
+        vcn = skypilot_config.get_nested(('oci', region, 'vcn_ocid'), None)
+        return vcn
+
+    @classmethod
     def get_vcn_subnet(cls, region):
+        # Will reuse the subnet if specified.
         vcn = skypilot_config.get_nested(('oci', region, 'vcn_subnet'), None)
         return vcn
 
