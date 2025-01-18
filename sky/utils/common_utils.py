@@ -182,7 +182,7 @@ def make_cluster_name_on_cloud(display_name: str,
             f'on the cloud, we convert it to {cluster_name_on_cloud}.')
     user_hash = ''
     if add_user_hash:
-        user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
+        user_hash = get_user_hash()
         user_hash = f'-{user_hash}'
     user_hash_length = len(user_hash)
 
