@@ -831,14 +831,17 @@ def test_skyserve_https(generic_cloud: str):
                 f'--env TLS_KEYFILE_ENV_VAR={keyfile} --env TLS_CERTFILE_ENV_VAR={certfile}',
                 _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl $endpoint -k | grep "Hi, SkyPilot here"',
+                'output=$(curl $endpoint -k); echo $output; '
+                'echo $output | grep "Hi, SkyPilot here"',
                 # Self signed certificate should fail without -k.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-                'curl $endpoint 2>&1 | grep "self signed certificate"',
+                'output=$(curl $endpoint 2>&1); echo $output; '
+                'echo $output | grep "self signed certificate"',
                 # curl with wrong schema (http) should fail.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'http_endpoint="${endpoint/https:/http:}"; '
-                'curl $http_endpoint 2>&1 | grep "Empty reply from server"',
+                'output=$(curl $http_endpoint 2>&1); echo $output; '
+                'echo $output | grep "Empty reply from server"',
             ],
             _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
