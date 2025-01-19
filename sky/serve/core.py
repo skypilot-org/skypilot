@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import copy
 import re
 import signal
 import subprocess
@@ -28,6 +29,7 @@ from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils import vpn_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -188,7 +190,16 @@ def up(
         }
         controller_task.set_resources(controller_resources)
 
-        # # Set service_name so the backend will know to modify default ray
+        # Set VPN configuration on the controller, so the controller can
+        # start the VPN service on the replicas.
+        if task.vpn_config is not None:
+            controller_vpn_config = copy.copy(task.vpn_config)
+            if task.service is not None and task.service.expose_service:
+                controller_vpn_config.disable_vpn_ip()
+            controller_task.set_vpn_config(controller_vpn_config)
+            controller_task.update_envs(task.vpn_config.get_setup_env_vars())
+
+        # Set service_name so the backend will know to modify default ray
         # task CPU usage to custom value instead of default 0.5 vCPU. We need
         # to set it to a smaller value to support a larger number of services.
         controller_task.service_name = service_name
@@ -343,6 +354,18 @@ def update(
         'To spin up a new service, '
         f'use {ux_utils.BOLD}sky serve up{ux_utils.RESET_BOLD}',
     )
+
+    vpn_check_result = vpn_utils.check_vpn_unchanged(
+        task.vpn_config, handle.vpn_config,
+        task.service.expose_service if task.service is not None else False)
+    if vpn_check_result is not None:
+        mismatch_str = (
+            f'To fix: specify a new cluster name, or down the '
+            f'existing cluster first: sky down {handle.cluster_name}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ResourcesMismatchError(
+                'VPN configuration mismatch: '
+                f'{vpn_check_result}.\n{mismatch_str}')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)

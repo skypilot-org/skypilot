@@ -1,0 +1,300 @@
+"""Utils for VPN setup on instances."""
+import os
+import pprint
+from typing import Any, Dict, Optional
+
+import requests
+
+from sky import resources as resource_lib
+from sky import sky_logging
+from sky.provision import common
+from sky.utils import common_utils
+from sky.utils import schemas
+from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
+
+
+class VPNConfig:
+    """Basic interface for VPN configuration.
+
+    This class defines the interface for VPN configurations. Each VPN
+    should implement the following methods then it can be integrated
+    into SkyPilot out of the box.
+    """
+
+    def __init__(self) -> None:
+        # NOTE(yi): By default, we use the VPN IP address for all the
+        # instances. But in some cases (e.g. SkyServe controller), we
+        # may want to use the public IP address instead.
+        self._use_vpn_ip = True
+
+    @staticmethod
+    def from_yaml_config(config: Dict[str, Any]) -> 'VPNConfig':
+        """Create a VPN configuration from a YAML configuration."""
+        common_utils.validate_schema(config, schemas.get_vpn_schema(),
+                                     'Invalid VPN YAML: ')
+        if config.get('tailscale') is not None:
+            return TailscaleConfig.from_env_vars()
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Unsupported VPN configuration. Please check '
+                             'the YAML configuration.')
+
+    def get_setup_command(self, cluster_name: str, node_id: int) -> str:
+        """Get the command to setup the VPN on VM instances."""
+        raise NotImplementedError
+
+    def get_setup_env_vars(self) -> Dict[str, str]:
+        """Get the environment variables to setup instances with the VPN.
+
+        NOTE: This is used for launching another instance with the same VPN
+        by SkyPilot, instead of setting up the VPN on that instance. Currently
+        it is only used in SkyServe.
+        """
+        return {}
+
+    def get_private_ip(self, cluster_name: str, node_id: int) -> str:
+        """Get the private IP address from the cluster name and node ID."""
+        raise NotImplementedError
+
+    def remove_node(self, cluster_name: str, node_id: int) -> None:
+        """Remove a node from the VPN."""
+        raise NotImplementedError
+
+    def to_yaml_config(self) -> Dict[str, Any]:
+        """Get the VPN configuration in YAML format."""
+        return {}
+
+    def disable_vpn_ip(self) -> None:
+        """Disable using VPN IP address for the instances."""
+        self._use_vpn_ip = False
+
+    @property
+    def use_vpn_ip(self) -> bool:
+        """Whether to use the VPN IP address for the instances."""
+        return self._use_vpn_ip
+
+    @staticmethod
+    def from_backend_config(**kwargs) -> 'VPNConfig':
+        """Create a VPN configuration from the backend configuration."""
+        vpn_type = kwargs.pop('vpn_type')
+        if vpn_type == 'tailscale':
+            return TailscaleConfig.from_backend_config(**kwargs)
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Unsupported VPN type. Please check the backend '
+                             'configuration.')
+
+    def to_backend_config(self) -> Dict[str, Any]:
+        """Get the VPN configuration for the backend."""
+        return {}
+
+
+class TailscaleConfig(VPNConfig):
+    """Tailscale VPN configuration."""
+    _TYPE = 'tailscale'
+    _MAX_HOSTNAME_LENGTH = 63
+
+    # pylint: disable=line-too-long
+    _SETUP_COMMAND = (
+        'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.noarmor.gpg | '
+        'sudo tee /usr/share/keyrings/tailscale-archive-keyring.gpg >/dev/null; '
+        'curl -fsSL https://pkgs.tailscale.com/stable/ubuntu/focal.tailscale-keyring.list | '
+        'sudo tee /etc/apt/sources.list.d/tailscale.list >/dev/null; '
+        'sudo apt-get update > /dev/null 2>&1; '
+        'sudo apt-get install tailscale -y > /dev/null 2>&1; '
+        'sudo tailscale login --auth-key {tailscale_auth_key} --hostname {hostname}'
+    )
+
+    def __init__(
+        self,
+        auth_key: str,
+        api_key: str,
+        tailnet: str,
+        use_vpn_ip: bool = True,
+    ) -> None:
+        super().__init__()
+        self._auth_key = auth_key
+        self._api_key = api_key
+        self._tailnet = tailnet
+        self._use_vpn_ip = use_vpn_ip
+
+    @staticmethod
+    def from_env_vars() -> 'TailscaleConfig':
+        # Parse Tailscale auth key from environment variable.
+        # This is required for all Tailscale operations.
+        auth_key = os.environ.get('TS_AUTHKEY')
+        api_key = os.environ.get('TS_API_KEY')
+        tailnet = os.environ.get('TS_TAILNET')
+
+        missing_env_vars = []
+        if auth_key is None:
+            missing_env_vars.append('TS_AUTHKEY')
+        if api_key is None:
+            missing_env_vars.append('TS_API_KEY')
+        if tailnet is None:
+            missing_env_vars.append('TS_TAILNET')
+
+        if len(missing_env_vars) > 0:
+            if len(missing_env_vars) == 1:
+                missing_env_vars_str = missing_env_vars[0]
+            else:
+                missing_env_vars_str = ', '.join(
+                    missing_env_vars[:-1]) + ' and ' + missing_env_vars[-1]
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'You should set {missing_env_vars_str} to '
+                                 'enable Tailscale VPN. Please go to the '
+                                 'Tailscale console, retrieve the required '
+                                 'access keys and set them in the environment '
+                                 'variables.')
+
+        assert auth_key is not None and api_key is not None and tailnet is not None
+        return TailscaleConfig(auth_key, api_key, tailnet)
+
+    @staticmethod
+    def _get_hostname(cluster_name: str, node_id: int) -> str:
+        return common_utils.make_cluster_name_on_cloud(
+            f'{cluster_name}-{node_id}', TailscaleConfig._MAX_HOSTNAME_LENGTH)
+
+    def get_setup_command(self, cluster_name: str, node_id: int) -> str:
+        return self._SETUP_COMMAND.format(tailscale_auth_key=self._auth_key,
+                                          hostname=self._get_hostname(
+                                              cluster_name, node_id))
+
+    def get_setup_env_vars(self) -> Dict[str, str]:
+        return {
+            'TS_AUTHKEY': self._auth_key,
+            'TS_API_KEY': self._api_key,
+            'TS_TAILNET': self._tailnet,
+        }
+
+    def _get_auth_headers(self) -> Dict[str, str]:
+        """Get the authentication headers for the Tailscale API."""
+        return {
+            'Authorization': f'Bearer {self._api_key}',
+        }
+
+    def _get_device_id_from_hostname(self, hostname: str) -> Optional[str]:
+        """Get the node ID from the hostname."""
+        url_to_query = ('https://api.tailscale.com/api/v2/tailnet/'
+                        f'{self._tailnet}/devices')
+        resp = requests.get(url_to_query, headers=self._get_auth_headers())
+        all_devices_in_network = resp.json().get('devices', [])
+        for device_info in all_devices_in_network:
+            if device_info.get('hostname') == hostname:
+                return device_info.get('id')
+        return None
+
+    def get_private_ip(self, cluster_name: str, node_id: int) -> str:
+        """Get the private IP address from the cluster name and node ID."""
+        device_name = self._get_hostname(cluster_name, node_id)
+        device_id = self._get_device_id_from_hostname(device_name)
+        url_to_query = f'https://api.tailscale.com/api/v2/device/{device_id}'
+        resp = requests.get(url_to_query, headers=self._get_auth_headers())
+        return resp.json().get('addresses', [])[0]
+
+    def remove_node(self, cluster_name: str, node_id: int) -> None:
+        """Remove a node from the VPN."""
+        device_name = self._get_hostname(cluster_name, node_id)
+        device_id = self._get_device_id_from_hostname(device_name)
+        if not device_id:
+            logger.warning(
+                f'Could not find device ID for node {cluster_name}-{node_id}.'
+                ' Skipping host removal.')
+
+        url_to_remove = f'https://api.tailscale.com/api/v2/device/{device_id}'
+        resp = requests.delete(url_to_remove, headers=self._get_auth_headers())
+        if resp.status_code != 200:
+            logger.warning(
+                f'Failed to remove node {cluster_name}-{node_id} from the VPN.'
+                f' Status code: {resp.status_code}.'
+                f' Response: {resp.text}')
+
+    def to_yaml_config(self) -> Dict[str, Any]:
+        """Get the VPN configuration in YAML format."""
+        return {'tailscale': True}
+
+    @staticmethod
+    def from_backend_config(**kwargs) -> 'TailscaleConfig':
+        assert kwargs.get('auth_key') is not None and kwargs.get(
+            'api_key') is not None and kwargs.get('tailnet') is not None, (
+                'Tailscale VPN configuration is missing required '
+                'fields. Please check the backend configuration.')
+        return TailscaleConfig(**kwargs)
+
+    def to_backend_config(self) -> Dict[str, Any]:
+        return {
+            'vpn_type': self._TYPE,
+            'auth_key': self._auth_key,
+            'api_key': self._api_key,
+            'tailnet': self._tailnet,
+            'use_vpn_ip': self._use_vpn_ip,
+        }
+
+
+def rewrite_cluster_info_by_vpn(
+    cluster_info: common.ClusterInfo,
+    cluster_name: str,
+    vpn_config_dict: Dict[str, Any],
+) -> None:
+    """Rewrite the cluster info with the VPN configuration."""
+    vpn_config = VPNConfig.from_backend_config(**vpn_config_dict)
+    if not vpn_config.use_vpn_ip:
+        return
+    instance_list = cluster_info.get_instances()
+    for (node_id, instance) in enumerate(instance_list):
+        instance.external_ip = vpn_config.get_private_ip(cluster_name, node_id)
+
+
+def remove_nodes_from_vpn(
+    cluster_info: common.ClusterInfo,
+    cluster_name: str,
+    vpn_config_dict: Dict[str, Any],
+) -> None:
+    vpn_config = VPNConfig.from_backend_config(**vpn_config_dict)
+    for node_id in range(cluster_info.num_instances):
+        vpn_config.remove_node(cluster_name, node_id)
+
+
+def check_vpn_unchanged(new_config: Optional[VPNConfig],
+                        old_config_dict: Optional[Dict[str, Any]],
+                        expose_service: Optional[bool] = None) -> Optional[str]:
+    """Check if the VPN configuration is unchanged.
+    Args:
+        vpn_config: The new VPN configuration to be launched.
+        old_config: The old VPN configuration in the backend.
+        expose_service: Whether the service controller should use the public IP.
+    Returns:
+        None if the VPN configuration is unchanged, otherwise a string
+        indicating the mismatch.
+    """
+    new_config_dict = None
+    if new_config is not None:
+        new_config_dict = new_config.to_backend_config()
+        if expose_service:
+            new_config_dict['use_vpn_ip'] = False
+    use_or_not_mismatch_str = (
+        '{} VPN, but current config requires the opposite')
+    if old_config_dict is None:
+        if new_config_dict is None:
+            return None
+        return use_or_not_mismatch_str.format('without')
+    if new_config_dict is None:
+        return use_or_not_mismatch_str.format('with')
+    if new_config_dict == old_config_dict:
+        return None
+    return (f'with VPN config\n{pprint.pformat(old_config_dict)}, '
+            f'but current config is\n{pprint.pformat(new_config_dict)}')
+
+
+def check_open_ports(vpn_config: Optional[VPNConfig],
+                     to_provision: resource_lib.Resources) -> None:
+    """Check if the ports are not needed to be opened.
+    Args:
+        task: The task.
+        to_provision: The resources to provision.
+    """
+    if vpn_config is None:
+        return
+    if not vpn_config.use_vpn_ip:
+        return
+    to_provision.remove_open_ports()
