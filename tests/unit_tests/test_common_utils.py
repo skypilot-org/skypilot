@@ -48,5 +48,5 @@ class TestMakeClusterNameOnCloud:
     @mock.patch('sky.utils.common_utils.get_user_hash')
     def test_make_with_characters_to_transform(self, mock_get_user_hash):
         mock_get_user_hash.return_value = MOCKED_USER_HASH
-        assert "cuda-11-8-ab12cd34" == common_utils.make_cluster_name_on_cloud(
+        assert "cud-73-ab12cd34" == common_utils.make_cluster_name_on_cloud(
             "Cuda_11.8")
