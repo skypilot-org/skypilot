@@ -171,7 +171,8 @@ def finishing_message(message: str,
 
 
 def error_message(message: str,
-                  log_path: Optional[Union[str, 'pathlib.Path']] = None) -> str:
+                  log_path: Optional[Union[str, 'pathlib.Path']] = None,
+                  is_local: bool = False) -> str:
     """Gets the error message for the given message."""
     # We have to reset the color before the message, because sometimes if a
     # previous spinner with dimmed color overflows in a narrow terminal, the
@@ -180,7 +181,7 @@ def error_message(message: str,
                     f'{colorama.Style.RESET_ALL} {message}')
     if log_path is None:
         return error_prefix
-    path_hint = log_path_hint(log_path)
+    path_hint = log_path_hint(log_path, is_local)
     return f'{error_prefix}  {path_hint}'
 
 

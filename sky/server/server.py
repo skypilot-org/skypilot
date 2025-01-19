@@ -4,12 +4,14 @@ import argparse
 import asyncio
 import collections
 import contextlib
+import datetime
 import os
 import pathlib
+import re
 import shutil
 import sys
-import time
-from typing import AsyncGenerator, Deque, Dict, List, Literal, Optional
+from typing import (AsyncGenerator, Deque, Dict, List, Literal, Optional, Set,
+                    Tuple)
 import uuid
 import zipfile
 
@@ -70,6 +72,35 @@ class RequestIDMiddleware(starlette.middleware.base.BaseHTTPMiddleware):
         return response
 
 
+# Default expiration time for upload ids before cleanup.
+_DEFAULT_UPLOAD_EXPIRATION_TIME = datetime.timedelta(hours=1)
+# Key: (upload_id, user_hash), Value: the time when the upload id needs to be
+# cleaned up.
+upload_ids_to_cleanup: Dict[Tuple[str, str], datetime.datetime] = {}
+
+
+async def cleanup_upload_ids():
+    """Cleans up the temporary chunks uploaded by the client after a delay."""
+    # Clean up the temporary chunks uploaded by the client after an hour. This
+    # is to prevent stale chunks taking up space on the API server.
+    while True:
+        await asyncio.sleep(3600)
+        current_time = datetime.datetime.now()
+        # We use list() to avoid modifying the dict while iterating over it.
+        upload_ids_to_cleanup_list = list(upload_ids_to_cleanup.items())
+        for (upload_id, user_hash), expire_time in upload_ids_to_cleanup_list:
+            if current_time > expire_time:
+                logger.info(f'Cleaning up upload id: {upload_id}')
+                client_file_mounts_dir = (
+                    common.CLIENT_DIR.expanduser().resolve() / user_hash /
+                    'file_mounts')
+                shutil.rmtree(client_file_mounts_dir / upload_id,
+                              ignore_errors=True)
+                (client_file_mounts_dir /
+                 upload_id).with_suffix('.zip').unlink(missing_ok=True)
+                upload_ids_to_cleanup.pop((upload_id, user_hash))
+
+
 @contextlib.asynccontextmanager
 async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-name
     """FastAPI lifespan context manager."""
@@ -84,6 +115,7 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
             schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
             is_skypilot_system=True,
         )
+    asyncio.create_task(cleanup_upload_ids())
     yield
     # Shutdown: Add any cleanup code here if needed
 
@@ -229,34 +261,137 @@ async def optimize(optimize_body: payloads.OptimizeBody,
 
 
 @app.post('/upload')
-async def upload_zip_file(request: fastapi.Request, user_hash: str) -> None:
-    """Uploads a zip file to the API server."""
-    # TODO(1271): We need to double check security of uploading zip file.
+async def upload_zip_file(request: fastapi.Request, user_hash: str,
+                          upload_id: str, chunk_index: int,
+                          total_chunks: int) -> payloads.UploadZipFileResponse:
+    """Uploads a zip file to the API server.
+
+    This endpoints can be called multiple times for the same upload_id with
+    different chunk_index. The server will merge the chunks and unzip the file
+    when all chunks are uploaded.
+
+    This implementation is simplified and may need to be improved in the future,
+    e.g., adopting S3-style multipart upload.
+
+    Args:
+        user_hash: The user hash.
+        upload_id: The upload id, a valid SkyPilot run_timestamp appended with 8
+            hex characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+        chunk_index: The chunk index, starting from 0.
+        total_chunks: The total number of chunks.
+    """
+    # Add the upload id to the cleanup list.
+    upload_ids_to_cleanup[(upload_id,
+                           user_hash)] = (datetime.datetime.now() +
+                                          _DEFAULT_UPLOAD_EXPIRATION_TIME)
+
+    # TODO(SKY-1271): We need to double check security of uploading zip file.
     client_file_mounts_dir = (common.CLIENT_DIR.expanduser().resolve() /
                               user_hash / 'file_mounts')
-    os.makedirs(client_file_mounts_dir, exist_ok=True)
-    timestamp = str(int(time.time()))
-    # Save the uploaded zip file temporarily
-    zip_file_path = client_file_mounts_dir / f'{timestamp}.zip'
-    async with aiofiles.open(zip_file_path, 'wb') as f:
-        async for chunk in request.stream():
-            await f.write(chunk)
+    client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
-    with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-        for member in zipf.namelist():
-            # Determine the new path
-            filename = os.path.basename(member)
-            original_path = os.path.normpath(member)
-            new_path = client_file_mounts_dir / original_path.lstrip('/')
+    # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
+    # characters, e.g. 'sky-2025-01-17-09-10-13-933602-35d31c22'.
+    if not re.match(
+            r'sky-[0-9]{4}-[0-9]{2}-[0-9]{2}-[0-9]{2}-[0-9]{2}-'
+            r'[0-9]{2}-[0-9]{6}-[0-9a-f]{8}$', upload_id):
+        raise ValueError(
+            f'Invalid upload_id: {upload_id}. Please use a valid uuid.')
+    # Check chunk_index to be a valid integer
+    if chunk_index < 0 or chunk_index >= total_chunks:
+        raise ValueError(
+            f'Invalid chunk_index: {chunk_index}. Please use a valid integer.')
+    # Check total_chunks to be a valid integer
+    if total_chunks < 1:
+        raise ValueError(
+            f'Invalid total_chunks: {total_chunks}. Please use a valid integer.'
+        )
 
-            if not filename:  # This is for directories, skip
-                new_path.mkdir(parents=True, exist_ok=True)
-                continue
-            new_path.parent.mkdir(parents=True, exist_ok=True)
-            with zipf.open(member) as member_file, new_path.open('wb') as f:
-                # Use shutil.copyfileobj to copy files in chunks, so it does
-                # not load the entire file into memory.
-                shutil.copyfileobj(member_file, f)
+    if total_chunks == 1:
+        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+    else:
+        chunk_dir = client_file_mounts_dir / upload_id
+        chunk_dir.mkdir(parents=True, exist_ok=True)
+        zip_file_path = chunk_dir / f'part{chunk_index}.incomplete'
+
+    try:
+        async with aiofiles.open(zip_file_path, 'wb') as f:
+            async for chunk in request.stream():
+                await f.write(chunk)
+    except starlette.requests.ClientDisconnect as e:
+        # Client disconnected, remove the zip file.
+        zip_file_path.unlink(missing_ok=True)
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail='Client disconnected, please try again.') from e
+    except Exception as e:
+        logger.error(f'Error uploading zip file: {zip_file_path}')
+        # Client disconnected, remove the zip file.
+        zip_file_path.unlink(missing_ok=True)
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=('Error uploading zip file: '
+                    f'{common_utils.format_exception(e)}'))
+
+    def get_missing_chunks(total_chunks: int) -> Set[str]:
+        return set(f'part{i}' for i in range(total_chunks)) - set(
+            p.name for p in chunk_dir.glob('part*'))
+
+    if total_chunks > 1:
+        zip_file_path.rename(zip_file_path.with_suffix(''))
+        missing_chunks = get_missing_chunks(total_chunks)
+        if missing_chunks:
+            return payloads.UploadZipFileResponse(status='uploading',
+                                                  missing_chunks=missing_chunks)
+        zip_file_path = client_file_mounts_dir / f'{upload_id}.zip'
+        async with aiofiles.open(zip_file_path, 'wb') as zip_file:
+            for chunk in range(total_chunks):
+                async with aiofiles.open(chunk_dir / f'part{chunk}', 'rb') as f:
+                    while True:
+                        # Use 64KB buffer to avoid memory overflow, same size as
+                        # shutil.copyfileobj.
+                        data = await f.read(64 * 1024)
+                        if not data:
+                            break
+                        await zip_file.write(data)
+
+    logger.info(f'Uploaded zip file: {zip_file_path}')
+    unzip_file(zip_file_path, client_file_mounts_dir)
+    if total_chunks > 1:
+        shutil.rmtree(chunk_dir)
+    return payloads.UploadZipFileResponse(status='completed')
+
+
+def unzip_file(zip_file_path: pathlib.Path,
+               client_file_mounts_dir: pathlib.Path) -> None:
+    """Unzips a zip file."""
+    try:
+        with zipfile.ZipFile(zip_file_path, 'r') as zipf:
+            for member in zipf.namelist():
+                # Determine the new path
+                filename = os.path.basename(member)
+                original_path = os.path.normpath(member)
+                new_path = client_file_mounts_dir / original_path.lstrip('/')
+
+                if not filename:  # This is for directories, skip
+                    new_path.mkdir(parents=True, exist_ok=True)
+                    continue
+                new_path.parent.mkdir(parents=True, exist_ok=True)
+                with zipf.open(member) as member_file, new_path.open('wb') as f:
+                    # Use shutil.copyfileobj to copy files in chunks, so it does
+                    # not load the entire file into memory.
+                    shutil.copyfileobj(member_file, f)
+    except zipfile.BadZipFile as e:
+        logger.error(f'Bad zip file: {zip_file_path}')
+        raise fastapi.HTTPException(
+            status_code=400,
+            detail=f'Invalid zip file: {common_utils.format_exception(e)}')
+    except Exception as e:
+        logger.error(f'Error unzipping file: {zip_file_path}')
+        raise fastapi.HTTPException(
+            status_code=500,
+            detail=(f'Error unzipping file: '
+                    f'{common_utils.format_exception(e)}'))
 
     # Cleanup the temporary file
     zip_file_path.unlink()

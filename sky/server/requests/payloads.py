@@ -441,3 +441,9 @@ class JobsDownloadLogsBody(RequestBody):
     refresh: bool = False
     controller: bool = False
     local_dir: str = constants.SKY_LOGS_DIRECTORY
+
+
+class UploadZipFileResponse(pydantic.BaseModel):
+    """The response body for the upload zip file endpoint."""
+    status: str
+    missing_chunks: Optional[List[str]] = None

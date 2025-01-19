@@ -379,8 +379,9 @@ def init_db(func):
 def reset_db_and_logs():
     """Create the database."""
     common_utils.remove_file_if_exists(_DB_PATH)
-    shutil.rmtree(REQUEST_LOG_PATH_PREFIX, ignore_errors=True)
-    shutil.rmtree(server_common.CLIENT_DIR, ignore_errors=True)
+    shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
+                  ignore_errors=True)
+    shutil.rmtree(server_common.CLIENT_DIR.expanduser(), ignore_errors=True)
 
 
 def request_lock_path(request_id: str) -> str:

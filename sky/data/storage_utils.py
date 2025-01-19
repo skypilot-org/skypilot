@@ -4,7 +4,7 @@ import os
 import pathlib
 import shlex
 import subprocess
-from typing import Any, Dict, IO, List, Optional, TextIO, Union
+from typing import Any, Dict, List, Optional, TextIO, Union
 import warnings
 import zipfile
 
@@ -229,7 +229,7 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 
 
 def zip_files_and_folders(items: List[str],
-                          output_file: Union[str, pathlib.Path, IO[bytes]],
+                          output_file: Union[str, pathlib.Path],
                           log_file: Optional[TextIO] = None):
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore',
