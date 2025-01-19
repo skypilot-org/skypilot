@@ -1,7 +1,6 @@
 """SkyServe core APIs."""
 import re
 import signal
-import subprocess
 import tempfile
 import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -763,8 +762,7 @@ def tail_logs(
                         code,
                         stream_logs=True,
                         process_stream=False,
-                        ssh_mode=command_runner.SshMode.INTERACTIVE,
-                        stdin=subprocess.DEVNULL)
+                        ssh_mode=command_runner.SshMode.INTERACTIVE)
 
 
 def serve_controller_endpoint(

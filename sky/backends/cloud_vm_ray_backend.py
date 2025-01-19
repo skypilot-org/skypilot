@@ -3842,10 +3842,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Allocate a pseudo-terminal to disable output buffering.
                 # Otherwise, there may be 5 minutes delay in logging.
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
-                # Disable stdin to avoid ray outputs mess up the terminal with
-                # misaligned output in multithreading/multiprocessing.
-                # Refer to: https://github.com/ray-project/ray/blob/d462172be7c5779abf37609aed08af112a533e1e/python/ray/autoscaler/_private/subprocess_output_util.py#L264 # pylint: disable=line-too-long
-                stdin=subprocess.DEVNULL,
             )
         except SystemExit as e:
             returncode = e.code
@@ -3875,7 +3871,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stream_logs=True,
             process_stream=False,
             ssh_mode=command_runner.SshMode.INTERACTIVE,
-            stdin=subprocess.DEVNULL,
         )
 
     def sync_down_managed_job_logs(
@@ -4021,7 +4016,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 stream_logs=False,
                 process_stream=False,
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
-                stdin=subprocess.DEVNULL,
             )
 
         logger.info(f'{colorama.Fore.CYAN}'

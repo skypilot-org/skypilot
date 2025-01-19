@@ -178,6 +178,9 @@ def run_with_log(
     if process_stream:
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
+    # Use stdin=subprocess.DEVNULL by default, as allowing inputs will mess up
+    # the terminal output when typing in the terminal that starts the API
+    # server.
     stdin = kwargs.pop('stdin', subprocess.DEVNULL)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
