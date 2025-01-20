@@ -11,7 +11,7 @@ resources:
 file_mounts:
   # Mount an existing oci bucket
   /datasets-storage:
-    source: oci://skybucket
+    source: oci://skybucket@us-sanjose-1
     mode: MOUNT  # Either MOUNT or COPY. Optional.
 
 # Working directory (optional) containing the project codebase.

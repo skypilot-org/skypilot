@@ -655,6 +655,33 @@ def test_managed_jobs_cancellation_gcp():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.managed_jobs
+def test_managed_jobs_retry_logs():
+    """Test managed job retry logs are properly displayed when a task fails."""
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
+        test = smoke_tests_utils.Test(
+            'managed_jobs_retry_logs',
+            [
+                f'sky jobs launch -n {name} {yaml_path} -y -d',
+                f'sky jobs logs -n {name} | tee {log_file.name}',
+                # First attempt
+                f'cat {log_file.name} | grep "Job started. Streaming logs..."',
+                f'cat {log_file.name} | grep "Job 1 failed"',
+                # Second attempt
+                f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
+                f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
+                # Task 2 is not reached
+                f'! cat {log_file.name} | grep "Job 2"',
+            ],
+            f'sky jobs cancel -y -n {name}',
+            timeout=7 * 60,  # 7 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 # ---------- Testing storage for managed job ----------
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
@@ -698,7 +725,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         output_check_cmd = f'{gcs_check_file_count} | grep 1'
     elif generic_cloud == 'azure':
-        region = 'westus2'
+        region = 'centralus'
         region_flag = f' --region {region}'
         storage_account_name = (
             storage_lib.AzureBlobStore.get_default_storage_account_name(region))
@@ -868,6 +895,29 @@ def test_managed_jobs_inline_env(generic_cloud: str):
         ],
         f'sky jobs cancel -y -n {name}',
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.managed_jobs
+def test_managed_jobs_logs_sync_down():
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'test-managed-jobs-logs-sync-down',
+        [
+            f'sky jobs launch -n {name} -y examples/managed_job.yaml -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=300 + smoke_tests_utils.BUMP_UP_SECONDS),
+            f'sky jobs logs --controller 1 --sync-down',
+            f'sky jobs logs 1 --sync-down',
+            f'sky jobs logs --controller --name minimal --sync-down',
+            f'sky jobs logs --name minimal --sync-down',
+        ],
+        f'sky jobs cancel -y -n {name}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)

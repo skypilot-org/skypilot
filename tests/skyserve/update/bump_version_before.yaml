@@ -16,7 +16,7 @@ service:
   replicas: 2
 
 resources:
-  ports: 8080
+  ports: 8081
   cpus: 2+
 
 setup: |
