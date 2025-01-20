@@ -23,7 +23,6 @@ clouds are not supported yet, smoke tests for those clouds are not generated.
 
 import collections
 import os
-import random
 import re
 import subprocess
 from typing import Any, Dict, List, Optional, Tuple
@@ -112,7 +111,10 @@ def _extract_marked_tests(
     for i, arg in enumerate(args_to_pytest):
         if arg == "-k" and i + 1 < len(args_to_pytest):
             k_value = args_to_pytest[i + 1]
+        if arg == "--generic-cloud" and i + 1 < len(args_to_pytest):
+            default_clouds_to_run = [args_to_pytest[i + 1]]
 
+    print(f'default_clouds_to_run: {default_clouds_to_run}')
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
 
@@ -122,7 +124,7 @@ def _extract_marked_tests(
             continue
         if 'skip' in marks:
             continue
-        if k_value and k_value not in function_name:
+        if k_value is not None and k_value not in function_name:
             # TODO(zpoint): support and/or in k_value
             continue
 
@@ -155,7 +157,7 @@ def _extract_marked_tests(
             clouds_to_include.append(PYTEST_TO_CLOUD_KEYWORD[mark])
 
         clouds_to_include = (clouds_to_include
-                             if clouds_to_include else DEFAULT_CLOUDS_TO_RUN)
+                             if clouds_to_include else default_clouds_to_run)
         cloud_queue_map = SERVE_CLOUD_QUEUE_MAP if is_serve_test else CLOUD_QUEUE_MAP
         final_clouds_to_include = [
             cloud for cloud in clouds_to_include if cloud in cloud_queue_map
@@ -233,9 +235,6 @@ def _dump_pipeline_to_file(yaml_file_path: str,
         all_steps = []
         for pipeline in pipelines:
             all_steps.extend(pipeline['steps'])
-        # Shuffle the steps to avoid flakyness, consecutive runs of the same
-        # kind of test may fail for requiring locks on the same resources.
-        random.shuffle(all_steps)
         final_pipeline = {'steps': all_steps, 'env': default_env}
         yaml.dump(final_pipeline, file, default_flow_style=False)
 
