@@ -1,0 +1,21 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+env:
+  LOG_TO_STDOUT: '1'
+  PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  SKYPILOT_DISABLE_USAGE_COLLECTION: '1'
+  SKYPILOT_SUPPRESS_SENSITIVE_LOG: '1'
+steps:
+- agents:
+    queue: back_compat
+  command: bash tests/backward_compatibility_tests.sh
+  label: Backward compatibility test
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_quick_tests_core.py::test_yaml_launch_and_mount
+    --aws
+  label: test_yaml_launch_and_mount on aws
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_quick_tests_core.py::test_yaml_launch_and_mount
+    --azure
+  label: test_yaml_launch_and_mount on azure

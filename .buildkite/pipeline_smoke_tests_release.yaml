@@ -1,0 +1,1178 @@
+# This is an auto-generated Buildkite pipeline by .buildkite/generate_pipeline.py, Please do not edit directly.
+env:
+  LOG_TO_STDOUT: '1'
+  PYTHONPATH: ${PYTHONPATH}:$(pwd)
+  SKYPILOT_DISABLE_USAGE_COLLECTION: '1'
+steps:
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_zone --aws
+  label: test_aws_zone on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_aws_storage_mounts_with_stop
+    --aws
+  label: test_aws_storage_mounts_with_stop on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+    --azure
+  label: TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+    on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_failures --aws
+  label: test_skyserve_failures on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
+    --azure -k blue_green
+  label: test_skyserve_new_autoscaler_update on azure with param blue_green
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_hostname --azure
+  label: test_multi_hostname on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_private_bucket
+    --azure
+  label: TestStorageWithCredentials::test_private_bucket on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_default_resources
+    --azure
+  label: test_managed_jobs_recovery_default_resources on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_large_readiness_timeout
+    --aws
+  label: test_skyserve_large_readiness_timeout on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs --aws
+  label: test_managed_jobs on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_aws_images --aws
+  label: test_aws_images on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_rolling_update
+    --aws
+  label: test_skyserve_rolling_update on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_env_check --aws
+  label: test_env_check on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_source_with_spaces
+    --azure
+  label: TestStorageWithCredentials::test_upload_source_with_spaces on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_large_job_queue --azure
+  label: test_large_job_queue on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_aws_storage_mounts_with_stop_only_mount
+    --aws
+  label: test_aws_storage_mounts_with_stop_only_mount on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_user_bug_restart
+    --aws
+  label: test_skyserve_user_bug_restart on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_failures --azure
+  label: test_skyserve_failures on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_long_setup_run_script
+    --azure
+  label: test_long_setup_run_script on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_sub_path
+    --aws
+  label: TestStorageWithCredentials::test_bucket_sub_path on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_failed_setup
+    --azure
+  label: test_managed_jobs_pipeline_failed_setup on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue --aws
+  label: test_job_queue on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_multinode
+    --aws
+  label: test_job_queue_multinode on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_llm --azure
+  label: test_skyserve_llm on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_disk_tier --aws
+  label: test_aws_disk_tier on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_gcs_regions
+    --azure
+  label: TestStorageWithCredentials::test_gcs_regions on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue --azure
+  label: test_job_queue on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_user_dependencies --aws
+  label: test_user_dependencies on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_large_job_queue --aws
+  label: test_large_job_queue on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_azure --azure
+  label: test_cancel_azure on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_region_and_zone.py::test_azure_region --azure
+  label: test_azure_region on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::TestYamlSpecs::test_load_dump_yaml_config_equivalent
+    --aws
+  label: TestYamlSpecs::test_load_dump_yaml_config_equivalent on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_use_spot --aws
+  label: test_use_spot on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered_with_default
+    --azure
+  label: test_multiple_accelerators_ordered_with_default on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update --aws
+  label: test_skyserve_update on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_multinode
+    --azure
+  label: test_job_queue_multinode on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_file_mounts --aws
+  label: test_file_mounts on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_node_failure --azure
+  label: test_multi_node_failure on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_list_source
+    --azure
+  label: TestStorageWithCredentials::test_list_source on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update_autoscale
+    --aws
+  label: test_skyserve_update_autoscale on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_using_file_mounts_with_env_vars
+    --azure
+  label: test_using_file_mounts_with_env_vars on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_example_app --aws
+  label: test_example_app on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_rolling_update
+    --azure
+  label: test_skyserve_rolling_update on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_streaming --azure
+  label: test_skyserve_streaming on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_task_labels_aws --aws
+  label: test_task_labels_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_storage
+    --azure
+  label: test_managed_jobs_storage on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered_with_default
+    --aws
+  label: test_multiple_accelerators_ordered_with_default on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_clone_disk_aws --aws
+  label: test_clone_disk_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_huggingface --azure
+  label: test_huggingface on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_cancel --aws
+  label: test_skyserve_cancel on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop --azure
+  label: test_azure_start_stop on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_disk_tier --azure
+  label: test_azure_disk_tier on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_logs_sync_down
+    --aws
+  label: test_managed_jobs_logs_sync_down on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_load_balancer
+    --azure
+  label: test_skyserve_load_balancer on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered
+    --azure
+  label: test_multiple_accelerators_unordered on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_large_readiness_timeout
+    --azure
+  label: test_skyserve_large_readiness_timeout on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::TestYamlSpecs::test_load_dump_yaml_config_equivalent
+    --azure
+  label: TestYamlSpecs::test_load_dump_yaml_config_equivalent on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_zero_quota_failover
+    --aws
+  label: test_aws_zero_quota_failover on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_aws
+    --aws
+  label: test_managed_jobs_recovery_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_custom_default_conda_env
+    --aws
+  label: test_custom_default_conda_env on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered
+    --azure
+  label: test_multiple_accelerators_ordered on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_base_ondemand_fallback
+    --aws
+  label: test_skyserve_base_ondemand_fallback on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_streaming --aws
+  label: test_skyserve_streaming on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+    --aws
+  label: TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+    on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_invalid_names
+    --azure
+  label: TestStorageWithCredentials::test_invalid_names on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_default_resources
+    --aws
+  label: test_managed_jobs_recovery_default_resources on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_docker_preinstalled_package
+    --azure
+  label: test_docker_preinstalled_package on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_with_ssh_proxy_command
+    --aws
+  label: test_aws_with_ssh_proxy_command on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_custom_default_conda_env
+    --azure
+  label: test_custom_default_conda_env on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_minimal --aws
+  label: test_minimal on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_load_balancer
+    --aws
+  label: test_skyserve_load_balancer on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+    --aws
+  label: TestStorageWithCredentials::test_externally_created_bucket_mount_without_source
+    on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_minimal --azure
+  label: test_minimal on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_cli_logs --aws
+  label: test_cli_logs on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_new_bucket_creation_and_deletion
+    --azure
+  label: TestStorageWithCredentials::test_new_bucket_creation_and_deletion on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_echo --aws
+  label: test_multi_echo on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_copy_mount_existing_storage
+    --aws
+  label: TestStorageWithCredentials::test_copy_mount_existing_storage on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_huggingface --aws
+  label: test_huggingface on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_best_tier_failover
+    --azure
+  label: test_azure_best_tier_failover on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_job_pipeline --aws
+  label: test_job_pipeline on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_autostop --aws
+  label: test_autostop on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_custom_image --aws
+  label: test_aws_custom_image on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict --aws
+  label: test_aws_image_id_dict on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_pytorch --aws
+  label: test_cancel_pytorch on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_readiness_timeout_fail
+    --aws
+  label: test_skyserve_readiness_timeout_fail on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_inferentia --aws
+  label: test_inferentia on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env_file --aws
+  label: test_inline_env_file on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_launch_fast --azure
+  label: test_launch_fast on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_aws_http_server_with_custom_ports
+    --aws
+  label: test_aws_http_server_with_custom_ports on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_spot_instance_verification
+    --azure
+  label: test_azure_spot_instance_verification on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_docker_storage_mounts
+    --azure
+  label: test_docker_storage_mounts on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_gcs_regions
+    --aws
+  label: TestStorageWithCredentials::test_gcs_regions on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_fast --aws
+  label: test_core_api_sky_launch_fast on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_with_docker
+    --azure
+  label: test_job_queue_with_docker on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_aws_stale_job_manual_restart
+    --aws
+  label: test_aws_stale_job_manual_restart on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_azure_images --azure
+  label: test_azure_images on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_cancel --azure
+  label: test_skyserve_cancel on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_aws --aws
+  label: test_cancel_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env_file --azure
+  label: test_inline_env_file on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_example_app --azure
+  label: test_example_app on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_fast_large_job_queue
+    --aws
+  label: test_fast_large_job_queue on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_azure_storage_mounts_with_stop
+    --azure
+  label: test_azure_storage_mounts_with_stop on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_public_bucket
+    --azure
+  label: TestStorageWithCredentials::test_public_bucket on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered
+    --aws
+  label: test_multiple_accelerators_unordered on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_launch_fast_with_autostop
+    --azure
+  label: test_launch_fast_with_autostop on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_job_pipeline --azure
+  label: test_job_pipeline on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_llm --aws -k
+    accelerator0
+  label: test_skyserve_llm on aws with param accelerator0
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env --aws
+  label: test_inline_env on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_retry_logs
+    --azure
+  label: test_managed_jobs_retry_logs on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_aws_regions
+    --azure
+  label: TestStorageWithCredentials::test_aws_regions on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_autodown --azure
+  label: test_autodown on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered_with_default
+    --azure
+  label: test_multiple_accelerators_unordered_with_default on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_long_setup_run_script
+    --aws
+  label: test_long_setup_run_script on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_inline_env
+    --aws
+  label: test_managed_jobs_inline_env on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_upload_to_existing_bucket
+    --azure
+  label: TestStorageWithCredentials::test_upload_to_existing_bucket on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_failed_setup
+    --azure
+  label: test_managed_jobs_failed_setup on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_recovery_aws
+    --aws
+  label: test_managed_jobs_pipeline_recovery_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_intermediate_storage
+    --aws
+  label: test_managed_jobs_intermediate_storage on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_copy_mount_existing_storage
+    --azure
+  label: TestStorageWithCredentials::test_copy_mount_existing_storage on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_http_server_with_custom_ports
+    --azure
+  label: test_azure_http_server_with_custom_ports on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_using_file_mounts_with_env_vars
+    --aws
+  label: test_using_file_mounts_with_env_vars on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_sub_path
+    --azure
+  label: TestStorageWithCredentials::test_bucket_sub_path on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_azure_start_stop_two_nodes
+    --azure
+  label: test_azure_start_stop_two_nodes on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs --azure
+  label: test_managed_jobs on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_env_check --azure
+  label: test_env_check on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_fast_update --azure
+  label: test_skyserve_fast_update on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_image_no_conda --aws
+  label: test_image_no_conda on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_retry_logs
+    --aws
+  label: test_managed_jobs_retry_logs on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update --azure
+  label: test_skyserve_update on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_ordered
+    --aws
+  label: test_multiple_accelerators_ordered on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_bulk_deletion
+    --azure
+  label: TestStorageWithCredentials::test_bucket_bulk_deletion on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_autostop --azure
+  label: test_autostop on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_cli_logs --azure
+  label: test_cli_logs on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_readiness_timeout_fail
+    --azure
+  label: test_skyserve_readiness_timeout_fail on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_nonexistent_bucket
+    --azure
+  label: TestStorageWithCredentials::test_nonexistent_bucket on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_update_autoscale
+    --azure
+  label: test_skyserve_update_autoscale on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_new_autoscaler_update
+    --aws -k rolling
+  label: test_skyserve_new_autoscaler_update on aws with param rolling
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_echo --azure
+  label: test_multi_echo on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+    --azure
+  label: TestStorageWithCredentials::test_excluded_file_cloud_storage_upload_copy
+    on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_logs_sync_down
+    --azure
+  label: test_managed_jobs_logs_sync_down on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_job_queue_with_docker
+    --aws
+  label: test_job_queue_with_docker on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_region
+    --aws
+  label: test_aws_image_id_dict_region on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_failed_setup
+    --aws
+  label: test_managed_jobs_failed_setup on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion
+    --azure
+  label: TestStorageWithCredentials::test_multiple_buckets_creation_and_deletion on
+    azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_stale_job --aws
+  label: test_stale_job on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_use_spot --azure
+  label: test_use_spot on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_user_dependencies --azure
+  label: test_user_dependencies on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_azure_http --azure
+  label: test_skyserve_azure_http on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_node_failure --aws
+  label: test_multi_node_failure on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_fast_update --aws
+  label: test_skyserve_fast_update on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_resources --azure
+  label: test_multiple_resources on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_fast_large_job_queue
+    --azure
+  label: test_fast_large_job_queue on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_recovery_multi_node_aws
+    --aws
+  label: test_managed_jobs_recovery_multi_node_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_inline_env
+    --azure
+  label: test_managed_jobs_inline_env on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_storage
+    --aws
+  label: test_managed_jobs_storage on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_resources --aws
+  label: test_multiple_resources on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_region_and_zone.py::test_aws_region --aws
+  label: test_aws_region on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_multiple_accelerators_unordered_with_default
+    --aws
+  label: test_multiple_accelerators_unordered_with_default on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_bucket_external_deletion
+    --azure
+  label: TestStorageWithCredentials::test_bucket_external_deletion on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_cancel_pytorch --azure
+  label: test_cancel_pytorch on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_multi_hostname --aws
+  label: test_multi_hostname on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_images.py::test_aws_image_id_dict_zone --aws
+  label: test_aws_image_id_dict_zone on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_core_api_sky_launch_fast --azure
+  label: test_core_api_sky_launch_fast on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::TestStorageWithCredentials::test_aws_regions
+    --aws
+  label: TestStorageWithCredentials::test_aws_regions on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_launch_fast --aws
+  label: test_launch_fast on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_docker_preinstalled_package
+    --aws
+  label: test_docker_preinstalled_package on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_cancellation_aws
+    --aws
+  label: test_managed_jobs_cancellation_aws on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_inline_env --azure
+  label: test_inline_env on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_stale_job --azure
+  label: test_stale_job on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_docker_storage_mounts
+    --aws
+  label: test_docker_storage_mounts on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_sky_bench --aws
+  label: test_sky_bench on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_cluster_job.py::test_autodown --aws
+  label: test_autodown on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_mount_and_storage.py::test_file_mounts --azure
+  label: test_file_mounts on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_basic.py::test_launch_fast_with_autostop
+    --aws
+  label: test_launch_fast_with_autostop on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud
+  command: pytest tests/smoke_tests/test_managed_job.py::test_managed_jobs_pipeline_failed_setup
+    --aws
+  label: test_managed_jobs_pipeline_failed_setup on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_aws_http --aws
+  label: test_skyserve_aws_http on aws
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_base_ondemand_fallback
+    --azure
+  label: test_skyserve_base_ondemand_fallback on azure
+  retry:
+    automatic: true
+- agents:
+    queue: generic_cloud_serve
+  command: pytest tests/smoke_tests/test_sky_serve.py::test_skyserve_user_bug_restart
+    --azure
+  label: test_skyserve_user_bug_restart on azure
+  retry:
+    automatic: true

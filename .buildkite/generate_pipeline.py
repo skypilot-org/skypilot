@@ -89,6 +89,27 @@ def _extract_marked_tests(
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
 
+    # If user pass --aws, --gcp, --azure, --kubernetes, we should change the
+    # DEFAULT_CLOUDS_TO_RUN to the clouds that user passed.
+    default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
+    args_to_pytest = args.split(' ')
+    args_to_pytest = [
+        i[2:] if i.startswith('--') else i for i in args_to_pytest
+    ]
+    default_clouds_to_run = []
+    for each_arg in args_to_pytest:
+        if each_arg in PYTEST_TO_CLOUD_KEYWORD:
+            default_clouds_to_run.append(each_arg)
+    if default_clouds_to_run:
+        default_clouds_to_run = list(
+            set(default_clouds_to_run) & set(CLOUD_QUEUE_MAP.keys()))
+    # if user pass don't support clouds, we should revert back to default
+    if not default_clouds_to_run:
+        default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
+    if 'generic-cloud' in args_to_pytest:
+        default_clouds_to_run = [default_clouds_to_run[0]]
+    print(f'default_clouds_to_run: {default_clouds_to_run}')
+
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
 
@@ -98,6 +119,7 @@ def _extract_marked_tests(
             continue
         if 'skip' in marks:
             continue
+        print(f'function_name: {function_name}, marks: {marks}')
 
         marks = marks.replace('\'', '').split(',')
         marks = [i.strip() for i in marks]
