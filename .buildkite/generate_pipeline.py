@@ -103,8 +103,6 @@ def _extract_marked_tests(
     # if user pass clouds we don't support, we should revert back to default
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
-    if 'generic-cloud' in marks_to_pytest:
-        default_clouds_to_run = [default_clouds_to_run[0]]
 
     k_value = None
     # Iterate over the argument list to find `-k` and its value
