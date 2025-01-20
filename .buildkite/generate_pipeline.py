@@ -100,7 +100,7 @@ def _extract_marked_tests(
     if default_clouds_to_run:
         default_clouds_to_run = list(
             set(default_clouds_to_run) & set(CLOUD_QUEUE_MAP.keys()))
-    # if user pass don't support clouds, we should revert back to default
+    # if user pass clouds we don't support, we should revert back to default
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
     if 'generic-cloud' in marks_to_pytest:
