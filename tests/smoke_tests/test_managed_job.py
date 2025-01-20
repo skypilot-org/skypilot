@@ -28,8 +28,8 @@ import time
 
 import pytest
 from smoke_tests import smoke_tests_utils
-from smoke_tests.test_mount_and_storage import (
-    TestStorageWithCredentials as StorageWithCredentialsUtils)
+from smoke_tests.test_mount_and_storage import (TestStorageWithCredentials as
+                                                StorageWithCredentialsUtils)
 
 import sky
 from sky import jobs
