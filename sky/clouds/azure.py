@@ -8,6 +8,7 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
+from packaging import version as pversion
 
 from sky import clouds
 from sky import exceptions
@@ -206,7 +207,7 @@ class Azure(clouds.Cloud):
                 publisher_name=publisher,
                 offer=offer,
                 skus=sku)
-            latest_version = max(versions, key=lambda x: x.name)
+            latest_version = max(versions, key=lambda x: pversion.parse(x.name))
             version = latest_version.name
         try:
             image = compute_client.virtual_machine_images.get(
