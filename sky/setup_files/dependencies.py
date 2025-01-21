@@ -141,7 +141,7 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': ['nebius @ git+https://github.com/nebius/pysdk@fee51b4']
+    'nebius': ['nebius @ git+https://github.com/nebius/pysdk@876bb16']
 }
 
 extras_require['all'] = sum(extras_require.values(), [])
