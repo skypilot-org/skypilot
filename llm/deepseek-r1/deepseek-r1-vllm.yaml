@@ -1,0 +1,28 @@
+envs:
+  MODEL_NAME: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
+resources:
+  accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
+  ports:
+    - 8000
+
+setup: |
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.10 -y
+    conda activate vllm
+  fi
+
+  pip install transformers
+  pip install vllm
+
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+
+run: |
+  conda activate vllm
+  echo 'Starting vllm openai api server...'
+  python -m vllm.entrypoints.openai.api_server \
+    --model $MODEL_NAME \
+    --host 0.0.0.0 --max-model-len 4096
