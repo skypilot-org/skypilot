@@ -295,6 +295,9 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
+    def set_port(self, port: int) -> None:
+        self._port = port
+
     def tls_str(self):
         if self.tls_credential is None:
             return 'No TLS Enabled'

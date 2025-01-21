@@ -174,15 +174,8 @@ def _get_resources_ports(task_yaml: str) -> str:
     # Already checked all ports are valid in sky.serve.core.up
     assert len(task.resources) >= 1, task
     assert task.service is not None, task
-    # If the service has a specified main port
-    task_service_port = task.service.port
-    if task_service_port is not None:
-        return str(task_service_port)
-    task_resources: 'resources.Resources' = list(task.resources)[0]
-    # Already checked the resources have and only have one port
-    # before upload the task yaml.
-    assert task_resources.ports is not None
-    return task_resources.ports[0]
+    assert task.service.port is not None, task
+    return str(task.service.port)
 
 
 def _should_use_spot(task_yaml: str,

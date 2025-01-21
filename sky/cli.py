@@ -4105,6 +4105,8 @@ def _generate_task_with_service(
                     raise ValueError(f'Got multiple ports: {service_port} and '
                                      f'{resource_port} in different resources. '
                                      'Please specify single port instead.')
+        assert service_port is not None
+        task.service.set_port(service_port)
     else:
         port_set = set()
         for requested_resources in list(task.resources):
