@@ -391,6 +391,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not have spot instances
+@pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
@@ -656,6 +657,7 @@ def test_managed_jobs_cancellation_gcp():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_retry_logs():
     """Test managed job retry logs are properly displayed when a task fails."""
@@ -690,7 +692,7 @@ def test_managed_jobs_retry_logs():
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_do  # DO does not support spot instances
-@pytest.mark.no_vast # Uses other clouds
+@pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""

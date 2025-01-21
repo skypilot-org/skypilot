@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -31,6 +32,8 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.skylet import events
 from sky.utils import common_utils
+
+EXTRA_TIMEOUT = int(os.getenv('EXTRA_TIMEOUT') or 0)
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
@@ -81,7 +84,7 @@ def test_minimal(generic_cloud: str):
             f'sky exec -c {name} && exit 1 || true',
         ],
         f'sky down -y {name}',
-        smoke_tests_utils.get_timeout(generic_cloud),
+        smoke_tests_utils.get_timeout(generic_cloud) + EXTRA_TIMEOUT,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -110,7 +113,7 @@ def test_launch_fast(generic_cloud: str):
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + EXTRA_TIMEOUT,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -119,7 +122,6 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
-@pytest.mark.no_vast  # Dynamic ports are needed
 @pytest.mark.no_kubernetes
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -148,7 +150,8 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) +
+        autostop_timeout + EXTRA_TIMEOUT,
     )
     smoke_tests_utils.run_one_test(test)
 
