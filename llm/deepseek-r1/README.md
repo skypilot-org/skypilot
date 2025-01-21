@@ -2,10 +2,6 @@
 
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-<p align="center">
-    <img src="https://i.imgur.com/yxtzPEu.png" alt="vLLM"/>
-</p>
-
 On Jan 19, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters. 
 
 DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning behaviors. It outperforms **state-of-the-art proprietary models** such as OpenAI-o1-mini and becomes **the first time** an open LLM closely rivals like OpenAI-o1.
@@ -13,17 +9,6 @@ DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning b
 This guide walks through how to run and host DeepSeek-R1 models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public Clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)). 
 
 Skypilot supports a vareity of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
-
-### GPUs required for serving DeepSeek-R1
-
-DeepSeek-R1 comes in different sizes, and each size has different GPU requirements. Here is the model-GPU compatibility matrix (applies to both pretrained and instruction tuned models):
-
-| **GPU**         	| **DeepSeek-R1-Distill-Qwen-7B**  | **DeepSeek-R1-Distill-Llama-70B** 	| **DeepSeek-R1**  	| 
-|-----------------	|------------------------------	|------------------------	|------------------------------	|
-| **L4:1**        	| ✅, with `--max-model-len 4096` 	| ❌                      	| ❌                            	|
-| **L4:8**        	| ✅                            	| ❌                      	| ❌                            	|
-| **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
-| **A100-80GB:16** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
 
 
 ### Step 0: Bring any infra
@@ -53,14 +38,33 @@ See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 ### Step 1: Run it!
 
 Now it's time to run deepseek 
+8B: 
 ```
 sky launch deepseek-r1-vllm.yaml \
   -c deepseek \
   --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
-  --env MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Qwen-7B \
+  --env MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
   --gpus L4:1
 ```
-replace the command with your own huggingface token and the GPU that you wish to use. You may run `sky show-gpus` to know what GPU that you have access to. 
+
+70B: 
+```
+sky launch deepseek-r1-vllm.yaml \
+  -c deepseek \
+  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
+  --env MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
+  --gpus A100-80GB
+```
+
+replace the command with your own huggingface token and the GPU that you wish to use. You may run `sky show-gpus` to know what GPU that you have access to. As a reference, here is the model-GPU compatibility matrix:
+
+| **GPU**         	| **DeepSeek-R1-Distill-Qwen-7B**  | **DeepSeek-R1-Distill-Llama-70B** 	| **DeepSeek-R1**  	| 
+|-----------------	|------------------------------	|------------------------	|------------------------------	|
+| **L4:1**        	| ✅, with `--max-model-len 4096` 	| ❌                      	| ❌                            	|
+| **L4:8**        	| ✅                            	| ❌                      	| ❌                            	|
+| **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
+| **A100-80GB:12** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
+
 
 Get a single endpoint that load-balances across replicas:
 
