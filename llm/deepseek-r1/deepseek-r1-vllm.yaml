@@ -1,5 +1,6 @@
 envs:
-  MODEL_NAME: deepseek-ai/DeepSeek-R1-Distill-Qwen-7B
+  MODEL_NAME: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
+  MAX_MODEL_LEN: 4096
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 resources:
@@ -24,5 +25,6 @@ run: |
   conda activate vllm
   echo 'Starting vllm openai api server...'
   python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
     --model $MODEL_NAME \
-    --host 0.0.0.0 --max-model-len 4096
+    --max-model-len $MAX_MODEL_LEN
