@@ -554,6 +554,53 @@ def set_failed(
     logger.info(failure_reason)
 
 
+def set_failed_controller(
+    job_id: int,
+    failure_reason: str,
+    callback_func: Optional[CallbackType] = None,
+):
+    """Set the status to FAILED_CONTROLLER for all tasks of the job.
+
+    Unlike set_failed(), this will override any existing status, including
+    terminal ones. This should only be used when the controller process has died
+    abnormally.
+
+    For jobs that already have an end_time set, we preserve that time instead of
+    overwriting it with the current time.
+
+    Args:
+        job_id: The job id.
+        failure_reason: The failure reason.
+    """
+    now = time.time()
+    fields_to_set: Dict[str, Any] = {
+        'status': ManagedJobStatus.FAILED_CONTROLLER.value,
+        'failure_reason': failure_reason,
+    }
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        previous_status = cursor.execute(
+            'SELECT status FROM spot WHERE spot_job_id=(?)',
+            (job_id,)).fetchone()[0]
+        previous_status = ManagedJobStatus(previous_status)
+        if previous_status == ManagedJobStatus.RECOVERING:
+            # If the job is recovering, we should set the last_recovered_at to
+            # the current time, so that the end_at - last_recovered_at will not
+            # affect the job duration calculation.
+            fields_to_set['last_recovered_at'] = now
+
+        set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
+
+        cursor.execute(
+            f"""\
+            UPDATE spot SET
+            end_at = COALESCE(end_at, ?),
+            {set_str}
+            WHERE spot_job_id=(?)""", (now, *fields_to_set.values(), job_id))
+    if callback_func:
+        callback_func('FAILED')
+    logger.info(failure_reason)
+
+
 def set_cancelling(job_id: int, callback_func: CallbackType):
     """Set tasks in the job as cancelling, if they are in non-terminal states.
 
@@ -674,6 +721,47 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
             }
             jobs.append(job_dict)
         return jobs
+
+
+def get_jobs_to_check(job_id: Optional[int] = None) -> List[int]:
+    """Get jobs that need controller process checking.
+
+    Returns:
+    - For jobs with schedule state: jobs that have schedule state not DONE
+    - For legacy jobs (no schedule state): jobs that are in non-terminal status
+
+    Args:
+        job_id: Optional job ID to check. If None, checks all jobs.
+    """
+    job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
+    job_value = () if job_id is None else (job_id,)
+
+    statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
+    field_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
+
+    # Get jobs that are either:
+    # 1. Have schedule state that is not DONE, or
+    # 2. Have no schedule state (legacy) AND are in non-terminal status
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            f"""\
+            SELECT DISTINCT spot.spot_job_id
+            FROM spot
+            LEFT OUTER JOIN job_info
+            ON spot.spot_job_id=job_info.spot_job_id
+            WHERE (
+                (job_info.schedule_state IS NOT NULL AND
+                 job_info.schedule_state IS NOT ?)
+                OR
+                (job_info.schedule_state IS NULL AND status NOT IN ({statuses}))
+            )
+            {job_filter}
+            ORDER BY spot.spot_job_id DESC""",
+            [ManagedJobScheduleState.DONE.value, *field_values, *job_value
+            ]).fetchall()
+        return [row[0] for row in rows if row[0] is not None]
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
