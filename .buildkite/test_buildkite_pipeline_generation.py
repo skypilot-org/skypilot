@@ -8,7 +8,7 @@ and compares the output to the generated pipeline.
 Some parameters in smoke tests requires credentials to setup, so we need to
 run the tests with the credentials.
 
-pytest -n 0 --dist no .buildkite/test_buildkite.py
+pytest -n 0 --dist no .buildkite/test_buildkite_pipeline_generation.py
 
 """
 
@@ -133,8 +133,8 @@ def _extract_test_names_from_pipeline(pipeline_path):
     '--aws',
     '--gcp',
     '--azure',
-    '--generic_cloud aws',
-    '--generic_cloud gcp',
+    '--generic-cloud aws',
+    '--generic-cloud gcp',
     '--managed-jobs',
     '--managed-jobs --serve',
     '--managed-jobs --aws',
@@ -159,10 +159,11 @@ def test_generate_same_as_pytest(args):
                 f.write(modified_content)
 
         # Get all test functions from pytest for all files
-        pytest_output = subprocess.check_output(['pytest'] + test_files +
-                                                [args],
-                                                stderr=subprocess.STDOUT,
-                                                text=True)
+        pytest_output = subprocess.check_output(
+            f"pytest ./tests/test_smoke.py {args}",
+            stderr=subprocess.STDOUT,
+            text=True,
+            shell=True)
         pytest_tests = set(re.findall(r"test_\w+", pytest_output))
 
         # Generate pipeline and extract test functions using YAML parsing
