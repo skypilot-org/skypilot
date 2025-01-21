@@ -28,10 +28,7 @@ import time
 
 import pytest
 from smoke_tests import smoke_tests_utils
-
-# isort: off
-from smoke_tests.test_mount_and_storage import (TestStorageWithCredentials as
-                                                StorageWithCredentialsUtils)
+from smoke_tests import test_mount_and_storage
 
 import sky
 from sky import jobs
@@ -711,19 +708,19 @@ def test_managed_jobs_storage(generic_cloud: str):
     if generic_cloud == 'aws':
         region = 'eu-central-1'
         region_flag = f' --region {region}'
-        region_cmd = StorageWithCredentialsUtils.cli_region_cmd(
+        region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
-        s3_check_file_count = StorageWithCredentialsUtils.cli_count_name_in_bucket(
+        s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.S3, output_storage_name, 'output.txt')
         output_check_cmd = f'{s3_check_file_count} | grep 1'
     elif generic_cloud == 'gcp':
         region = 'us-west2'
         region_flag = f' --region {region}'
-        region_cmd = StorageWithCredentialsUtils.cli_region_cmd(
+        region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.GCS, bucket_name=storage_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
-        gcs_check_file_count = StorageWithCredentialsUtils.cli_count_name_in_bucket(
+        gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         output_check_cmd = f'{gcs_check_file_count} | grep 1'
     elif generic_cloud == 'azure':
@@ -731,11 +728,11 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_flag = f' --region {region}'
         storage_account_name = (
             storage_lib.AzureBlobStore.get_default_storage_account_name(region))
-        region_cmd = StorageWithCredentialsUtils.cli_region_cmd(
+        region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
         region_validation_cmd = f'{region_cmd} | grep {region}'
-        az_check_file_count = StorageWithCredentialsUtils.cli_count_name_in_bucket(
+        az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.AZURE,
             output_storage_name,
             'output.txt',
@@ -744,10 +741,10 @@ def test_managed_jobs_storage(generic_cloud: str):
     elif generic_cloud == 'kubernetes':
         # With Kubernetes, we don't know which object storage provider is used.
         # Check both S3 and GCS if bucket exists in either.
-        s3_check_file_count = StorageWithCredentialsUtils.cli_count_name_in_bucket(
+        s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.S3, output_storage_name, 'output.txt')
         s3_output_check_cmd = f'{s3_check_file_count} | grep 1'
-        gcs_check_file_count = StorageWithCredentialsUtils.cli_count_name_in_bucket(
+        gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
         output_check_cmd = f'{s3_output_check_cmd} || {gcs_output_check_cmd}'
