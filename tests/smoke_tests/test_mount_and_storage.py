@@ -318,7 +318,8 @@ def test_kubernetes_context_switch():
     )
     smoke_tests_utils.run_one_test(test)
 
-
+@pytest.mark.temp_test
+@pytest.mark.kubernetes
 @pytest.mark.parametrize(
     'image_id',
     [
