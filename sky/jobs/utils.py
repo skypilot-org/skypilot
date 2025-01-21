@@ -223,9 +223,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 task_id=None,
                 failure_type=managed_job_state.ManagedJobStatus.
                 FAILED_CONTROLLER,
-                failure_reason=
-                'Legacy controller process has exited abnormally. '
-                f'For more details, run: sky jobs logs --controller {job_id}')
+                failure_reason=(
+                    'Legacy controller process has exited abnormally. For '
+                    f'more details, run: sky jobs logs --controller {job_id}'))
 
     # Get jobs that need checking (non-terminal or not DONE)
     job_ids = managed_job_state.get_jobs_to_check(job_id)
