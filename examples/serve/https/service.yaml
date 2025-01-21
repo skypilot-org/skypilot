@@ -1,0 +1,31 @@
+# SkyServe YAML to run an HTTPS server.
+#
+# Usage:
+# For testing purpose, generate a self-signed certificate and key,
+# or bring your own:
+#   $ openssl req -x509 -newkey rsa:2048 -days 36500 -nodes \
+#       -keyout <key-path> -out <cert-path>
+# Then:
+#   $ sky serve up -n https examples/serve/https/service.yaml \
+#       --env TLS_KEYFILE_ENV_VAR=<key-path> \
+#       --env TLS_CERTFILE_ENV_VAR=<cert-path>
+# The endpoint will be printed in the console. You could also
+# check the endpoint by running:
+#   $ sky serve status --endpoint https
+
+envs:
+  TLS_KEYFILE_ENV_VAR:
+  TLS_CERTFILE_ENV_VAR:
+
+service:
+  readiness_probe: /
+  replicas: 1
+  tls:
+    keyfile: $TLS_KEYFILE_ENV_VAR
+    certfile: $TLS_CERTFILE_ENV_VAR
+
+resources:
+  ports: 8080
+  cpus: 2+
+
+run: python3 -m http.server 8080
