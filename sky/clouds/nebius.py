@@ -27,6 +27,16 @@ class Nebius(clouds.Cloud):
             ('Autodown not supported. Can\'t delete disk.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
+        clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
+            (f'Migrating disk is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.DOCKER_IMAGE:
+            (f'Docker image is currently not supported on {_REPR}. '
+             'You can try running docker command inside the '
+             '`run` section in task.yaml.'),
+        clouds.CloudImplementationFeatures.CUSTOM_DISK_TIER:
+            (f'Custom disk tier is currently not supported on {_REPR}.'),
+        clouds.CloudImplementationFeatures.OPEN_PORTS:
+            (f'Opening ports is currently not supported on {_REPR}.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
     # 63 - 8 = 55 characters since
@@ -47,15 +57,6 @@ class Nebius(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
-        """The features not supported based on the resources provided.
-
-        This method is used by check_features_are_supported() to check if the
-        cloud implementation supports all the requested features.
-
-        Returns:
-            A dict of {feature: reason} for the features not supported by the
-            cloud implementation.
-        """
         del resources  # unused
         return cls._CLOUD_UNSUPPORTED_FEATURES
 
@@ -178,16 +179,28 @@ class Nebius(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun, cluster_name
+        del dryrun, cluster_name
+        assert zones is None, ('Nebius does not support zones', zones)
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
         custom_resources = resources_utils.make_ray_custom_resources_str(
             acc_dict)
+        platform, _ = resources.instance_type.split('_')
+
+        if platform in ('cpu-d3', 'cpu-e2'):
+            image_family = 'ubuntu22.04-driverless'
+        elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
+            image_family = 'ubuntu22.04-cuda12'
+        else:
+            raise RuntimeError(f'Unsupported platform: {platform}')
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,
-            'region': region.name
+            'region': region.name,
+            'image_id': image_family,
+            # Nebius does not support specific zones.
+            'zones': None,
         }
 
     def _get_feasible_launchable_resources(

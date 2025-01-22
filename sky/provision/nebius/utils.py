@@ -45,7 +45,14 @@ def get_project_by_region(region: str) -> str:
 
 
 def get_or_creat_gpu_cluster(name: str, region: str) -> str:
-    """Creates a GPU cluster."""
+    """Creates a GPU cluster.
+    When creating a GPU cluster, select an InfiniBand fabric for it:
+
+    fabric-2, fabric-3 or fabric-4 for projects in the eu-north1 region.
+    fabric-5 for projects in the eu-west1 region.
+
+    https://docs.nebius.com/compute/clusters/gpu
+    """
     project_id = get_project_by_region(region)
     service = nebius.compute().GpuClusterServiceClient(sdk)
     try:
@@ -54,14 +61,21 @@ def get_or_creat_gpu_cluster(name: str, region: str) -> str:
             name=name,
         )).wait()
         cluster_id = cluster.metadata.id
-    except nebius.request_error():
+    except nebius.request_error() as no_cluster_found_error:
+        if region == 'eu-north1':
+            fabric = 'fabric-4'
+        elif region == 'eu-west1':
+            fabric = 'fabric-5'
+        else:
+            raise RuntimeError(
+                f'Unsupported region {region}.') from no_cluster_found_error
         cluster = service.create(nebius.compute().CreateGpuClusterRequest(
             metadata=nebius.nebius_common().ResourceMetadata(
                 parent_id=project_id,
                 name=name,
             ),
             spec=nebius.compute().GpuClusterSpec(
-                infiniband_fabric='fabric-4'))).wait()
+                infiniband_fabric=fabric))).wait()
         cluster_id = cluster.resource_id
     return cluster_id
 
@@ -119,19 +133,15 @@ def start(instance_id: str) -> None:
     service.start(nebius.compute().StartInstanceRequest(id=instance_id)).wait()
 
 
-def launch(name: str, instance_type: str, region: str, disk_size: int,
-           user_data: str) -> str:
+def launch(name: str, platform: str, preset: str, region: str,
+           image_family: str, disk_size: int, user_data: str) -> str:
     logger.debug(f'Launching instance: {name}')
-    platform, preset = instance_type.split('_')
-    if platform in ('cpu-d3', 'cpu-e2'):
-        image_family = 'ubuntu22.04-driverless'
-    elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
-        image_family = 'ubuntu22.04-cuda12'
-    else:
-        raise RuntimeError(f'Unsupported platform: {platform}')
     disk_name = 'disk-' + name
     cluster_id = None
     cluster_name = '-'.join(name.split('-')[:4])
+    # 8 GPU virtual machines can be grouped into a GPU cluster.
+    # The GPU clusters are built with InfiniBand secure high-speed networking.
+    # https://docs.nebius.com/compute/clusters/gpu
     if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
         if preset == '8gpu-128vcpu-1600gb':
             cluster_id = get_or_creat_gpu_cluster(cluster_name, region)

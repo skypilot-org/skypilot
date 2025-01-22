@@ -113,10 +113,13 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     for _ in range(to_start_count):
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
+            platform, preset = config.node_config['InstanceType'].split('_')
             instance_id = utils.launch(
                 name=f'{cluster_name_on_cloud}-{node_type}',
-                instance_type=config.node_config['InstanceType'],
+                platform=platform,
+                preset=preset,
                 region=region,
+                image_family=config.node_config['ImageId'],
                 disk_size=config.node_config['DiskSize'],
                 user_data=config.node_config['UserData'])
         except Exception as e:  # pylint: disable=broad-except
