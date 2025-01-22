@@ -1044,6 +1044,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.Paperspace,
             clouds.Azure,
             clouds.DO,
+            clouds.Nebius,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
@@ -1060,8 +1061,6 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
-    elif isinstance(cloud, clouds.Nebius):
-        config = auth.setup_nebius_authentication(config)
     else:
         assert False, cloud
     common_utils.dump_yaml(cluster_config_file, config)

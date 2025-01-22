@@ -1,12 +1,8 @@
-# NEBIUSTODO The cloud class that handles the metadata of the clouds
 """ Nebius Cloud. """
 import logging
 import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
-
-from nebius.api.nebius.iam.v1 import ListProjectsRequest
-from nebius.api.nebius.iam.v1 import ProjectServiceClient
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -28,12 +24,14 @@ class Nebius(clouds.Cloud):
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            'Stopping '
-            'not supported. Can\'t delete disk.',
+            'Autodown not supported. Can\'t delete disk.',
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as Nebius API does not implement spot .'),
+            ('Spot is not supported, as Nebius API does not implement spot.'),
     }
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 120
+    # Nebius maximum instance name length defined as <= 63 as a hostname length
+    # 63 - 8 = 55 characters since
+    # our provisioner adds additional `-worker`.
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 55
     _regions: List[clouds.Region] = []
 
     # Using the latest SkyPilot provisioner API to provision and check status.
@@ -70,13 +68,11 @@ class Nebius(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        logging.debug('Nebius cloud regions with offering: %s', cls._REPR)
         assert zone is None, 'Nebius does not support zones.'
         del accelerators, zone  # unused
         if use_spot:
             return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
+        regions = service_catalog.get_region_zones_for_instance_type(
                 instance_type, use_spot, 'nebius')
 
         if region is not None:
@@ -131,23 +127,12 @@ class Nebius(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         """Returns the hourly cost of the accelerators, in dollars/hour."""
-        logging.debug('Nebius cloud accelerators to hourly cost: %s', 1)
+        logging.debug('Nebius cloud accelerators to hourly cost: 0')
         del accelerators, use_spot, region, zone  # unused
-        ########
-        # TODO #
-        ########
-        # This function assumes accelerators are included as part of instance
-        # type. If not, you will need to change this. (However, you can do
-        # this later; `return 0.0` is a good placeholder.)
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        logging.debug('Nebius cloud get egress cost: %s', 1)
-        ########
-        # TODO #
-        ########
-        # Change if your cloud has egress cost. (You can do this later;
-        # `return 0.0` is a good placeholder.)
+        logging.debug('Nebius cloud get egress cost: 0', )
         return 0.0
 
     def __repr__(self):
@@ -193,7 +178,6 @@ class Nebius(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        logging.debug('Nebius cloud make deploy resources variables: %s',)
         del zones, dryrun, cluster_name
 
         r = resources
@@ -269,6 +253,7 @@ class Nebius(clouds.Cloud):
             from nebius.aio.service_error import RequestError
             from nebius.base.error import SDKError
             from nebius.sdk import SDK
+            from nebius.api.nebius import iam
 
             try:
 
@@ -291,9 +276,9 @@ class Nebius(clouds.Cloud):
                     '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
                 )
             try:
-                service = ProjectServiceClient(sdk)
+                service = iam.v1.ProjectServiceClient(sdk)
                 projects = service.list(
-                    ListProjectsRequest(parent_id=nb_tenant_id)).wait()
+                    iam.v1.ListProjectsRequest(parent_id=nb_tenant_id)).wait()
                 for project in projects.items:
                     logging.debug(
                         f'Founded project name: {project.metadata.name}')

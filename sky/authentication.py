@@ -516,14 +516,3 @@ def setup_fluidstack_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)
 
-
-def setup_nebius_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
-    get_or_generate_keys()
-
-    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
-
-    file_mounts = config['file_mounts']
-    file_mounts[PUBLIC_SSH_KEY_PATH] = PUBLIC_SSH_KEY_PATH
-    config['file_mounts'] = file_mounts
-
-    return configure_ssh_info(config)

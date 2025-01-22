@@ -56,15 +56,22 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def _wait_all_pending(project_id: str, cluster_name_on_cloud: str) -> None:
-    while True:
+def _wait_until_no_pending(project_id: str, cluster_name_on_cloud: str) -> None:
+    max_retries = 120  # Maximum number of retries
+    retry_count = 0
+    while retry_count < max_retries:
         instances = _filter_instances(project_id, cluster_name_on_cloud,
                                       PENDING_STATUS)
         if not instances:
             break
-        logger.info(f'Waiting for {len(instances)} instances to be ready.')
+        logger.info(
+            f'Waiting for {len(instances)} instances to be ready (Attempt {retry_count + 1}/{max_retries}).')
         time.sleep(POLL_INTERVAL)
+        retry_count += 1
 
+    if retry_count == max_retries:
+        raise TimeoutError(
+            f"Exceeded maximum retries ({max_retries * POLL_INTERVAL} seconds) while waiting for instances to be ready.")
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
