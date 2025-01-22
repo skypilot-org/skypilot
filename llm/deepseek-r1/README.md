@@ -1,8 +1,13 @@
-# Run and Serve DeepSeek-R1 on any Infra 
+# Run and Serve DeepSeek-R1 with SkyPilot
 
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-On Jan 19, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters. 
+<p align="center">
+<img src="https://imgur.com/a/5D8pa2V" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+</p>
+
+
+On Jan 20, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters. 
 
 DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning behaviors. It outperforms **state-of-the-art proprietary models** such as OpenAI-o1-mini and becomes **the first time** an open LLM closely rivals like OpenAI-o1.
 
@@ -37,7 +42,7 @@ See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 
 ### Step 1: Run it with SkyPilot
 
-Now it's time to run deepseek with skypilot. The instruction can be dependent on your existing hardware.  
+Now it's time to run deepseek with SkyPilot. The instruction can be dependent on your existing hardware.  
 
 8B: 
 ```
@@ -106,18 +111,19 @@ curl http://$ENDPOINT:8000/v1/chat/completions \
       },
       {
         "role": "user",
-        "content": "how many rs is in strawberry"
+        "content": "how many rs are in strawberry"
       }
     ]
   }' | jq .
 ```    
 </details>
 
-You will get
+You will get both the chain of thoughts within `<think>` tags and the final results. 
 
 <details>
     <summary>Who are you? I'm DeepSeek-R1.</summary>
-```
+
+```console
 {
   "id": "chatcmpl-507f467863344f31b98d8bf36b9a3c1c",
   "object": "chat.completion",
@@ -149,8 +155,9 @@ You will get
 
 
 <details>
-    <summary>How many Rs is in strawberry: There are 3 Rs in strawberry.</summary>
-```
+    <summary>How many Rs are in strawberry: There are 3 Rs in strawberry.</summary>
+
+```console
 {
   "id": "chatcmpl-d532bd1c1738493ab9c8c906550044bf",
   "object": "chat.completion",
