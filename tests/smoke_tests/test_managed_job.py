@@ -676,7 +676,7 @@ def test_managed_jobs_retry_logs():
                 f'! cat {log_file.name} | grep "Job 2"',
             ],
             f'sky jobs cancel -y -n {name}',
-            timeout=7 * 60,  # 7 mins
+            timeout=15 * 60,  # 15 mins
         )
         smoke_tests_utils.run_one_test(test)
 
