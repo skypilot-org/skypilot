@@ -6,6 +6,13 @@ from sky.adaptors import common
 NB_TENANT_ID_PATH = '~/.nebius/NB_TENANT_ID.txt'
 NEBIUS_IAM_TOKEN_PATH = '~/.nebius/NEBIUS_IAM_TOKEN.txt'
 
+MAX_RETRIES_TO_DISK_CREATE = 120
+MAX_RETRIES_TO_INSTANCE_READY = 120
+MAX_RETRIES_TO_DISK_DELETE = 120
+MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
+
+POLL_INTERVAL = 5
+
 nebius = common.LazyImport(
     'nebius',
     import_error_message='Failed to import dependencies for Nebius AI Cloud. '
