@@ -289,6 +289,8 @@ def schedule_request(
 
     request.log_path.touch()
     input_tuple = (request_id, ignore_return_value)
+
+    logger.info(f'Queuing request: {request_id}')
     _get_queue(schedule_type).put(input_tuple)
 
 
@@ -320,7 +322,7 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
             request = requests.get_request(request_id)
             if request.status == requests.RequestStatus.CANCELLED:
                 continue
-            logger.info(f'[{worker}] Submitted request: {request_id}')
+            logger.info(f'[{worker}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
             # cancelled when requested by a user.
             # TODO(zhwu): since the executor is reusing the request process,
@@ -334,9 +336,9 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                     future.result(timeout=None)
                 except Exception as e:  # pylint: disable=broad-except
                     logger.error(f'[{worker}] Request {request_id} failed: {e}')
-                logger.info(f'[{worker}] Request {request_id} finished')
+                logger.info(f'[{worker}] Finished request: {request_id}')
             else:
-                logger.info(f'[{worker}] Request {request_id} submitted')
+                logger.info(f'[{worker}] Submitted request: {request_id}')
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
