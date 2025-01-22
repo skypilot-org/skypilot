@@ -3,9 +3,8 @@
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
 <p align="center">
-<img src="https://imgur.com/a/5D8pa2V.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/6umSuKw.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
 </p>
-
 
 On Jan 20, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters. 
 
