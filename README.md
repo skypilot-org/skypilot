@@ -26,6 +26,7 @@
 
 ----
 :fire: *News* :fire:
+- [Jan 2025] Launch and Serve **[DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1)** on Kubernetes or Any Cloud: [**example**](./llm/deepseek-r1/)
 - [Oct 2024] :tada: **SkyPilot crossed 1M+ downloads** :tada:: Thank you to our community! [**Twitter/X**](https://x.com/skypilot_org/status/1844770841718067638)
 - [Sep 2024] Point, Launch and Serve **Llama 3.2** on Kubernetes or Any Cloud: [**example**](./llm/llama-3_2/)
 - [Sep 2024] Run and deploy [**Pixtral**](./llm/pixtral), the first open-source multimodal model from Mistral AI.
