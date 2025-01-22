@@ -156,6 +156,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     service_spec = task.service
 
     is_recovery = is_recovery_mode(service_name)
+    logger.info(f'It\'s a {"first" if not is_recovery else "recovery"} run')
 
     if not is_recovery:
         if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
@@ -294,6 +295,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
 
 if __name__ == '__main__':
+    if not pathlib.Path('/home/sky/.sky/k8s_container_ready').exists():
+        print('k8s_container_ready not found, exiting')
+        exit(0)
+
+    print('k8s_container_ready found, starting service')
+
     parser = argparse.ArgumentParser(description='Sky Serve Service')
     parser.add_argument('--service-name',
                         type=str,

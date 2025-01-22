@@ -414,7 +414,15 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
-                VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+
+                # If copied wheel exists, install from the copied wheel. That should only happen
+                # when recovering.
+                file=~/.sky/wheels/**/skypilot-1.0.0.dev0*.whl
+                if ls $file 1> /dev/null 2>&1; then
+                  VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install "$(echo $file)[kubernetes,remote]"
+                else
+                  VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
+                fi
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
 
@@ -517,6 +525,40 @@ available_node_types:
                   sleep 0.1
                 done
               }
+
+              # TODO(andyl): Find a more proper place to execute task.setup
+
+              cat > ~/.sky/setup_commands.sh << 'EOF'
+              source ~/skypilot-runtime/bin/activate
+              # Disable the pip version check to avoid the warning message, which makes the
+              # output hard to read.
+              export PIP_DISABLE_PIP_VERSION_CHECK=1
+
+              # Install all cloud dependencies.
+              # This is for multicloud support. To allow controller launch on all clouds,
+              # we need to install all cloud dependencies.
+              echo -en "\r[1/4] Check & install cloud dependencies on controller: uv                    " &&"$HOME/.local/bin"/uv -V >/dev/null 2>&1 || curl -LsSf https://astral.sh/uv/install.sh | UV_INSTALL_DIR="$HOME/.local/bin" sh >/dev/null 2>&1
+              echo -en "\r[2/4] Check & install cloud dependencies on controller: GCP SDK                    " &&pushd /tmp &>/dev/null &&     { gcloud --help > /dev/null 2>&1 ||     { mkdir -p ~/.sky/logs &&     wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-424.0.0-linux-x86_64.tar.gz > ~/.sky/logs/gcloud_installation.log &&     tar xzf google-cloud-sdk-424.0.0-linux-x86_64.tar.gz >> ~/.sky/logs/gcloud_installation.log &&     rm -rf ~/google-cloud-sdk >> ~/.sky/logs/gcloud_installation.log  &&     mv google-cloud-sdk ~/ &&     ~/google-cloud-sdk/install.sh -q >> ~/.sky/logs/gcloud_installation.log 2>&1 &&     echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc &&     source ~/google-cloud-sdk/path.bash.inc >> ~/.sky/logs/gcloud_installation.log 2>&1; }; } &&     popd &>/dev/null
+              echo -en "\r[3/4] Check & install cloud dependencies on controller: Kubernetes                    " && sudo bash -c "if ! command -v curl &> /dev/null || ! command -v socat &> /dev/null || ! command -v netcat &> /dev/null; then apt update &> /dev/null && apt install curl socat netcat -y &> /dev/null; fi" && (command -v kubectl &>/dev/null || (curl -s -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl))
+              echo -en "\r[4/4] Check & install cloud dependencies on controller: cloud python packages                    " && VIRTUAL_ENV=~/skypilot-runtime "$HOME/.local/bin"/uv pip install "kubernetes>=20.0.0" "google-cloud-storage" "runpod>=1.6.1" "google-api-python-client>=2.69.0" > /dev/null 2>&1
+              echo -e "\r  Check & install cloud dependencies on controller: done.                    "
+
+              # Install serve dependencies.
+              # TODO(tian): Gather those into serve constants.
+              pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
+              pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
+              pip list | grep httpx > /dev/null 2>&1 || pip install httpx > /dev/null 2>&1
+              EOF
+              sudo chmod 777 ~/.sky/setup_commands.sh
+              source ~/skypilot-runtime/bin/activate && bash -i ~/.sky/setup_commands.sh > /tmp/setup_commands.log 2>&1
+
+              cat > ~/.sky/run_commands.py << 'EOF'
+              {{controller_run_commands}}
+              EOF
+              source ~/skypilot-runtime/bin/activate && python -u ~/.sky/run_commands.py > /tmp/run_commands.log 2>&1
+
+              touch ~/.sky/k8s_container_ready
+
               trap : TERM INT; log_tail || sleep infinity & wait
 
           ports:

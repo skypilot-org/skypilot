@@ -917,6 +917,8 @@ def write_cluster_config(
                         '{sky_wheel_hash}',
                         wheel_hash).replace('{cloud}',
                                             str(cloud).lower()),
+                'skypilot_wheel_hash': wheel_hash,
+
                 # Port of Ray (GCS server).
                 # Ray's default port 6379 is conflicted with Redis.
                 'ray_port': constants.SKY_REMOTE_RAY_PORT,
@@ -1021,6 +1023,8 @@ def write_cluster_config(
     # uploaded as part of the file_mounts), so the restore for backward
     # compatibility should go before this call.
     _optimize_file_mounts(tmp_yaml_path)
+
+    # TODO(andyl): Check if `file_mounts` and `setup_commands` are both recoverable.
 
     # Rename the tmp file to the final YAML path.
     os.rename(tmp_yaml_path, yaml_path)

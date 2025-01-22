@@ -2038,6 +2038,10 @@ class RetryingVmProvisioner(object):
                     requested_features.remove(
                         clouds.CloudImplementationFeatures.STOP)
 
+                if isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # TODO(andyl): a proper way to pass task.run
+                    setattr(to_provision, 'task', task)
+
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
                     to_provision, requested_features)
@@ -2439,6 +2443,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
+        # TODO(andyl): must force refresh here?
+        if self.cluster_name.startswith('sky-serve-controller'):
+            self._update_cluster_info()
+
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,

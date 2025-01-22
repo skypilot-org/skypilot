@@ -689,8 +689,8 @@ def _create_serve_controller_deployment(
         pod_spec: Dict[str, Any], cluster_name_on_cloud: str, namespace: str,
         context: Optional[str]) -> Dict[str, Any]:
     """Creates a deployment for SkyServe controller with persistence."""
-    pvc_name = f'{cluster_name_on_cloud}-data'
-    _create_persistent_volume_claim(namespace, context, pvc_name)
+    assert len(
+        pod_spec['spec']['containers']) == 1, 'Only one container is supported'
 
     # The reason we mount the whole /home/sky/.sky instead of just
     # /home/sky/.sky/serve is that k8s changes the ownership of the
@@ -698,26 +698,34 @@ def _create_serve_controller_deployment(
     # the serve controller will not be able to create the serve directory.
     # pylint: disable=line-too-long
     # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
-    mount_path = '/home/sky/.sky'  # TODO(andyl): use a constant here
-    volume_mounts = [{'name': 'serve-data', 'mountPath': mount_path}]
 
-    volumes = [{
-        'name': 'serve-data',
-        'persistentVolumeClaim': {
-            'claimName': pvc_name
-        }
-    }]
+    # TODO(andyl): Are we mounting too much? Should we do a more fine-grained
+    # mounting?
+    # TODO(andyl): The sematic of `~/.sky` is not clear.
+    volume_mounts = {
+        # TODO(andyl): use some constants here
+        'sky-data': '/home/sky/.sky',
+    }
 
-    if 'volumes' in pod_spec['spec']:
-        pod_spec['spec']['volumes'].extend(volumes)
-    else:
-        pod_spec['spec']['volumes'] = volumes
+    if volume_mounts:
+        if pod_spec['spec'].get('volumes') is None:
+            pod_spec['spec']['volumes'] = []
+        if pod_spec['spec']['containers'][0].get('volumeMounts') is None:
+            pod_spec['spec']['containers'][0]['volumeMounts'] = []
 
-    for container in pod_spec['spec']['containers']:
-        if 'volumeMounts' in container:
-            container['volumeMounts'].extend(volume_mounts)
-        else:
-            container['volumeMounts'] = volume_mounts
+    for name, mount_path in volume_mounts.items():
+        pvc_name = f'{cluster_name_on_cloud}-{name}'
+        _create_persistent_volume_claim(namespace, context, pvc_name)
+        pod_spec['spec']['volumes'].append({
+            'name': name,
+            'persistentVolumeClaim': {
+                'claimName': pvc_name
+            }
+        })
+        pod_spec['spec']['containers'][0]['volumeMounts'].append({
+            'mountPath': mount_path,
+            'name': name
+        })
 
     template_metadata = pod_spec.pop('metadata')
 
@@ -928,7 +936,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if _is_serve_controller(cluster_name_on_cloud):
             deployment_spec = _create_serve_controller_deployment(
                 pod_spec_copy, cluster_name_on_cloud, namespace, context)
-            print('try to create deployment')
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(
