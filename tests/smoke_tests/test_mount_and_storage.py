@@ -1300,9 +1300,17 @@ class TestStorageWithCredentials:
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('https'):
                 default_region = 'eastus'
-                storage_account_name = (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+                config_storage_account = skypilot_config.get_nested(
+                    ('azure', 'storage_account'), None)
+                if config_storage_account is not None:
+                    storage_account_name = config_storage_account
+                else:
+                    storage_account_name = (
+                        storage_lib.AzureBlobStore.
+                        get_default_storage_account_name(default_region))
+                    resource_group_name = (
+                        azure.DEFAULT_RESOURCE_GROUP_NAME.format(
+                            user_hash=common_utils.get_user_hash()))
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
