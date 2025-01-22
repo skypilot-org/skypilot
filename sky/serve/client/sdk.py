@@ -40,8 +40,10 @@ def up(task: Union['sky.Task', 'sky.Dag'],
             argument.
         endpoint (str): The service endpoint.
     """
-    # This is to avoid circular import.
+
+    # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
     sdk.validate(dag)
     request_id = sdk.optimize(dag)
@@ -91,8 +93,9 @@ def update(task: Union['sky.Task', 'sky.Dag'],
     Request Returns:
         None
     """
-    # This is to avoid circular import.
+    # Avoid circular import.
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
     dag = dag_utils.convert_entrypoint_to_dag(task)
     sdk.validate(dag)
     request_id = sdk.optimize(dag)
@@ -270,19 +273,19 @@ def status(
 def tail_logs(service_name: str,
               target: Union[str, 'serve_utils.ServiceComponent'],
               replica_id: Optional[int] = None,
-              follow: bool = True) -> server_common.RequestId:
+              follow: bool = True) -> None:
     """Tails logs for a service.
 
     Usage:
 
     .. code-block:: python
 
-        sky.stream_and_get(sky.serve.tail_logs(
+        sky.serve.tail_logs(
             service_name,
             target=<component>,
             follow=False, # Optionally, default to True
             # replica_id=3, # Must be specified when target is REPLICA.
-        ))
+        )
 
 
     ``target`` is a enum of ``sky.serve.ServiceComponent``, which can be one of:
@@ -303,17 +306,19 @@ def tail_logs(service_name: str,
     .. code-block:: python
 
         # follow default to True
-        sky.stream_and_get(sky.serve.tail_logs(
-            service_name, target=sky.serve.ServiceComponent.CONTROLLER))
+        sky.serve.tail_logs(
+            service_name, target=sky.serve.ServiceComponent.CONTROLLER
+        )
 
     To print replica 3 logs:
 
     .. code-block:: python
 
         # Pass target as a lower-case string is also supported.
-        sky.stream_and_get(sky.serve.tail_logs(
+        sky.serve.tail_logs(
             service_name, target='replica',
-            follow=False, replica_id=3)
+            follow=False, replica_id=3
+        )
 
 
     Returns:
@@ -323,6 +328,9 @@ def tail_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
     body = payloads.ServeLogsBody(
         service_name=service_name,
         target=target,
@@ -333,8 +341,10 @@ def tail_logs(service_name: str,
         f'{server_common.get_server_url()}/serve/logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        stream=True,
     )
-    return server_common.get_request_id(response)
+    request_id = server_common.get_request_id(response)
+    sdk.stream_response(request_id, response)
 
 
 @usage_lib.entrypoint

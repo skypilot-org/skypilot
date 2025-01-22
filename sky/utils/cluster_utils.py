@@ -6,6 +6,7 @@ import os
 import re
 import textwrap
 from typing import Dict, List, Optional
+import uuid
 
 from sky.skylet import constants
 from sky.utils import command_runner
@@ -347,3 +348,9 @@ class SSHConfigHelper(object):
             os.path.basename(path)
             for path in glob.glob(os.path.join(cluster_config_dir, '*'))
         ]
+
+
+def generate_cluster_name():
+    # TODO: change this ID formatting to something more pleasant.
+    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
+    return f'sky-{uuid.uuid4().hex[:4]}-{common_utils.get_cleaned_username()}'

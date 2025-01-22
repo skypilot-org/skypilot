@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from sky import dag as dag_lib
 from sky import sky_logging
 from sky import task as task_lib
-from sky.backends import backend_utils
+from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils
@@ -176,7 +176,7 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
             dag.name = first_task.name
 
     if dag.name is None:
-        dag.name = backend_utils.generate_cluster_name()
+        dag.name = cluster_utils.generate_cluster_name()
 
     if len(dag.tasks) == 1:
         if first_task.name is None:

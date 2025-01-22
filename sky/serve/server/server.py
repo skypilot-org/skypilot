@@ -2,11 +2,14 @@
 
 import fastapi
 
+from sky import sky_logging
 from sky.serve.server import core
+from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests
 
+logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
@@ -94,13 +97,21 @@ async def status(
 
 @router.post('/logs')
 async def tail_logs(
-    request: fastapi.Request,
-    log_body: payloads.ServeLogsBody,
-) -> None:
+    request: fastapi.Request, log_body: payloads.ServeLogsBody,
+    background_tasks: fastapi.BackgroundTasks
+) -> fastapi.responses.StreamingResponse:
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.logs',
         request_body=log_body,
         func=core.tail_logs,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
+    )
+
+    request_task = requests.get_request(request.state.request_id)
+
+    return stream_utils.stream_response(
+        request_id=request_task.request_id,
+        logs_path=request_task.log_path,
+        background_tasks=background_tasks,
     )

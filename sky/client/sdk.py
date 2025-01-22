@@ -29,7 +29,6 @@ from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.backends import backend_utils
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server import constants as server_constants
@@ -38,6 +37,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -54,9 +54,10 @@ logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 
-def _stream_response(request_id: Optional[str],
-                     response: requests.Response) -> Any:
+def stream_response(request_id: Optional[str],
+                    response: requests.Response) -> Any:
     """Streams the response to the console."""
+
     try:
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
@@ -367,7 +368,7 @@ def launch(
     Other exceptions may be raised depending on the backend.
     """
     if cluster_name is None:
-        cluster_name = backend_utils.generate_cluster_name()
+        cluster_name = cluster_utils.generate_cluster_name()
 
     # TODO(zhwu): implement clone_disk_from
     # clone_source_str = ''
@@ -585,7 +586,7 @@ def tail_logs(cluster_name: str,
                              stream=True,
                              timeout=(5, None))
     request_id = server_common.get_request_id(response)
-    _stream_response(request_id, response)
+    stream_response(request_id, response)
 
 
 @usage_lib.entrypoint
@@ -1464,7 +1465,7 @@ def stream_and_get(request_id: Optional[str] = None,
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         return get(request_id)
-    return _stream_response(request_id, response)
+    return stream_response(request_id, response)
 
 
 @usage_lib.entrypoint

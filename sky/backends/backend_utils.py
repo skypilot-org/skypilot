@@ -1330,12 +1330,6 @@ def check_local_gpus() -> bool:
     return is_functional
 
 
-def generate_cluster_name():
-    # TODO: change this ID formatting to something more pleasant.
-    # User name is helpful in non-isolated accounts, e.g., GCP, Azure.
-    return f'sky-{uuid.uuid4().hex[:4]}-{common_utils.get_cleaned_username()}'
-
-
 def _query_head_ip_with_retries(cluster_yaml: str,
                                 max_attempts: int = 1) -> str:
     """Returns the IP of the head node by querying the cloud.

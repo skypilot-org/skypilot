@@ -39,10 +39,10 @@ def run_sky_task(base_path: str,
                  **kwargs):
     """Generic function to run a SkyPilot task.
 
-    This is a blocking call that runs the SkyPilot task and streams the logs. 
-    In the future, we can use deferrable tasks to avoid blocking the worker 
+    This is a blocking call that runs the SkyPilot task and streams the logs.
+    In the future, we can use deferrable tasks to avoid blocking the worker
     while waiting for cluster to start.
-    
+
     Args:
         base_path: Base path (local directory or git repo URL)
         yaml_path: Path to the YAML file (relative to base_path)

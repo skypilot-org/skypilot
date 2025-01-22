@@ -8,6 +8,7 @@ from sky import sky_logging
 from sky.jobs.server import core
 from sky.jobs.server import dashboard_utils
 from sky.server import common as server_common
+from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests
@@ -59,9 +60,9 @@ async def cancel(request: fastapi.Request,
 
 @router.post('/logs')
 async def logs(
-    request: fastapi.Request,
-    jobs_logs_body: payloads.JobsLogsBody,
-) -> None:
+    request: fastapi.Request, jobs_logs_body: payloads.JobsLogsBody,
+    background_tasks: fastapi.BackgroundTasks
+) -> fastapi.responses.StreamingResponse:
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.logs',
@@ -69,6 +70,13 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests.ScheduleType.NON_BLOCKING
         if jobs_logs_body.refresh else requests.ScheduleType.BLOCKING,
+    )
+    request_task = requests.get_request(request.state.request_id)
+
+    return stream_utils.stream_response(
+        request_id=request_task.request_id,
+        logs_path=request_task.log_path,
+        background_tasks=background_tasks,
     )
 
 

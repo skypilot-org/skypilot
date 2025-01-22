@@ -3892,11 +3892,10 @@ def jobs_launch(
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
         job_id = job_id_handle[0]
-        sdk.stream_and_get(
-            managed_jobs.tail_logs(name=None,
-                                   job_id=job_id,
-                                   follow=True,
-                                   controller=False))
+        managed_jobs.tail_logs(name=None,
+                               job_id=job_id,
+                               follow=True,
+                               controller=False)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4088,7 +4087,6 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
               controller: bool, refresh: bool, sync_down: bool):
     """Tail or sync down the log of a managed job."""
-    log_request_id = None
     try:
         if sync_down:
             with rich_utils.client_status(
@@ -4105,18 +4103,14 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
-            log_request_id = managed_jobs.tail_logs(name=name,
-                                                    job_id=job_id,
-                                                    follow=follow,
-                                                    controller=controller,
-                                                    refresh=refresh)
-            sdk.stream_and_get(log_request_id)
+            managed_jobs.tail_logs(name=name,
+                                   job_id=job_id,
+                                   follow=follow,
+                                   controller=controller,
+                                   refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
-    finally:
-        if log_request_id is not None:
-            sdk.api_cancel(log_request_id, silent=True)
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
@@ -4740,11 +4734,10 @@ def serve_logs(
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:
-        request_id = serve_lib.tail_logs(service_name,
-                                         target=target_component,
-                                         replica_id=replica_id,
-                                         follow=follow)
-        sdk.stream_and_get(request_id)
+        serve_lib.tail_logs(service_name,
+                            target=target_component,
+                            replica_id=replica_id,
+                            follow=follow)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

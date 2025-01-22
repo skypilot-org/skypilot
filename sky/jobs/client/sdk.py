@@ -9,6 +9,7 @@ import requests
 
 from sky import sky_logging
 from sky.client import common as client_common
+from sky.client import sdk
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -56,7 +57,6 @@ def launch(
           chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
     """
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
     sdk.validate(dag)
@@ -177,7 +177,7 @@ def tail_logs(name: Optional[str],
               job_id: Optional[int],
               follow: bool,
               controller: bool,
-              refresh: bool = False) -> server_common.RequestId:
+              refresh: bool = False) -> None:
     """Tails logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -188,9 +188,6 @@ def tail_logs(name: Optional[str],
         follow: Whether to follow the logs.
         controller: Whether to tail logs from the jobs controller.
         refresh: Whether to restart the jobs controller if it is stopped.
-
-    Returns:
-        The request ID of the tail logs request.
 
     Request Raises:
         ValueError: invalid arguments.
@@ -206,9 +203,11 @@ def tail_logs(name: Optional[str],
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/logs',
         json=json.loads(body.model_dump_json()),
+        stream=True,
         timeout=(5, None),
     )
-    return server_common.get_request_id(response=response)
+    request_id = server_common.get_request_id(response)
+    sdk.stream_response(request_id, response)
 
 
 @usage_lib.entrypoint
@@ -237,7 +236,6 @@ def download_logs(
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
-    from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     body = payloads.JobsDownloadLogsBody(
         name=name,
