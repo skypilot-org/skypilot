@@ -3,7 +3,6 @@ import os
 import time
 from typing import Any, Dict
 
-from nebius.aio.service_error import RequestError
 from nebius.api.nebius.common.v1 import GetByNameRequest
 from nebius.api.nebius.common.v1 import ResourceMetadata
 from nebius.api.nebius.compute.v1 import AttachedDiskSpec
@@ -102,7 +101,7 @@ def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
                 name=name,
             )).wait()
         cluster_id = cluster.metadata.id
-    except RequestError:
+    except nebius.aio.serive_error.RequestError:
         cluster = service.create(
             CreateGpuClusterRequest(
                 metadata=ResourceMetadata(
@@ -125,10 +124,13 @@ def delete_cluster(name: str, project_id: str) -> None:
             )).wait()
         cluster_id = cluster.metadata.id
         logger.debug(f'Found GPU Cluster : {cluster_id}.')
-        service.delete(DeleteGpuClusterRequest(id=cluster_id)).wait()
-        logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
-    except RequestError as e:
-        logger.debug(f'GPU Cluster does not exist or can not deleted {e}.')
+        try:
+            service.delete(DeleteGpuClusterRequest(id=cluster_id)).wait()
+            logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
+        except nebius.aio.serive_error.RequestError as e:
+            raise RuntimeError(f'GPU Cluster can not deleted {e}.')
+    except nebius.aio.serive_error.RequestError as e:
+        logger.debug(f'GPU Cluster does not exist.')
         pass
     return
 
@@ -183,85 +185,70 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
         if preset == '8gpu-128vcpu-1600gb':
             cluster_id = get_or_creat_gpu_cluster(cluster_name, project_id)
-    try:
-        service = DiskServiceClient(sdk)
+    service = DiskServiceClient(sdk)
+    disk = service.create(
+        CreateDiskRequest(
+            metadata=ResourceMetadata(
+                parent_id=project_id,
+                name=disk_name,
+            ),
+            spec=DiskSpec(
+              source_image_family=SourceImageFamily(
+                  image_family=image_family),
+              size_gibibytes=disk_size,
+              type=DiskSpec.DiskType.NETWORK_SSD,
+            )
+        )
+    ).wait()
+    disk_id = disk.resource_id
+    while True:
         disk = service.get_by_name(
             GetByNameRequest(
                 parent_id=project_id,
                 name=disk_name,
             )).wait()
-        disk_id = disk.metadata.id
-    except RequestError:
-        service = DiskServiceClient(sdk)
-        disk = service.create(
-            CreateDiskRequest(metadata=ResourceMetadata(
+        if disk.status.state.name == 'READY':
+            break
+        logger.debug(f'Waiting for disk {disk_name} to be ready.')
+        time.sleep(POLL_INTERVAL)
+
+    service = SubnetServiceClient(sdk)
+    sub_net = service.list(ListSubnetsRequest(parent_id=project_id,)).wait()
+
+    service = InstanceServiceClient(sdk)
+    service.create(
+        CreateInstanceRequest(
+            metadata=ResourceMetadata(
                 parent_id=project_id,
-                name=disk_name,
+                name=name,
             ),
-                              spec=DiskSpec(
-                                  source_image_family=SourceImageFamily(
-                                      image_family=image_family),
-                                  size_gibibytes=disk_size,
-                                  type=DiskSpec.DiskType.NETWORK_SSD,
-                              ))).wait()
-        disk_id = disk.resource_id
-        while True:
-            disk = service.get_by_name(
-                GetByNameRequest(
-                    parent_id=project_id,
-                    name=disk_name,
-                )).wait()
-            if disk.status.state.name == 'READY':
-                break
-            logger.debug(f'Waiting for disk {disk_name} to be ready.')
-            time.sleep(POLL_INTERVAL)
-    try:
+            spec=InstanceSpec(
+                gpu_cluster=InstanceGpuClusterSpec(id=cluster_id,)
+                if cluster_id else None,
+                boot_disk=AttachedDiskSpec(
+                    attach_mode=AttachedDiskSpec.AttachMode.READ_WRITE,
+                    existing_disk=ExistingDisk(id=disk_id)),
+                cloud_init_user_data=user_data,
+                resources=ResourcesSpec(platform=platform, preset=preset),
+                network_interfaces=[
+                    NetworkInterfaceSpec(
+                        subnet_id=sub_net.items[0].metadata.id,
+                        ip_address=IPAddress(),
+                        name='network-interface-0',
+                        public_ip_address=PublicIPAddress())
+                ]))).wait()
+    while True:
         service = InstanceServiceClient(sdk)
         instance = service.get_by_name(
             GetByNameRequest(
                 parent_id=project_id,
                 name=name,
             )).wait()
-        start(instance.metadata.id)
-        instance_id = instance.metadata.id
-    except RequestError:
-        service = SubnetServiceClient(sdk)
-        sub_net = service.list(ListSubnetsRequest(parent_id=project_id,)).wait()
-
-        service = InstanceServiceClient(sdk)
-        service.create(
-            CreateInstanceRequest(
-                metadata=ResourceMetadata(
-                    parent_id=project_id,
-                    name=name,
-                ),
-                spec=InstanceSpec(
-                    gpu_cluster=InstanceGpuClusterSpec(id=cluster_id,)
-                    if cluster_id else None,
-                    boot_disk=AttachedDiskSpec(
-                        attach_mode=AttachedDiskSpec.AttachMode(2),
-                        existing_disk=ExistingDisk(id=disk_id)),
-                    cloud_init_user_data=user_data,
-                    resources=ResourcesSpec(platform=platform, preset=preset),
-                    network_interfaces=[
-                        NetworkInterfaceSpec(
-                            subnet_id=sub_net.items[0].metadata.id,
-                            ip_address=IPAddress(),
-                            name='network-interface-0',
-                            public_ip_address=PublicIPAddress())
-                    ]))).wait()
-        while True:
-            service = InstanceServiceClient(sdk)
-            instance = service.get_by_name(
-                GetByNameRequest(
-                    parent_id=project_id,
-                    name=name,
-                )).wait()
-            if instance.status.state.name == 'STARTING':
-                break
-            time.sleep(POLL_INTERVAL)
-            logger.debug(f'Waiting for instance {name} start running.')
-        instance_id = instance.metadata.id
+        if instance.status.state.name == 'STARTING':
+            break
+        time.sleep(POLL_INTERVAL)
+        logger.debug(f'Waiting for instance {name} start running.')
+    instance_id = instance.metadata.id
     return instance_id
 
 
@@ -276,6 +263,6 @@ def remove(instance_id: str) -> None:
             service = DiskServiceClient(sdk)
             service.delete(DeleteDiskRequest(id=disk_id)).wait()
             break
-        except RequestError:
+        except nebius.aio.serive_error.RequestError:
             logger.debug('Waiting for disk deletion.')
             time.sleep(POLL_INTERVAL)
