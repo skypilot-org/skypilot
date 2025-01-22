@@ -7,15 +7,17 @@ and compares the output to the generated pipeline.
 Some parameters in smoke tests requires credentials to setup, so we need to
 run the tests with the credentials.
 
+PYTHONPATH=$(pwd)/tests:$PYTHONPATH \
 pytest -n 0 --dist no .buildkite/test_buildkite_pipeline_generation.py
 
 """
 
 import os
-from pathlib import Path
+import pathlib
 import re
 import subprocess
 
+import generate_pipeline
 import pytest
 import yaml
 
@@ -131,6 +133,7 @@ def _extract_test_names_from_pipeline(pipeline_path):
     '--aws',
     '--gcp',
     '--azure',
+    '--kubernetes',
     '--generic-cloud aws',
     '--generic-cloud gcp',
     '--managed-jobs',
@@ -163,10 +166,12 @@ def test_generate_same_as_pytest(args):
             text=True,
             shell=True)
         pytest_tests = set(re.findall(r"test_\w+", pytest_output))
+        pytest_tests = pytest_tests - set(generate_pipeline.SKIP_TESTS)
 
         # Generate pipeline and extract test functions using YAML parsing
         env = dict(os.environ)
-        env['PYTHONPATH'] = f"{Path.cwd()}/tests:{env.get('PYTHONPATH', '')}"
+        env['PYTHONPATH'] = f"{pathlib.Path.cwd()}/tests:" \
+                            f"{env.get('PYTHONPATH', '')}"
 
         subprocess.run(
             ['python', '.buildkite/generate_pipeline.py', '--args', args],
