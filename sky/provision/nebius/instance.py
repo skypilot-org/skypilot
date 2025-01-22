@@ -52,14 +52,16 @@ def _wait_until_no_pending(project_id: str, cluster_name_on_cloud: str) -> None:
                                       PENDING_STATUS)
         if not instances:
             break
-        logger.info(
-            f'Waiting for {len(instances)} instances to be ready (Attempt {retry_count + 1}/{max_retries}).')
+        logger.info(f'Waiting for {len(instances)} instances to be ready '
+                    f'(Attempt {retry_count + 1}/{max_retries}).')
         time.sleep(utils.POLL_INTERVAL)
         retry_count += 1
 
     if retry_count == max_retries:
-        raise TimeoutError(
-            f"Exceeded maximum retries ({max_retries * utils.POLL_INTERVAL} seconds) while waiting for instances to be ready.")
+        raise TimeoutError(f'Exceeded maximum retries '
+                           f'({max_retries * utils.POLL_INTERVAL} seconds)'
+                           f' while waiting for instances to be ready.')
+
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -92,6 +94,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resumed_instance_ids = []
     stopped_instances = _filter_instances(project_id, cluster_name_on_cloud,
                                           ['STOPPED'])
+    # pylint: disable=consider-using-dict-items
     for stopped_instance_id in stopped_instances:
         if to_start_count > 0:
             try:

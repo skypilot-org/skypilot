@@ -1,10 +1,10 @@
 """ Nebius Cloud. """
 import logging
-import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
+from sky.adaptors import nebius
 from sky.clouds import service_catalog
 from sky.utils import resources_utils
 
@@ -13,8 +13,8 @@ if typing.TYPE_CHECKING:
 
 _CREDENTIAL_FILES = [
     # credential files for Nebius
-    'NEBIUS_IAM_TOKEN.txt',
-    'NB_TENANT_ID.txt'
+    nebius.NB_TENANT_ID_PATH,
+    nebius.NEBIUS_IAM_TOKEN_PATH
 ]
 
 
@@ -24,7 +24,7 @@ class Nebius(clouds.Cloud):
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            'Autodown not supported. Can\'t delete disk.',
+            ('Autodown not supported. Can\'t delete disk.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
     }
@@ -73,7 +73,7 @@ class Nebius(clouds.Cloud):
         if use_spot:
             return []
         regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'nebius')
+            instance_type, use_spot, 'nebius')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -132,7 +132,7 @@ class Nebius(clouds.Cloud):
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        logging.debug('Nebius cloud get egress cost: 0', )
+        logging.debug('Nebius cloud get egress cost: 0',)
         return 0.0
 
     def __repr__(self):
@@ -248,58 +248,20 @@ class Nebius(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """ Verify that the user has valid credentials for Nebius. """
         logging.debug('Nebius cloud check credentials')
+        sdk = nebius.sdk(credentials=nebius.get_iam_token())
         try:
-            # pylint: disable=import-outside-toplevel
-            from nebius.aio.service_error import RequestError
-            from nebius.base.error import SDKError
-            from nebius.sdk import SDK
-            from nebius.api.nebius import iam
-
-            try:
-
-                with open(os.path.expanduser('~/.nebius/NEBIUS_IAM_TOKEN.txt'),
-                          encoding='utf-8') as file:
-                    nebius_iam_token = file.read().strip()
-                with open(os.path.expanduser('~/.nebius/NB_TENANT_ID.txt'),
-                          encoding='utf-8') as file:
-                    nb_tenant_id = file.read().strip()
-                sdk = SDK(credentials=nebius_iam_token)
-
-            except SDKError:
-                return False, (
-                    'EMPTY TOKEN \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    '        $ pip install git+https://github.com/nebius/pysdk@876bb16  \n'  # pylint: disable=line-too-long
-                    '        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'  # pylint: disable=line-too-long
-                    '   Copy your project ID from the web console Project settings and save it to file \n'  # pylint: disable=line-too-long
-                    '        $ echo $NB_TENANT_ID > ~/.nebius/NB_TENANT_ID.txt \n'  # pylint: disable=line-too-long
-                    '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
-                )
-            try:
-                service = iam.v1.ProjectServiceClient(sdk)
-                projects = service.list(
-                    iam.v1.ListProjectsRequest(parent_id=nb_tenant_id)).wait()
-                for project in projects.items:
-                    logging.debug(
-                        f'Founded project name: {project.metadata.name}')
-            except RequestError as e:
-                return False, (
-                    f'{e.status} \n'  # First line is indented by 4 spaces
-                    '    Credentials can be set up by running: \n'
-                    '        $ pip install git+https://github.com/nebius/pysdk@876bb16   \n'  # pylint: disable=line-too-long
-                    '        $ nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt \n'  # pylint: disable=line-too-long
-                    '   Copy your project ID from the web console Project settings and save it to file \n'  # pylint: disable=line-too-long
-                    '        $ echo NB_TENANT_ID > ~/.nebius/NB_TENANT_ID.txt \n'  # pylint: disable=line-too-long
-                    '    For more information, see https://docs..io/docs/skypilot'  # pylint: disable=line-too-long
-                )
-
-            return True, None
-
-        except ImportError:
+            service = nebius.iam().ProjectServiceClient(sdk)
+            service.list(nebius.iam().ListProjectsRequest(
+                parent_id=nebius.get_tenant_id())).wait()
+        except nebius.request_error() as e:
             return False, (
-                'Failed to import nebius.'
-                'To install, run: "pip install git+https://github.com/nebius/pysdk@876bb16" or "pip install sky[nebius]"'  # pylint: disable=line-too-long
-            )
+                f'{e.status} \n'  # First line is indented by 4 spaces
+                '    Credentials can be set up by running: \n'
+                f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
+                '   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+                f'        $ echo NB_TENANT_ID > {nebius.NB_TENANT_ID_PATH} \n')
+
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         logging.debug('Nebius cloud get credential file mounts')

@@ -1,5 +1,4 @@
 """RunPod library wrapper for SkyPilot."""
-import os
 import time
 from typing import Any, Dict
 
@@ -49,21 +48,19 @@ def get_or_creat_gpu_cluster(name: str, project_id: str) -> str:
     """Creates a GPU cluster."""
     service = nebius.compute().GpuClusterServiceClient(sdk)
     try:
-        cluster = service.get_by_name(
-            nebius.common().GetByNameRequest(
-                parent_id=project_id,
-                name=name,
-            )).wait()
+        cluster = service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=project_id,
+            name=name,
+        )).wait()
         cluster_id = cluster.metadata.id
     except nebius.request_error():
-        cluster = service.create(
-            nebius.compute().CreateGpuClusterRequest(
-                metadata=nebius.common().ResourceMetadata(
-                    parent_id=project_id,
-                    name=name,
-                ),
-                spec=nebius.compute().GpuClusterSpec(
-                    infiniband_fabric='fabric-4'))).wait()
+        cluster = service.create(nebius.compute().CreateGpuClusterRequest(
+            metadata=nebius.nebius_common().ResourceMetadata(
+                parent_id=project_id,
+                name=name,
+            ),
+            spec=nebius.compute().GpuClusterSpec(
+                infiniband_fabric='fabric-4'))).wait()
         cluster_id = cluster.resource_id
     return cluster_id
 
@@ -72,21 +69,17 @@ def delete_cluster(name: str, project_id: str) -> None:
     """Delete a GPU cluster."""
     service = nebius.compute().GpuClusterServiceClient(sdk)
     try:
-        cluster = service.get_by_name(
-            nebius.common().GetByNameRequest(
-                parent_id=project_id,
-                name=name,
-            )).wait()
+        cluster = service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=project_id,
+            name=name,
+        )).wait()
         cluster_id = cluster.metadata.id
         logger.debug(f'Found GPU Cluster : {cluster_id}.')
-        try:
-            service.delete(
-                nebius.compute().DeleteGpuClusterRequest(id=cluster_id)).wait()
-            logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
-        except nebius.request_error() as e:
-            raise RuntimeError(f'GPU Cluster can not deleted {e}.')
-    except nebius.request_error() as e:
-        logger.debug(f'GPU Cluster does not exist.')
+        service.delete(
+            nebius.compute().DeleteGpuClusterRequest(id=cluster_id)).wait()
+        logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
+    except nebius.request_error():
+        logger.debug('GPU Cluster does not exist.')
         pass
     return
 
@@ -143,67 +136,61 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         if preset == '8gpu-128vcpu-1600gb':
             cluster_id = get_or_creat_gpu_cluster(cluster_name, project_id)
     service = nebius.compute().DiskServiceClient(sdk)
-    disk = service.create(
-        nebius.compute().CreateDiskRequest(
-            metadata=nebius.common().ResourceMetadata(
-                parent_id=project_id,
-                name=disk_name,
-            ),
-            spec=nebius.compute().DiskSpec(
-                source_image_family=nebius.compute().SourceImageFamily(
-                    image_family=image_family),
-                size_gibibytes=disk_size,
-                type=nebius.compute().DiskSpec.DiskType.NETWORK_SSD,
-            )
-        )
-    ).wait()
+    disk = service.create(nebius.compute().CreateDiskRequest(
+        metadata=nebius.nebius_common().ResourceMetadata(
+            parent_id=project_id,
+            name=disk_name,
+        ),
+        spec=nebius.compute().DiskSpec(
+            source_image_family=nebius.compute().SourceImageFamily(
+                image_family=image_family),
+            size_gibibytes=disk_size,
+            type=nebius.compute().DiskSpec.DiskType.NETWORK_SSD,
+        ))).wait()
     disk_id = disk.resource_id
     while True:
-        disk = service.get_by_name(
-            nebius.common().GetByNameRequest(
-                parent_id=project_id,
-                name=disk_name,
-            )).wait()
+        disk = service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=project_id,
+            name=disk_name,
+        )).wait()
         if disk.status.state.name == 'READY':
             break
         logger.debug(f'Waiting for disk {disk_name} to be ready.')
         time.sleep(POLL_INTERVAL)
 
     service = nebius.vpc().SubnetServiceClient(sdk)
-    sub_net = service.list(
-        nebius.vpc().ListSubnetsRequest(parent_id=project_id, )).wait()
+    sub_net = service.list(nebius.vpc().ListSubnetsRequest(
+        parent_id=project_id,)).wait()
 
     service = nebius.compute().InstanceServiceClient(sdk)
-    service.create(
-        nebius.compute().CreateInstanceRequest(
-            metadata=nebius.common().ResourceMetadata(
-                parent_id=project_id,
-                name=name,
-            ),
-            spec=nebius.compute().InstanceSpec(
-                gpu_cluster=nebius.compute().InstanceGpuClusterSpec(
-                    id=cluster_id, )
-                if cluster_id else None,
-                boot_disk=nebius.compute().AttachedDiskSpec(
-                    attach_mode=nebius.compute().AttachedDiskSpec.AttachMode.READ_WRITE,
-                    existing_disk=nebius.compute().ExistingDisk(id=disk_id)),
-                cloud_init_user_data=user_data,
-                resources=nebius.compute().ResourcesSpec(platform=platform,
-                                                         preset=preset),
-                network_interfaces=[
-                    nebius.compute().NetworkInterfaceSpec(
-                        subnet_id=sub_net.items[0].metadata.id,
-                        ip_address=nebius.compute().IPAddress(),
-                        name='network-interface-0',
-                        public_ip_address=nebius.compute().PublicIPAddress())
-                ]))).wait()
+    service.create(nebius.compute().CreateInstanceRequest(
+        metadata=nebius.nebius_common().ResourceMetadata(
+            parent_id=project_id,
+            name=name,
+        ),
+        spec=nebius.compute().InstanceSpec(
+            gpu_cluster=nebius.compute().InstanceGpuClusterSpec(id=cluster_id,)
+            if cluster_id else None,
+            boot_disk=nebius.compute().AttachedDiskSpec(
+                attach_mode=nebius.compute(
+                ).AttachedDiskSpec.AttachMode.READ_WRITE,
+                existing_disk=nebius.compute().ExistingDisk(id=disk_id)),
+            cloud_init_user_data=user_data,
+            resources=nebius.compute().ResourcesSpec(platform=platform,
+                                                     preset=preset),
+            network_interfaces=[
+                nebius.compute().NetworkInterfaceSpec(
+                    subnet_id=sub_net.items[0].metadata.id,
+                    ip_address=nebius.compute().IPAddress(),
+                    name='network-interface-0',
+                    public_ip_address=nebius.compute().PublicIPAddress())
+            ]))).wait()
     while True:
         service = nebius.compute().InstanceServiceClient(sdk)
-        instance = service.get_by_name(
-            nebius.common().GetByNameRequest(
-                parent_id=project_id,
-                name=name,
-            )).wait()
+        instance = service.get_by_name(nebius.nebius_common().GetByNameRequest(
+            parent_id=project_id,
+            name=name,
+        )).wait()
         if instance.status.state.name == 'STARTING':
             break
         time.sleep(POLL_INTERVAL)
