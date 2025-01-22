@@ -3920,9 +3920,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if job_name is not None:
                     name_str = ('Multiple jobs IDs found under the name '
                                 f'{job_name}. ')
+                controller_str = ' (controller)' if controller else ''
                 logger.info(f'{colorama.Fore.YELLOW}'
                             f'{name_str}'
-                            'Downloading the latest job logs.'
+                            f'Downloading the latest job logs{controller_str}.'
                             f'{colorama.Style.RESET_ALL}')
             # list should aready be in descending order
             job_id = job_ids[0]
@@ -3953,12 +3954,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         if controller:  # download controller logs
             remote_log = os.path.join(managed_jobs.JOBS_CONTROLLER_LOGS_DIR,
                                       f'{job_id}.log')
-            local_log_dir = os.path.expanduser(
-                os.path.join(local_dir, run_timestamp))
+            local_log_dir = os.path.join(local_dir, run_timestamp)
+            os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
+                        exist_ok=True)
 
-            logger.info(f'{colorama.Fore.CYAN}'
-                        f'Job {job_id} local logs: {local_log_dir}'
-                        f'{colorama.Style.RESET_ALL}')
+            logger.debug(f'{colorama.Fore.CYAN}'
+                         f'Job {job_id} local logs: {local_log_dir}'
+                         f'{colorama.Style.RESET_ALL}')
 
             runners = handle.get_command_runners()
 
@@ -3970,7 +3972,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 """
                 (runner, local_log_dir, remote_log) = args
                 try:
-                    os.makedirs(local_log_dir, exist_ok=True)
+                    os.makedirs(os.path.expanduser(local_log_dir),
+                                exist_ok=True)
                     runner.rsync(
                         source=remote_log,
                         target=f'{local_log_dir}/controller.log',
@@ -3991,9 +3994,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             ]
             subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
         else:  # download job logs
-            local_log_dir = os.path.expanduser(
-                os.path.join(local_dir, 'managed_jobs', run_timestamp))
-            os.makedirs(os.path.dirname(local_log_dir), exist_ok=True)
+            local_log_dir = os.path.join(local_dir, 'managed_jobs',
+                                         run_timestamp)
+            os.makedirs(os.path.dirname(os.path.expanduser(local_log_dir)),
+                        exist_ok=True)
             log_file = os.path.join(local_log_dir, 'run.log')
 
             code = managed_jobs.ManagedJobCodeGen.stream_logs(job_name=None,
@@ -4012,15 +4016,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self.run_on_head(
                 handle,
                 code,
-                log_path=log_file,
+                log_path=os.path.expanduser(log_file),
                 stream_logs=False,
                 process_stream=False,
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
 
-        logger.info(f'{colorama.Fore.CYAN}'
-                    f'Job {job_id} logs: {local_log_dir}'
-                    f'{colorama.Style.RESET_ALL}')
+        logger.debug(f'{colorama.Fore.CYAN}'
+                     f'Job {job_id} logs: {local_log_dir}'
+                     f'{colorama.Style.RESET_ALL}')
         return {str(job_id): local_log_dir}
 
     def teardown_no_lock(self,

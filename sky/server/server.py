@@ -585,15 +585,13 @@ async def download_logs(request: fastapi.Request,
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
     logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
-    cluster_job_download_logs_body = payloads.ClusterJobsDownloadLogsBody(
-        cluster_name=cluster_jobs_body.cluster_name,
-        job_ids=cluster_jobs_body.job_ids,
-        local_dir=str(logs_dir_on_api_server),
-    )
+    # We should reuse the original request body, so that the env vars, such as
+    # user hash, are kept the same.
+    cluster_jobs_body.local_dir = str(logs_dir_on_api_server)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='download_logs',
-        request_body=cluster_job_download_logs_body,
+        request_body=cluster_jobs_body,
         func=core.download_logs,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
     )
@@ -610,7 +608,9 @@ async def download(download_body: payloads.DownloadBody) -> None:
     for folder_path in folder_paths:
         if not str(folder_path).startswith(str(logs_dir_on_api_server)):
             raise fastapi.HTTPException(
-                status_code=400, detail=f'Invalid folder path: {folder_path}')
+                status_code=400,
+                detail=
+                f'Invalid folder path: {folder_path}; {logs_dir_on_api_server}')
 
         if not folder_path.expanduser().resolve().exists():
             raise fastapi.HTTPException(

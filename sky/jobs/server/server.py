@@ -76,13 +76,20 @@ async def logs(
 async def download_logs(
         request: fastapi.Request,
         jobs_download_logs_body: payloads.JobsDownloadLogsBody) -> None:
+    user_hash = jobs_download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
+    logs_dir_on_api_server = server_common.api_server_user_logs_dir_prefix(
+        user_hash)
+    logs_dir_on_api_server.expanduser().mkdir(parents=True, exist_ok=True)
+    # We should reuse the original request body, so that the env vars, such as
+    # user hash, are kept the same.
+    jobs_download_logs_body.local_dir = str(logs_dir_on_api_server)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.download_logs',
         request_body=jobs_download_logs_body,
         func=core.download_logs,
-        schedule_type=requests.ScheduleType.NON_BLOCKING
-        if jobs_download_logs_body.refresh else requests.ScheduleType.BLOCKING,
+        schedule_type=requests.ScheduleType.BLOCKING if
+        jobs_download_logs_body.refresh else requests.ScheduleType.NON_BLOCKING,
     )
 
 

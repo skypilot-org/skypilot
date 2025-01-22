@@ -496,14 +496,18 @@ def stop_dashboard_forwarding(pid: int) -> None:
 
 
 @usage_lib.entrypoint
-def download_logs(name: Optional[str],
-                  job_id: Optional[int],
-                  refresh: bool,
-                  controller: bool,
-                  local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
+def download_logs(
+        name: Optional[str],
+        job_id: Optional[int],
+        refresh: bool,
+        controller: bool,
+        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
+
+    Returns:
+        A dictionary mapping job ID to the local path.
 
     Raises:
         ValueError: invalid arguments.
@@ -532,8 +536,8 @@ def download_logs(name: Optional[str],
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    backend.sync_down_managed_job_logs(handle,
-                                       job_id=job_id,
-                                       job_name=name,
-                                       controller=controller,
-                                       local_dir=local_dir)
+    return backend.sync_down_managed_job_logs(handle,
+                                              job_id=job_id,
+                                              job_name=name,
+                                              controller=controller,
+                                              local_dir=local_dir)

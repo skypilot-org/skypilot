@@ -6,6 +6,7 @@ from typing import List, Optional, Union
 import click
 import requests
 
+from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.usage import usage_lib
@@ -50,7 +51,7 @@ def up(task: Union['sky.Task', 'sky.Dag'],
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    dag = server_common.upload_mounts_to_api_server(dag)
+    dag = client_common.upload_mounts_to_api_server(dag)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     body = payloads.ServeUpBody(
@@ -102,7 +103,7 @@ def update(task: Union['sky.Task', 'sky.Dag'],
                       abort=True,
                       show_default=True)
 
-    dag = server_common.upload_mounts_to_api_server(dag)
+    dag = client_common.upload_mounts_to_api_server(dag)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ServeUpdateBody(
         task=dag_str,

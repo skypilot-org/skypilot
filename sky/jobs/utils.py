@@ -1096,9 +1096,9 @@ class ManagedJobCodeGen:
     @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
-        from sky.utils import common_utils
+        from sky.utils import message_utils
         job_id = managed_job_state.get_all_job_ids_by_name({job_name!r})
-        print(common_utils.encode_payload(job_id), end="", flush=True)
+        print(message_utils.encode_payload(job_id), end="", flush=True)
         """)
         return cls._build(code)
 

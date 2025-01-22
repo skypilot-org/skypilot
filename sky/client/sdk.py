@@ -16,10 +16,8 @@ import logging
 import os
 import pathlib
 import subprocess
-import tempfile
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-import zipfile
 
 import click
 import colorama
@@ -32,6 +30,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.backends import backend_utils
+from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
@@ -431,7 +430,7 @@ def launch(
     if not confirm_shown:
         click.secho(f'Running task on cluster {cluster_name}...', fg='yellow')
 
-    dag = server_common.upload_mounts_to_api_server(dag)
+    dag = client_common.upload_mounts_to_api_server(dag)
 
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
@@ -527,7 +526,7 @@ def exec(  # pylint: disable=redefined-builtin
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
     validate(dag, workdir_only=True)
-    dag = server_common.upload_mounts_to_api_server(dag, workdir_only=True)
+    dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
         task=dag_str,
@@ -622,56 +621,14 @@ def download_logs(cluster_name: str,
     )
     response = requests.post(f'{server_common.get_server_url()}/download_logs',
                              json=json.loads(body.model_dump_json()))
-    remote_path_dict = stream_and_get(server_common.get_request_id(response))
-    remote2local_path_dict = {
-        remote_path: remote_path.replace(
-            str(server_common.api_server_user_logs_dir_prefix()),
-            constants.SKY_LOGS_DIRECTORY)
-        for remote_path in remote_path_dict.values()
+    job_id_remote_path_dict = stream_and_get(
+        server_common.get_request_id(response))
+    remote2local_path_dict = client_common.download_logs_from_api_server(
+        job_id_remote_path_dict.values())
+    return {
+        job_id: remote2local_path_dict[remote_path]
+        for job_id, remote_path in job_id_remote_path_dict.items()
     }
-    body = payloads.DownloadBody(folder_paths=list(remote_path_dict.values()),)
-    response = requests.post(f'{server_common.get_server_url()}/download',
-                             json=json.loads(body.model_dump_json()),
-                             stream=True)
-    if response.status_code == 200:
-        remote_home_path = response.headers.get('X-Home-Path')
-        assert remote_home_path is not None, response.headers
-        with tempfile.NamedTemporaryFile(prefix='skypilot-logs-download-',
-                                         delete=True) as temp_file:
-            # Download the zip file from the API server to the local machine.
-            for chunk in response.iter_content(chunk_size=8192):
-                temp_file.write(chunk)
-            temp_file.flush()
-
-            # Unzip the downloaded file and save the logs to the correct local
-            # directory.
-            with zipfile.ZipFile(temp_file, 'r') as zipf:
-                for member in zipf.namelist():
-                    # Determine the new path
-                    filename = os.path.basename(member)
-                    original_dir = os.path.dirname('/' + member)
-                    local_dir = original_dir.replace(remote_home_path, '~')
-                    for remote_path, local_path in remote2local_path_dict.items(
-                    ):
-                        if local_dir.startswith(remote_path):
-                            local_dir = local_dir.replace(
-                                remote_path, local_path)
-                            break
-                    else:
-                        raise ValueError(f'Invalid folder path: {original_dir}')
-                    new_path = pathlib.Path(
-                        local_dir).expanduser().resolve() / filename
-                    new_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zipf.open(member) as member_file:
-                        new_path.write_bytes(member_file.read())
-
-        return {
-            job_id: remote2local_path_dict[log_dir]
-            for job_id, log_dir in remote_path_dict.items()
-        }
-    else:
-        raise Exception(
-            f'Failed to download logs: {response.status_code} {response.text}')
 
 
 @usage_lib.entrypoint

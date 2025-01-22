@@ -1,13 +1,14 @@
 """SDK functions for managed jobs."""
 import json
 import typing
-from typing import List, Optional, Union
+from typing import Dict, List, Optional, Union
 import webbrowser
 
 import click
 import requests
 
 from sky import sky_logging
+from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
@@ -66,7 +67,7 @@ def launch(
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
-    dag = server_common.upload_mounts_to_api_server(dag)
+    dag = client_common.upload_mounts_to_api_server(dag)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.JobsLaunchBody(
         task=dag_str,
@@ -217,8 +218,7 @@ def download_logs(
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        local_dir: str = constants.SKY_LOGS_DIRECTORY
-) -> server_common.RequestId:
+        local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[int, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
@@ -231,12 +231,14 @@ def download_logs(
         local_dir: Local directory to sync down logs.
 
     Returns:
-        The request ID of the sync down logs request.
+        A dictionary mapping job ID to the local path.
 
     Request Raises:
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
     body = payloads.JobsDownloadLogsBody(
         name=name,
         job_id=job_id,
@@ -249,8 +251,14 @@ def download_logs(
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
     )
-    # TODO(zhwu): Download the logs from the controller.
-    return server_common.get_request_id(response=response)
+    job_id_remote_path_dict = sdk.stream_and_get(
+        server_common.get_request_id(response))
+    remote2local_path_dict = client_common.download_logs_from_api_server(
+        job_id_remote_path_dict.values())
+    return {
+        job_id: remote2local_path_dict[remote_path]
+        for job_id, remote_path in job_id_remote_path_dict.items()
+    }
 
 
 spot_launch = common_utils.deprecated_function(

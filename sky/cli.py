@@ -4091,10 +4091,19 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     log_request_id = None
     try:
         if sync_down:
-            managed_jobs.download_logs(name=name,
-                                       job_id=job_id,
-                                       controller=controller,
-                                       refresh=refresh)
+            with rich_utils.client_status(
+                    ux_utils.spinner_message('Downloading jobs logs')):
+                log_local_path_dict = managed_jobs.download_logs(
+                    name=name,
+                    job_id=job_id,
+                    controller=controller,
+                    refresh=refresh)
+            style = colorama.Style
+            fore = colorama.Fore
+            controller_str = ' (controller)' if controller else ''
+            for job, log_local_path in log_local_path_dict.items():
+                logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
+                            f'{log_local_path}{style.RESET_ALL}')
         else:
             log_request_id = managed_jobs.tail_logs(name=name,
                                                     job_id=job_id,

@@ -999,21 +999,44 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 
 @pytest.mark.managed_jobs
-def test_managed_jobs_logs_sync_down():
+def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'test-managed-jobs-logs-sync-down',
         [
-            f'sky jobs launch -n {name} -y examples/managed_job.yaml -d',
+            f'sky jobs launch -n {name} --cloud {generic_cloud} --cpus 2+ -y examples/managed_job.yaml -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}',
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=300 + smoke_tests_utils.BUMP_UP_SECONDS),
-            f'sky jobs logs --controller 1 --sync-down',
-            f'sky jobs logs 1 --sync-down',
-            f'sky jobs logs --controller --name minimal --sync-down',
-            f'sky jobs logs --name minimal --sync-down',
+            # Example output of `sky jobs logs --controller 1 --sync-down`:
+            #   Job 8 logs (controller): ~/sky_logs/sky-2025-01-19-22-34-45-320451
+            's=$(SKYPILOT_DEBUG=0 sky jobs logs --controller --sync-down) && echo "$s" && '
+            # Parse the log path
+            'log_path=$(echo "$s" | grep -E "Job .* logs \\(controller\\): " | '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}") && echo "$log_path" && '
+            # Check if the log path is a valid path
+            'eval "[ -d $log_path ]"',
+            # Example output of `sky jobs logs --sync-down`:
+            #   Job 8 logs: ~/sky_logs/managed_jobs/sky-2025-01-19-22-34-45-320451
+            's=$(SKYPILOT_DEBUG=0 sky jobs logs --sync-down) && echo "$s" && '
+            'log_path=$(echo "$s" | grep -E "Job .* logs: " | '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}") && echo "$log_path" && '
+            # Check if the log path is a valid path
+            'eval "[ -d $log_path ]"',
+            # Download jobs controller logs with job name
+            f's=$(SKYPILOT_DEBUG=0 sky jobs logs --controller --name {name} --sync-down) && echo "$s" && '
+            f'log_path=$(echo "$s" | grep -E "Job .* logs \\(controller\\): " | '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}" | sed "s|^~/|$HOME/|") && echo "$log_path" && '
+            'echo "$log_path" && eval "[ -d $log_path ]" && '
+            'cat $(echo "$log_path")/controller.log | grep "Job status: JobStatus.SETTING_UP\|Job status: JobStatus.RUNNING"',
+            # Download jobs logs with job name
+            f's=$(SKYPILOT_DEBUG=0 sky jobs logs --name {name} --sync-down) && echo "$s" && '
+            f'log_path=$(echo "$s" | grep -E "Job .* logs: " | '
+            'sed -r "s/\\x1B\\[[0-9;]*[JKmsu]//g" | awk -F": " "{print \$2}" | sed "s|^~/|$HOME/|") && echo "$log_path" && '
+            'echo "$log_path" && eval "[ -d $log_path ]" && '
+            'cat $(echo "$log_path")/run.log | grep "start counting"',
         ],
         f'sky jobs cancel -y -n {name}',
         timeout=20 * 60,
