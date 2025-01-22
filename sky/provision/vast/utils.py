@@ -125,7 +125,7 @@ def remove(instance_id: str) -> None:
     vast.vast().destroy_instance(id=instance_id)
 
 
-def get_ssh_ports(cluster_name) -> List[int]:
+def get_ssh_ports(cluster_name: str) -> List[int]:
     """Gets the SSH ports for the given cluster."""
     logger.debug(f'Getting SSH ports for cluster {cluster_name}.')
 
