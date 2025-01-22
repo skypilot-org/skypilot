@@ -42,11 +42,47 @@ Following tabs describe how to configure credentials for different clouds on the
     .. tab-item:: Kubernetes
         :sync: kubernetes-creds-tab
 
-        No action is required - SkyPilot will automatically use the same Kubernetes cluster as the API server.
+        By default, SkyPilot will automatically use the same Kubernetes cluster as the API server:
+        
+        * To disable this behavior, set ``kubernetesCredentials.useApiServerCluster=false`` in the Helm chart values.
+        * When running in the same cluster, tasks are launched in the same namespace as the API server. To use a different namespace for tasks, set ``kubernetesCredentials.inclusterNamespace=<namespace>`` when deploying the API server.
 
-        By default, tasks are launched are in the same namespace as the API server. To specify a different namespace for tasks launched by the API server, set the ``--set kubernetesCredentials.inclusterNamespace=<namespace>`` helm flag when deploying the API server.
+        To use a kubeconfig file to authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file:
 
-        Support for other Kubernetes clusters is coming soon.
+        .. code-block:: console
+
+            $ NAMESPACE=skypilot
+            $ kubectl create secret generic kube-credentials \
+            -n $NAMESPACE \
+            --from-file=config=~/.kube/config
+
+
+        Once the ``kube-credentials`` secret is created, set ``kubernetesCredentials.useKubeconfig=true`` in the Helm chart values to use the kubeconfig file for authentication.
+
+        .. code-block:: console
+
+            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+            --set kubernetesCredentials.useKubeconfig=true \
+            --set kubernetesCredentials.useApiServerCluster=true
+
+
+        .. tip::
+
+            If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
+            You can use the ``exec_kubeconfig_converter.py`` script to do this.
+
+            .. code-block:: console
+
+                $ python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
+
+            Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
+
+        .. tip::
+
+            To use multiple Kubernetes clusters from the config file, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config file. See :ref:`sky-api-server-config` on how to set the config file.
+
+            You can also set both ``useKubeconfig`` and ``useApiServerCluster`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
+
     
     .. tab-item:: AWS
         :sync: aws-creds-tab
@@ -262,12 +298,48 @@ The steps below are based on the `official documentation <https://docs.aws.amazo
 Once the EBS CSI driver is installed, the default ``gp2`` storage class will be backed by EBS volumes.
 
 
-Setting Config YAML or Admin Policy
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _sky-api-server-config:
 
-The Helm chart supports setting the global SkyPilot config YAML and installing an admin policy before the API server starts. 
+Setting the SkyPilot Config
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To do so, set ``apiService.preDeployHook`` to the commands you want to run. For example, to set the global config YAML and install an admin policy, create a ``values.yaml`` file with the following:
+The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
+
+To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
+
+.. code-block:: console
+
+    # Create the config.yaml file
+    $ cat <<EOF > config.yaml
+    admin_policy: admin_policy_examples.AddLabelsPolicy
+
+    jobs:
+      controller:
+        resources:
+            cpus: 2+
+
+    allowed_clouds:
+      - aws
+      - kubernetes
+
+    kubernetes:
+      allowed_contexts:
+        - my-context
+        - my-other-context
+    EOF
+
+    # Install the API server with the config file
+    $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+    --set-file apiService.config=config.yaml
+
+You can also directly set config values in the ``values.yaml`` file.
+
+Setting an Admin Policy
+^^^^^^^^^^^^^^^^^^^^^^^
+
+The Helm chart supports installing an admin policy before the API server starts.
+
+To do so, set ``apiService.preDeployHook`` to the commands you want to run. For example, to install an admin policy, create a ``values.yaml`` file with the following:
 
 .. code-block:: yaml
 
@@ -276,21 +348,9 @@ To do so, set ``apiService.preDeployHook`` to the commands you want to run. For 
       preDeployHook: |
        echo "Installing admin policy"
        pip install git+https://github.com/michaelvll/admin-policy-examples
-       
-       echo "Setting global SkyPilot config"
-       mkdir -p ~/.sky
-       cat <<EOF > ~/.sky/config.yaml
-       admin_policy: admin_policy_examples.AddLabelsPolicy
 
-       jobs:
-       controller:
-          resources:
-             cpus: 2+
-       
-       allowed_clouds:
-       - aws
-       - kubernetes
-       EOF
+      config: |
+        admin_policy: admin_policy_examples.AddLabelsPolicy
 
 Then apply the values.yaml file using the `-f` flag when running the helm upgrade command:
 
