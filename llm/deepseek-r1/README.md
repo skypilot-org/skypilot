@@ -53,7 +53,7 @@ sky launch deepseek-r1-vllm.yaml \
   -c deepseek \
   --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
   --env MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
-  --gpus A100-80GB
+  --gpus A100-80GB:2
 ```
 
 replace the command with your own huggingface token and the GPU that you wish to use. You may run `sky show-gpus` to know what GPU that you have access to. As a reference, here is the model-GPU compatibility matrix:
@@ -73,11 +73,31 @@ ENDPOINT=$(sky status --ip deepseek)
 ```
 
 Query the endpoint in a terminal:
+8B: 
 ```
 curl http://$ENDPOINT:8000/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "9.11 > 9.8?"
+      }
+    ]
+  }' | jq .
+```
+
+70B: 
+```
+curl http://$ENDPOINT:8000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
     "messages": [
       {
         "role": "system",
@@ -94,10 +114,10 @@ curl http://$ENDPOINT:8000/v1/chat/completions \
 This will get get 
 ```
 {
-  "id": "chatcmpl-6d6d96d8fa084980b60f4059455fbfc2",
+  "id": "chatcmpl-507f467863344f31b98d8bf36b9a3c1c",
   "object": "chat.completion",
-  "created": 1737497896,
-  "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-7B",
+  "created": 1737503962,
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
   "choices": [
     {
       "index": 0,
