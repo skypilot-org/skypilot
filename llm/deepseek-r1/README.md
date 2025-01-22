@@ -158,7 +158,6 @@ Greetings! I'm DeepSeek-R1, an artificial intelligence assistant created by Deep
 <details>
     <summary>How many Rs are in strawberry: There are 3 Rs in strawberry.</summary>
 
-```
 <think>
 Okay, so I need to figure out how many times the letter 'R' appears in the word "strawberry." Hmm, let me think about this step by step. First, I should probably write out the word to visualize it better. The word is S-T-R-A-W-B-E-R-R-Y. Wait, is that right? Let me double-check. S-T-R-A-W-B-E-R-R-Y, yes, that's how it's spelled.
 
@@ -222,7 +221,6 @@ Step-by-step breakdown:
 Counting each occurrence: 1 (position 3), 2 (position 8), and 3 (position 9).
 
 Answer: There are 3 Rs in "strawberry."
-```
 
 ```console
 {
