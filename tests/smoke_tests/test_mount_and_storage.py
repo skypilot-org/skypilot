@@ -41,10 +41,20 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
+from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.data.data_utils import Rclone
 from sky.skylet import constants
+from sky.utils import controller_utils
+
+ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
+    'GOOGLE_APPLICATION_CREDENTIALS='
+    f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+    'gcloud auth activate-service-account '
+    '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+    '2> /dev/null || true; '
+    'gsutil')
 
 
 # ---------- file_mounts ----------
@@ -156,18 +166,24 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     f.write(content)
     f.flush()
     file_path = f.name
+
     test_commands = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
         f'sky launch -y -c {cluster_name} --cloud {cloud} {file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
-        ls_hello_command,
+        smoke_tests_utils.run_cloud_cmd_on_cluster(cluster_name,
+                                                   cmd=ls_hello_command),
         f'sky stop -y {cluster_name}',
         f'sky start -y {cluster_name}',
         # Check if hello.txt from mounting bucket exists after restart in
         # the mounted directory
         f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
     ]
-    clean_command = f'sky down -y {cluster_name}; sky storage delete -y {storage_name}'
+    clean_command = (
+        f'sky down -y {cluster_name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
+        f'sky storage delete -y {storage_name}')
     return test_commands, clean_command
 
 
@@ -212,7 +228,7 @@ def test_gcp_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'gcp'
     storage_name = f'sky-test-{int(time.time())}'
-    ls_hello_command = f'gsutil ls gs://{storage_name}/hello.txt'
+    ls_hello_command = f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, cloud, False)
@@ -260,8 +276,13 @@ def test_kubernetes_storage_mounts():
     # built for x86_64 only.
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    ls_hello_command = (f'aws s3 ls {storage_name}/hello.txt || '
-                        f'gsutil ls gs://{storage_name}/hello.txt')
+    ls_hello_command = (f'aws s3 ls {storage_name}/hello.txt || {{ '
+                        f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
+                        f'ls gs://{storage_name}/hello.txt; }}')
+    cloud_cmd_cluster_setup_cmd_list = controller_utils._get_cloud_dependencies_installation_commands(
+        controller_utils.Controllers.JOBS_CONTROLLER)
+    cloud_cmd_cluster_setup_cmd = ' && '.join(cloud_cmd_cluster_setup_cmd_list)
+    ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, 'kubernetes', False)
@@ -355,7 +376,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Commands to verify bucket upload. We need to check all three
     # storage types because the optimizer may pick any of them.
     s3_command = f'aws s3 ls {storage_name}/hello.txt'
-    gsutil_command = f'gsutil ls gs://{storage_name}/hello.txt'
+    gsutil_command = (f'{{ {ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
+                      f'ls gs://{storage_name}/hello.txt; }}')
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
     if azure_mount_unsupported_ubuntu_version in image_id:
@@ -652,7 +674,8 @@ class TestStorageWithCredentials:
             return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
 
     @classmethod
-    def list_all_files(cls, store_type, bucket_name):
+    def list_all_files(cls, store_type: storage_lib.StoreType,
+                       bucket_name: str):
         cmd = cls.cli_ls_cmd(store_type, bucket_name, recursive=True)
         if store_type == storage_lib.StoreType.GCS:
             try:
@@ -711,7 +734,7 @@ class TestStorageWithCredentials:
                 url = f'gs://{bucket_name}'
             if recursive:
                 url = f'"{url}/**"'
-            return f'gsutil ls {url}'
+            return f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             # azure isrecursive by default
             default_region = 'eastus'
@@ -751,9 +774,10 @@ class TestStorageWithCredentials:
                     f'--bucket {bucket_name} --output text')
         elif store_type == storage_lib.StoreType.GCS:
             assert bucket_name is not None
-            return (f'gsutil ls -L -b gs://{bucket_name}/ | '
-                    'grep "Location constraint" | '
-                    'awk \'{print tolower($NF)}\'')
+            return (
+                f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls -L -b gs://{bucket_name}/ | '
+                'grep "Location constraint" | '
+                'awk \'{print tolower($NF)}\'')
         elif store_type == storage_lib.StoreType.AZURE:
             # For Azure Blob Storage, the location of the containers are
             # determined by the location of storage accounts.

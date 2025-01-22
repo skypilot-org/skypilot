@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
 import pathlib
+import shlex
 import tempfile
 import textwrap
 from typing import Dict
@@ -80,6 +81,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -493,7 +495,7 @@ def test_inferentia():
         'test_inferentia',
         [
             f'sky launch -y -c {name} -t inf2.xlarge -- echo hi',
-            f'sky exec {name} --gpus Inferentia:1 echo hi',
+            f'sky exec {name} --gpus Inferentia2:1 echo hi',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -748,17 +750,19 @@ def test_task_labels_aws():
         test = smoke_tests_utils.Test(
             'task_labels_aws',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with aws cli that the tags are set.
-                'aws ec2 describe-instances '
-                '--query "Reservations[*].Instances[*].InstanceId" '
-                '--filters "Name=instance-state-name,Values=running" '
-                f'--filters "Name=tag:skypilot-cluster-name,Values={name}*" '
-                '--filters "Name=tag:inlinelabel1,Values=inlinevalue1" '
-                '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
-                '--region us-east-1 --output text',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, 'aws ec2 describe-instances '
+                    '--query "Reservations[*].Instances[*].InstanceId" '
+                    '--filters "Name=instance-state-name,Values=running" '
+                    f'--filters "Name=tag:skypilot-cluster-name,Values={name}*" '
+                    '--filters "Name=tag:inlinelabel1,Values=inlinevalue1" '
+                    '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
+                    '--region us-east-1 --output text'),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -778,14 +782,18 @@ def test_task_labels_gcp():
         test = smoke_tests_utils.Test(
             'task_labels_gcp',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with gcloud cli that the tags are set
-                f'gcloud compute instances list --filter="name~\'^{name}\' AND '
-                'labels.inlinelabel1=\'inlinevalue1\' AND '
-                'labels.inlinelabel2=\'inlinevalue2\'" '
-                '--format="value(name)" | grep .',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=
+                    (f'gcloud compute instances list --filter="name~\'^{name}\' AND '
+                     'labels.inlinelabel1=\'inlinevalue1\' AND '
+                     'labels.inlinelabel2=\'inlinevalue2\'" '
+                     '--format="value(name)" | grep .')),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1110,7 +1118,7 @@ def test_autostop(generic_cloud: str):
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout + smoke_tests_utils._BUMP_UP_SECONDS),
+                timeout=autostop_timeout + smoke_tests_utils.BUMP_UP_SECONDS),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -1496,34 +1504,41 @@ def test_azure_start_stop_two_nodes():
 @pytest.mark.aws
 def test_aws_disk_tier():
 
-    def _get_aws_query_command(region, instance_id, field, expected):
+    def _get_aws_query_command(region: str, instance_id: str, field: str,
+                               expected: str):
         return (f'aws ec2 describe-volumes --region {region} '
                 f'--filters Name=attachment.instance-id,Values={instance_id} '
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
+    cluster_name = smoke_tests_utils.get_cluster_name()
     for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
+        name = cluster_name + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.AWS.max_cluster_name_length())
         region = 'us-east-2'
         test = smoke_tests_utils.Test(
             'aws-disk-tier-' + disk_tier.value,
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
                 f'sky launch -y -c {name} --cloud aws --region {region} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',
-                f'id=`aws ec2 describe-instances --region {region} --filters '
-                f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
-                f'Reservations[].Instances[].InstanceId --output text`; ' +
-                _get_aws_query_command(region, '$id', 'VolumeType',
-                                       specs['disk_tier']) +
-                ('' if specs['disk_tier']
-                 == 'standard' else _get_aws_query_command(
-                     region, '$id', 'Iops', specs['disk_iops'])) +
-                ('' if specs['disk_tier'] != 'gp3' else _get_aws_query_command(
-                    region, '$id', 'Throughput', specs['disk_throughput'])),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=
+                    (f'id=`aws ec2 describe-instances --region {region} --filters '
+                     f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
+                     f'Reservations[].Instances[].InstanceId --output text`; ' +
+                     _get_aws_query_command(region, '$id', 'VolumeType',
+                                            specs['disk_tier']) +
+                     ('' if specs['disk_tier']
+                      == 'standard' else _get_aws_query_command(
+                          region, '$id', 'Iops', specs['disk_iops'])) +
+                     ('' if specs['disk_tier'] != 'gp3' else
+                      _get_aws_query_command(region, '$id', 'Throughput',
+                                             specs['disk_throughput'])))),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
         )
         smoke_tests_utils.run_one_test(test)
@@ -1551,15 +1566,18 @@ def test_gcp_disk_tier():
             test = smoke_tests_utils.Test(
                 'gcp-disk-tier-' + disk_tier.value,
                 [
+                    smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
                     f'sky launch -y -c {name} --cloud gcp --region {region} '
                     f'--disk-tier {disk_tier.value} {instance_type_option} ',
-                    f'name=`gcloud compute instances list --filter='
-                    f'"labels.ray-cluster-name:{name_on_cloud}" '
-                    '--format="value(name)"`; '
-                    f'gcloud compute disks list --filter="name=$name" '
-                    f'--format="value(type)" | grep {disk_type} '
+                    smoke_tests_utils.run_cloud_cmd_on_cluster(
+                        name,
+                        cmd=(f'name=`gcloud compute instances list --filter='
+                             f'"labels.ray-cluster-name:{name_on_cloud}" '
+                             '--format="value(name)"`; '
+                             f'gcloud compute disks list --filter="name=$name" '
+                             f'--format="value(type)" | grep {disk_type}'))
                 ],
-                f'sky down -y {name}',
+                f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
                 timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
             )
             smoke_tests_utils.run_one_test(test)

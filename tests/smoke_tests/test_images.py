@@ -26,6 +26,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.skylet import constants
 
 
 # ---------- Test the image ----------
@@ -322,26 +323,43 @@ def test_gcp_mig():
     test = smoke_tests_utils.Test(
         'gcp_mig',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check MIG exists.
-            f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"'
+                )),
             f'sky autostop -i 0 --down -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
                 cluster_name=name, timeout=120),
-            f'gcloud compute instance-templates list | grep "sky-it-{name}"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'gcloud compute instance-templates list | grep "sky-it-{name}"'
+                )),
             # Launch again with the same region. The original instance template
             # should be removed.
             f'sky launch -y -c {name} --gpus L4 --num-nodes 2 --region {region} nvidia-smi',
             f'sky logs {name} 1 | grep "L4"',
             f'sky down -y {name}',
-            f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true'
+                )),
         ],
-        f'sky down -y {name}',
-        env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml'})
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env={
+            'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml',
+            constants.SKY_API_SERVER_URL_ENV_VAR:
+                sky.server.common.get_server_url()
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -354,16 +372,20 @@ def test_gcp_force_enable_external_ips():
         'curl -s -H "Metadata-Flavor: Google" '
         '"http://metadata.google.internal/computeMetadata/v1/instance/name"')
 
+    is_on_k8s = os.getenv('KUBERNETES_SERVICE_HOST') is not None
+
     # Run the GCP check
-    is_on_gcp = subprocess.run(f'{is_on_gcp_command}',
-                               shell=True,
-                               check=False,
-                               text=True,
-                               capture_output=True).stdout.strip()
-    if not is_on_gcp:
+    result = subprocess.run(f'{is_on_gcp_command}',
+                            shell=True,
+                            check=False,
+                            text=True,
+                            capture_output=True)
+    is_on_gcp = result.returncode == 0 and result.stdout.strip()
+    if not is_on_gcp or is_on_k8s:
         pytest.skip('Not on GCP, skipping test')
 
     test_commands = [
+        is_on_gcp_command,
         f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
         (f'gcloud compute instances list --filter=name~"{name}" --format='
@@ -378,7 +400,11 @@ def test_gcp_force_enable_external_ips():
     test = smoke_tests_utils.Test('gcp_force_enable_external_ips',
                                   test_commands,
                                   f'sky down -y {name}',
-                                  env={'SKYPILOT_CONFIG': skypilot_config})
+                                  env={
+                                      'SKYPILOT_CONFIG': skypilot_config,
+                                      constants.SKY_API_SERVER_URL_ENV_VAR:
+                                          sky.server.common.get_server_url()
+                                  })
     smoke_tests_utils.run_one_test(test)
 
 

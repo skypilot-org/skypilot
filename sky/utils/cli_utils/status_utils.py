@@ -47,8 +47,10 @@ class StatusColumn:
         return val
 
 
-def show_status_table(cluster_records: List[_ClusterRecord], show_all: bool,
-                      show_user: bool) -> int:
+def show_status_table(cluster_records: List[_ClusterRecord],
+                      show_all: bool,
+                      show_user: bool,
+                      query_clusters: Optional[List[str]] = None) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -97,7 +99,21 @@ def show_status_table(cluster_records: List[_ClusterRecord], show_all: bool,
 
     if cluster_records:
         click.echo(cluster_table)
-    else:
+
+    if query_clusters:
+        cluster_names = {record['name'] for record in cluster_records}
+        not_found_clusters = [
+            repr(cluster)
+            for cluster in query_clusters
+            if cluster not in cluster_names
+        ]
+        cluster_str = 'Cluster'
+        if len(not_found_clusters) > 1:
+            cluster_str += 's'
+        cluster_str += ' '
+        cluster_str += ', '.join(not_found_clusters)
+        click.echo(f'{cluster_str} not found.')
+    elif not cluster_records:
         click.echo('No existing clusters.')
     return num_pending_autostop
 

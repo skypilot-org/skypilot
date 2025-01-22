@@ -53,7 +53,6 @@ from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
-from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.client import sdk
@@ -1404,6 +1403,7 @@ def _handle_jobs_queue_request(
     """
     # TODO(SKY-980): remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
+    msg = ''
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
@@ -1420,16 +1420,18 @@ def _handle_jobs_queue_request(
             msg += (f' (See finished managed jobs: {colorama.Style.BRIGHT}'
                     f'sky jobs queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
-        msg = ''
         try:
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the jobs.
             controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-            record = backend_utils.refresh_cluster_record(
-                controller_type.value.cluster_name,
-                cluster_status_lock_timeout=0)
-            if (record is None or
-                    record['status'] == status_lib.ClusterStatus.STOPPED):
+            # Query status of the controller cluster. We add a wildcard because
+            # the controller cluster name can have a suffix like
+            # '-remote-<hash>' when using remote API server.
+            records = sdk.get(
+                sdk.status(
+                    cluster_names=[controller_type.value.cluster_name + '*']))
+            if (not records or
+                    records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
@@ -1498,11 +1500,14 @@ def _handle_services_request(
             # due to the controller being autostopped when querying the
             # services.
             controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-            record = backend_utils.refresh_cluster_record(
-                controller_type.value.cluster_name,
-                cluster_status_lock_timeout=0)
-            if (record is None or
-                    record['status'] == status_lib.ClusterStatus.STOPPED):
+            # Query status of the controller cluster. We add a wildcard because
+            # the controller cluster name can have a suffix like
+            # '-remote-<hash>' when using remote API server.
+            records = sdk.get(
+                sdk.status(
+                    cluster_names=[controller_type.value.cluster_name + '*']))
+            if (not records or
+                    records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
@@ -1841,7 +1846,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
     num_pending_autostop = 0
     num_pending_autostop += status_utils.show_status_table(
-        normal_clusters + controllers, verbose, all_users)
+        normal_clusters + controllers, verbose, all_users, query_clusters)
 
     managed_jobs_query_interrupted = False
     if show_managed_jobs:

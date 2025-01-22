@@ -146,6 +146,15 @@ curl --header "Content-Type: application/json-patch+json" \
    ```
 NOTE - If are using nodeport networking, make sure port 32100 is open in your node pool VPC's firewall.
 
+To delete the node pools, run:
+```bash
+gcloud container node-pools delete "spot-t4" --region ${REGION} --cluster ${CLUSTER_NAME} --async
+gcloud container node-pools delete "t4" --region ${REGION} --cluster ${CLUSTER_NAME} --async
+gcloud container node-pools delete "v100" --region ${REGION} --cluster ${CLUSTER_NAME} --async
+gcloud container node-pools delete "l4" --region ${REGION} --cluster ${CLUSTER_NAME} --async
+gcloud container node-pools delete "largecpu" --region ${REGION} --cluster ${CLUSTER_NAME} --async
+```
+
 ## Running a EKS cluster
 1. Create a EKS cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
    * Tip - to create an example GPU cluster for testing, this command will create a 3 node cluster with 1x T4-8cpu, 1x V100-8cpu and 1x 16cpu CPU-only node. It will also automatically update your kubeconfig file:

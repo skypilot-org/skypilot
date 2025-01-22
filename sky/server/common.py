@@ -275,7 +275,7 @@ def upload_chunk_with_retry(params: UploadChunkParams) -> None:
     with open(params.file_path, 'rb') as f:
         for attempt in range(max_attempts):
             response = params.client.post(
-                f'{server_url}/upload?',
+                f'{server_url}/upload',
                 params={
                     'user_hash': common_utils.get_user_hash(),
                     'upload_id': params.upload_id,

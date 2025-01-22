@@ -128,7 +128,9 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
         assert user_identity_list, user_identity_list
         user_identity = user_identity_list[0]
         aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
-    except exceptions.CloudUserIdentityError:
+    except (exceptions.CloudUserIdentityError, ImportError):
+        # If failed to get user identity, or import aws dependencies, we use the
+        # latest mapping file or the default mapping file.
         glob_name = common.get_catalog_path('aws/az_mappings-*.csv')
         # Find the most recent file that matches the glob.
         # We check the existing files because the user could remove the

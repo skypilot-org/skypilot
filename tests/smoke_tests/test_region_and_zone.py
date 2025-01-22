@@ -55,18 +55,16 @@ def test_aws_region():
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()
-    api_server = skypilot_config.get_nested(('api_server', 'endpoint'), None)
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
             textwrap.dedent(f"""\
         aws:
             ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
-        if api_server is not None:
-            f.write(
-                textwrap.dedent(f"""\
+        f.write(
+            textwrap.dedent(f"""\
             api_server:
-                endpoint: {api_server}
+                endpoint: {sky.server.common.get_server_url()}
             """))
         f.flush()
         test = smoke_tests_utils.Test(

@@ -328,14 +328,10 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         stream_logs=False,
         separate_stderr=True)
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to fetch managed jobs',
-                                           job_table_payload + stderr,
-                                           stream_logs=False)
-    except exceptions.CommandError as e:
-        raise RuntimeError(str(e)) from e
+    if returncode != 0:
+        logger.error(job_table_payload + stderr)
+        raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                           f'{returncode}')
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
     if skip_finished:

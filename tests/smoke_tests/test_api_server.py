@@ -45,7 +45,7 @@ def test_multi_tenant(generic_cloud: str):
         # Skip the stop test for Kubernetes, as stopping is not supported.
         stop_test_cmds = []
 
-    test = Test(
+    test = smoke_tests_utils.Test(
         'test_multi_tenant',
         [
             'echo "==== Test multi-tenant job on single cluster ===="',

@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
 import pathlib
+import shlex
 import subprocess
 import tempfile
 import textwrap
@@ -29,6 +30,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.skylet import constants
 from sky.skylet import events
 from sky.utils import common_utils
 
@@ -189,15 +191,19 @@ def test_aws_stale_job_manual_restart():
     test = smoke_tests_utils.Test(
         'aws_stale_job_manual_restart',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
             f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
-            f'id=`aws ec2 describe-instances --region {region} --filters '
-            f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
-            f'--query Reservations[].Instances[].InstanceId '
-            '--output text`; '
-            f'aws ec2 stop-instances --region {region} '
-            '--instance-ids $id',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'id=`aws ec2 describe-instances --region {region} --filters '
+                 f'Name=tag:ray-cluster-name,Values={name_on_cloud} '
+                 f'--query Reservations[].Instances[].InstanceId '
+                 f'--output text` && '
+                 f'aws ec2 stop-instances --region {region} '
+                 f'--instance-ids $id')),
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
@@ -212,7 +218,7 @@ def test_aws_stale_job_manual_restart():
                 job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS),
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -222,7 +228,7 @@ def test_gcp_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.GCP.max_cluster_name_length())
-    zone = 'us-west2-a'
+    zone = 'us-central1-a'
     query_cmd = (f'gcloud compute instances list --filter='
                  f'"(labels.ray-cluster-name={name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
@@ -231,10 +237,11 @@ def test_gcp_stale_job_manual_restart():
     test = smoke_tests_utils.Test(
         'gcp_stale_job_manual_restart',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky launch -y -c {name} --cloud gcp --zone {zone} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
-            stop_cmd,
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=stop_cmd),
             'sleep 40',
             f'sky launch -c {name} -y "echo hi"',
             f'sky logs {name} 1 --status',
@@ -246,7 +253,7 @@ def test_gcp_stale_job_manual_restart():
                 job_status=[sky.JobStatus.FAILED_DRIVER],
                 timeout=events.JobSchedulerEvent.EVENT_INTERVAL_SECONDS)
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -506,6 +513,7 @@ def test_multiple_resources():
 
 
 # ---------- Sky Benchmark ----------
+@pytest.mark.skip(reason='SkyBench is not supported in API server')
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
@@ -605,6 +613,10 @@ def test_kubernetes_context_failover():
                 f'sky status -r {name}-3 | grep UP',
             ],
             f'sky down -y {name}-1 {name}-3',
-            env={'SKYPILOT_CONFIG': f.name},
+            env={
+                'SKYPILOT_CONFIG': f.name,
+                constants.SKY_API_SERVER_URL_ENV_VAR:
+                    sky.server.common.get_server_url()
+            },
         )
         smoke_tests_utils.run_one_test(test)
