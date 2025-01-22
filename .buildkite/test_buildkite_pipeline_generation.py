@@ -1,5 +1,4 @@
-"""
-This script tests the buildkite pipeline generation script.
+"""This script tests the buildkite pipeline generation script.
 
 It modifies the smoke test files to print the test name and return without
 running the actual test code, then runs the pipeline generation script
@@ -22,8 +21,7 @@ import yaml
 
 
 def _insert_test_tracers(content):
-    """
-    Matches any function definition starting with `def test_...(` possibly
+    """Matches any function definition starting with `def test_...(` possibly
     spanning multiple lines, and inserts print statements.
 
     1) print(function_name)
