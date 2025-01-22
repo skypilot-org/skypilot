@@ -15,7 +15,7 @@ You may have multiple Kubernetes clusters for different:
 * **Kubernetes versions:** e.g., to upgrade a cluster from Kubernetes 1.20 to 1.21, you may create a new Kubernetes cluster to avoid downtime or unexpected errors.
 
 
-.. image:: /images/kubernetes/multi-kubernetes.png
+.. image:: /images/multi-kubernetes.svg
 
 
 Set Up Credentials for Multiple Kubernetes Clusters
