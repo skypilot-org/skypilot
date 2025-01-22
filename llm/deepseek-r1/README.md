@@ -8,7 +8,7 @@ DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning b
 
 This guide walks through how to run and host DeepSeek-R1 models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public Clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)). 
 
-Skypilot supports a vareity of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
+Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
 
 
 ### Step 0: Bring any infra
@@ -35,9 +35,10 @@ sky check
 See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html) for details.
 
 
-### Step 1: Run it!
+### Step 1: Run it with SkyPilot
 
-Now it's time to run deepseek 
+Now it's time to run deepseek with skypilot. The instruction can be dependent on your existing hardware.  
+
 8B: 
 ```
 sky launch deepseek-r1-vllm.yaml \
@@ -65,7 +66,7 @@ replace the command with your own huggingface token and the GPU that you wish to
 | **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
 | **A100-80GB:12** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
 
-
+### Step 2: Get Results 
 Get a single endpoint that load-balances across replicas:
 
 ```
@@ -179,6 +180,8 @@ You will get
 </details>
 
 
-
-# Coming Soon 
-Building large scale Retrieval Augmented Generator (RAG) with Skypilot and Deepseek-R1.
+### Shutdown 
+To shutdown, run 
+```
+sky down deepseek
+```
