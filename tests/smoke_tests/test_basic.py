@@ -33,8 +33,6 @@ import sky
 from sky.skylet import events
 from sky.utils import common_utils
 
-EXTRA_TIMEOUT = int(os.getenv('EXTRA_TIMEOUT') or 0)
-
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
 @pytest.mark.no_vast  #requires GCP and AWS set up
@@ -84,7 +82,7 @@ def test_minimal(generic_cloud: str):
             f'sky exec -c {name} && exit 1 || true',
         ],
         f'sky down -y {name}',
-        smoke_tests_utils.get_timeout(generic_cloud) + EXTRA_TIMEOUT,
+        smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -113,7 +111,7 @@ def test_launch_fast(generic_cloud: str):
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) + EXTRA_TIMEOUT,
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -151,7 +149,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) +
-        autostop_timeout + EXTRA_TIMEOUT,
+        autostop_timeout,
     )
     smoke_tests_utils.run_one_test(test)
 
