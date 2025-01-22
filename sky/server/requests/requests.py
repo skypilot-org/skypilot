@@ -248,7 +248,7 @@ class Request:
 
 
 def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
-    """Kill all running requests for a cluster.
+    """Kill all pending and running requests for a cluster.
 
     Args:
         cluster_name: the name of the cluster.
@@ -258,7 +258,7 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
     request_ids = [
         request_task.request_id for request_task in get_request_tasks(
             cluster_names=[cluster_name],
-            status=[RequestStatus.RUNNING],
+            status=[RequestStatus.PENDING, RequestStatus.RUNNING],
             exclude_request_names=[exclude_request_name])
     ]
     kill_requests(request_ids)

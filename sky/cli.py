@@ -2919,6 +2919,18 @@ def _down_or_stop_clusters(
     Controllers (jobs controller and sky serve controller) can only be
     terminated if the cluster name is explicitly and uniquely specified (not
     via glob).
+
+    Args:
+        names: The names of the clusters to tear down or stop. If empty,
+            apply_to_all or all_users must be set.
+        apply_to_all: If True, apply the operation to all clusters.
+        all_users: If True, apply the operation to all clusters for all users.
+        down: If True, tear down the clusters.
+        no_confirm: If True, skip the confirmation prompt.
+        purge: If True, forcefully remove the clusters from the cluster table.
+        idle_minutes_to_autostop: The number of minutes to wait before
+            automatically stopping the cluster.
+        async_call: If True, send the request asynchronously.
     """
     if down:
         command = 'down'
