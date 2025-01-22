@@ -44,6 +44,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
         No action is required - SkyPilot will automatically use the same Kubernetes cluster as the API server.
 
+        By default, tasks are launched are in the same namespace as the API server. To specify a different namespace for tasks launched by the API server, set the ``--set kubernetesCredentials.inclusterNamespace=<namespace>`` helm flag when deploying the API server.
+
         Support for other Kubernetes clusters is coming soon.
     
     .. tab-item:: AWS

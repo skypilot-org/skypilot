@@ -22,6 +22,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
 from sky.utils import annotations
@@ -1102,11 +1103,21 @@ def get_kube_config_context_namespace(
     """
     k8s = kubernetes.kubernetes
     ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
-    # If using in-cluster context, get the namespace from the service account
-    # namespace file. Uses the same logic as adaptors.kubernetes._load_config()
-    # to stay consistent with in-cluster config loading.
+    # If using in-cluster context, first check for the environment variable,
+    # then fall back to the service account namespace file. Uses the same logic
+    # as adaptors.kubernetes._load_config() to stay consistent with in-cluster
+    # config loading.
     if (context_name == kubernetes.in_cluster_context_name() or
             context_name is None):
+        # First check for environment variable. We allow the env var to take
+        # effect only when using in-cluster auth because the recommended way to
+        # set the namespace when using kubeconfig is to change the namespace
+        # configured in the context.
+        env_namespace = os.getenv(
+            kubernetes_constants.KUBERNETES_IN_CLUSTER_NAMESPACE_ENV_VAR)
+        if env_namespace:
+            return env_namespace
+        # Fall back to service account namespace file
         if os.path.exists(ns_path):
             with open(ns_path, encoding='utf-8') as f:
                 return f.read().strip()
