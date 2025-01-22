@@ -21,13 +21,13 @@ pip install 'skypilot-nightly[all]'
 
 Pick one of the following depending on what infra you want to run DeepSeek-R1 on:
 
-**If your local machine is a GPU node**: use this command to up a lightweight kubernetes cluster:
+**If your local machine/cluster has GPU**: you can run SkyPilot [directly on existing machines](https://docs.skypilot.co/en/latest/reservations/existing-machines.html) with 
 
 ```bash
 sky local up
 ```
 
-**If you have a Kubernetes** (e.g., on-prem, EKS / GKE / AKS / ...) **or Clouds** (15+ clouds are supported):
+**If you want to use Clouds** (15+ clouds are supported):
 
 ```bash
 sky check 
@@ -86,7 +86,7 @@ curl http://$ENDPOINT:8000/v1/chat/completions \
       },
       {
         "role": "user",
-        "content": "9.11 > 9.8?"
+        "content": "Who are you?"
       }
     ]
   }' | jq .
@@ -105,13 +105,17 @@ curl http://$ENDPOINT:8000/v1/chat/completions \
       },
       {
         "role": "user",
-        "content": "Who are you?"
+        "content": "how many rs is in strawberry"
       }
     ]
   }' | jq .
-```
+```    
+</details>
 
-This will get get 
+You will get
+
+<details>
+    <summary>Who are you? I'm DeepSeek-R1.</summary>
 ```
 {
   "id": "chatcmpl-507f467863344f31b98d8bf36b9a3c1c",
@@ -140,3 +144,41 @@ This will get get
   "prompt_logprobs": null
 }
 ```
+</details>
+
+
+<details>
+    <summary>How many Rs is in strawberry: There are 3 Rs in strawberry.</summary>
+```
+{
+  "id": "chatcmpl-d532bd1c1738493ab9c8c906550044bf",
+  "object": "chat.completion",
+  "created": 1737507945,
+  "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "<think>\nOkay, so I need to figure out how many times the letter 'R' appears in the word \"strawberry.\" Hmm, let me think about this step by step. First, I should probably write out the word to visualize it better. The word is S-T-R-A-W-B-E-R-R-Y. Wait, is that right? Let me double-check. S-T-R-A-W-B-E-R-R-Y, yes, that's how it's spelled.\n\nNow, I need to go through each letter one by one and count the Rs. Starting with the first letter, it's an S. Not an R, so move on. The second letter is T, still not an R. The third letter is R. Okay, that's the first R. I'll note that down.\n\nNext letters: A, W, B, E. None of those are Rs. So far, only one R. Then comes R again after E, right? So that's the second R. But wait, I think there's another R after that. Let me make sure. After the second R, there's another R, making it the third R. Wait, no, let me check the spelling again. It's S-T-R-A-W-B-E-R-R-Y. So after E, it's R, then another R, so that's two Rs there. So total, how many?\n\nLet me recount: first R is the third letter, then after E, there's another R, making it two in total, or three? Wait, no. Let me look at each position:\n\n1. S\n2. T\n3. R (1st R)\n4. A\n5. W\n6. B\n7. E\n8. R (2nd R)\n9. R (3rd R)\n10. Y\n\nWait, so after E, there are two Rs in a row, which would make it the 8th and 9th letters. So that's two more Rs after the first one. So total, it's three Rs? Or is that correct? Let me make sure I'm not overcounting. Let's write it out:\n\nS T R A W B E R R Y\n\nSo, positions:\n\n1: S\n\n2: T\n\n3: R (1)\n\n4: A\n\n5: W\n\n6: B\n\n7: E\n\n8: R (2)\n\n9: R (3)\n\n10: Y\n\nSo that's three Rs. Wait, but when I think about the word \"strawberry,\" I thought it had two Rs, but maybe it's three. Wait, maybe I'm wrong. Let me check a dictionary or something, but since I can't do that, I'll have to rely on my memory. Hmm, maybe I was mistaken earlier. Let me think again. Strawberries have a double R, I believe. But in the spelling, is it R-A-W-B-E-R-R-Y? So after the E, it's R-R-Y. So that's two Rs at the end. Plus the one after the T, so that's three Rs total.\n\nWait, no. Let me think about how the word is pronounced. It's \"straw\" plus \"berry,\" right? So \"straw\" has one R, and \"berry\" has two Rs? No, \"berry\" only has one R. Wait, no, \"berry\" is B-E-R-R-Y, so there are two Rs there. So when you put it together, \"strawberry\" would have the R from \"straw\" and two Rs from \"berry,\" making three Rs. Hmm, but I'm not sure. Some people might think it's only two Rs, but based on the spelling, it's three.\n\nWait, no, actually, let me break it down. The word is S-T-R-A-W-B-E-R-R-Y. So after the T, there's an R, then later after the B and E, there's another R, and then another R before Y. So that's three Rs. So the answer should be three. But I'm a bit confused because sometimes people might miscount, thinking it's two. But according to the spelling, it's three. I think that's correct.\n</think>\n\nThe word \"strawberry\" contains three Rs. \n\nStep-by-step breakdown:\n- The first R is the third letter.\n- The second R is the eighth letter.\n- The third R is the ninth letter.\n\nCounting each occurrence: 1 (position 3), 2 (position 8), and 3 (position 9).\n\nAnswer: There are 3 Rs in \"strawberry.\"",
+        "tool_calls": []
+      },
+      "logprobs": null,
+      "finish_reason": "stop",
+      "stop_reason": null
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 15,
+    "total_tokens": 985,
+    "completion_tokens": 970,
+    "prompt_tokens_details": null
+  },
+```
+    
+</details>
+
+
+
+# Coming Soon 
+Building large scale Retrieval Augmented Generator (RAG) with Skypilot and Deepseek-R1.
