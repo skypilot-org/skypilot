@@ -2020,6 +2020,8 @@ class RetryingVmProvisioner(object):
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
                 common_utils.check_cluster_name_is_valid(cluster_name)
+
+                assert to_provision.cloud is not None
                 if dryrun:
                     cloud_user = None
                 else:

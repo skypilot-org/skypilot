@@ -279,7 +279,7 @@ class Task:
         self.service_name: Optional[str] = None
 
         # Filled in by the optimizer.  If None, this Task is not planned.
-        self.best_resources = None
+        self.best_resources: Optional[sky.Resources] = None
         # Check if the task is legal.
         self._validate()
 

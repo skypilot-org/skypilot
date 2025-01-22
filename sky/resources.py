@@ -1062,6 +1062,7 @@ class Resources:
         docker_image = self.extract_docker_image()
 
         # Cloud specific variables
+        assert self.cloud is not None
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun)
 
