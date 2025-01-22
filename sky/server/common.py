@@ -4,6 +4,7 @@ import dataclasses
 import enum
 import functools
 import importlib
+import json
 import os
 import pathlib
 import subprocess
@@ -77,14 +78,26 @@ def get_api_server_status() -> ApiServerInfo:
         try:
             response = requests.get(f'{server_url}/api/health', timeout=2.5)
             if response.status_code == 200:
-                result = response.json()
-                if result['api_version'] == server_constants.API_VERSION:
-                    return ApiServerInfo(status=ApiServerStatus.HEALTHY,
-                                         api_version=result['api_version'])
-                else:
+                try:
+                    result = response.json()
+                    api_version = result.get('api_version')
+                    if api_version is None:
+                        logger.warning(f'API server response missing '
+                                       f'version info. {server_url} may '
+                                       f'not be running SkyPilot API server.')
+                        return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
+                                             api_version=None)
+                    if api_version == server_constants.API_VERSION:
+                        return ApiServerInfo(status=ApiServerStatus.HEALTHY,
+                                             api_version=api_version)
                     return ApiServerInfo(
                         status=ApiServerStatus.VERSION_MISMATCH,
-                        api_version=result['api_version'])
+                        api_version=api_version)
+                except (json.JSONDecodeError, AttributeError) as e:
+                    logger.warning('Failed to parse API server response: '
+                                   f'{str(e)}')
+                    return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
+                                         api_version=None)
             else:
                 return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
                                      api_version=None)
@@ -102,6 +115,10 @@ def get_api_server_status() -> ApiServerInfo:
 
 
 def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
+    if not is_api_server_local():
+        raise RuntimeError(
+            f'Cannot start API server: {get_server_url()} is not a local URL')
+
     # Check available memory before starting the server.
     avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
     if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
@@ -127,23 +144,24 @@ def start_uvicorn_in_background(reload: bool = False, deploy: bool = False):
     subprocess.Popen(cmd, shell=True)
 
     # Wait for the server to start until timeout.
-    server_url = get_server_url()
     # Conservative upper time bound for starting the server based on profiling.
     timeout_sec = 12
     start_time = time.time()
     while True:
-        try:
-            requests.get(f'{server_url}/api/health', timeout=1)
+        api_server_info = get_api_server_status()
+        assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
+            f'API server version mismatch when starting the server. '
+            f'Server version: {api_server_info.api_version} '
+            f'Client version: {server_constants.API_VERSION}')
+        if api_server_info.status == ApiServerStatus.HEALTHY:
             break
-        except requests.exceptions.ConnectionError as e:
-            if time.time() - start_time < timeout_sec:
-                time.sleep(0.5)
-            else:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'Failed to connect to SkyPilot API server at '
-                        f'{server_url}. '
-                        f'\nView logs at: {constants.API_SERVER_LOGS}') from e
+        elif time.time() - start_time >= timeout_sec:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    'Failed to start SkyPilot API server at '
+                    f'{get_server_url()}. '
+                    f'\nView logs at: {constants.API_SERVER_LOGS}')
+        time.sleep(0.5)
 
 
 def handle_request_error(response):
