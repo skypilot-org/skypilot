@@ -3,7 +3,7 @@
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
 <p align="center">
-<img src="https://imgur.com/a/5D8pa2V" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+<img src="https://imgur.com/a/5D8pa2V.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
 </p>
 
 
