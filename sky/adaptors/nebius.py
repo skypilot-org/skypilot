@@ -1,29 +1,46 @@
 """Nebius cloud adaptor."""
+import os
 
-import functools
+from sky.adaptors import common
 
-_nebius_sdk = None
+NB_TENANT_ID_PATH = '~/.nebius/NB_TENANT_ID.txt'
+NEBIUS_IAM_TOKEN_PATH = '~/.nebius/NEBIUS_IAM_TOKEN.txt'
 
+nebius = common.LazyImport(
+    'nebius',
+    import_error_message='Failed to import dependencies for Nebius AI Cloud. '
+    'Try running: pip install "skypilot[nebius]"')
 
-def import_package(func):
+def request_error():
+    return nebius.aio.service_error.RequestError
 
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        global _nebius_sdk
-        if _nebius_sdk is None:
-            try:
-                import nebius as _nebius  # pylint: disable=import-outside-toplevel
-                _nebius_sdk = _nebius
-            except ImportError:
-                raise ImportError(
-                    'Fail to import dependencies for nebius.'
-                    'Try pip install "skypilot[nebius]"') from None
-        return func(*args, **kwargs)
+def compute():
+    from nebius.api.nebius.compute import v1 as compute
+    return compute
 
-    return wrapper
+def iam():
+    from nebius.api.nebius.iam import v1 as iam
+    return iam
 
+def common():
+    from nebius.api.nebius.common import v1 as nebius_common
+    return nebius_common
 
-@import_package
-def nebius():
-    """Return the nebius package."""
-    return _nebius_sdk
+def vpc():
+    from nebius.api.nebius.vpc import v1 as vpc
+    return vpc
+
+def get_iam_token():
+    with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
+              encoding='utf-8') as file:
+        iam_token = file.read().strip()
+    return iam_token
+
+def get_tenant_id():
+    with open(os.path.expanduser(NB_TENANT_ID_PATH),
+              encoding='utf-8') as file:
+        tenant_id = file.read().strip()
+    return tenant_id
+
+def sdk(credentials):
+    return nebius.sdk.SDK(credentials=credentials)

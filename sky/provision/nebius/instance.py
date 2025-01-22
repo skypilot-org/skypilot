@@ -3,8 +3,6 @@ import time
 from time import sleep
 from typing import Any, Dict, List, Optional
 
-from nebius.sdk import SDK
-
 from sky import sky_logging
 from sky import status_lib
 from sky.provision import common
@@ -13,12 +11,6 @@ from sky.utils import common_utils
 from sky.utils import ux_utils
 
 PENDING_STATUS = ['STARTING', 'DELETING', 'STOPPING']
-
-params = utils.get_iam_token_project_id()
-NEBIUS_IAM_TOKEN = params['iam_token']
-NB_TENANT_ID = params['tenant_id']
-
-sdk = SDK(credentials=NEBIUS_IAM_TOKEN)
 
 QUERY_PORTS_TIMEOUT_SECONDS = 30
 
