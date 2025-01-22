@@ -195,9 +195,13 @@ def _generate_pipeline(test_file: str,
                        auto_retry: bool = False) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
+    generated_function_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param in zip(*clouds_queues_param):
+            if '::' in test_function and test_function in generated_function_set:
+                # Skip duplicate nested function tests under the same class
+                continue
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
@@ -218,6 +222,7 @@ def _generate_pipeline(test_file: str,
                     # Automatically retry 2 times on any failure by default.
                     'automatic': True
                 }
+            generated_function_set.add(test_function)
             steps.append(step)
     return {'steps': steps}
 
