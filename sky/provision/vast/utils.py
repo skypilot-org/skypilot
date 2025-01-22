@@ -136,7 +136,7 @@ def get_ssh_ports(cluster_name: str) -> List[int]:
 
     for instance in instances.values():
         if instance['name'] in possible_names:
-            ssh_ports.append((instance['name'], instance['ssh_port']))
+            ssh_ports.append(instance['ssh_port'])
     assert ssh_ports, (
         f'Could not find any instances for cluster {cluster_name}.')
 

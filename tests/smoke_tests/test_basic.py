@@ -148,8 +148,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
-        timeout=smoke_tests_utils.get_timeout(generic_cloud) +
-        autostop_timeout,
+        timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
     )
     smoke_tests_utils.run_one_test(test)
 
