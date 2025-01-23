@@ -212,9 +212,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     failure_type=managed_job_state.ManagedJobStatus.
                     FAILED_CONTROLLER,
                     failure_reason=
-                    f'Legacy controller process for {job_id} exited '
-                    f'abnormally, and cleanup failed: {cleanup_error}. For '
-                    f'more details, run: sky jobs logs --controller {job_id}',
+                    'Legacy controller process has exited abnormally, and '
+                    f'cleanup failed: {cleanup_error}. For more details, run: '
+                    f'sky jobs logs --controller {job_id}',
                     override_terminal=True)
                 return
 
@@ -232,7 +232,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     f'more details, run: sky jobs logs --controller {job_id}'))
 
     # Get jobs that need checking (non-terminal or not DONE)
-    job_ids = managed_job_state.get_jobs_to_check(job_id)
+    job_ids = managed_job_state.get_jobs_to_check_status(job_id)
     if not job_ids:
         # job_id is already terminal, or if job_id is None, there are no jobs
         # that need to be checked.
@@ -249,7 +249,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # Backwards compatibility: this job was submitted when ray was still
         # used for managing the parallelism of job controllers.
         # TODO(cooperc): Remove before 0.11.0.
-        if (schedule_state is None or schedule_state is
+        if (schedule_state is
                 managed_job_state.ManagedJobScheduleState.INVALID):
             _handle_legacy_job(job_id)
             continue

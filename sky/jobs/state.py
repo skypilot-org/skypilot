@@ -697,7 +697,7 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
         return jobs
 
 
-def get_jobs_to_check(job_id: Optional[int] = None) -> List[int]:
+def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
     """Get jobs that need controller process checking.
 
     Returns:
@@ -710,8 +710,9 @@ def get_jobs_to_check(job_id: Optional[int] = None) -> List[int]:
     job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
     job_value = () if job_id is None else (job_id,)
 
-    statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
-    field_values = [
+    status_filter_str = ', '.join(['?'] *
+                                  len(ManagedJobStatus.terminal_statuses()))
+    terminal_status_values = [
         status.value for status in ManagedJobStatus.terminal_statuses()
     ]
 
@@ -729,11 +730,13 @@ def get_jobs_to_check(job_id: Optional[int] = None) -> List[int]:
                 (job_info.schedule_state IS NOT NULL AND
                  job_info.schedule_state IS NOT ?)
                 OR
-                (job_info.schedule_state IS NULL AND status NOT IN ({statuses}))
+                (job_info.schedule_state IS NULL AND
+                 status NOT IN ({status_filter_str}))
             )
             {job_filter}
-            ORDER BY spot.spot_job_id DESC""",
-            [ManagedJobScheduleState.DONE.value, *field_values, *job_value
+            ORDER BY spot.spot_job_id DESC""", [
+                ManagedJobScheduleState.DONE.value, *terminal_status_values,
+                *job_value
             ]).fetchall()
         return [row[0] for row in rows if row[0] is not None]
 
