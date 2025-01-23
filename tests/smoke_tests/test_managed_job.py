@@ -726,8 +726,8 @@ def test_managed_jobs_storage(generic_cloud: str):
     elif generic_cloud == 'azure':
         region = 'centralus'
         region_flag = f' --region {region}'
-        storage_account_name = (
-            storage_lib.AzureBlobStore.get_default_storage_account_name(region))
+        storage_account_name = test_mount_and_storage.TestStorageWithCredentials. \
+            get_az_storage_account_name(region)
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.AZURE,
             storage_account_name=storage_account_name)
