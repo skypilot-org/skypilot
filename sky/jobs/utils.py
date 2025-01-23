@@ -190,7 +190,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                     terminate_cluster(cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
                     error_msg = (f'Failed to terminate cluster {cluster_name}: '
-                                 f'{str(e)}')
+                                 f'{common_utils.format_exception(e, use_bracket=True)}')
                     logger.exception(error_msg, exc_info=e)
         return error_msg
 

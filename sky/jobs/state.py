@@ -562,7 +562,7 @@ def set_failed(
                 WHERE spot_job_id=(?) {task_query_str}""",
                 (end_time, *list(fields_to_set.values()), job_id, *task_value))
         else:
-            # Only set if end_at is null.
+            # Only set if end_at is null, i.e. the previous state is not terminal.
             cursor.execute(
                 f"""\
                 UPDATE spot SET
