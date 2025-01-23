@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import contextlib
 import datetime
+import logging
 import os
 import pathlib
 import re
@@ -51,6 +52,25 @@ else:
 
 P = ParamSpec('P')
 
+
+def _add_timestamp_prefix_for_server_logs() -> None:
+    server_logger = sky_logging.init_logger('sky.server')
+    # Disable propagation to avoid the root logger of SkyPilot being affected.
+    server_logger.propagate = False
+    # Add date prefix to the log message printed by loggers under
+    # server.
+    stream_handler = logging.StreamHandler(sys.stdout)
+    stream_handler.flush = sys.stdout.flush  # type: ignore
+    stream_handler.setFormatter(sky_logging.FORMATTER)
+    server_logger.addHandler(stream_handler)
+    # Add date prefix to the log message printed by uvicorn.
+    for name in ['uvicorn', 'uvicorn.access']:
+        uvicorn_logger = logging.getLogger(name)
+        uvicorn_logger.handlers.clear()
+        uvicorn_logger.addHandler(stream_handler)
+
+
+_add_timestamp_prefix_for_server_logs()
 logger = sky_logging.init_logger(__name__)
 
 # TODO(zhwu): Streaming requests, such log tailing after sky launch or sky logs,
