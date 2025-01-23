@@ -25,7 +25,6 @@ from sky.provision import common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
-from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -464,18 +463,17 @@ def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
     remote_port = skylet_constants.SPOT_DASHBOARD_REMOTE_PORT
     free_port = common_utils.find_free_port(remote_port)
     runner = handle.get_command_runners()[0]
-    ssh_command = ' '.join(
-        runner.ssh_base_command(ssh_mode=command_runner.SshMode.INTERACTIVE,
-                                port_forward=[(free_port, remote_port)],
-                                connect_timeout=1))
-    ssh_command = (
-        f'{ssh_command} '
+    port_forward_command = ' '.join(
+        runner.port_forward_command(port_forward=[(free_port, remote_port)],
+                                    connect_timeout=1))
+    port_forward_command = (
+        f'{port_forward_command} '
         f'> ~/sky_logs/api_server/dashboard-{common_utils.get_user_hash()}.log '
         '2>&1')
-    logger.info(f'Forwarding port: {colorama.Style.DIM}{ssh_command}'
+    logger.info(f'Forwarding port: {colorama.Style.DIM}{port_forward_command}'
                 f'{colorama.Style.RESET_ALL}')
 
-    ssh_process = subprocess.Popen(ssh_command,
+    ssh_process = subprocess.Popen(port_forward_command,
                                    shell=True,
                                    start_new_session=True)
     time.sleep(3)  # Added delay for ssh_command to initialize.

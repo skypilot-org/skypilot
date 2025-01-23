@@ -9,6 +9,7 @@ import pathlib
 import shutil
 import signal
 import sqlite3
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
@@ -265,8 +266,6 @@ def kill_cluster_requests(cluster_name: str, exclude_request_name: str):
 def refresh_cluster_status_event():
     """Periodically refresh the cluster status."""
     # pylint: disable=import-outside-toplevel
-    import time
-
     from sky import core
 
     while True:

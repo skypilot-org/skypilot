@@ -959,24 +959,8 @@ async def kubernetes_pod_ssh_proxy(
             detail=f'Cluster {cluster_name} is not a Kubernetes cluster'
             'Use ssh to connect to the cluster instead.')
 
-    config = common_utils.read_yaml(handle.cluster_yaml)
-    context = kubernetes_utils.get_context_from_config(config['provider'])
-    namespace = kubernetes_utils.get_namespace_from_config(config['provider'])
-    pod_name = handle.cluster_name_on_cloud + '-head'
-
-    kubernetes_args = []
-    if namespace is not None:
-        kubernetes_args.append(f'--namespace={namespace}')
-    if context is not None:
-        kubernetes_args.append(f'--context={context}')
-
-    kubectl_cmd = [
-        'kubectl',
-        *kubernetes_args,
-        'port-forward',
-        f'pod/{pod_name}',
-        ':22',
-    ]
+    kubectl_cmd = handle.get_command_runners()[0].port_forward_command(
+        port_forward=[(None, 22)])
     proc = await asyncio.create_subprocess_exec(
         *kubectl_cmd,
         stdout=asyncio.subprocess.PIPE,

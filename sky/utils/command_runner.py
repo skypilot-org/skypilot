@@ -419,6 +419,18 @@ class CommandRunner:
         """Close the cached connection to the remote machine."""
         pass
 
+    def port_forward_command(self,
+                             port_forward: List[Tuple[int, int]],
+                             connect_timeout: int = 1) -> List[str]:
+        """Command for forwarding ports from localhost to the remote machine.
+
+        Args:
+            port_forward: A list of ports to forward from the localhost to the
+                remote host.
+            connect_timeout: The timeout for the connection.
+        """
+        raise NotImplementedError
+
 
 class SSHCommandRunner(CommandRunner):
     """Runner for SSH commands."""
@@ -486,6 +498,24 @@ class SSHCommandRunner(CommandRunner):
             self.ssh_user = ssh_user
             self.port = port
             self._docker_ssh_proxy_command = None
+
+    def port_forward_command(self,
+                             port_forward: List[Tuple[int, int]],
+                             connect_timeout: int = 1) -> List[str]:
+        """Command for forwarding ports from localhost to the remote machine.
+
+        Args:
+            port_forward: A list of ports to forward from the local port to the
+                remote port.
+            connect_timeout: The timeout for the ssh connection.
+
+        Returns:
+            The command for forwarding ports from localhost to the remote
+            machine.
+        """
+        return self.ssh_base_command(ssh_mode=SshMode.INTERACTIVE,
+                                     port_forward=port_forward,
+                                     connect_timeout=connect_timeout)
 
     def ssh_base_command(self, *, ssh_mode: SshMode,
                          port_forward: Optional[List[Tuple[int, int]]],
@@ -705,6 +735,35 @@ class KubernetesCommandRunner(CommandRunner):
     @property
     def node_id(self) -> str:
         return f'{self.context}-{self.namespace}-{self.pod_name}'
+
+    def port_forward_command(self,
+                             port_forward: List[Tuple[int, int]],
+                             connect_timeout: int = 1) -> List[str]:
+        """Command for forwarding ports from localhost to the remote machine.
+
+        Args:
+            port_forward: A list of ports to forward from the local port to the
+                remote port. Currently, only one port is supported, i.e. the
+                list should have only one element.
+            connect_timeout: The timeout for the ssh connection.
+        """
+        assert port_forward and len(port_forward) == 1, (
+            'Only one port is supported for Kubernetes port-forward.')
+        kubectl_args = [
+            '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
+        ]
+        if self.context:
+            kubectl_args += ['--context', self.context]
+        local_port, remote_port = port_forward[0]
+        local_port_str = f'{local_port}' if local_port is not None else ''
+        kubectl_cmd = [
+            'kubectl',
+            *kubectl_args,
+            'port-forward',
+            f'pod/{self.pod_name}',
+            f'{local_port_str}:{remote_port}',
+        ]
+        return kubectl_cmd
 
     @timeline.event
     def run(
