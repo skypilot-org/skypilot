@@ -82,6 +82,10 @@ class RequestBody(pydantic.BaseModel):
         kwargs.pop('override_skypilot_config')
         return kwargs
 
+    @property
+    def user_hash(self) -> Optional[str]:
+        return self.env_vars.get(constants.USER_ID_ENV_VAR)
+
 
 class CheckBody(RequestBody):
     """The request body for the check endpoint."""

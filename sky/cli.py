@@ -5551,28 +5551,35 @@ def api_cancel(request_id: Optional[str], all: bool, all_users: bool):
               default=False,
               required=False,
               help='Show requests of all statuses.')
+@click.option('--verbose',
+              '-v',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show more details.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def api_status(request_id: Optional[str], all_status: bool):
+def api_status(request_id: Optional[str], all_status: bool, verbose: bool):
     """List requests on SkyPilot API server."""
     request_list = sdk.api_status(request_id, all_status)
-    table = log_utils.create_table([
-        'ID',
-        'User',
-        'Name',
-        'Created',
-        'Status',
-    ])
+    columns = ['ID', 'User', 'Name']
+    if verbose:
+        columns.append('Cluster')
+    columns.extend(['Created', 'Status'])
+    table = log_utils.create_table(columns)
     for request in request_list:
         r_id = request.request_id
         if not all_status:
             r_id = common_utils.truncate_long_string(r_id, 36)
         req_status = requests.RequestStatus(request.status)
-        table.add_row([
-            r_id, request.user_name, request.name,
+        row = [r_id, request.user_name, request.name]
+        if verbose:
+            row.append(request.cluster_name)
+        row.extend([
             log_utils.readable_time_duration(request.created_at),
             req_status.colored_str()
         ])
+        table.add_row(row)
     click.echo(table)
 
 

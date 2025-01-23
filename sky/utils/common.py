@@ -1,6 +1,7 @@
 """Common enumerators and classes."""
 
 import enum
+from typing import Optional
 
 from sky.utils import common_utils
 
@@ -22,18 +23,20 @@ class ControllerType(enum.Enum):
     JOBS = 'JOBS'
 
 
-def get_controller_name(controller_type: ControllerType) -> str:
+def get_controller_name(controller_type: ControllerType,
+                        user_hash: Optional[str] = None) -> str:
     prefix = JOB_CONTROLLER_PREFIX
     if controller_type == ControllerType.SERVE:
         prefix = SKY_SERVE_CONTROLLER_PREFIX
-    user_id = common_utils.get_user_hash()
+    if user_hash is None:
+        user_hash = common_utils.get_user_hash()
     # Comparing the two IDs can determine if the caller is trying to get the
     # controller created by their local API server or a remote API server.
-    if user_id == SERVER_ID:
+    if user_hash == SERVER_ID:
         # Not adding server ID for locally created controller because
         # of backward compatibility.
-        return f'{prefix}{user_id}'
-    return f'{prefix}{user_id}{SERVER_ID_CONNECTOR}{SERVER_ID}'
+        return f'{prefix}{user_hash}'
+    return f'{prefix}{user_hash}{SERVER_ID_CONNECTOR}{SERVER_ID}'
 
 
 # Controller names differ per user and per SkyPilot API server.

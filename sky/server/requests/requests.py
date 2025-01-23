@@ -104,6 +104,8 @@ class RequestPayload:
     pid: Optional[int]
     schedule_type: str
     user_name: Optional[str] = None
+    # Resources the request operates on.
+    cluster_name: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -121,6 +123,8 @@ class Request:
     error: Optional[Dict[str, Any]] = None
     pid: Optional[int] = None
     schedule_type: ScheduleType = ScheduleType.BLOCKING
+    # Resources the request operates on.
+    cluster_name: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -164,22 +168,13 @@ class Request:
     @classmethod
     def from_row(cls, row: Tuple[Any, ...]) -> 'Request':
         content = dict(zip(REQUEST_COLUMNS, row))
-        # Pop db columns that are not a part of Request.
-        content.pop(COL_CLUSTER_NAME, None)
         return cls.decode(RequestPayload(**content))
 
     def to_row(self) -> Tuple[Any, ...]:
         payload = self.encode()
         row = []
         for k in REQUEST_COLUMNS:
-            if k == COL_CLUSTER_NAME:
-                cluster_name = ''
-                if hasattr(self.request_body, COL_CLUSTER_NAME) and \
-                        self.request_body.cluster_name is not None:
-                    cluster_name = self.request_body.cluster_name
-                row.append(cluster_name)
-            else:
-                row.append(getattr(payload, k))
+            row.append(getattr(payload, k))
         return tuple(row)
 
     def readable_encode(self) -> RequestPayload:
@@ -200,6 +195,7 @@ class Request:
             schedule_type=self.schedule_type.value,
             user_id=self.user_id,
             user_name=user_name,
+            cluster_name=self.cluster_name,
         )
 
     def encode(self) -> RequestPayload:
@@ -219,6 +215,7 @@ class Request:
                 created_at=self.created_at,
                 schedule_type=self.schedule_type.value,
                 user_id=self.user_id,
+                cluster_name=self.cluster_name,
             )
         except TypeError as e:
             print(f'Error encoding: {e}\n'
@@ -244,6 +241,7 @@ class Request:
             created_at=payload.created_at,
             schedule_type=ScheduleType(payload.schedule_type),
             user_id=payload.user_id,
+            cluster_name=payload.cluster_name,
         )
 
 
@@ -270,6 +268,7 @@ def refresh_cluster_status_event():
     import time
 
     from sky import core
+
     while True:
         print('Refreshing cluster status...')
         # TODO(zhwu): Periodically refresh will cause the cluster being locked

@@ -425,6 +425,7 @@ async def launch(launch_body: payloads.LaunchBody,
         request_body=launch_body,
         func=execution.launch,
         schedule_type=requests_lib.ScheduleType.BLOCKING,
+        request_cluster_name=launch_body.cluster_name,
     )
 
 
@@ -438,6 +439,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
         request_body=exec_body,
         func=execution.exec,
         schedule_type=requests_lib.ScheduleType.BLOCKING,
+        request_cluster_name=exec_body.cluster_name,
     )
 
 
@@ -451,6 +453,7 @@ async def stop(request: fastapi.Request,
         request_body=stop_body,
         func=core.stop,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=stop_body.cluster_name,
     )
 
 
@@ -481,6 +484,7 @@ async def endpoints(request: fastapi.Request,
         request_body=endpoint_body,
         func=core.endpoints,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=endpoint_body.cluster,
     )
 
 
@@ -494,6 +498,7 @@ async def down(request: fastapi.Request,
         request_body=down_body,
         func=core.down,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=down_body.cluster_name,
     )
 
 
@@ -507,6 +512,7 @@ async def start(request: fastapi.Request,
         request_body=start_body,
         func=core.start,
         schedule_type=requests_lib.ScheduleType.BLOCKING,
+        request_cluster_name=start_body.cluster_name,
     )
 
 
@@ -520,6 +526,7 @@ async def autostop(request: fastapi.Request,
         request_body=autostop_body,
         func=core.autostop,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=autostop_body.cluster_name,
     )
 
 
@@ -533,6 +540,7 @@ async def queue(request: fastapi.Request,
         request_body=queue_body,
         func=core.queue,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=queue_body.cluster_name,
     )
 
 
@@ -546,6 +554,7 @@ async def job_status(request: fastapi.Request,
         request_body=job_status_body,
         func=core.job_status,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=job_status_body.cluster_name,
     )
 
 
@@ -559,6 +568,7 @@ async def cancel(request: fastapi.Request,
         request_body=cancel_body,
         func=core.cancel,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=cancel_body.cluster_name,
     )
 
 
@@ -574,6 +584,7 @@ async def logs(
         request_body=cluster_job_body,
         func=core.tail_logs,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=cluster_job_body.cluster_name,
     )
 
     request_task = requests_lib.get_request(request.state.request_id)
@@ -603,6 +614,7 @@ async def download_logs(request: fastapi.Request,
         request_body=cluster_jobs_body,
         func=core.download_logs,
         schedule_type=requests_lib.ScheduleType.NON_BLOCKING,
+        request_cluster_name=cluster_jobs_body.cluster_name,
     )
 
 

@@ -13,6 +13,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -20,16 +21,21 @@ logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
+def _get_controller_name(request_body: payloads.RequestBody) -> str:
+    user_hash = request_body.user_hash
+    return common.get_controller_name(common.ControllerType.JOBS, user_hash)
+
+
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
-
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='jobs.launch',
         request_body=jobs_launch_body,
         func=core.launch,
         schedule_type=requests.ScheduleType.BLOCKING,
+        request_cluster_name=_get_controller_name(jobs_launch_body),
     )
 
 
@@ -43,6 +49,7 @@ async def queue(request: fastapi.Request,
         func=core.queue,
         schedule_type=(requests.ScheduleType.BLOCKING if jobs_queue_body.refresh
                        else requests.ScheduleType.NON_BLOCKING),
+        request_cluster_name=_get_controller_name(jobs_queue_body),
     )
 
 
@@ -55,6 +62,7 @@ async def cancel(request: fastapi.Request,
         request_body=jobs_cancel_body,
         func=core.cancel,
         schedule_type=requests.ScheduleType.NON_BLOCKING,
+        request_cluster_name=_get_controller_name(jobs_cancel_body),
     )
 
 
@@ -70,6 +78,7 @@ async def logs(
         func=core.tail_logs,
         schedule_type=requests.ScheduleType.NON_BLOCKING
         if jobs_logs_body.refresh else requests.ScheduleType.BLOCKING,
+        request_cluster_name=_get_controller_name(jobs_logs_body),
     )
     request_task = requests.get_request(request.state.request_id)
 
@@ -98,6 +107,7 @@ async def download_logs(
         func=core.download_logs,
         schedule_type=requests.ScheduleType.BLOCKING if
         jobs_download_logs_body.refresh else requests.ScheduleType.NON_BLOCKING,
+        request_cluster_name=_get_controller_name(jobs_download_logs_body),
     )
 
 

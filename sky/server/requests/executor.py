@@ -265,6 +265,7 @@ def schedule_request(
         request_name: str,
         request_body: payloads.RequestBody,
         func: Callable[P, Any],
+        request_cluster_name: Optional[str] = None,
         ignore_return_value: bool = False,
         schedule_type: requests.ScheduleType = requests.ScheduleType.BLOCKING,
         is_skypilot_system: bool = False) -> None:
@@ -281,7 +282,8 @@ def schedule_request(
                                status=requests.RequestStatus.PENDING,
                                created_at=time.time(),
                                schedule_type=schedule_type,
-                               user_id=user_id)
+                               user_id=user_id,
+                               cluster_name=request_cluster_name)
 
     if not requests.create_if_not_exists(request):
         logger.debug(f'Request {request_id} already exists.')
