@@ -17,7 +17,6 @@ import pathlib
 import re
 import subprocess
 
-import generate_pipeline
 import pytest
 import yaml
 
@@ -167,7 +166,6 @@ def test_generate_same_as_pytest(args):
             text=True,
             shell=True)
         pytest_tests = set(re.findall(r"test_\w+", pytest_output))
-        pytest_tests = pytest_tests - set(generate_pipeline.SKIP_TESTS)
 
         # Generate pipeline and extract test functions using YAML parsing
         env = dict(os.environ)

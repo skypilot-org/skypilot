@@ -203,11 +203,6 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
-# Additional seconds to extend the timeout, used in some smoke tests,
-# for instance, waiting for a cluster to reach a certain status
-# or for a job to complete.
-BUMP_UP_SECONDS = 35
-
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
