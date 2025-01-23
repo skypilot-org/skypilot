@@ -189,8 +189,9 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 try:
                     terminate_cluster(cluster_name)
                 except Exception as e:  # pylint: disable=broad-except
-                    error_msg = (f'Failed to terminate cluster {cluster_name}: '
-                                 f'{common_utils.format_exception(e, use_bracket=True)}')
+                    error_msg = (
+                        f'Failed to terminate cluster {cluster_name}: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
                     logger.exception(error_msg, exc_info=e)
         return error_msg
 
@@ -478,7 +479,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
         # If we see CANCELLING, just exit - we could miss some job logs but the
         # job will be terminated momentarily anyway so we don't really care.
         return (not status.is_terminal() and
-                status is not managed_job_state.ManagedJobStatus.CANCELLING)
+                status != managed_job_state.ManagedJobStatus.CANCELLING)
 
     msg = _JOB_WAITING_STATUS_MESSAGE.format(status_str='', job_id=job_id)
     status_display = rich_utils.safe_status(msg)
@@ -555,7 +556,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                 assert managed_job_status is not None, (job_id, task_id,
                                                         managed_job_status)
                 continue
-            assert (managed_job_status is
+            assert (managed_job_status ==
                     managed_job_state.ManagedJobStatus.RUNNING)
             assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
             status_display.stop()
@@ -670,7 +671,6 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
             time.sleep(3 * JOB_STATUS_CHECK_GAP_SECONDS)
             managed_job_status = managed_job_state.get_status(job_id)
             assert managed_job_status is not None, (job_id, managed_job_status)
-            should_keep_logging(managed_job_status)
 
     # The managed_job_status may not be in terminal status yet, since the
     # controller has not updated the managed job state yet. We wait for a while,

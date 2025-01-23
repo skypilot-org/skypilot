@@ -562,7 +562,8 @@ def set_failed(
                 WHERE spot_job_id=(?) {task_query_str}""",
                 (end_time, *list(fields_to_set.values()), job_id, *task_value))
         else:
-            # Only set if end_at is null, i.e. the previous state is not terminal.
+            # Only set if end_at is null, i.e. the previous status is not
+            # terminal.
             cursor.execute(
                 f"""\
                 UPDATE spot SET
@@ -700,12 +701,12 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
 def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
     """Get jobs that need controller process checking.
 
-    Returns:
-    - For jobs with schedule state: jobs that have schedule state not DONE
-    - For legacy jobs (no schedule state): jobs that are in non-terminal status
-
     Args:
         job_id: Optional job ID to check. If None, checks all jobs.
+
+    Returns a list of job_ids, including the following:
+    - For jobs with schedule state: jobs that have schedule state not DONE
+    - For legacy jobs (no schedule state): jobs that are in non-terminal status
     """
     job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
     job_value = () if job_id is None else (job_id,)
