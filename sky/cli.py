@@ -1223,6 +1223,9 @@ def launch(
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:
         job_id, handle = job_id_handle
+        if not handle:
+            assert dryrun, 'handle should only be None when dryrun is true'
+            return
         # Add ssh config for the cluster
         _get_cluster_records_and_set_ssh_config(
             clusters=[handle.get_cluster_name()])

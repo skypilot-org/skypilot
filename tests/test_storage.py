@@ -25,10 +25,11 @@ class TestStorageSpecLocalSource:
         assert 'Storage source paths cannot end with a slash' in str(e)
 
     def test_source_single_file(self):
-        storage_obj = storage_lib.Storage(name='test', source=f.name)
-        with pytest.raises(exceptions.StorageSourceError) as e:
-            storage_obj.construct()
-        assert 'Storage source path cannot be a file' in str(e)
+        with tempfile.NamedTemporaryFile() as f:
+            storage_obj = storage_lib.Storage(name='test', source=f.name)
+            with pytest.raises(exceptions.StorageSourceError) as e:
+                storage_obj.construct()
+            assert 'Storage source path cannot be a file' in str(e)
 
     def test_source_multifile_conflict(self):
         storage_obj = storage_lib.Storage(

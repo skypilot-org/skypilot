@@ -177,6 +177,29 @@ def override_request_env_and_config(
         os.environ.update(original_env)
 
 
+def _redirect_output(file: TextIO) -> Tuple[int, int]:
+    """Redirect stdout and stderr to the log file."""
+    fd = file.fileno()  # Get the file descriptor from the file object
+    # Store copies of the original stdout and stderr file descriptors
+    original_stdout = os.dup(sys.stdout.fileno())
+    original_stderr = os.dup(sys.stderr.fileno())
+
+    # Copy this fd to stdout and stderr
+    os.dup2(fd, sys.stdout.fileno())
+    os.dup2(fd, sys.stderr.fileno())
+    return original_stdout, original_stderr
+
+
+def _restore_output(original_stdout: int, original_stderr: int) -> None:
+    """Restore stdout and stderr to their original file descriptors."""
+    os.dup2(original_stdout, sys.stdout.fileno())
+    os.dup2(original_stderr, sys.stderr.fileno())
+
+    # Close the duplicate file descriptors
+    os.close(original_stdout)
+    os.close(original_stderr)
+
+
 def _wrapper(request_id: str, ignore_return_value: bool) -> None:
     """Wrapper for a request.
 
@@ -194,27 +217,6 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
 
     signal.signal(signal.SIGTERM, sigterm_handler)
 
-    def redirect_output(file: TextIO) -> Tuple[int, int]:
-        """Redirect stdout and stderr to the log file."""
-        fd = file.fileno()  # Get the file descriptor from the file object
-        # Store copies of the original stdout and stderr file descriptors
-        original_stdout = os.dup(sys.stdout.fileno())
-        original_stderr = os.dup(sys.stderr.fileno())
-
-        # Copy this fd to stdout and stderr
-        os.dup2(fd, sys.stdout.fileno())
-        os.dup2(fd, sys.stderr.fileno())
-        return original_stdout, original_stderr
-
-    def restore_output(original_stdout: int, original_stderr: int) -> None:
-        """Restore stdout and stderr to their original file descriptors."""
-        os.dup2(original_stdout, sys.stdout.fileno())
-        os.dup2(original_stderr, sys.stderr.fileno())
-
-        # Close the duplicate file descriptors
-        os.close(original_stdout)
-        os.close(original_stderr)
-
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
     with requests.update_request(request_id) as request_task:
@@ -227,7 +229,7 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
 
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
-        original_stdout, original_stderr = redirect_output(f)
+        original_stdout, original_stderr = _redirect_output(f)
         # Redirect the stdout/stderr before overriding the environment and
         # config, as there can be some logs during override that needs to be
         # captured in the log file.
@@ -236,7 +238,7 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
                 return_value = func(**request_body.to_kwargs())
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
-            restore_output(original_stdout, original_stderr)
+            _restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             with ux_utils.enable_traceback():
@@ -246,7 +248,7 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
                 assert request_task is not None, request_id
                 request_task.status = requests.RequestStatus.FAILED
                 request_task.set_error(e)
-            restore_output(original_stdout, original_stderr)
+            _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to '
                         f'{common_utils.format_exception(e)}')
             return
@@ -256,7 +258,7 @@ def _wrapper(request_id: str, ignore_return_value: bool) -> None:
                 request_task.status = requests.RequestStatus.SUCCEEDED
                 if not ignore_return_value:
                     request_task.set_return_value(return_value)
-            restore_output(original_stdout, original_stderr)
+            _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 
 

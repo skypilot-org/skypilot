@@ -26,6 +26,12 @@ RUN_DURATION_OVERRIDE = 10
 PROVISION_TIMEOUT = 600
 
 
+def _reload_config() -> None:
+    skypilot_config._dict = config_utils.Config()
+    skypilot_config._loaded_config_path = None
+    skypilot_config._reload_config()
+
+
 def _check_empty_config() -> None:
     """Check that the config is empty."""
     assert not skypilot_config.loaded(), (skypilot_config._dict,
@@ -123,7 +129,7 @@ def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
 
 def test_nested_config(monkeypatch) -> None:
     """Test that the nested config works."""
-    config = skypilot_config.Config()
+    config = config_utils.Config()
     config.set_nested(('aws', 'ssh_proxy_command'), 'value')
     assert config == {'aws': {'ssh_proxy_command': 'value'}}
 
@@ -338,7 +344,8 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
     # Get cluster YAML
     cluster_name = 'test-kubernetes-config-with-override'
     task.set_resources_override({'cloud': sky.Kubernetes()})
-    sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    sky.stream_and_get(request_id)
     cluster_yaml = pathlib.Path(
         f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
             tmp_path / (cluster_name + '.yml'))
@@ -373,7 +380,8 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     task.set_resources_override({'cloud': sky.Kubernetes()})
     exception_occurred = False
     try:
-        sky.launch(task, cluster_name=cluster_name, dryrun=True)
+        request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
+        sky.stream_and_get(request_id)
     except sky.exceptions.ResourcesUnavailableError:
         exception_occurred = True
     assert exception_occurred
@@ -393,7 +401,8 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
     # Test GCP overrides
     cluster_name = 'test-gcp-config-with-override'
     task.set_resources_override({'cloud': sky.GCP(), 'accelerators': 'L4'})
-    sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    sky.stream_and_get(request_id)
     cluster_yaml = pathlib.Path(
         f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
             tmp_path / (cluster_name + '.yml'))
@@ -441,7 +450,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
 
 
 @mock.patch('sky.skypilot_config.to_dict',
-            return_value={
+            return_value=config_utils.Config({
                 'api_server': 'http://example.com',
                 'aws': {
                     'vpc_name': 'test-vpc',
@@ -450,7 +459,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
                 'gcp': {
                     'project_id': 'test-project'
                 }
-            })
+            }))
 @mock.patch('sky.skylet.constants.SKIPPED_CLIENT_OVERRIDE_KEYS',
             [('aws', 'security_group')])
 @mock.patch('sky.skypilot_config.loaded_config_path',
@@ -471,8 +480,8 @@ def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
         assert result['gcp']['project_id'] == 'test-project'
 
         # Verify warning was logged for removed disallowed key
-        mock_logger.warning.assert_called_once_with(
-            'Key (\'aws\', \'security_group\') is specified in the client '
+        mock_logger.debug.assert_called_once_with(
+            'The following keys ({"aws.security_group": "test-sg"}) are specified in the client '
             'SkyPilot config at \'/path/to/config.yaml\'. This will be '
             'ignored. If you want to specify it, please modify it on server '
             'side or contact your administrator.')

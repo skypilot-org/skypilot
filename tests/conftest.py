@@ -1,6 +1,19 @@
-from typing import List, Optional
+from typing import List
 
-import common  # TODO(zongheng): for some reason isort places it here.
+# We need to import all the mock functions here, so that the smoke
+# tests can access them.
+from common_test_fixtures import aws_config_region
+from common_test_fixtures import enable_all_clouds
+from common_test_fixtures import fix_controller_enum_comparison
+from common_test_fixtures import mock_client_requests
+from common_test_fixtures import mock_controller_accessible
+from common_test_fixtures import mock_job_table_no_job
+from common_test_fixtures import mock_job_table_one_job
+from common_test_fixtures import mock_queue
+from common_test_fixtures import mock_redirect_log_file
+from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_stream_utils
 import pytest
 
 from sky.server import common as server_common
@@ -218,20 +231,3 @@ def _generic_cloud(config) -> str:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
-
-
-@pytest.fixture
-def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
-    common.enable_all_clouds_in_monkeypatch(monkeypatch)
-
-
-@pytest.fixture
-def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
-    from sky import skypilot_config
-    region = 'us-east-2'
-    if skypilot_config.loaded():
-        ssh_proxy_command = skypilot_config.get_nested(
-            ('aws', 'ssh_proxy_command'), None)
-        if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
-            region = list(ssh_proxy_command.keys())[0]
-    return region
