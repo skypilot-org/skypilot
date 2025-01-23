@@ -42,7 +42,7 @@ from sky.utils import common_utils
 # when the controller being on Azure, which takes a long time for launching
 # step.
 @pytest.mark.managed_jobs
-def test_managed_jobs(generic_cloud: str):
+def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
