@@ -206,12 +206,16 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             if cleanup_error:
                 # Unconditionally set the job to failed_controller if the
                 # cleanup fails.
-                managed_job_state.set_failed_controller(
+                managed_job_state.set_failed(
                     job_id,
+                    task_id=None,
+                    failure_type=managed_job_state.ManagedJobStatus.
+                    FAILED_CONTROLLER,
                     failure_reason=
                     f'Legacy controller process for {job_id} exited '
                     f'abnormally, and cleanup failed: {cleanup_error}. For '
-                    f'more details, run: sky jobs logs --controller {job_id}')
+                    f'more details, run: sky jobs logs --controller {job_id}',
+                    override_terminal=True)
                 return
 
             # It's possible for the job to have transitioned to
@@ -321,12 +325,15 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         # failure_reason ends up in the database, the outcome is acceptable.
         # We assume that no other code path outside the controller process will
         # update the job status.
-        managed_job_state.set_failed_controller(
+        managed_job_state.set_failed(
             job_id,
+            task_id=None,
+            failure_type=managed_job_state.ManagedJobStatus.FAILED_CONTROLLER,
             failure_reason=
             f'Controller process has exited abnormally ({failure_reason}). '
             f'{cleanup_error_msg}'
-            f'For more details, run: sky jobs logs --controller {job_id}')
+            f'For more details, run: sky jobs logs --controller {job_id}',
+            override_terminal=True)
 
         scheduler.job_done(job_id, idempotent=True)
 

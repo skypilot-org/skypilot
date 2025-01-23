@@ -511,8 +511,12 @@ def set_failed(
     failure_reason: str,
     callback_func: Optional[CallbackType] = None,
     end_time: Optional[float] = None,
+    override_terminal: bool = False,
 ):
-    """Set an entire job or task to failed, if they are in non-terminal states.
+    """Set an entire job or task to failed.
+
+    By default, don't override tasks that are already terminal (that is, for
+    which end_at is already set).
 
     Args:
         job_id: The job id.
@@ -521,12 +525,13 @@ def set_failed(
         failure_type: The failure type. One of ManagedJobStatus.FAILED_*.
         failure_reason: The failure reason.
         end_time: The end time. If None, the current time will be used.
+        override_terminal: If True, override the current status even if end_at
+            is already set.
     """
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
-    fields_to_set = {
-        'end_at': end_time,
+    fields_to_set: Dict[str, Any] = {
         'status': failure_type.value,
         'failure_reason': failure_reason,
     }
@@ -541,61 +546,30 @@ def set_failed(
             # affect the job duration calculation.
             fields_to_set['last_recovered_at'] = end_time
         set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
-        task_str = '' if task_id is None else f' AND task_id={task_id}'
+        task_query_str = '' if task_id is None else 'AND task_id=(?)'
+        task_value = [] if task_id is None else [
+            task_id,
+        ]
 
-        cursor.execute(
-            f"""\
-            UPDATE spot SET
-            {set_str}
-            WHERE spot_job_id=(?){task_str} AND end_at IS null""",
-            (*list(fields_to_set.values()), job_id))
-    if callback_func:
-        callback_func('FAILED')
-    logger.info(failure_reason)
-
-
-def set_failed_controller(
-    job_id: int,
-    failure_reason: str,
-    callback_func: Optional[CallbackType] = None,
-):
-    """Set the status to FAILED_CONTROLLER for all tasks of the job.
-
-    Unlike set_failed(), this will override any existing status, including
-    terminal ones. This should only be used when the controller process has died
-    abnormally.
-
-    For jobs that already have an end_time set, we preserve that time instead of
-    overwriting it with the current time.
-
-    Args:
-        job_id: The job id.
-        failure_reason: The failure reason.
-    """
-    now = time.time()
-    fields_to_set: Dict[str, Any] = {
-        'status': ManagedJobStatus.FAILED_CONTROLLER.value,
-        'failure_reason': failure_reason,
-    }
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        previous_status = cursor.execute(
-            'SELECT status FROM spot WHERE spot_job_id=(?)',
-            (job_id,)).fetchone()[0]
-        previous_status = ManagedJobStatus(previous_status)
-        if previous_status == ManagedJobStatus.RECOVERING:
-            # If the job is recovering, we should set the last_recovered_at to
-            # the current time, so that the end_at - last_recovered_at will not
-            # affect the job duration calculation.
-            fields_to_set['last_recovered_at'] = now
-
-        set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
-
-        cursor.execute(
-            f"""\
-            UPDATE spot SET
-            end_at = COALESCE(end_at, ?),
-            {set_str}
-            WHERE spot_job_id=(?)""", (now, *fields_to_set.values(), job_id))
+        if override_terminal:
+            # Use COALESCE for end_at to avoid overriding the existing end_at if
+            # it's already set.
+            cursor.execute(
+                f"""\
+                UPDATE spot SET
+                end_at = COALESCE(end_at, ?),
+                {set_str}
+                WHERE spot_job_id=(?) {task_query_str}""",
+                (end_time, *list(fields_to_set.values()), job_id, *task_value))
+        else:
+            # Only set if end_at is null.
+            cursor.execute(
+                f"""\
+                UPDATE spot SET
+                end_at = (?),
+                {set_str}
+                WHERE spot_job_id=(?) {task_query_str} AND end_at IS null""",
+                (end_time, *list(fields_to_set.values()), job_id, *task_value))
     if callback_func:
         callback_func('FAILED')
     logger.info(failure_reason)
