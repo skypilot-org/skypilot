@@ -228,8 +228,8 @@ def get_cloud_credential_file_mounts(
 def _format_enabled_cloud(cloud_name: str) -> str:
     if cloud_name == repr(sky_clouds.Kubernetes()):
         # Get enabled contexts for Kubernetes
-        contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
-        if not contexts:
+        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        if not existing_contexts:
             return cloud_name
 
         # Check if allowed_contexts is explicitly set in config
@@ -239,16 +239,16 @@ def _format_enabled_cloud(cloud_name: str) -> str:
         # Format the context info with consistent styling
         if allowed_contexts is not None:
             contexts_formatted = []
-            for i, context in enumerate(contexts):
+            for i, context in enumerate(existing_contexts):
                 # TODO: We should use ux_utils.INDENT_SYMBOL and
                 # INDENT_LAST_SYMBOL but, they are formatted for colorama, while
                 # here we are using rich. We should migrate this file to
                 # use colorama as we do in the rest of the codebase.
-                symbol = ('└── ' if i == len(contexts) - 1 else '├── ')
+                symbol = ('└── ' if i == len(existing_contexts) - 1 else '├── ')
                 contexts_formatted.append(f'\n        {symbol}{context}')
             context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
         else:
-            context_info = f'Active context: {contexts[0]}'
+            context_info = f'Active context: {existing_contexts[0]}'
 
         return f'{cloud_name}[/green][dim]\n    └── {context_info}[/dim][green]'
     return cloud_name
