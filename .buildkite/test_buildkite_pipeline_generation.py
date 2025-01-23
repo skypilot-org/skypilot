@@ -130,6 +130,7 @@ def _extract_test_names_from_pipeline(pipeline_path):
 
 
 @pytest.mark.parametrize('args', [
+    '',
     '--aws',
     '--gcp',
     '--azure',
