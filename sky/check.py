@@ -160,13 +160,12 @@ def check(
         # Pretty print for UX.
         if not quiet:
             enabled_clouds_str = '\n  ' + '\n  '.join([
-                CHECK_MARK_EMOJI + ' ' + cloud
+                _format_enabled_cloud(cloud)
                 for cloud in sorted(all_enabled_clouds)
             ])
-            echo(
-                click.style(f'\n{PARTY_POPPER_EMOJI} Enabled clouds '
-                            f'{PARTY_POPPER_EMOJI}' + enabled_clouds_str,
-                            fg='green'))
+            echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
+                 f'Enabled clouds {PARTY_POPPER_EMOJI}'
+                 f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
     return enabled_clouds
 
 
@@ -232,3 +231,34 @@ def get_cloud_credential_file_mounts(
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
     return file_mounts
+
+
+def _format_enabled_cloud(cloud_name: str) -> str:
+    def _green_color(cloud_name: str) -> str:
+        return f'{colorama.Fore.GREEN}{cloud_name}{colorama.Style.RESET_ALL}'
+
+    if cloud_name == repr(sky_clouds.Kubernetes()):
+        # Get enabled contexts for Kubernetes
+        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        if not existing_contexts:
+            return _green_color(cloud_name)
+
+        # Check if allowed_contexts is explicitly set in config
+        allowed_contexts = skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'), None)
+
+        # Format the context info with consistent styling
+        if allowed_contexts is not None:
+            contexts_formatted = []
+            for i, context in enumerate(existing_contexts):
+                symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(existing_contexts) - 1 else ux_utils.INDENT_SYMBOL)
+                contexts_formatted.append(f'\n        {symbol}{context}')
+            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+        else:
+            context_info = f'Active context: {existing_contexts[0]}'
+
+        return (f'{_green_color(cloud_name)}\n'
+                f'    {colorama.Style.DIM}{ux_utils.INDENT_LAST_SYMBOL}'
+                f'{context_info}{colorama.Style.RESET_ALL}')
+    return _green_color(cloud_name)
+

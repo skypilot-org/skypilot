@@ -202,8 +202,4 @@ def merge_k8s_configs(
             else:
                 base_config[key].extend(value)
         else:
-            if base_config is None:
-                # TODO(zhwu): This will not be effective as the base_config
-                # is not returned by this function.
-                base_config = {}
             base_config[key] = value
