@@ -176,6 +176,10 @@ def _extract_marked_tests(
                 f'but we only have credentials for {final_clouds_to_include}. '
                 f'clouds {excluded_clouds} are skipped.')
 
+        # pytest will only run the first cloud if there are multiple clouds
+        # make it consistent with pytest behavior
+        print(f"final_clouds_to_include: {final_clouds_to_include}")
+        final_clouds_to_include = [final_clouds_to_include[0]]
         param_list = function_name_param_map.get(function_name, [None])
         if len(param_list) < len(final_clouds_to_include):
             # align, so we can zip them together
@@ -198,7 +202,7 @@ def _generate_pipeline(test_file: str,
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param in zip(*clouds_queues_param):
-            if '::' in test_function and test_function in generated_function_set:
+            if test_function in generated_function_set:
                 # Skip duplicate nested function tests under the same class
                 continue
             label = f'{test_function} on {cloud}'
