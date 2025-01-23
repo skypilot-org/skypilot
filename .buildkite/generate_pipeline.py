@@ -85,7 +85,6 @@ def _extract_marked_tests(
     """
     cmd = f'pytest {file_path} --collect-only {args}'
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    print(f'output: {output.stdout}')
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
 
