@@ -1,4 +1,0 @@
-file_mounts:
-  /code:
-    name: code-zhwu
-    mode: MOUNT
