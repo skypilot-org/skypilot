@@ -231,6 +231,21 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 def zip_files_and_folders(items: List[str],
                           output_file: Union[str, pathlib.Path],
                           log_file: Optional[TextIO] = None):
+
+    def _store_symlink(zipf, path: str, is_dir: bool):
+        # Get the target of the symlink
+        target = os.readlink(path)
+        # Use relative path as absolute path will not be able to resolve on
+        # remote API server.
+        if os.path.isabs(target):
+            target = os.path.relpath(target, os.path.dirname(path))
+        # Create a ZipInfo instance
+        zi = zipfile.ZipInfo(path + '/') if is_dir else zipfile.ZipInfo(path)
+        # Set external attributes to mark as symlink
+        zi.external_attr = 0xA1ED0000
+        # Write symlink target as content
+        zipf.writestr(zi, target)
+
     with warnings.catch_warnings():
         warnings.filterwarnings('ignore',
                                 category=UserWarning,
@@ -245,9 +260,26 @@ def zip_files_and_folders(items: List[str],
                 if os.path.isfile(item) and item not in excluded_files:
                     zipf.write(item)
                 elif os.path.isdir(item):
-                    for root, _, files in os.walk(item):
+                    for root, dirs, files in os.walk(item, followlinks=False):
+                        # Store directory entries (important for empty
+                        # directories)
+                        for dir_name in dirs:
+                            dir_path = os.path.join(root, dir_name)
+                            if dir_path in excluded_files:
+                                continue
+                            # If it's a symlink, store it as a symlink
+                            if os.path.islink(dir_path):
+                                _store_symlink(zipf, dir_path, is_dir=True)
+                            else:
+                                zipf.write(dir_path)
+
                         for file in files:
-                            if os.path.join(root, file) not in excluded_files:
-                                zipf.write(os.path.join(root, file))
+                            file_path = os.path.join(root, file)
+                            if file_path in excluded_files:
+                                continue
+                            if os.path.islink(file_path):
+                                _store_symlink(zipf, file_path, is_dir=False)
+                            else:
+                                zipf.write(file_path)
                 if log_file is not None:
                     log_file.write(f'Zipped {item}\n')

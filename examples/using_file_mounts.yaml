@@ -125,7 +125,5 @@ run: |
   cd ~/sky_workdir
   ! ls sky.egg-info/
 
-  # Symlinks will not be uploaded for safety reason (by zip).
   # Assumes symlink named circle-link in /tmp/workdir (created by test_smoke.py)
-  # TODO(SKY-1031): add for remote API server only.
-  # ! ls /tmp/workdir/circle-link
+  ls -l /tmp/workdir/circle-link

@@ -385,20 +385,52 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
     return payloads.UploadZipFileResponse(status='completed')
 
 
+def _is_relative_to(path: pathlib.Path, parent: pathlib.Path) -> bool:
+    """Checks if path is a subpath of parent."""
+    try:
+        # We cannot use is_relative_to, as it is only added after 3.9.
+        path.relative_to(parent)
+        return True
+    except ValueError:
+        return False
+
+
 def unzip_file(zip_file_path: pathlib.Path,
                client_file_mounts_dir: pathlib.Path) -> None:
     """Unzips a zip file."""
     try:
         with zipfile.ZipFile(zip_file_path, 'r') as zipf:
-            for member in zipf.namelist():
+            for member in zipf.infolist():
                 # Determine the new path
-                filename = os.path.basename(member)
-                original_path = os.path.normpath(member)
+                original_path = os.path.normpath(member.filename)
                 new_path = client_file_mounts_dir / original_path.lstrip('/')
 
-                if not filename:  # This is for directories, skip
+                if (member.external_attr >> 28) == 0xA:
+                    # Symlink. Read the target path and create a symlink.
+                    new_path.parent.mkdir(parents=True, exist_ok=True)
+                    target = zipf.read(member).decode()
+                    assert not os.path.isabs(target), target
+                    # Since target is a relative path, we need to check that it
+                    # is under `client_file_mounts_dir` for security.
+                    full_target_path = (new_path.parent / target).resolve()
+                    if not _is_relative_to(full_target_path,
+                                           client_file_mounts_dir):
+                        raise ValueError(f'Symlink target {target} leads to a '
+                                         'file not in userspace. Aborted.')
+
+                    if new_path.exists() or new_path.is_symlink():
+                        new_path.unlink(missing_ok=True)
+                    new_path.symlink_to(
+                        target,
+                        target_is_directory=member.filename.endswith('/'))
+                    continue
+
+                # Handle directories
+                if member.filename.endswith('/'):
                     new_path.mkdir(parents=True, exist_ok=True)
                     continue
+
+                # Handle files
                 new_path.parent.mkdir(parents=True, exist_ok=True)
                 with zipf.open(member) as member_file, new_path.open('wb') as f:
                     # Use shutil.copyfileobj to copy files in chunks, so it does

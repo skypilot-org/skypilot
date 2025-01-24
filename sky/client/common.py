@@ -183,8 +183,7 @@ def upload_chunk_with_retry(params: UploadChunkParams) -> None:
             else:
                 error_msg = (
                     f'Failed to upload chunk: {params.chunk_index + 1} / '
-                    f'{params.total_chunks}: {response.content.decode("utf-8")}'
-                )
+                    f'{params.total_chunks}: {response.json().get("detail")}')
                 upload_logger.error(error_msg)
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
