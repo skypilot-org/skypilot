@@ -1,6 +1,6 @@
 import argparse
-import logging
 import base64
+import logging
 from typing import List, Optional
 
 import chromadb

@@ -1,11 +1,11 @@
 import argparse
+import base64
 import glob
 import logging
 import os
 import pickle
 import shutil
 import tempfile
-import base64
 
 import chromadb
 import numpy as np

@@ -1,17 +1,17 @@
 import abc
 import asyncio
+import base64
+from io import BytesIO
 import logging
 import os
 import pickle
-import base64
-from io import BytesIO
 from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
                     TypeVar)
 
 import numpy as np
+from PIL import Image
 import torch
 from tqdm import tqdm
-from PIL import Image
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -75,7 +75,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                 break
             yield idx, item
 
-    async def do_data_loading(self) -> AsyncIterator[Tuple[int, Tuple[torch.Tensor, Any]]]:
+    async def do_data_loading(
+            self) -> AsyncIterator[Tuple[int, Tuple[torch.Tensor, Any]]]:
         """Load and preprocess ImageNet images."""
         if self.model is None:
             await self.setup_model()
@@ -92,8 +93,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                     f"Error preprocessing image at index {idx}: {str(e)}")
 
     async def do_batch_processing(
-            self, batch: List[Tuple[int,
-                                    Tuple[torch.Tensor, Any]]]) -> List[Tuple[int, bytes]]:
+        self, batch: List[Tuple[int, Tuple[torch.Tensor, Any]]]
+    ) -> List[Tuple[int, bytes]]:
         """Process a batch of images through CLIP."""
         if self.model is None:
             await self.setup_model()
@@ -112,7 +113,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
 
         # Convert to numpy arrays
         embeddings = features.cpu().numpy()
-        
+
         # Convert original images to base64
         images_base64 = {}
         for idx, img in zip(indices, original_images):
@@ -120,9 +121,9 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             img.save(buffered, format="JPEG")
             img_str = base64.b64encode(buffered.getvalue()).decode()
             images_base64[idx] = img_str
-        
+
         # Return both embeddings and images
-        return [(idx, pickle.dumps((images_base64[idx], arr))) 
+        return [(idx, pickle.dumps((images_base64[idx], arr)))
                 for idx, arr in zip(indices, embeddings)]
 
     async def run(self):
