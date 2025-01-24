@@ -88,6 +88,7 @@ def _parse_args(args=None):
     parsed_args = parser.parse_args(args)
 
     # Collect chosen clouds from the flags
+    # TODO(zpoint): get default clouds from the conftest.py
     default_clouds_to_run = []
     for cloud in PYTEST_TO_CLOUD_KEYWORD.keys():
         if getattr(parsed_args, cloud):
