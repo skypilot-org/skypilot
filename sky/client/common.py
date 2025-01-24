@@ -80,9 +80,9 @@ def download_logs_from_api_server(
             with zipfile.ZipFile(temp_file, 'r') as zipf:
                 for member in zipf.namelist():
                     # Determine the new path
-                    filename = os.path.basename(member)
-                    original_dir = os.path.dirname('/' + member)
-                    local_dir = original_dir.replace(remote_home_path, '~')
+                    zipped_filename = os.path.basename(member)
+                    zipped_dir = os.path.dirname('/' + member)
+                    local_dir = zipped_dir.replace(remote_home_path, '~')
                     for remote_path, local_path in remote2local_path_dict.items(
                     ):
                         if local_dir.startswith(remote_path):
@@ -90,12 +90,16 @@ def download_logs_from_api_server(
                                 remote_path, local_path)
                             break
                     else:
-                        raise ValueError(f'Invalid folder path: {original_dir}')
+                        raise ValueError(f'Invalid folder path: {zipped_dir}')
                     new_path = pathlib.Path(
-                        local_dir).expanduser().resolve() / filename
+                        local_dir).expanduser().resolve() / zipped_filename
                     new_path.parent.mkdir(parents=True, exist_ok=True)
-                    with zipf.open(member) as member_file:
-                        new_path.write_bytes(member_file.read())
+                    if member.endswith('/'):
+                        # If it is a directory, we need to create it.
+                        new_path.mkdir(parents=True, exist_ok=True)
+                    else:
+                        with zipf.open(member) as member_file:
+                            new_path.write_bytes(member_file.read())
 
         return remote2local_path_dict
     else:
