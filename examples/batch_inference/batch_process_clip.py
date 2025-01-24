@@ -1,29 +1,52 @@
+import abc
 import asyncio
 import logging
 import pickle
-from typing import Any, AsyncIterator, Dict, List, Optional, Tuple
+from typing import Any, AsyncIterator, Dict, Generic, List, Optional, Tuple, TypeVar
 
 import numpy as np
-from processors import BatchInferenceProcessor
-from processors import HuggingFaceDatasetMixin
+from tqdm import tqdm
 import torch
+import os
 
-class ClipBatchProcessor(HuggingFaceDatasetMixin,
-                         BatchInferenceProcessor[Dict[str, Any], Tuple[str, bytes]]):
-    """Example implementation for processing images with CLIP."""
+InputType = TypeVar('InputType')
+OutputType = TypeVar('OutputType')
+ModelInputType = TypeVar('ModelInputType')
+ModelOutputType = TypeVar('ModelOutputType')
+
+
+class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
+    """Process ImageNet images with CLIP."""
 
     def __init__(
             self,
+            output_path: str,
             model_name: str = "ViT-bigG-14",
-            dataset_name: str = "laion/relaion2B-en-research-safe",
-            max_preprocessing_tasks: int = 10,  # Control parallel preprocessing
-            **kwargs):
-        super().__init__(model_name=model_name,
-                         dataset_name=dataset_name,
-                         **kwargs)
+            dataset_name: str = "ILSVRC/imagenet-1k",
+            pretrained: str = "laion2b_s39b_b160k",
+            device: Optional[str] = None,
+            split: str = "train",
+            streaming: bool = True,
+            batch_size: int = 32,
+            checkpoint_size: int = 100,
+            start_idx: int = 0,
+            end_idx: Optional[int] = None):
+        self.output_path = output_path
+        self.batch_size = batch_size
+        self.checkpoint_size = checkpoint_size
+        self.start_idx = start_idx
+        self.end_idx = end_idx
+        self._current_batch = []
+        
+        # CLIP-specific attributes
+        self.model_name = model_name
+        self.pretrained = pretrained
+        self.device = device or ('cuda' if torch.cuda.is_available() else 'cpu')
+        self.dataset_name = dataset_name
+        self.split = split
+        self.streaming = streaming
+        self.model = None
         self.preprocess = None
-        self.preprocessing_semaphore = asyncio.Semaphore(
-            max_preprocessing_tasks)
 
     async def setup_model(self):
         """Set up the CLIP model."""
@@ -31,86 +54,103 @@ class ClipBatchProcessor(HuggingFaceDatasetMixin,
 
         model, _, preprocess = open_clip.create_model_and_transforms(
             self.model_name,
-            pretrained="laion2b_s39b_b160k",
+            pretrained=self.pretrained,
             device=self.device)
         self.model = model
         self.preprocess = preprocess
 
-    async def run_model_inference(
-            self, model_inputs: List[Tuple[str, torch.Tensor]]) -> List[Tuple[str, bytes]]:
-        """Run CLIP model on a batch of preprocessed images."""
-        # Unzip the URLs and tensors
-        urls, tensors = zip(*model_inputs)
+    async def get_dataset_iterator(self) -> AsyncIterator[Tuple[int, Any]]:
+        """Load data from a HuggingFace dataset."""
+        from datasets import load_dataset
+
+        dataset = load_dataset(self.dataset_name,
+                             streaming=self.streaming)[self.split]
+
+        if self.start_idx > 0:
+            dataset = dataset.skip(self.start_idx)
+
+        for idx, item in enumerate(dataset, start=self.start_idx):
+            if self.end_idx and idx >= self.end_idx:
+                break
+            yield idx, item
+
+    async def do_data_loading(self) -> AsyncIterator[Tuple[int, torch.Tensor]]:
+        """Load and preprocess ImageNet images."""
+        if self.model is None:
+            await self.setup_model()
+
+        async for idx, item in self.get_dataset_iterator():
+            try:
+                # ImageNet provides PIL Images directly
+                tensor = self.preprocess(item['image'])
+                if tensor is not None:
+                    yield idx, tensor
+            except Exception as e:
+                logging.debug(f"Error preprocessing image at index {idx}: {str(e)}")
+
+    async def do_batch_processing(
+        self, batch: List[Tuple[int, torch.Tensor]]
+    ) -> List[Tuple[int, bytes]]:
+        """Process a batch of images through CLIP."""
+        if self.model is None:
+            await self.setup_model()
+
+        indices, model_inputs = zip(*batch)
         
         # Stack inputs into a batch
-        batch_tensor = torch.stack(tensors).to(self.device)
+        batch_tensor = torch.stack(model_inputs).to(self.device)
 
         # Run inference
         with torch.no_grad():
             features = self.model.encode_image(batch_tensor)
             features /= features.norm(dim=-1, keepdim=True)
 
-        # Convert to numpy arrays, then to bytes, and pair with URLs
+        # Convert to numpy arrays and then to bytes
         embeddings = features.cpu().numpy()
-        embedding_bytes = [pickle.dumps((url, arr)) for url, arr in zip(urls, embeddings)]
-        return embedding_bytes
+        return list(zip(indices, [pickle.dumps(arr) for arr in embeddings]))
 
-    async def do_data_loading(self) -> AsyncIterator[Tuple[int, Tuple[str, torch.Tensor]]]:
-        """Load and preprocess data in parallel."""
-        if self.model is None:
-            await self.setup_model()
+    async def run(self):
+        """Run the batch processing pipeline."""
+        import pandas as pd
 
-        preprocessing_tasks = []
-        buffer_size = self.batch_size * 2
+        results = []
+        partition_counter = 0  # To keep track of partitions
 
-        async for idx, item in self.get_dataset_iterator():
-            # Clean up completed tasks when buffer is full
-            if len(preprocessing_tasks) >= buffer_size:
-                done, pending = await asyncio.wait(
-                    preprocessing_tasks, return_when=asyncio.FIRST_COMPLETED)
-                preprocessing_tasks = list(pending)
+        async for idx, input_data in self.do_data_loading():
+            self._current_batch.append((idx, input_data))
 
-                for task in done:
-                    result = await task
-                    if result[1][1] is not None:  # Check tensor in (idx, (url, tensor))
-                        yield result
+            if len(self._current_batch) >= self.batch_size:
+                batch_results = await self.do_batch_processing(self._current_batch)
+                results.extend(batch_results)
+                self._current_batch = []
 
-            # Start new preprocessing task
-            async def preprocess_with_index(idx, item):
-                async with self.preprocessing_semaphore:
-                    url = item["url"]
-                    tensor = await self._preprocess_input(item)
-                    return (idx, (url, tensor))  # Return tuple with url
+                if len(results) >= self.checkpoint_size:
+                    # Convert results to DataFrame
+                    df = pd.DataFrame(results, columns=['idx', 'embedding'])
 
-            task = asyncio.create_task(preprocess_with_index(idx, item))
-            preprocessing_tasks.append(task)
+                    # Save DataFrame to parquet file
+                    output_file = f"{self.output_path}_{partition_counter}.parquet"
+                    df.to_parquet(output_file, index=False)
+                    logging.info(f"Saved partition {partition_counter} to {output_file}")
+                    results = []
+                    partition_counter += 1
 
-        # Wait for and yield remaining results
-        if preprocessing_tasks:
-            done = await asyncio.gather(*preprocessing_tasks)
-            for result in done:
-                if result[1][1] is not None:  # Check tensor in (idx, (url, tensor))
-                    yield result
+        # Process remaining items in batch
+        if self._current_batch:
+            batch_results = await self.do_batch_processing(self._current_batch)
+            results.extend(batch_results)
 
-    async def _preprocess_input(self,
-                                item: Dict[str, Any]) -> Optional[torch.Tensor]:
-        """Download and preprocess a single image."""
-        from io import BytesIO
-
-        import aiohttp
-        from PIL import Image
-
-        url = item["url"]
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=10, ssl=False) as response:
-                    if response.status == 200:
-                        data = await response.read()
-                        img = Image.open(BytesIO(data))
-                        return self.preprocess(img)
-        except Exception as e:
-            logging.debug(f"Error preprocessing image from {url}: {str(e)}")
-        return None
+        # Save final results if any
+        if results:
+            df = pd.DataFrame(results, columns=['idx', 'embedding'])
+            partition_dir = f"{self.output_path}_part_{partition_counter}"
+            os.makedirs(partition_dir, exist_ok=True)
+            df.to_parquet(
+                os.path.join(partition_dir, "data.parquet"),
+                engine='pyarrow',
+                index=False
+            )
+            logging.info(f"Saved final partition {partition_counter} to {partition_dir}")
 
 
 async def main():
@@ -118,7 +158,7 @@ async def main():
     import argparse
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Run CLIP batch processing')
+    parser = argparse.ArgumentParser(description='Run CLIP batch processing on ImageNet')
     parser.add_argument('--output-path',
                         type=str,
                         default='embeddings.parquet',
@@ -143,10 +183,6 @@ async def main():
                         type=str,
                         default='ViT-bigG-14',
                         help='CLIP model name')
-    parser.add_argument('--dataset-name',
-                        type=str,
-                        default='laion/relaion2B-en-research-safe',
-                        help='HuggingFace dataset name')
 
     args = parser.parse_args()
 
@@ -156,13 +192,12 @@ async def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
     # Initialize processor
-    processor = ClipBatchProcessor(output_path=args.output_path,
-                                   start_idx=args.start_idx,
-                                   end_idx=args.end_idx,
-                                   batch_size=args.batch_size,
-                                   checkpoint_size=args.checkpoint_size,
-                                   model_name=args.model_name,
-                                   dataset_name=args.dataset_name)
+    processor = BatchProcessor(output_path=args.output_path,
+                                 start_idx=args.start_idx,
+                                 end_idx=args.end_idx,
+                                 batch_size=args.batch_size,
+                                 checkpoint_size=args.checkpoint_size,
+                                 model_name=args.model_name)
 
     # Run processing
     await processor.run()
