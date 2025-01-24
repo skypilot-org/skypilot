@@ -3,12 +3,15 @@ import asyncio
 import logging
 import os
 import pickle
+import base64
+from io import BytesIO
 from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
                     TypeVar)
 
 import numpy as np
 import torch
 from tqdm import tqdm
+from PIL import Image
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -72,7 +75,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                 break
             yield idx, item
 
-    async def do_data_loading(self) -> AsyncIterator[Tuple[int, torch.Tensor]]:
+    async def do_data_loading(self) -> AsyncIterator[Tuple[int, Tuple[torch.Tensor, Any]]]:
         """Load and preprocess ImageNet images."""
         if self.model is None:
             await self.setup_model()
@@ -82,19 +85,22 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                 # ImageNet provides PIL Images directly
                 tensor = self.preprocess(item['image'])
                 if tensor is not None:
-                    yield idx, tensor
+                    # Pass through both the tensor and original image
+                    yield idx, (tensor, item['image'])
             except Exception as e:
                 logging.debug(
                     f"Error preprocessing image at index {idx}: {str(e)}")
 
     async def do_batch_processing(
             self, batch: List[Tuple[int,
-                                    torch.Tensor]]) -> List[Tuple[int, bytes]]:
+                                    Tuple[torch.Tensor, Any]]]) -> List[Tuple[int, bytes]]:
         """Process a batch of images through CLIP."""
         if self.model is None:
             await self.setup_model()
 
-        indices, model_inputs = zip(*batch)
+        # Unpack the batch
+        indices, batch_data = zip(*batch)
+        model_inputs, original_images = zip(*batch_data)
 
         # Stack inputs into a batch
         batch_tensor = torch.stack(model_inputs).to(self.device)
@@ -104,9 +110,20 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             features = self.model.encode_image(batch_tensor)
             features /= features.norm(dim=-1, keepdim=True)
 
-        # Convert to numpy arrays and then to bytes
+        # Convert to numpy arrays
         embeddings = features.cpu().numpy()
-        return list(zip(indices, [pickle.dumps(arr) for arr in embeddings]))
+        
+        # Convert original images to base64
+        images_base64 = {}
+        for idx, img in zip(indices, original_images):
+            buffered = BytesIO()
+            img.save(buffered, format="JPEG")
+            img_str = base64.b64encode(buffered.getvalue()).decode()
+            images_base64[idx] = img_str
+        
+        # Return both embeddings and images
+        return [(idx, pickle.dumps((images_base64[idx], arr))) 
+                for idx, arr in zip(indices, embeddings)]
 
     async def run(self):
         """Run the batch processing pipeline."""
@@ -126,7 +143,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
 
                 if len(results) >= self.checkpoint_size:
                     # Convert results to DataFrame
-                    df = pd.DataFrame(results, columns=['idx', 'embedding'])
+                    df = pd.DataFrame(results, columns=['idx', 'output'])
 
                     # Save DataFrame to parquet file
                     output_file = f"{self.output_path}_{partition_counter}.parquet"
@@ -143,7 +160,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
 
         # Save final results if any
         if results:
-            df = pd.DataFrame(results, columns=['idx', 'embedding'])
+            df = pd.DataFrame(results, columns=['idx', 'output'])
             partition_dir = f"{self.output_path}_part_{partition_counter}"
             os.makedirs(partition_dir, exist_ok=True)
             df.to_parquet(os.path.join(partition_dir, "data.parquet"),
@@ -170,7 +187,7 @@ async def main():
                         help='Starting index in dataset')
     parser.add_argument('--end-idx',
                         type=int,
-                        default=1000,
+                        default=10000,
                         help='Ending index in dataset')
     parser.add_argument('--batch-size',
                         type=int,

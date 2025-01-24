@@ -5,6 +5,7 @@ import os
 import pickle
 import shutil
 import tempfile
+import base64
 
 import chromadb
 import numpy as np
@@ -32,12 +33,14 @@ def process_batch(collection, batch_df):
     # Extract data from DataFrame and unpack the pickled data
     ids = [str(idx) for idx in batch_df['idx']]
 
-    # Unpack the pickled data to get urls and embeddings
+    # Unpack the pickled data to get images and embeddings
     unpacked_data = [pickle.loads(row) for row in batch_df['output']]
-    urls, embeddings = zip(*unpacked_data)
+    # Each row now contains (image_base64, embedding)
+    images_base64, embeddings = zip(*unpacked_data)
 
     embeddings = [embedding for embedding in embeddings]
-    metadatas = [{'url': url} for url in urls]
+    # Store both image data and embeddings in metadata
+    metadatas = [{'image_base64': img} for img in images_base64]
 
     # Add to collection
     collection.add(ids=ids, embeddings=embeddings, metadatas=metadatas)

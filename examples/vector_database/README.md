@@ -1,6 +1,6 @@
 # Building A Million Scale Image Vector Database With SkyPilot 
 
-### Context: Semantic Search at Million (Billion) Scale 
+### Semantic Search at Million (Billion) Scale 
 As the volume of image data grows, the need for efficient and powerful search methods becomes critical. Traditional keyword-based or metadata-based search often fails to capture the full semantic meaning in images. A vector database enables semantic search: you can find images that conceptually match a query (e.g., "a photo of a cloud") rather than relying on textual tags.
 
 In particular:
@@ -58,13 +58,5 @@ Querying allows you to confirm that your database is working and retrieve semant
 
 To query the constructed database, run 
 ```
-ENDPOINT=$(sky status --ip vecdb_serve)
-curl POST http://$ENDPOINT:8000/search \
-  -H "Content-Type: application/json" \
-  -d '{"text": "a photo of cloud", "n_results": 5}' | jq .
+$(sky status --ip vecdb_serve)
 ```
-
-This will result 
-
-
-``````

@@ -1,10 +1,12 @@
 import argparse
 import logging
+import base64
 from typing import List, Optional
 
 import chromadb
 from fastapi import FastAPI
 from fastapi import HTTPException
+from fastapi.responses import HTMLResponse
 import numpy as np
 import open_clip
 from pydantic import BaseModel
@@ -30,7 +32,7 @@ class SearchQuery(BaseModel):
 
 
 class SearchResult(BaseModel):
-    url: str
+    image_base64: str
     similarity: float
 
 
@@ -58,16 +60,16 @@ def query_collection(query_embedding: np.ndarray,
                                n_results=n_results,
                                include=["metadatas", "distances"])
 
-    # Combine URLs and distances
-    urls = [item['url'] for item in results['metadatas'][0]]
+    # Get images and distances
+    images = [item['image_base64'] for item in results['metadatas'][0]]
     distances = results['distances'][0]
 
     # Convert distances to similarities (cosine similarity = 1 - distance/2)
     similarities = [1 - (d / 2) for d in distances]
 
     return [
-        SearchResult(url=url, similarity=similarity)
-        for url, similarity in zip(urls, similarities)
+        SearchResult(image_base64=img, similarity=similarity)
+        for img, similarity in zip(images, similarities)
     ]
 
 
@@ -94,6 +96,57 @@ async def health_check():
         "status": "healthy",
         "collection_size": collection.count() if collection else 0
     }
+
+
+@app.get("/", response_class=HTMLResponse)
+async def get_search_page():
+    """Serve a simple search interface."""
+    return """
+    <html>
+        <head>
+            <title>Image Search</title>
+            <style>
+                body { font-family: Arial, sans-serif; margin: 20px; }
+                .search-container { margin-bottom: 20px; }
+                .results { display: flex; flex-wrap: wrap; gap: 20px; }
+                .result { 
+                    border: 1px solid #ddd;
+                    padding: 10px;
+                    text-align: center;
+                }
+                img { max-width: 200px; max-height: 200px; }
+            </style>
+        </head>
+        <body>
+            <div class="search-container">
+                <h1>Image Search</h1>
+                <input type="text" id="searchInput" placeholder="Enter search text">
+                <button onclick="search()">Search</button>
+            </div>
+            <div id="results" class="results"></div>
+            
+            <script>
+            async function search() {
+                const query = document.getElementById('searchInput').value;
+                const response = await fetch('/search', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({text: query, n_results: 10})
+                });
+                const results = await response.json();
+                
+                const resultsDiv = document.getElementById('results');
+                resultsDiv.innerHTML = results.map(result => `
+                    <div class="result">
+                        <img src="data:image/jpeg;base64,${result.image_base64}">
+                        <p>Similarity: ${result.similarity.toFixed(3)}</p>
+                    </div>
+                `).join('');
+            }
+            </script>
+        </body>
+    </html>
+    """
 
 
 def main():
