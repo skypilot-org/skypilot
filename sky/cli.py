@@ -34,7 +34,7 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
@@ -2793,7 +2793,7 @@ def down(
                            async_call=async_call)
 
 
-def _hint_or_raise_for_down_jobs_controller(controller_name: str):
+def _hint_or_raise_for_down_jobs_controller(controller_name: str) -> None:
     """Helper function to check job controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
@@ -2852,7 +2852,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
                    'terminate (see caveats above).')
 
 
-def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
+def _hint_or_raise_for_down_sky_serve_controller(controller_name: str) -> None:
     """Helper function to check serve controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
@@ -2900,12 +2900,11 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     click.echo(f'Terminate sky serve controller: {controller_name}.')
 
 
-_CONTROLLER_TO_HINT_OR_RAISE = {
-    controller_utils.Controllers.JOBS_CONTROLLER:
-        (_hint_or_raise_for_down_jobs_controller),
-    controller_utils.Controllers.SKY_SERVE_CONTROLLER:
-        (_hint_or_raise_for_down_sky_serve_controller),
-}
+def _controller_to_hint_or_raise(
+        controller: controller_utils.Controllers) -> Callable[[str], None]:
+    if controller == controller_utils.Controllers.JOBS_CONTROLLER:
+        return _hint_or_raise_for_down_jobs_controller
+    return _hint_or_raise_for_down_sky_serve_controller
 
 
 def _down_or_stop_clusters(
@@ -2994,7 +2993,7 @@ def _down_or_stop_clusters(
                 controller = controller_utils.Controllers.from_name(
                     controller_name)
                 assert controller is not None
-                hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
+                hint_or_raise = _controller_to_hint_or_raise(controller)
                 try:
                     # TODO(zhwu): This hint or raise is not transactional, which
                     # means even if it passed the check with no in-progress spot

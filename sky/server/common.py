@@ -385,6 +385,10 @@ def reload_for_new_request():
         common.ControllerType.JOBS)
     # TODO(zhwu): We should avoid reloading the controller_utils module.
     # Instead, we should reload required cache or global variables.
+    # TODO(zhwu): Reloading the controller_utils module may cause the global
+    # variables in other modules referring the `controller_utils.Controllers`
+    # dangling, as they will be pointing to the old object. We should not use
+    # it in global variables.
     importlib.reload(controller_utils)
 
     for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:

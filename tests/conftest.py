@@ -4,7 +4,6 @@ from typing import List
 # tests can access them.
 from common_test_fixtures import aws_config_region
 from common_test_fixtures import enable_all_clouds
-from common_test_fixtures import fix_controller_enum_comparison
 from common_test_fixtures import mock_client_requests
 from common_test_fixtures import mock_controller_accessible
 from common_test_fixtures import mock_job_table_no_job

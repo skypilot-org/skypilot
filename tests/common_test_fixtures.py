@@ -42,9 +42,9 @@ def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
     return region
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
-                         mock_stream_utils) -> None:
+                         mock_stream_utils, mock_redirect_log_file) -> None:
     """Fixture to mock HTTP requests using FastAPI's TestClient."""
     # This fixture automatically replaces `requests.get` and `requests.post`
     # with mocked versions that route requests through a FastAPI TestClient.
@@ -125,7 +125,7 @@ def mock_client_requests(monkeypatch: pytest.MonkeyPatch, mock_queue,
 
 
 @pytest.fixture
-def enable_all_clouds(monkeypatch, request):
+def enable_all_clouds(monkeypatch, request, mock_client_requests):
     """Create mock context managers for cloud configurations."""
     enabled_clouds = request.param if hasattr(request, 'param') else None
     if enabled_clouds is None:
@@ -147,17 +147,6 @@ def enable_all_clouds(monkeypatch, request):
         'sky.clouds.utils.gcp_utils.list_reservations_for_instance_type_in_zone',
         lambda *_, **__: [])
 
-    # Store original reload function
-    original_reload = importlib.reload
-
-    # Create a wrapper that prevents reloading kubernetes.utils
-    def mock_reload(module):
-        if module.__name__ == 'sky.provision.kubernetes.utils':
-            return module
-        return original_reload(module)
-
-    # Patch importlib.reload
-    monkeypatch.setattr('importlib.reload', mock_reload)
     # Kubernetes mocks
     monkeypatch.setattr('sky.adaptors.kubernetes._load_config',
                         lambda *_, **__: None)
@@ -323,35 +312,12 @@ def mock_queue(monkeypatch):
     return mock_queue_instance
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_redirect_log_file(monkeypatch):
     monkeypatch.setattr('sky.server.requests.executor._redirect_output',
                         lambda *_, **__: (None, None))
     monkeypatch.setattr('sky.server.requests.executor._restore_output',
                         lambda *_, **__: None)
-
-
-@pytest.fixture(autouse=True)
-def fix_controller_enum_comparison(monkeypatch):
-    """Fixture to handle controller enum comparison in tests.
-
-    This fixes the issue where controller enum IDs change during testing
-    by comparing enum values directly.
-    """
-    original_dict = cli._CONTROLLER_TO_HINT_OR_RAISE
-
-    class ControllerDictWrapper(dict):
-
-        def __getitem__(self, key):
-            # Match controller by comparing their values
-            for k, v in self.items():
-                if (k.value.controller_type == key.value.controller_type and
-                        k.value.name == key.value.name):
-                    return v
-            return original_dict[key]
-
-    wrapped_dict = ControllerDictWrapper(original_dict)
-    monkeypatch.setattr(cli, '_CONTROLLER_TO_HINT_OR_RAISE', wrapped_dict)
 
 
 @pytest.fixture
