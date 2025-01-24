@@ -41,30 +41,31 @@ def main():
                         help='Global start index in dataset')
     parser.add_argument('--end-idx',
                         type=int,
-                        default=100000,
+                        default=20000,
                         help='Global end index in dataset')
     parser.add_argument('--num-jobs',
                         type=int,
-                        default=10,
+                        default=2,
                         help='Number of jobs to partition the work across')
     parser.add_argument('--run-as-launch',
                         action='store_true',
                         help='Run as a launch')
-
+    parser.add_argument("--env-path", type=str, default="~/.env")
     args = parser.parse_args()
 
-    # Read HF_TOKEN from ~/.env
-    env_path = os.path.expanduser('~/.env')
-    hf_token = None
-    if os.path.exists(env_path):
-        with open(env_path) as f:
-            for line in f:
-                if line.startswith('HF_TOKEN='):
-                    hf_token = line.strip().split('=')[1]
-                    break
+    # Try to get HF_TOKEN from environment first, then ~/.env file
+    hf_token = os.environ.get('HF_TOKEN')
+    if not hf_token:
+        env_path = os.path.expanduser(args.env_path)
+        if os.path.exists(env_path):
+            with open(env_path) as f:
+                for line in f:
+                    if line.startswith('HF_TOKEN='):
+                        hf_token = line.strip().split('=')[1]
+                        break
 
     if not hf_token:
-        raise ValueError("HF_TOKEN not found in ~/.env")
+        raise ValueError("HF_TOKEN not found in ~/.env or environment variable")
 
     # Load the task template
     task = sky.Task.from_yaml('clip.yaml')
@@ -83,18 +84,13 @@ def main():
         })
 
         if not args.run_as_launch:
-            # Launch the job
-            sky.stream_and_get(
-                sky.jobs.launch(
-                    task_copy,
-                    name=f'clip-inference-{job_start}-{job_end}',
-                    # detach_run=True,
-                    # retry_until_up=True,
-                ))
+            sky.jobs.launch(
+                task_copy,
+                name=f'clip-inference-{job_start}-{job_end}',
+            )
         else:
             sky.launch(
                 task_copy,
-                retry_until_up=True,
             )
 
 

@@ -1,4 +1,4 @@
-# Building A Billion Scale Image Vector Database With SkyPilot 
+# Building A Million Scale Image Vector Database With SkyPilot 
 
 ### Context: Semantic Search at Billion Scale 
 Retrieval-Augmented Generation (RAG) is an advanced AI technique that enhances large language models (LLMs) by integrating external data sources into their responses.
