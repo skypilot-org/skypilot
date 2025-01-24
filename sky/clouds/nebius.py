@@ -24,7 +24,9 @@ class Nebius(clouds.Cloud):
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            ('Autodown not supported. Can\'t delete disk.'),
+            ('Autodown and Autostop not supported. Can\'t delete disk.'),
+        # Autostop functionality can be implemented, but currently,
+        # there is only a single flag for both autostop and autodown.
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
@@ -270,9 +272,9 @@ class Nebius(clouds.Cloud):
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
                 '    Credentials can be set up by running: \n'
-                f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
+                f'        $ nebius iam get-access-token > ~/.nebius/{nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
                 '   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                f'        $ echo NB_TENANT_ID > {nebius.NB_TENANT_ID_PATH} \n')
+                f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > ~/.nebius/{nebius.NB_TENANT_ID_PATH} \n')   # pylint: disable=line-too-long
 
         return True, None
 

@@ -3,10 +3,12 @@ import os
 
 from sky.adaptors import common
 
-NB_TENANT_ID_PATH = '~/.nebius/NB_TENANT_ID.txt'
-NEBIUS_IAM_TOKEN_PATH = '~/.nebius/NEBIUS_IAM_TOKEN.txt'
+NB_TENANT_ID_PATH = 'NB_TENANT_ID.txt'
+NEBIUS_IAM_TOKEN_PATH = 'NEBIUS_IAM_TOKEN.txt'
 
 MAX_RETRIES_TO_DISK_CREATE = 120
+MAX_RETRIES_TO_INSTANCE_STOP = 120
+MAX_RETRIES_TO_INSTANCE_START = 120
 MAX_RETRIES_TO_INSTANCE_READY = 120
 MAX_RETRIES_TO_DISK_DELETE = 120
 MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
@@ -16,7 +18,7 @@ POLL_INTERVAL = 5
 nebius = common.LazyImport(
     'nebius',
     import_error_message='Failed to import dependencies for Nebius AI Cloud. '
-    'Try running: pip install "skypilot[nebius]"')
+                         'Try running: pip install "skypilot[nebius]"')
 
 
 def request_error():
@@ -48,14 +50,15 @@ def vpc():
 
 
 def get_iam_token():
-    with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
+    with open(os.path.expanduser(f'~/.nebius/{NEBIUS_IAM_TOKEN_PATH}'),
               encoding='utf-8') as file:
         iam_token = file.read().strip()
     return iam_token
 
 
 def get_tenant_id():
-    with open(os.path.expanduser(NB_TENANT_ID_PATH), encoding='utf-8') as file:
+    with open(os.path.expanduser(f'~/.nebius/{NB_TENANT_ID_PATH}'),
+              encoding='utf-8') as file:
         tenant_id = file.read().strip()
     return tenant_id
 

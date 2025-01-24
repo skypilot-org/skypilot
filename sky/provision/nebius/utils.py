@@ -126,11 +126,46 @@ def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
 def stop(instance_id: str) -> None:
     service = nebius.compute().InstanceServiceClient(sdk)
     service.stop(nebius.compute().StopInstanceRequest(id=instance_id)).wait()
+    retry_count = 0
+    while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_STOP:
+        service = nebius.compute().InstanceServiceClient(sdk)
+        instance = service.get(nebius.compute().GetInstanceRequest(
+            id=instance_id,
+        )).wait()
+        if instance.status.state.name == 'STOPPED':
+            break
+        time.sleep(POLL_INTERVAL)
+        logger.debug(f'Waiting for instance {instance_id} stopping.')
+        retry_count += 1
 
+    if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_STOP:
+        raise TimeoutError(
+            f'Exceeded maximum retries '
+            f'({nebius.MAX_RETRIES_TO_INSTANCE_STOP * POLL_INTERVAL}'
+            f' seconds) while waiting for instance {instance_id}'
+            f' to be stopped.')
 
 def start(instance_id: str) -> None:
     service = nebius.compute().InstanceServiceClient(sdk)
     service.start(nebius.compute().StartInstanceRequest(id=instance_id)).wait()
+    retry_count = 0
+    while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_START:
+        service = nebius.compute().InstanceServiceClient(sdk)
+        instance = service.get(nebius.compute().GetInstanceRequest(
+            id=instance_id,
+        )).wait()
+        if instance.status.state.name == 'RUNNING':
+            break
+        time.sleep(POLL_INTERVAL)
+        logger.debug(f'Waiting for instance {instance_id} starting.')
+        retry_count += 1
+
+    if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_START:
+        raise TimeoutError(
+            f'Exceeded maximum retries '
+            f'({nebius.MAX_RETRIES_TO_INSTANCE_START * POLL_INTERVAL}'
+            f' seconds) while waiting for instance {instance_id}'
+            f' to be ready.')
 
 
 def launch(name: str, platform: str, preset: str, region: str,
