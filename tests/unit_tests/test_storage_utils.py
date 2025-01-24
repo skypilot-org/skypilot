@@ -15,9 +15,18 @@ def skyignore_dir():
         # Create workdir
         dirs = ['remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir']
         files = [
-            'remove.py', 'remove.sh', 'remove.a', 'keep.py', 'remove.a',
-            'dir/keep.txt', 'dir/remove.sh', 'dir/keep.a', 'dir/remove.b',
-            'dir/remove.a', 'dir/subdir/keep.b', 'dir/subdir/remove.py'
+            'remove.py',
+            'remove.sh',
+            'remove.a',
+            'keep.py',
+            'remove.a',
+            'dir/keep.txt',
+            'dir/remove.sh',
+            'dir/keep.a',
+            'dir/remove.b',
+            'dir/remove.a',
+            'dir/subdir/keep.b',
+            'dir/subdir/remove.py',
         ]
         for dir_name in dirs:
             os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
@@ -25,6 +34,21 @@ def skyignore_dir():
             full_path = os.path.join(temp_dir, file_path)
             with open(full_path, 'w') as f:
                 f.write('test content')
+
+        # Create symlinks
+        os.symlink(os.path.join(temp_dir, 'keep.py'),
+                   os.path.join(temp_dir, 'ln-keep.py'))
+        os.symlink(os.path.join(temp_dir, 'dir/keep.py'),
+                   os.path.join(temp_dir, 'ln-dir-keep.py'))
+        os.symlink(os.path.join(temp_dir, 'keep.py'),
+                   os.path.join(temp_dir, 'dir/subdir/ln-keep.py'))
+
+        # Symlinks for folders
+        os.symlink(os.path.join(temp_dir, 'dir/subdir/ln-folder'),
+                   os.path.join(temp_dir, 'ln-folder'))
+
+        # Create empty directories
+        os.makedirs(os.path.join(temp_dir, 'empty-folder'))
 
         # Create skyignore file
         skyignore_content = """
@@ -74,16 +98,23 @@ def test_zip_files_and_folders(skyignore_dir):
             actual_zipped_files = zipf.namelist()
 
         expected_zipped_files = [
+            'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
             constants.SKY_IGNORE_FILE, 'dir/subdir/remove.py', 'keep.py',
-            'dir/keep.txt', 'dir/keep.a', 'dir/subdir/keep.b'
+            'dir/keep.txt', 'dir/keep.a', 'dir/subdir/keep.b', 'ln-folder',
+            'empty-folder/', 'dir/', 'dir/subdir/', 'dir/subdir/remove_dir/'
         ]
-        expected_zipped_files = [
-            os.path.join(skyignore_dir, f_name).lstrip('/')
-            for f_name in expected_zipped_files
-        ]
+
+        expected_zipped_file_paths = []
+        for filename in expected_zipped_files:
+            file_path = os.path.join(skyignore_dir, filename)
+            if 'ln' not in filename:
+                file_path = file_path.lstrip('/')
+            expected_zipped_file_paths.append(file_path)
+
         for file in actual_zipped_files:
-            assert file in expected_zipped_files
-        assert len(actual_zipped_files) == len(expected_zipped_files)
+            assert file in expected_zipped_file_paths, (
+                file, expected_zipped_file_paths)
+        assert len(actual_zipped_files) == len(expected_zipped_file_paths)
         # Check the log file correctly logs the zipped files
         log_file.seek(0)
         log_file_content = log_file.read()

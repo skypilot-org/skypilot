@@ -1,5 +1,6 @@
 import base64
 import importlib
+import os
 import pickle
 import tempfile
 import time
@@ -23,6 +24,7 @@ from sky.server import common as server_common
 from sky.server.requests import executor
 from sky.server.requests import requests as sky_requests
 from sky.server.server import app
+from sky.skylet import constants
 from sky.utils import controller_utils
 from sky.utils import message_utils
 from sky.utils import registry
@@ -339,3 +341,62 @@ def mock_stream_utils(monkeypatch):
 
     monkeypatch.setattr("sky.server.stream_utils.stream_response",
                         _mock_stream_response)
+
+
+@pytest.fixture
+def skyignore_dir():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create workdir
+        dirs = ['remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir']
+        files = [
+            'remove.py',
+            'remove.sh',
+            'remove.a',
+            'keep.py',
+            'remove.a',
+            'dir/keep.txt',
+            'dir/remove.sh',
+            'dir/keep.a',
+            'dir/remove.b',
+            'dir/remove.a',
+            'dir/subdir/keep.b',
+            'dir/subdir/remove.py',
+        ]
+        for dir_name in dirs:
+            os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w') as f:
+                f.write('test content')
+
+        # Create symlinks
+        os.symlink(os.path.join(temp_dir, 'keep.py'),
+                   os.path.join(temp_dir, 'ln-keep.py'))
+        os.symlink(os.path.join(temp_dir, 'dir/keep.py'),
+                   os.path.join(temp_dir, 'ln-dir-keep.py'))
+        os.symlink(os.path.join(temp_dir, 'keep.py'),
+                   os.path.join(temp_dir, 'dir/subdir/ln-keep.py'))
+
+        # Symlinks for folders
+        os.symlink(os.path.join(temp_dir, 'dir/subdir/ln-folder'),
+                   os.path.join(temp_dir, 'ln-folder'))
+
+        # Create empty directories
+        os.makedirs(os.path.join(temp_dir, 'empty-folder'))
+
+        # Create skyignore file
+        skyignore_content = """
+        # Current directory
+        /remove.py
+        /remove_dir
+        /*.a
+        /dir/*.b
+        # Pattern match for all subdirectories
+        *.sh
+        remove.a
+        """
+        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        yield temp_dir
