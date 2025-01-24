@@ -31,6 +31,4 @@ run: |
     --end-idx ${END_IDX} \
     --batch-size 50 \
     --checkpoint-size 1000 
-
   echo "Processing complete. Results saved in node-specific files under /output/"
-  ls -l /output
