@@ -2,12 +2,12 @@ import argparse
 import glob
 import logging
 import os
+import pickle
 import shutil
 import tempfile
-import pickle
-import numpy as np
 
 import chromadb
+import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
@@ -31,7 +31,7 @@ def process_batch(collection, batch_df):
     """Process a batch of data and add it to the ChromaDB collection."""
     # Extract data from DataFrame and unpack the pickled data
     ids = [str(idx) for idx in batch_df['idx']]
-    
+
     # Unpack the pickled data to get urls and embeddings
     unpacked_data = [pickle.loads(row) for row in batch_df['output']]
     urls, embeddings = zip(*unpacked_data)
@@ -62,17 +62,18 @@ def main():
                         type=str,
                         default='/clip_embeddings',
                         help='Path to mounted bucket containing parquet files')
-    parser.add_argument('--prefix',
-                        type=str,
-                        default='',
-                        help='Prefix path within mounted bucket to search for parquet files')
+    parser.add_argument(
+        '--prefix',
+        type=str,
+        default='',
+        help='Prefix path within mounted bucket to search for parquet files')
 
     args = parser.parse_args()
 
     # Create a temporary directory for building the database
     with tempfile.TemporaryDirectory() as temp_dir:
         logger.info(f"Using temporary directory: {temp_dir}")
-        
+
         # Initialize ChromaDB in temporary directory
         client = chromadb.PersistentClient(path=temp_dir)
 
@@ -87,7 +88,8 @@ def main():
             logger.info(f"Using existing collection: {args.collection_name}")
 
         # List parquet files from mounted directory
-        parquet_files = list_local_parquet_files(args.embeddings_dir, args.prefix)
+        parquet_files = list_local_parquet_files(args.embeddings_dir,
+                                                 args.prefix)
         logger.info(f"Found {len(parquet_files)} parquet files")
 
         # Process each parquet file
@@ -108,7 +110,7 @@ def main():
 
         logger.info("Vector database build complete!")
         logger.info(f"Total documents in collection: {collection.count()}")
-        
+
         # Copy the completed database to the final location
         logger.info(f"Copying database to final location: {args.persist_dir}")
         if os.path.exists(args.persist_dir):

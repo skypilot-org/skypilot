@@ -1,13 +1,14 @@
 import abc
 import asyncio
 import logging
+import os
 import pickle
-from typing import Any, AsyncIterator, Dict, Generic, List, Optional, Tuple, TypeVar
+from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
+                    TypeVar)
 
 import numpy as np
-from tqdm import tqdm
 import torch
-import os
+from tqdm import tqdm
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -18,26 +19,25 @@ ModelOutputType = TypeVar('ModelOutputType')
 class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
     """Process ImageNet images with CLIP."""
 
-    def __init__(
-            self,
-            output_path: str,
-            model_name: str = "ViT-bigG-14",
-            dataset_name: str = "ILSVRC/imagenet-1k",
-            pretrained: str = "laion2b_s39b_b160k",
-            device: Optional[str] = None,
-            split: str = "train",
-            streaming: bool = True,
-            batch_size: int = 32,
-            checkpoint_size: int = 100,
-            start_idx: int = 0,
-            end_idx: Optional[int] = None):
+    def __init__(self,
+                 output_path: str,
+                 model_name: str = "ViT-bigG-14",
+                 dataset_name: str = "ILSVRC/imagenet-1k",
+                 pretrained: str = "laion2b_s39b_b160k",
+                 device: Optional[str] = None,
+                 split: str = "train",
+                 streaming: bool = True,
+                 batch_size: int = 32,
+                 checkpoint_size: int = 100,
+                 start_idx: int = 0,
+                 end_idx: Optional[int] = None):
         self.output_path = output_path
         self.batch_size = batch_size
         self.checkpoint_size = checkpoint_size
         self.start_idx = start_idx
         self.end_idx = end_idx
         self._current_batch = []
-        
+
         # CLIP-specific attributes
         self.model_name = model_name
         self.pretrained = pretrained
@@ -53,9 +53,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         import open_clip
 
         model, _, preprocess = open_clip.create_model_and_transforms(
-            self.model_name,
-            pretrained=self.pretrained,
-            device=self.device)
+            self.model_name, pretrained=self.pretrained, device=self.device)
         self.model = model
         self.preprocess = preprocess
 
@@ -64,7 +62,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         from datasets import load_dataset
 
         dataset = load_dataset(self.dataset_name,
-                             streaming=self.streaming)[self.split]
+                               streaming=self.streaming)[self.split]
 
         if self.start_idx > 0:
             dataset = dataset.skip(self.start_idx)
@@ -86,17 +84,18 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                 if tensor is not None:
                     yield idx, tensor
             except Exception as e:
-                logging.debug(f"Error preprocessing image at index {idx}: {str(e)}")
+                logging.debug(
+                    f"Error preprocessing image at index {idx}: {str(e)}")
 
     async def do_batch_processing(
-        self, batch: List[Tuple[int, torch.Tensor]]
-    ) -> List[Tuple[int, bytes]]:
+            self, batch: List[Tuple[int,
+                                    torch.Tensor]]) -> List[Tuple[int, bytes]]:
         """Process a batch of images through CLIP."""
         if self.model is None:
             await self.setup_model()
 
         indices, model_inputs = zip(*batch)
-        
+
         # Stack inputs into a batch
         batch_tensor = torch.stack(model_inputs).to(self.device)
 
@@ -120,7 +119,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             self._current_batch.append((idx, input_data))
 
             if len(self._current_batch) >= self.batch_size:
-                batch_results = await self.do_batch_processing(self._current_batch)
+                batch_results = await self.do_batch_processing(
+                    self._current_batch)
                 results.extend(batch_results)
                 self._current_batch = []
 
@@ -131,7 +131,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                     # Save DataFrame to parquet file
                     output_file = f"{self.output_path}_{partition_counter}.parquet"
                     df.to_parquet(output_file, index=False)
-                    logging.info(f"Saved partition {partition_counter} to {output_file}")
+                    logging.info(
+                        f"Saved partition {partition_counter} to {output_file}")
                     results = []
                     partition_counter += 1
 
@@ -145,12 +146,11 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             df = pd.DataFrame(results, columns=['idx', 'embedding'])
             partition_dir = f"{self.output_path}_part_{partition_counter}"
             os.makedirs(partition_dir, exist_ok=True)
-            df.to_parquet(
-                os.path.join(partition_dir, "data.parquet"),
-                engine='pyarrow',
-                index=False
-            )
-            logging.info(f"Saved final partition {partition_counter} to {partition_dir}")
+            df.to_parquet(os.path.join(partition_dir, "data.parquet"),
+                          engine='pyarrow',
+                          index=False)
+            logging.info(
+                f"Saved final partition {partition_counter} to {partition_dir}")
 
 
 async def main():
@@ -158,7 +158,8 @@ async def main():
     import argparse
 
     # Parse command line arguments
-    parser = argparse.ArgumentParser(description='Run CLIP batch processing on ImageNet')
+    parser = argparse.ArgumentParser(
+        description='Run CLIP batch processing on ImageNet')
     parser.add_argument('--output-path',
                         type=str,
                         default='embeddings.parquet',
@@ -193,11 +194,11 @@ async def main():
 
     # Initialize processor
     processor = BatchProcessor(output_path=args.output_path,
-                                 start_idx=args.start_idx,
-                                 end_idx=args.end_idx,
-                                 batch_size=args.batch_size,
-                                 checkpoint_size=args.checkpoint_size,
-                                 model_name=args.model_name)
+                               start_idx=args.start_idx,
+                               end_idx=args.end_idx,
+                               batch_size=args.batch_size,
+                               checkpoint_size=args.checkpoint_size,
+                               model_name=args.model_name)
 
     # Run processing
     await processor.run()

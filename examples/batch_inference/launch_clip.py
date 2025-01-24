@@ -84,12 +84,13 @@ def main():
 
         if not args.run_as_launch:
             # Launch the job
-            sky.stream_and_get(sky.jobs.launch(
-                task_copy,
-                name=f'clip-inference-{job_start}-{job_end}',
-                # detach_run=True,
-                # retry_until_up=True,
-            ))
+            sky.stream_and_get(
+                sky.jobs.launch(
+                    task_copy,
+                    name=f'clip-inference-{job_start}-{job_end}',
+                    # detach_run=True,
+                    # retry_until_up=True,
+                ))
         else:
             sky.launch(
                 task_copy,

@@ -15,4 +15,3 @@ from tqdm import tqdm
 # Generic type variables for input and output data
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
-
