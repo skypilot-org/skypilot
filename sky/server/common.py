@@ -36,7 +36,10 @@ if typing.TYPE_CHECKING:
 
 DEFAULT_SERVER_URL = 'http://0.0.0.0:46580'
 API_SERVER_CMD = 'python -m sky.server.server'
-CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
+# The client dir on the API server for storing user-specific data, such as file
+# mounts, logs, etc. This dir is empheral and will be cleaned up when the API
+# server is restarted.
+API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 
 SKY_API_VERSION_WARNING = (
@@ -294,7 +297,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     # We should not use int(time.time()) as there can be multiple requests at
     # the same second.
     task_id = str(uuid.uuid4().hex)
-    client_dir = (CLIENT_DIR.expanduser().resolve() / user_hash)
+    client_dir = (API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash)
     client_task_dir = client_dir / 'tasks'
     client_task_dir.mkdir(parents=True, exist_ok=True)
 
@@ -363,7 +366,7 @@ def api_server_user_logs_dir_prefix(
         user_hash: Optional[str] = None) -> pathlib.Path:
     if user_hash is None:
         user_hash = common_utils.get_user_hash()
-    return CLIENT_DIR / user_hash / 'sky_logs'
+    return API_SERVER_CLIENT_DIR / user_hash / 'sky_logs'
 
 
 def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:

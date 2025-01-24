@@ -60,6 +60,10 @@ logger = sky_logging.init_logger(__name__)
 
 MAX_TRIALS = 64
 # TODO(zhwu): Support user specified key pair.
+# We intentionally not have the ssh key pair to be stored in
+# ~/.sky/api_server/clients, i.e. sky.server.common.API_SERVER_CLIENT_DIR,
+# because ssh key pair need to persist across API server restarts, while
+# the former dir is empheral.
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
 
 

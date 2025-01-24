@@ -101,6 +101,8 @@ def _get_optimized_resources(
             task = sky.Task()
             task.set_resources(resources)
 
+        # Do not use `sky.optimize` here, as this should be called on the API
+        # server side.
         dag = optimizer.Optimizer.optimize(dag, quiet=True)
         task = dag.tasks[0]
         optimized_resources.append(task.best_resources)
@@ -630,12 +632,9 @@ def update_benchmark_state(benchmark: str) -> None:
 
 def remove_benchmark_logs(benchmark: str, bucket_name: str,
                           bucket_type: data.StoreType) -> None:
-    try:
-        # Delete logs in the benchmark bucket.
-        remote_dir = os.path.join(bucket_name, benchmark)
-        _delete_remote_dir(remote_dir, bucket_type)
-        # Delete logs in the local storage.
-        local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
-        subprocess.run(['rm', '-rf', local_dir], check=False)
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to remove benchmark logs: {e}')
+    # Delete logs in the benchmark bucket.
+    remote_dir = os.path.join(bucket_name, benchmark)
+    _delete_remote_dir(remote_dir, bucket_type)
+    # Delete logs in the local storage.
+    local_dir = os.path.join(_SKY_LOCAL_BENCHMARK_DIR, benchmark)
+    subprocess.run(['rm', '-rf', local_dir], check=False)

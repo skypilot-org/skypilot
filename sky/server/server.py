@@ -110,8 +110,8 @@ async def cleanup_upload_ids():
             if current_time > expire_time:
                 logger.info(f'Cleaning up upload id: {upload_id}')
                 client_file_mounts_dir = (
-                    common.CLIENT_DIR.expanduser().resolve() / user_hash /
-                    'file_mounts')
+                    common.API_SERVER_CLIENT_DIR.expanduser().resolve() /
+                    user_hash / 'file_mounts')
                 shutil.rmtree(client_file_mounts_dir / upload_id,
                               ignore_errors=True)
                 (client_file_mounts_dir /
@@ -308,8 +308,9 @@ async def upload_zip_file(request: fastapi.Request, user_hash: str,
                                           _DEFAULT_UPLOAD_EXPIRATION_TIME)
 
     # TODO(SKY-1271): We need to double check security of uploading zip file.
-    client_file_mounts_dir = (common.CLIENT_DIR.expanduser().resolve() /
-                              user_hash / 'file_mounts')
+    client_file_mounts_dir = (
+        common.API_SERVER_CLIENT_DIR.expanduser().resolve() / user_hash /
+        'file_mounts')
     client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
     # Check upload_id to be a valid SkyPilot run_timestamp appended with 8 hex
