@@ -614,7 +614,7 @@ def download_logs(cluster_name: str,
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
     """
-    body = payloads.ClusterJobsBody(
+    body = payloads.ClusterJobsDownloadLogsBody(
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
