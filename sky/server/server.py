@@ -637,8 +637,9 @@ async def logs(
 
 
 @app.post('/download_logs')
-async def download_logs(request: fastapi.Request,
-                        cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
+async def download_logs(
+        request: fastapi.Request,
+        cluster_jobs_body: payloads.ClusterJobsDownloadLogsBody) -> None:
     """Downloads the logs of a job."""
     user_hash = cluster_jobs_body.env_vars[constants.USER_ID_ENV_VAR]
     logs_dir_on_api_server = common.api_server_user_logs_dir_prefix(user_hash)
