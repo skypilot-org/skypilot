@@ -1,0 +1,25 @@
+name: vectordb-build
+
+resources:
+  cloud: aws 
+  # instance_type: r5.2xlarge 
+
+file_mounts:
+  /clip_embeddings:
+    name: sky-clip-embedding
+    mode: MOUNT
+  
+  /vectordb:
+    name: sky-vectordb 
+    mode: MOUNT
+
+setup: |
+  pip install chromadb pandas tqdm pyarrow
+
+workdir: ~/skypilot/examples/batch_inference
+
+run: |
+  python scripts/build_vectordb.py \
+    --collection-name clip_embeddings \
+    --persist-dir /vectordb/chroma \
+    --batch-size 1000 
