@@ -119,7 +119,7 @@ async def get_search_page():
         </head>
         <body>
             <div class="search-container">
-                <h1>Image Search</h1>
+                <h1>SkyPilot Image Search</h1>
                 <input type="text" id="searchInput" placeholder="Enter search text">
                 <button onclick="search()">Search</button>
             </div>
