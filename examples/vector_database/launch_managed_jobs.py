@@ -41,11 +41,11 @@ def main():
                         help='Global start index in dataset')
     parser.add_argument('--end-idx',
                         type=int,
-                        default=20000,
+                        default=10000,
                         help='Global end index in dataset')
     parser.add_argument('--num-jobs',
                         type=int,
-                        default=2,
+                        default=1,
                         help='Number of jobs to partition the work across')
     parser.add_argument('--run-as-launch',
                         action='store_true',
@@ -89,9 +89,7 @@ def main():
                 name=f'clip-inference-{job_start}-{job_end}',
             )
         else:
-            sky.launch(
-                task_copy,
-            )
+            sky.launch(task_copy,)
 
 
 if __name__ == '__main__':
