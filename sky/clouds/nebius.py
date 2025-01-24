@@ -274,7 +274,7 @@ class Nebius(clouds.Cloud):
                 '    Credentials can be set up by running: \n'
                 f'        $ nebius iam get-access-token > ~/.nebius/{nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
                 '   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > ~/.nebius/{nebius.NB_TENANT_ID_PATH} \n')   # pylint: disable=line-too-long
+                f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > ~/.nebius/{nebius.NB_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
 
         return True, None
 

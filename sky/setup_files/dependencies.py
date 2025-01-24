@@ -143,7 +143,7 @@ extras_require: Dict[str, List[str]] = {
     ],
     'nebius': [
         'nebius>=0.2.0',
-         # nebius require "grpcio>=1.56.2"
+        # nebius require "grpcio>=1.56.2"
         'ray>=2.6.1'
     ]
 }

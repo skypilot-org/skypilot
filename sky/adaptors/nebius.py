@@ -18,7 +18,7 @@ POLL_INTERVAL = 5
 nebius = common.LazyImport(
     'nebius',
     import_error_message='Failed to import dependencies for Nebius AI Cloud. '
-                         'Try running: pip install "skypilot[nebius]"')
+    'Try running: pip install "skypilot[nebius]"')
 
 
 def request_error():

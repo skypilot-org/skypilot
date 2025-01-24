@@ -130,8 +130,7 @@ def stop(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_STOP:
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get(nebius.compute().GetInstanceRequest(
-            id=instance_id,
-        )).wait()
+            id=instance_id,)).wait()
         if instance.status.state.name == 'STOPPED':
             break
         time.sleep(POLL_INTERVAL)
@@ -145,6 +144,7 @@ def stop(instance_id: str) -> None:
             f' seconds) while waiting for instance {instance_id}'
             f' to be stopped.')
 
+
 def start(instance_id: str) -> None:
     service = nebius.compute().InstanceServiceClient(sdk)
     service.start(nebius.compute().StartInstanceRequest(id=instance_id)).wait()
@@ -152,8 +152,7 @@ def start(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_START:
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get(nebius.compute().GetInstanceRequest(
-            id=instance_id,
-        )).wait()
+            id=instance_id,)).wait()
         if instance.status.state.name == 'RUNNING':
             break
         time.sleep(POLL_INTERVAL)
