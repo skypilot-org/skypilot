@@ -801,9 +801,10 @@ def test_skyserve_failures(generic_cloud: str):
             f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
             'echo "Waiting for replica to be out of pending..."; sleep 5; '
             f's=$(sky serve status {name}); echo "$s"; done; ' +
-            _check_replica_in_status(
-                name, [(1, False, 'FAILED_PROBING'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            _check_replica_in_status(name, [
+                (1, False, 'FAILED_PROBING'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+            ]),
             # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),

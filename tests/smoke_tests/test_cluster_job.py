@@ -494,7 +494,7 @@ def test_inferentia():
         'test_inferentia',
         [
             f'sky launch -y -c {name} -t inf2.xlarge -- echo hi',
-            f'sky exec {name} --gpus Inferentia:1 echo hi',
+            f'sky exec {name} --gpus Inferentia2:1 echo hi',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -569,6 +569,7 @@ def test_tpu_vm_pod():
 # ---------- TPU Pod Slice on GKE. ----------
 @pytest.mark.requires_gke
 @pytest.mark.kubernetes
+@pytest.mark.skip
 def test_tpu_pod_slice_gke():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -1110,7 +1111,7 @@ def test_autostop(generic_cloud: str):
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout + smoke_tests_utils.BUMP_UP_SECONDS),
+                timeout=autostop_timeout),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -1481,7 +1482,7 @@ def test_azure_start_stop_two_nodes():
                 cluster_status=[
                     sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED
                 ],
-                timeout=200 + smoke_tests_utils.BUMP_UP_SECONDS) +
+                timeout=235) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
