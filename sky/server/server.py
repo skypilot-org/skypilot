@@ -256,9 +256,9 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
         for task in dag.tasks:
-            # Will validate workdir and file_mounts in the backend, as those need
-            # to be validated after the files are uploaded to the SkyPilot API
-            # server with `upload_mounts_to_api_server`.
+            # Will validate workdir and file_mounts in the backend, as those
+            # need to be validated after the files are uploaded to the SkyPilot
+            # API server with `upload_mounts_to_api_server`.
             task.validate_name()
             task.validate_run()
             for r in task.resources:
