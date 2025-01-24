@@ -634,6 +634,28 @@ class Storage(object):
                          f'loading Storage: {self.name}')
             self._add_store_from_metadata(self.handle.sky_stores)
 
+            # When a storage object is reconstructed from global_user_state,
+            # the user may have specified a new store type in the yaml file that
+            # was not used with the storage object. We should error out in this
+            # case, as we don't support having multiple stores for the same
+            # storage object.
+            if any(s is None for s in self.stores.values()):
+                new_store_type = None
+                previous_store_type = None
+                for store_type, store in self.stores.items():
+                    if store is not None:
+                        previous_store_type = store_type
+                    else:
+                        new_store_type = store_type
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'Bucket {self.name} was previously created for '
+                        f'{previous_store_type.value.lower()!r}, but a new '
+                        f'store type {new_store_type.value.lower()!r} is '
+                        'requested. This is not supported yet. Please specify '
+                        'the same store type: '
+                        f'{previous_store_type.value.lower()!r}.')
+
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
             if self.sync_on_reconstruction:
@@ -993,7 +1015,8 @@ class Storage(object):
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
 
-        if store_type in self.stores:
+        print('self.stores', self.stores)
+        if self.stores.get(store_type) is not None:
             if store_type == StoreType.AZURE:
                 azure_store_obj = self.stores[store_type]
                 assert isinstance(azure_store_obj, AzureBlobStore)
@@ -1132,6 +1155,7 @@ class Storage(object):
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""
         for _, store in self.stores.items():
+            assert store is not None, self
             self._sync_store(store)
 
     def _sync_store(self, store: AbstractStore):
