@@ -65,13 +65,17 @@ GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        'edit directly.\n')
 
 
-def _parse_args(args=None):
+def _parse_args(args: Optional[str] = None):
     """
     Parse command-line arguments to figure out which clouds to run
     and the -k pattern for tests.
 
     :return: (list_of_clouds, k_pattern)
     """
+    if args:
+        args_list = args.split()
+    else:
+        args_list = []
     parser = argparse.ArgumentParser(
         description="Process cloud arguments for tests")
 
@@ -85,7 +89,7 @@ def _parse_args(args=None):
     # -k argument for a test selection pattern
     parser.add_argument("-k")
 
-    parsed_args = parser.parse_args(args)
+    parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
     # TODO(zpoint): get default clouds from the conftest.py
@@ -131,7 +135,7 @@ def _extract_marked_tests(
     output = subprocess.run(cmd, shell=True, capture_output=True, text=True)
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
-
+    print(f'args: {args}')
     default_clouds_to_run, k_value = _parse_args(args)
 
     print(f'default_clouds_to_run: {default_clouds_to_run}, k_value: {k_value}')
