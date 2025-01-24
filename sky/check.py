@@ -234,6 +234,7 @@ def get_cloud_credential_file_mounts(
 
 
 def _format_enabled_cloud(cloud_name: str) -> str:
+
     def _green_color(cloud_name: str) -> str:
         return f'{colorama.Fore.GREEN}{cloud_name}{colorama.Style.RESET_ALL}'
 
@@ -251,14 +252,15 @@ def _format_enabled_cloud(cloud_name: str) -> str:
         if allowed_contexts is not None:
             contexts_formatted = []
             for i, context in enumerate(existing_contexts):
-                symbol = (ux_utils.INDENT_LAST_SYMBOL if i == len(existing_contexts) - 1 else ux_utils.INDENT_SYMBOL)
+                symbol = (ux_utils.INDENT_LAST_SYMBOL
+                          if i == len(existing_contexts) -
+                          1 else ux_utils.INDENT_SYMBOL)
                 contexts_formatted.append(f'\n        {symbol}{context}')
             context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
         else:
             context_info = f'Active context: {existing_contexts[0]}'
 
         return (f'{_green_color(cloud_name)}\n'
-                f'    {colorama.Style.DIM}{ux_utils.INDENT_LAST_SYMBOL}'
+                f'    {ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
                 f'{context_info}{colorama.Style.RESET_ALL}')
     return _green_color(cloud_name)
-
