@@ -112,13 +112,13 @@ DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
-                    retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
+                    retry_interval_seconds=DEFAULT_RETRY_INTERVAL_SECONDS,
                     resource_type: Optional[str] = None):
     """Decorator to retry Kubernetes API calls on transient failures.
 
     Args:
         max_retries: Maximum number of retry attempts
-        retry_interval: Initial seconds to wait between retries
+        retry_interval_seconds: Initial seconds to wait between retries
         resource_type: Type of resource being accessed (e.g. 'node', 'pod').
             Used to provide more specific error messages.
     """
@@ -128,7 +128,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             last_exception = None
-            backoff = common_utils.Backoff(initial_backoff=retry_interval,
+            backoff = common_utils.Backoff(initial_backoff=retry_interval_seconds,
                                            max_backoff_factor=3)
 
             for attempt in range(max_retries):
