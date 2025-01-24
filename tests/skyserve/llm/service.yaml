@@ -28,7 +28,10 @@ setup: |
   fi
 
   # Install dependencies
-  pip install "fschat[model_worker,webui]==0.2.24"
+  # TODO(tian): transformers<4.48.0 is a temporary solution for breaking
+  # change in transformers 4.48.0. Update to latest version when the issue
+  # is fixed. Ref: https://github.com/huggingface/transformers/issues/35639
+  pip install "fschat[model_worker,webui]==0.2.24" "transformers<4.48.0"
   pip install sentencepiece protobuf
 
 run: |

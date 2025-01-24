@@ -139,7 +139,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
                 timeout=autostop_timeout),
             # Even the cluster is stopped, cloud platform may take a while to
             # delete the VM.
-            f'sleep {smoke_tests_utils.BUMP_UP_SECONDS}',
+            f'sleep 35',
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
@@ -571,7 +571,7 @@ def test_kubernetes_context_failover():
                 'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
                 '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
                 'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
-                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
+                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
                 # H100 should not in the current context
