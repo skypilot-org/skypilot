@@ -3,9 +3,6 @@ name: clip-batch-inference
 resources:
   accelerators: {L4:1, A10G:1, A10:1, V100:1}
   memory: 32+
-  any_of:
-    - use_spot: true 
-    - use_spot: false
 
 num_nodes: 1
 
@@ -28,14 +25,12 @@ setup: |
   pip install fastapi uvicorn aiohttp pandas pyarrow tenacity
 
 run: |
-  python batch_process_clip.py \
+  python scripts/batch_process_clip.py \
     --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
     --start-idx ${START_IDX} \
     --end-idx ${END_IDX} \
     --batch-size 50 \
-    --checkpoint-size 1000 \
-    --model-name "ViT-bigG-14" \
-    --dataset-name "laion/relaion2B-en-research-safe"
+    --checkpoint-size 1000 
 
   echo "Processing complete. Results saved in node-specific files under /output/"
   ls -l /output
