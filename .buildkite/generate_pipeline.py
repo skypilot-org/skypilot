@@ -202,7 +202,7 @@ def _extract_marked_tests(
 
         # pytest will only run the first cloud if there are multiple clouds
         # make it consistent with pytest behavior
-        print(f"final_clouds_to_include: {final_clouds_to_include}")
+        # print(f"final_clouds_to_include: {final_clouds_to_include}")
         final_clouds_to_include = [final_clouds_to_include[0]]
         param_list = function_name_param_map.get(function_name, [None])
         if len(param_list) < len(final_clouds_to_include):
