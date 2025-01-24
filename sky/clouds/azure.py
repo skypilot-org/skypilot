@@ -201,6 +201,8 @@ class Azure(clouds.Cloud):
         publisher, offer, sku, version = image_id.split(':')
         # Since the Azure SDK requires explicitly specifying the image version number,
         # when the version is "latest," we need to manually query the current latest version.
+        # By querying the image size through a precise image version, while directly using the latest image version when creating a VM,
+        # there might be a difference in image information, and the probability of this occurring is very small.
         if version == 'latest':
             versions = compute_client.virtual_machine_images.list(
                 location=region,
