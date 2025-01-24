@@ -57,6 +57,7 @@ from typing import Any, Dict, Iterator, Optional, Tuple
 
 import yaml
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -215,15 +216,16 @@ def override_skypilot_config(
     try:
         _reload_config()
         yield
-    except ValueError as e:
+    except exceptions.InvalidSkyPilotConfigError as e:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Failed to override the SkyPilot config on API '
-                             'server with your local SkyPilot config:\n'
-                             '=== SkyPilot config on API server ===\n'
-                             f'{common_utils.dump_yaml_str(original_config)}\n'
-                             '=== Your local SkyPilot config ===\n'
-                             f'{common_utils.dump_yaml_str(override_configs)}\n'
-                             f'Details: {e}') from e
+            raise exceptions.InvalidSkyPilotConfigError(
+                'Failed to override the SkyPilot config on API '
+                'server with your local SkyPilot config:\n'
+                '=== SkyPilot config on API server ===\n'
+                f'{common_utils.dump_yaml_str(original_config)}\n'
+                '=== Your local SkyPilot config ===\n'
+                f'{common_utils.dump_yaml_str(override_configs)}\n'
+                f'Details: {e}') from e
 
     finally:
         if original_env_config_path is not None:

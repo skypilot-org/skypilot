@@ -120,6 +120,11 @@ class CloudError(Exception):
                 f'{super().__str__()}')
 
 
+class InvalidSkyPilotConfigError(ValueError):
+    """Raised when the SkyPilot config is invalid."""
+    pass
+
+
 class ResourcesUnavailableError(Exception):
     """Raised when resources are unavailable.
 

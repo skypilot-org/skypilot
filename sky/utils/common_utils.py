@@ -603,7 +603,7 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(err_msg)
+            raise exceptions.InvalidSkyPilotConfigError(err_msg)
 
 
 def get_cleaned_username(username: str = '') -> str:
