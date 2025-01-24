@@ -29,7 +29,6 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
         { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
-        { selector: '.toctree-l1 > a', text: 'Concept: Sky Computing' },
         { selector: '.toctree-l1 > a', text: 'SkyPilot API Server' },
     ];
     newItems.forEach(({ selector, text }) => {
