@@ -383,7 +383,9 @@ def reset_db_and_logs():
 
 
 def request_lock_path(request_id: str) -> str:
-    return os.path.join(os.path.dirname(_DB_PATH), f'.{request_id}.lock')
+    lock_path = os.path.expanduser(REQUEST_LOG_PATH_PREFIX)
+    os.makedirs(lock_path, exist_ok=True)
+    return os.path.join(lock_path, f'.{request_id}.lock')
 
 
 @contextlib.contextmanager

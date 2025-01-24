@@ -266,6 +266,7 @@ def process_mounts_in_task_on_api_server(task: str, env_vars: Dict[str, str],
     client_task_path.write_text(task)
 
     client_file_mounts_dir = client_dir / 'file_mounts'
+    client_file_mounts_dir.mkdir(parents=True, exist_ok=True)
 
     def _get_client_file_mounts_path(
             original_path: str, file_mounts_mapping: Dict[str, str]) -> str:
