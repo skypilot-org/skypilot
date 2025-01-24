@@ -1699,12 +1699,13 @@ def api_login(endpoint: Optional[str] = None) -> None:
     if endpoint is None:
         endpoint = click.prompt('Enter your SkyPilot API server endpoint')
     # Check endpoint is a valid URL
-    if endpoint and not endpoint.startswith(
-            'http://') and not endpoint.startswith('https://'):
+    if (endpoint is not None and not endpoint.startswith('http://') and
+            not endpoint.startswith('https://')):
         raise click.BadParameter('Endpoint must be a valid URL.')
-    if not endpoint:
-        endpoint = None
 
+    server_common.check_server_healthy(endpoint)
+
+    # Set the endpoint in the config file
     config_path = pathlib.Path(skypilot_config.CONFIG_PATH).expanduser()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not skypilot_config.loaded():

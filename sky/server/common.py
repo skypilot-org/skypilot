@@ -39,6 +39,12 @@ API_SERVER_CMD = 'python -m sky.server.server'
 CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 
+SKY_API_VERSION_WARNING = (
+    f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
+    f'v{{server_version}} (client version is v{{client_version}}). '
+    'Please restart the SkyPilot API server with: '
+    'sky api stop; sky api start'
+    f'{colorama.Style.RESET_ALL}')
 RequestId = str
 ApiVersion = Optional[str]
 
@@ -71,9 +77,24 @@ def is_api_server_local():
     return get_server_url() == DEFAULT_SERVER_URL
 
 
-def get_api_server_status() -> ApiServerInfo:
+def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
+    """Retrieve the status of the API server.
+
+    This function checks the health of the API server by sending a request
+    to the server's health endpoint. It retries the connection a specified
+    number of times in case of a timeout.
+
+    Args:
+        endpoint (Optional[str]): The endpoint of the API server.
+        If None, the default endpoint will be used.
+
+    Returns:
+        ApiServerInfo: An object containing the status and API version
+        of the server. The status can be HEALTHY, UNHEALTHY
+        or VERSION_MISMATCH.
+    """
     time_out_try_count = 1
-    server_url = get_server_url()
+    server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
             response = requests.get(f'{server_url}/api/health', timeout=2.5)
@@ -195,6 +216,31 @@ def _start_api_server(api_server_reload: bool = False, deploy: bool = False):
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
+def check_server_healthy(endpoint: Optional[str] = None,) -> None:
+    """Check if the API server is healthy.
+
+    Args:
+        endpoint (Optional[str]): The endpoint of the API server.
+        If None, the default endpoint will be used.
+
+    Raises:
+        RuntimeError: If the server is not healthy or the client version does
+            not match the server version.
+    """
+    endpoint = endpoint if endpoint is not None else get_server_url()
+    api_server_info = get_api_server_status(endpoint)
+    api_server_status = api_server_info.status
+    if api_server_status == ApiServerStatus.VERSION_MISMATCH:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                SKY_API_VERSION_WARNING.format(
+                    server_version=api_server_info.api_version,
+                    client_version=server_constants.API_VERSION))
+    elif api_server_status == ApiServerStatus.UNHEALTHY:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.ApiServerConnectionError(endpoint)
+
+
 def check_server_healthy_or_start(func):
 
     @functools.wraps(func)
@@ -202,31 +248,21 @@ def check_server_healthy_or_start(func):
                 api_server_reload: bool = False,
                 deploy: bool = False,
                 **kwargs):
-        api_server_info = get_api_server_status()
-        if api_server_info.status == ApiServerStatus.UNHEALTHY:
-            # If server is remote and unhealthy, raise exception. Else, start
-            # the server locally.
-            server_url = get_server_url()
-            if server_url != DEFAULT_SERVER_URL:
+        try:
+            check_server_healthy()
+        except exceptions.ApiServerConnectionError as exc:
+            endpoint = get_server_url()
+            if not is_api_server_local():
                 with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ApiServerConnectionError(server_url)
+                    raise exceptions.ApiServerConnectionError(endpoint) from exc
             with filelock.FileLock(
                     os.path.expanduser(
                         constants.API_SERVER_CREATION_LOCK_PATH)):
                 # Check again if server is already running. Other processes may
                 # have started the server while we were waiting for the lock.
-                api_server_info = get_api_server_status()
+                api_server_info = get_api_server_status(endpoint)
                 if api_server_info.status == ApiServerStatus.UNHEALTHY:
                     _start_api_server(api_server_reload, deploy)
-        elif api_server_info.status == ApiServerStatus.VERSION_MISMATCH:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
-                    f'v{api_server_info.api_version} (client version is '
-                    f'v{server_constants.API_VERSION}). '
-                    'Please restart the SkyPilot API server with: '
-                    'sky api stop; sky api start'
-                    f'{colorama.Style.RESET_ALL}')
         return func(*args, **kwargs)
 
     return wrapper
