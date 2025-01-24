@@ -60,7 +60,7 @@ def wrap_exception(exc: Exception) -> Exception:
                       error_type=type(exc).__name__)
 
 
-def serialize_exception(e) -> Dict[str, Any]:
+def serialize_exception(e: Exception) -> Dict[str, Any]:
     """Serialize the exception.
 
     This function also wraps any unsafe exceptions (e.g., cloud exceptions)

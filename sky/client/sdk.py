@@ -230,23 +230,18 @@ def optimize(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.public_api
-def validate(dag: 'sky.Dag',
-             workdir_only: bool = False) -> server_common.RequestId:
+def validate(dag: 'sky.Dag', workdir_only: bool = False) -> None:
     """Validates the tasks.
 
     The file paths (workdir and file_mounts) are validated on the client side
     while the rest (e.g. resource) are validated on server side.
 
+    Raises exceptions if the DAG is invalid.
+
     Args:
         dag: the DAG to validate.
         workdir_only: whether to only validate the workdir. This is used for
             `exec` as it does not need other files/folders in file_mounts.
-
-    Returns:
-        The request ID of the validate request.
-
-    Request Returns:
-        None
     """
     for task in dag.tasks:
         task.expand_and_validate_workdir()
@@ -256,7 +251,10 @@ def validate(dag: 'sky.Dag',
     body = payloads.ValidateBody(dag=dag_str)
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()))
-    return server_common.get_request_id(response)
+    if response.status_code == 400:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.deserialize_exception(
+                response.json().get('detail'))
 
 
 @usage_lib.entrypoint
