@@ -3,7 +3,6 @@ import hashlib
 from multiprocessing import pool
 import socket
 import sys
-import time
 from typing import Optional
 
 import sky
@@ -20,7 +19,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 
     if cloud is None:
         cloud = 'gcp'
-    cloud = sky.utils.registry.CLOUD_REGISTRY.from_str(cloud)
+    cloud = sky.CLOUD_REGISTRY.from_str(cloud)
 
     # Create the cluster.
     with sky.Dag() as dag:

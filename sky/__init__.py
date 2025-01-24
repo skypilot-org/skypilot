@@ -129,6 +129,8 @@ from sky.task import Task
 from sky.utils.common import OptimizeTarget
 from sky.utils.common import StatusRefreshMode
 from sky.utils.config_utils import Config
+from sky.utils.registry import CLOUD_REGISTRY
+from sky.utils.registry import JOBS_RECOVERY_STRATEGY_REGISTRY
 from sky.utils.status_lib import ClusterStatus
 
 # Aliases.
@@ -219,4 +221,7 @@ __all__ = [
     'MutatedUserRequest',
     'AdminPolicy',
     'Config',
+    # Registry
+    'CLOUD_REGISTRY',
+    'JOBS_RECOVERY_STRATEGY_REGISTRY',
 ]

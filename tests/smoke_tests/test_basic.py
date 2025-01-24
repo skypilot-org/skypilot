@@ -356,7 +356,7 @@ def test_core_api_sky_launch_exec():
 # restarted. However, the core API doesn't have these; make sure it still works
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    cloud = sky.utils.registry.CLOUD_REGISTRY.from_str(generic_cloud)
+    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     try:
         task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
         sky.launch(task,
