@@ -236,6 +236,7 @@ def test_skyserve_oci_http():
     test = _get_skyserve_http_test(name, 'oci', 20)
     smoke_tests_utils.run_one_test(test)
 
+
 @pytest.mark.nebius
 @pytest.mark.serve
 def test_skyserve_nebius_http():
@@ -243,6 +244,7 @@ def test_skyserve_nebius_http():
     name = _get_service_name()
     test = _get_skyserve_http_test(name, 'nebius', 20)
     smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
@@ -481,7 +483,7 @@ def test_skyserve_auto_restart():
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.no_nebius # Nebius doesn't support open ports
+@pytest.mark.no_nebius  # Nebius doesn't support open ports
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()

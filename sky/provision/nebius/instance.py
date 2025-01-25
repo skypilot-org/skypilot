@@ -31,7 +31,9 @@ def _filter_instances(region: str,
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name').startswith(f'{cluster_name_on_cloud}-'):
+
+        if instance['name'] and instance['name'].startswith(
+                f'{cluster_name_on_cloud}-'):
             if head_only and not instance['name'].endswith('-head'):
                 filtered_instances[instance_id] = instance
             else:

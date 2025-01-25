@@ -1,7 +1,7 @@
 """RunPod library wrapper for SkyPilot."""
 import time
-import uuid
 from typing import Any, Dict
+import uuid
 
 from sky import sky_logging
 from sky.adaptors import nebius
@@ -131,7 +131,7 @@ def stop(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_STOP:
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get(nebius.compute().GetInstanceRequest(
-            id=instance_id, )).wait()
+            id=instance_id,)).wait()
         if instance.status.state.name == 'STOPPED':
             break
         time.sleep(POLL_INTERVAL)
@@ -153,7 +153,7 @@ def start(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_START:
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get(nebius.compute().GetInstanceRequest(
-            id=instance_id, )).wait()
+            id=instance_id,)).wait()
         if instance.status.state.name == 'RUNNING':
             break
         time.sleep(POLL_INTERVAL)
@@ -220,7 +220,7 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
 
     service = nebius.vpc().SubnetServiceClient(sdk)
     sub_net = service.list(nebius.vpc().ListSubnetsRequest(
-        parent_id=project_id, )).wait()
+        parent_id=project_id,)).wait()
 
     service = nebius.compute().InstanceServiceClient(sdk)
     service.create(nebius.compute().CreateInstanceRequest(
@@ -229,7 +229,7 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
             name=instance_name,
         ),
         spec=nebius.compute().InstanceSpec(
-            gpu_cluster=nebius.compute().InstanceGpuClusterSpec(id=cluster_id, )
+            gpu_cluster=nebius.compute().InstanceGpuClusterSpec(id=cluster_id,)
             if cluster_id else None,
             boot_disk=nebius.compute().AttachedDiskSpec(
                 attach_mode=nebius.compute(
