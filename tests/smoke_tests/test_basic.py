@@ -19,7 +19,6 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
-import os
 import pathlib
 import subprocess
 import tempfile
