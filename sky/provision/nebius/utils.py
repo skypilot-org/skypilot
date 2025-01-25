@@ -1,5 +1,6 @@
 """RunPod library wrapper for SkyPilot."""
 import time
+import uuid
 from typing import Any, Dict
 
 from sky import sky_logging
@@ -130,7 +131,7 @@ def stop(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_STOP:
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get(nebius.compute().GetInstanceRequest(
-            id=instance_id,)).wait()
+            id=instance_id, )).wait()
         if instance.status.state.name == 'STOPPED':
             break
         time.sleep(POLL_INTERVAL)
@@ -152,7 +153,7 @@ def start(instance_id: str) -> None:
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_START:
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get(nebius.compute().GetInstanceRequest(
-            id=instance_id,)).wait()
+            id=instance_id, )).wait()
         if instance.status.state.name == 'RUNNING':
             break
         time.sleep(POLL_INTERVAL)
@@ -167,18 +168,22 @@ def start(instance_id: str) -> None:
             f' to be ready.')
 
 
-def launch(name: str, platform: str, preset: str, region: str,
-           image_family: str, disk_size: int, user_data: str) -> str:
-    logger.debug(f'Launching instance: {name}')
-    disk_name = 'disk-' + name
+def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
+           preset: str, region: str, image_family: str, disk_size: int,
+           user_data: str) -> str:
+
+    instance_name = (f'{cluster_name_on_cloud}-'
+                     f'{uuid.uuid4().hex[:4]}-{instance_type}')
+    logger.debug(f'Launching instance: {instance_name}')
+
+    disk_name = 'disk-' + instance_name
     cluster_id = None
-    cluster_name = '-'.join(name.split('-')[:4])
     # 8 GPU virtual machines can be grouped into a GPU cluster.
     # The GPU clusters are built with InfiniBand secure high-speed networking.
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
         if preset == '8gpu-128vcpu-1600gb':
-            cluster_id = get_or_creat_gpu_cluster(cluster_name, region)
+            cluster_id = get_or_creat_gpu_cluster(cluster_name_on_cloud, region)
 
     project_id = get_project_by_region(region)
     service = nebius.compute().DiskServiceClient(sdk)
@@ -215,16 +220,16 @@ def launch(name: str, platform: str, preset: str, region: str,
 
     service = nebius.vpc().SubnetServiceClient(sdk)
     sub_net = service.list(nebius.vpc().ListSubnetsRequest(
-        parent_id=project_id,)).wait()
+        parent_id=project_id, )).wait()
 
     service = nebius.compute().InstanceServiceClient(sdk)
     service.create(nebius.compute().CreateInstanceRequest(
         metadata=nebius.nebius_common().ResourceMetadata(
             parent_id=project_id,
-            name=name,
+            name=instance_name,
         ),
         spec=nebius.compute().InstanceSpec(
-            gpu_cluster=nebius.compute().InstanceGpuClusterSpec(id=cluster_id,)
+            gpu_cluster=nebius.compute().InstanceGpuClusterSpec(id=cluster_id, )
             if cluster_id else None,
             boot_disk=nebius.compute().AttachedDiskSpec(
                 attach_mode=nebius.compute(
@@ -246,20 +251,20 @@ def launch(name: str, platform: str, preset: str, region: str,
         service = nebius.compute().InstanceServiceClient(sdk)
         instance = service.get_by_name(nebius.nebius_common().GetByNameRequest(
             parent_id=project_id,
-            name=name,
+            name=instance_name,
         )).wait()
         if instance.status.state.name == 'STARTING':
             instance_id = instance.metadata.id
             break
         time.sleep(POLL_INTERVAL)
-        logger.debug(f'Waiting for instance {name} start running.')
+        logger.debug(f'Waiting for instance {instance_name} start running.')
         retry_count += 1
 
     if retry_count == nebius.MAX_RETRIES_TO_INSTANCE_READY:
         raise TimeoutError(
             f'Exceeded maximum retries '
             f'({nebius.MAX_RETRIES_TO_INSTANCE_READY * POLL_INTERVAL}'
-            f' seconds) while waiting for instance {name}'
+            f' seconds) while waiting for instance {instance_name}'
             f' to be ready.')
     return instance_id
 

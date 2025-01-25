@@ -31,8 +31,11 @@ def _filter_instances(region: str,
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name') in possible_names:
-            filtered_instances[instance_id] = instance
+        if instance.get('name').startswith(f'{cluster_name_on_cloud}-'):
+            if head_only and not instance['name'].endswith('-head'):
+                filtered_instances[instance_id] = instance
+            else:
+                filtered_instances[instance_id] = instance
     return filtered_instances
 
 
@@ -115,7 +118,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         try:
             platform, preset = config.node_config['InstanceType'].split('_')
             instance_id = utils.launch(
-                name=f'{cluster_name_on_cloud}-{node_type}',
+                cluster_name_on_cloud=cluster_name_on_cloud,
+                instance_type=node_type,
                 platform=platform,
                 preset=preset,
                 region=region,

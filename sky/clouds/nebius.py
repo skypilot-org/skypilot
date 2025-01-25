@@ -41,9 +41,10 @@ class Nebius(clouds.Cloud):
             (f'Opening ports is currently not supported on {_REPR}.'),
     }
     # Nebius maximum instance name length defined as <= 63 as a hostname length
-    # 63 - 8 = 55 characters since
+    # 63 - 8 - 5 = 50 characters since
+    # we add 4 character from UUID to make uniq `-xxxx`
     # our provisioner adds additional `-worker`.
-    _MAX_CLUSTER_NAME_LEN_LIMIT = 55
+    _MAX_CLUSTER_NAME_LEN_LIMIT = 50
     _regions: List[clouds.Region] = []
 
     # Using the latest SkyPilot provisioner API to provision and check status.
