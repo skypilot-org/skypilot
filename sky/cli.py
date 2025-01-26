@@ -4078,7 +4078,10 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    service_port: Optional[int] = task.service.port
+
+    # NOTE(yi): we only allow one service port now.
+    service_port: Optional[int] = int(
+        task.service.ports) if task.service.ports is not None else None
     if service_port is None:
         for requested_resources in list(task.resources):
             if requested_resources.ports is None:
@@ -4106,9 +4109,8 @@ def _generate_task_with_service(
                                      f'{resource_port} in different resources. '
                                      'Please specify single port instead.')
         assert service_port is not None
-        task.service.set_port(service_port)
+        task.service.set_ports(str(service_port))
     else:
-        port_set = set()
         for requested_resources in list(task.resources):
             if requested_resources.ports is None:
                 with ux_utils.print_exception_no_traceback():
@@ -4116,14 +4118,14 @@ def _generate_task_with_service(
                         'Must specify at least one ports in resources. Each '
                         'replica will use the port specified as application '
                         'ingress port.')
-            port_set.update(
-                resources_utils.port_ranges_to_set(requested_resources.ports))
-        if service_port not in port_set:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Service port {service_port} is not found in the '
-                    'ports specified in resources. Please re-specify '
-                    'the main port in the service section.')
+            ports_set = resources_utils.port_ranges_to_set(
+                requested_resources.ports)
+            if service_port not in ports_set:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Service port {service_port} is not found in the '
+                        'ports specified in some resources. Please re-specify '
+                        'the main port in the service section.')
 
     return task
 

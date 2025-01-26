@@ -3,7 +3,7 @@ service:
     path: /health
     initial_delay_seconds: 20
   replicas: 1
-  port: 8080
+  ports: 8080
 
 resources:
   ports:

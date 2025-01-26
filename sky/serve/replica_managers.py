@@ -172,10 +172,10 @@ def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
     # Already checked all ports are valid in sky.serve.core.up
-    assert len(task.resources) >= 1, task
+    assert task.resources, task
     assert task.service is not None, task
-    assert task.service.port is not None, task
-    return str(task.service.port)
+    assert task.service.ports is not None, task
+    return task.service.ports
 
 
 def _should_use_spot(task_yaml: str,

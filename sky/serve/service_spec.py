@@ -25,7 +25,7 @@ class SkyServiceSpec:
         readiness_timeout_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
-        port: Optional[int] = None,
+        ports: Optional[str] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
@@ -73,7 +73,7 @@ class SkyServiceSpec:
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
-        self._port: Optional[int] = port
+        self._ports: Optional[str] = ports
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
@@ -139,15 +139,21 @@ class SkyServiceSpec:
         service_config['post_data'] = post_data
         service_config['readiness_headers'] = readiness_headers
 
-        port = config.get('port', None)
-        if port is not None:
-            if not isinstance(port, int):
+        ports = config.get('ports', None)
+        if ports is not None:
+            if isinstance(ports, list):
+                if len(ports) > 1:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'We only support one port as main port now.')
+                ports = ports[0]
+            if isinstance(ports, str) and not ports.isdigit():
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Port must be an integer.')
-            if not 1 <= port <= 65535:
+            if not 1 <= int(ports) <= 65535:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Port must be between 1 and 65535.')
-        service_config['port'] = port
+        service_config['ports'] = str(ports)
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
@@ -247,7 +253,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
-        add_if_not_none('port', None, self.port)
+        add_if_not_none('ports', None, self.ports)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
             add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
@@ -295,8 +301,8 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
-    def set_port(self, port: int) -> None:
-        self._port = port
+    def set_ports(self, ports: str) -> None:
+        self._ports = ports
 
     def tls_str(self):
         if self.tls_credential is None:
@@ -337,8 +343,8 @@ class SkyServiceSpec:
         return self._max_replicas
 
     @property
-    def port(self) -> Optional[int]:
-        return self._port
+    def ports(self) -> Optional[str]:
+        return self._ports
 
     @property
     def target_qps_per_replica(self) -> Optional[float]:

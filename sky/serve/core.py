@@ -68,7 +68,8 @@ def _validate_service_task(task: 'sky.Task') -> None:
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
-    replica_ingress_port: Optional[int] = task.service.port
+    replica_ingress_port: Optional[int] = int(
+        task.service.ports) if (task.service.ports is not None) else None
     for requested_resources in task.resources:
         if (task.service.use_ondemand_fallback and
                 not requested_resources.use_spot):
@@ -77,7 +78,7 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     '`use_ondemand_fallback` is only supported '
                     'for spot resources. Please explicitly specify '
                     '`use_spot: true` in resources for on-demand fallback.')
-        if task.service.port is None:
+        if task.service.ports is None:
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
             if len(requested_ports) != 1:

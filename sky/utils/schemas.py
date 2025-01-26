@@ -388,8 +388,23 @@ def get_service_schema():
                     },
                 }
             },
-            'port': {
-                'type': 'integer',
+            'ports': {
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'integer',
+                }, {
+                    'type': 'array',
+                    'items': {
+                        'anyOf': [{
+                            'type': 'string',
+                        }, {
+                            'type': 'integer',
+                        }]
+                    }
+                }, {
+                    'type': 'null',
+                }],
             },
             'replicas': {
                 'type': 'integer',
