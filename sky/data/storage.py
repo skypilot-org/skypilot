@@ -1083,18 +1083,16 @@ class Storage(object):
         if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
             global_user_state.remove_storage(self.name)
-        if store_type:
+        if store_type is not None:
             store = self.stores[store_type]
-            is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
-            if is_sky_managed:
+            if store.is_sky_managed:
                 self.handle.remove_store(store)
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
-                delete = all(
-                    s.is_sky_managed is False for s in self.stores.values())
+                delete = all(not s.is_sky_managed for s in self.stores.values())
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
@@ -1689,6 +1687,9 @@ class S3Store(AbstractStore):
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
         """
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
@@ -2179,6 +2180,11 @@ class GcsStore(AbstractStore):
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
+            PermissionError: If the bucket is external and the user is not
+                allowed to delete it.
         """
         if _bucket_sub_path is not None:
             command_suffix = f'/{_bucket_sub_path}'
@@ -3478,6 +3484,9 @@ class R2Store(AbstractStore):
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
         """
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
@@ -3932,7 +3941,7 @@ class IBMCosStore(AbstractStore):
 
     def _delete_cos_bucket_objects(self,
                                    bucket: Any,
-                                   prefix: Optional[str] = None):
+                                   prefix: Optional[str] = None) -> None:
         bucket_versioning = self.s3_resource.BucketVersioning(bucket.name)
         if bucket_versioning.status == 'Enabled':
             if prefix is not None:
@@ -3947,7 +3956,7 @@ class IBMCosStore(AbstractStore):
                 res = list(bucket.objects.delete())
         logger.debug(f'Deleted bucket\'s content:\n{res}, prefix: {prefix}')
 
-    def _delete_cos_bucket(self):
+    def _delete_cos_bucket(self) -> None:
         bucket = self.s3_resource.Bucket(self.name)
         try:
             self._delete_cos_bucket_objects(bucket)

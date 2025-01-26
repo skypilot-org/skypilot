@@ -203,11 +203,6 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
-# After the timeout, the cluster will stop if autostop is set, and our check
-# should be more than the timeout. To address this, we extend the timeout by
-# _BUMP_UP_SECONDS before exiting.
-BUMP_UP_SECONDS = 35
-
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
