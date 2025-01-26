@@ -16,7 +16,7 @@ jobs:
   python-test:
     strategy:
       matrix:
-        python-version: [3.10]
+        python-version: ["3.10"]
         test-path:
           - tests/unit_tests
           - tests/test_api.py
