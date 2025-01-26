@@ -245,7 +245,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
-        add_if_not_none('ports', None, self.ports)
+        add_if_not_none('ports', None, int(self.ports) if self.ports else None)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
             add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
