@@ -50,18 +50,22 @@ def vpc():
 
 
 def get_iam_token():
-    with open(os.path.expanduser(f'~/.nebius/{NEBIUS_IAM_TOKEN_PATH}'),
-              encoding='utf-8') as file:
-        iam_token = file.read().strip()
-    return iam_token
-
+    try:
+        with open(os.path.expanduser(f'~/.nebius/{NEBIUS_IAM_TOKEN_PATH}'),
+                  encoding='utf-8') as file:
+            iam_token = file.read().strip()
+        return iam_token
+    except FileNotFoundError:
+        return None
 
 def get_tenant_id():
-    with open(os.path.expanduser(f'~/.nebius/{NB_TENANT_ID_PATH}'),
-              encoding='utf-8') as file:
-        tenant_id = file.read().strip()
-    return tenant_id
-
+    try:
+        with open(os.path.expanduser(f'~/.nebius/{NB_TENANT_ID_PATH}'),
+                  encoding='utf-8') as file:
+            tenant_id = file.read().strip()
+        return tenant_id
+    except FileNotFoundError:
+        return None
 
 def sdk(credentials):
     return nebius.sdk.SDK(credentials=credentials)
