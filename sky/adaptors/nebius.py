@@ -58,6 +58,7 @@ def get_iam_token():
     except FileNotFoundError:
         return None
 
+
 def get_tenant_id():
     try:
         with open(os.path.expanduser(f'~/.nebius/{NB_TENANT_ID_PATH}'),
@@ -66,6 +67,7 @@ def get_tenant_id():
         return tenant_id
     except FileNotFoundError:
         return None
+
 
 def sdk(credentials):
     return nebius.sdk.SDK(credentials=credentials)
