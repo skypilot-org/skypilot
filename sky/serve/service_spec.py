@@ -141,16 +141,8 @@ class SkyServiceSpec:
 
         ports = config.get('ports', None)
         if ports is not None:
-            if isinstance(ports, list):
-                if len(ports) > 1:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'We only support one port as main port now.')
-                ports = ports[0]
-            if isinstance(ports, str) and not ports.isdigit():
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Port must be an integer.')
-            if not 1 <= int(ports) <= 65535:
+            assert isinstance(ports, int)
+            if not 1 <= ports <= 65535:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Port must be between 1 and 65535.')
         service_config['ports'] = str(ports)

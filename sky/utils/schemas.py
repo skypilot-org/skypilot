@@ -389,22 +389,7 @@ def get_service_schema():
                 }
             },
             'ports': {
-                'anyOf': [{
-                    'type': 'string',
-                }, {
-                    'type': 'integer',
-                }, {
-                    'type': 'array',
-                    'items': {
-                        'anyOf': [{
-                            'type': 'string',
-                        }, {
-                            'type': 'integer',
-                        }]
-                    }
-                }, {
-                    'type': 'null',
-                }],
+                'type': 'integer',
             },
             'replicas': {
                 'type': 'integer',

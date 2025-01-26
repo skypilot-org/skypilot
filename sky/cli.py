@@ -4089,14 +4089,17 @@ def _generate_task_with_service(
                     raise ValueError(
                         'Must specify at least one ports in resources. Each '
                         'replica will use the port specified as application '
-                        'ingress port.')
+                        'ingress port if only one port is specified in the '
+                        'replica resources. If there are multiple ports opened '
+                        'in the replica, please set the `service.ports` field '
+                        'in the service config.')
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
             if len(requested_ports) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
                         'Multiple ports specified in resources. Please '
-                        'specify the main port in the service section.')
+                        'specify the main port in the `service.ports` field.')
             # We request all the replicas using the same port for now, but it
             # should be fine to allow different replicas to use different ports
             # in the future.
@@ -4105,9 +4108,12 @@ def _generate_task_with_service(
                 service_port = resource_port
             if service_port != resource_port:
                 with ux_utils.print_exception_no_traceback():
-                    raise ValueError(f'Got multiple ports: {service_port} and '
-                                     f'{resource_port} in different resources. '
-                                     'Please specify single port instead.')
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{resource_port} in different resources. '
+                        'Please specify the same port in all replicas, or '
+                        'explicitly set the service port in the '
+                        '`service.ports` section.')
         assert service_port is not None
         task.service.set_ports(str(service_port))
     else:
@@ -4115,17 +4121,20 @@ def _generate_task_with_service(
             if requested_resources.ports is None:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Must specify at least one ports in resources. Each '
-                        'replica will use the port specified as application '
-                        'ingress port.')
+                        'Must specify at least one ports in every replica '
+                        'resources.')
             ports_set = resources_utils.port_ranges_to_set(
                 requested_resources.ports)
             if service_port not in ports_set:
                 with ux_utils.print_exception_no_traceback():
+                    # TODO(tian): Automatically infer resource port from
+                    # service port if none of them is specified in the
+                    # replica resources.
                     raise ValueError(
-                        f'Service port {service_port} is not found in the '
-                        'ports specified in some resources. Please re-specify '
-                        'the main port in the service section.')
+                        f'The service port {service_port} specified in the '
+                        'service section is not found in some resources. '
+                        'Please check if the service port is correct or add '
+                        'the service port to replica resources.')
 
     return task
 
