@@ -244,6 +244,17 @@ def query_instances(
     return statuses
 
 
+def open_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """See sky/provision/__init__.py"""
+    logger.debug(f'Skip opening ports {ports} for Nebius instances, as all '
+                 'ports are open by default.')
+    del cluster_name_on_cloud, provider_config, ports
+
+
 def cleanup_ports(
     cluster_name_on_cloud: str,
     ports: List[str],
