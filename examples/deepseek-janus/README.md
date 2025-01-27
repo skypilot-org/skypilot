@@ -1,13 +1,14 @@
-# Run and Serve Janus by DeepSeek with SkyPilot
+# Run Janus by DeepSeek with SkyPilot
 
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 <p align="center">
-<img src="https://i.imgur.com/PAYaKCD.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/qYoFl7K.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
 </p>
 
-On Jan 27, 2025, DeepSeek AI released the [Janus](https://github.com/deepseek-ai/Janus). It outperforms **state-of-the-art Vision Languag Models** such as LLaVA, supporting a vareity of Vision-Langauge tasks such as image generation and Q&A. 
+On Jan 27, 2025, DeepSeek AI released the [Janus](https://github.com/deepseek-ai/Janus). It outperforms **state-of-the-art Vision Language Models** such as LLaVA, supporting a variety of Vision-Language tasks such as image generation and Q&A. 
 
-This guide walks through how to run and host models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public Clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)). 
+
+This guide walks through how to run and host models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)). 
 
 ### Step 0: Bring any infra
 
@@ -29,6 +30,7 @@ See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 
 Now it's time to run Janus with SkyPilot. The instruction can be dependent on your existing hardware.  
 
+Run Janus (1.5B) with
 ```
 sky launch janus_1.5b.yaml \
   -c janus \
@@ -36,7 +38,7 @@ sky launch janus_1.5b.yaml \
   --gpus L4:1
 ```
 
-or 
+or run Janus Pro (7B) with: 
 
 ```
 sky launch januspro_7b.yaml \
@@ -55,10 +57,10 @@ or you can access through getting the IP address of the deployed instance via
 echo `sky status --ip janus`
 ```
 
-### Check out our prompts! 
+### Example Prompts
 ```
 A modern fighter jet soaring through a vast, vibrant blue sky filled with fluffy white clouds. The jet leaves behind a sleek contrail as it cuts through the atmosphere. The sunlight reflects off the jet's metallic surface, highlighting its aerodynamic design. The pilot, wearing a high-tech flight suit and helmet with a reflective visor, gazes into the horizon. The sky transitions from a deep azure at the top to a soft pastel near the horizon, creating a stunning gradient. Cinematic lighting, ultra-realistic details, and dynamic motion blur effects.
 ```
 <p align="center">
-<img src="https://i.imgur.com/totgBGb.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/k4yh5BR.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
 </p>
