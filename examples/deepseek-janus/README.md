@@ -30,7 +30,16 @@ See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 Now it's time to run Janus with SkyPilot. The instruction can be dependent on your existing hardware.  
 
 ```
-sky launch janus.yaml \
+sky launch janus_1.5b.yaml \
+  -c janus \
+  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
+  --gpus L4:1
+```
+
+or 
+
+```
+sky launch januspro_7b.yaml \
   -c janus \
   --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
   --gpus L4:1
