@@ -12,7 +12,7 @@ import numpy as np
 from PIL import Image
 import torch
 from tqdm import tqdm
-
+import pandas as pd
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
 ModelInputType = TypeVar('ModelInputType')
@@ -127,50 +127,48 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         return [(idx, pickle.dumps((images_base64[idx], arr)))
                 for idx, arr in zip(indices, embeddings)]
 
-    async def run(self):
-        """Run the batch processing pipeline."""
-        import pandas as pd
 
+    async def run(self):
+        """
+        Run the batch processing pipeline without appending to existing files.
+        Each partition writes a new Parquet file in its own directory.
+        """
         results = []
-        partition_counter = 0  # To keep track of partitions
+        partition_counter = 0
 
         async for idx, input_data in self.do_data_loading():
             self._current_batch.append((idx, input_data))
-
             if len(self._current_batch) >= self.batch_size:
-                batch_results = await self.do_batch_processing(
-                    self._current_batch)
+                batch_results = await self.do_batch_processing(self._current_batch)
                 results.extend(batch_results)
                 self._current_batch = []
 
                 if len(results) >= self.checkpoint_size:
-                    # Convert results to DataFrame
-                    df = pd.DataFrame(results, columns=['idx', 'output'])
+                    # Convert results to a DataFrame and write out
+                    df = pd.DataFrame(results, columns=["idx", "output"])
+                    partition_dir = f"{self.output_path}_part_{partition_counter}"
+                    os.makedirs(partition_dir, exist_ok=True)
+                    output_file = os.path.join(partition_dir, "data.parquet")
 
-                    # Save DataFrame to parquet file
-                    output_file = f"{self.output_path}_{partition_counter}.parquet"
-                    df.to_parquet(output_file, index=False)
-                    logging.info(
-                        f"Saved partition {partition_counter} to {output_file}")
-                    results = []
+                    df.to_parquet(output_file, engine="pyarrow", index=False)
+                    logging.info(f"Saved partition {partition_counter} to {output_file}")
+                    results.clear()
                     partition_counter += 1
 
-        # Process remaining items in batch
+        # Process any remaining items in the batch
         if self._current_batch:
             batch_results = await self.do_batch_processing(self._current_batch)
             results.extend(batch_results)
 
-        # Save final results if any
+        # Write the final partition if there are any leftover results
         if results:
-            df = pd.DataFrame(results, columns=['idx', 'output'])
+            df = pd.DataFrame(results, columns=["idx", "output"])
             partition_dir = f"{self.output_path}_part_{partition_counter}"
             os.makedirs(partition_dir, exist_ok=True)
-            df.to_parquet(os.path.join(partition_dir, "data.parquet"),
-                          engine='pyarrow',
-                          index=False)
-            logging.info(
-                f"Saved final partition {partition_counter} to {partition_dir}")
+            output_file = os.path.join(partition_dir, "data.parquet")
 
+            df.to_parquet(output_file, engine="pyarrow", index=False)
+            logging.info(f"Saved final partition {partition_counter} to {output_file}")
 
 async def main():
     """Example usage of the batch processing framework."""
