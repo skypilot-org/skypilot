@@ -65,7 +65,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         from datasets import load_dataset
 
         dataset = load_dataset(self.dataset_name,
-                               streaming=self.streaming)[self.split]
+                               streaming=self.streaming,
+                               trust_remote_code=True)[self.split]
 
         if self.start_idx > 0:
             dataset = dataset.skip(self.start_idx)
