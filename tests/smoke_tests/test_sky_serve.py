@@ -237,19 +237,10 @@ def test_skyserve_oci_http():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.nebius
-@pytest.mark.serve
-def test_skyserve_nebius_http():
-    """Test skyserve on Nebius"""
-    name = _get_service_name()
-    test = _get_skyserve_http_test(name, 'nebius', 20)
-    smoke_tests_utils.run_one_test(test)
-
-
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
-@pytest.mark.no_nebius  # Nebius doesn't support autoterminate
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius':'H100'}])
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
@@ -313,7 +304,7 @@ def test_skyserve_spot_recovery():
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
 @pytest.mark.no_do
-@pytest.mark.no_nebius
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -379,7 +370,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
-@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 def test_skyserve_user_bug_restart(generic_cloud: str):
@@ -417,6 +408,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_load_balancer(generic_cloud: str):
     """Test skyserve load balancer round-robin policy"""
     name = _get_service_name()
@@ -441,6 +433,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
 @pytest.mark.gcp
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_auto_restart():
     """Test skyserve with auto restart"""
     name = _get_service_name()
@@ -483,7 +476,7 @@ def test_skyserve_auto_restart():
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.no_nebius  # Nebius does not support autodown
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -510,6 +503,7 @@ def test_skyserve_cancel(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     name = _get_service_name()
@@ -575,6 +569,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -607,6 +602,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -645,6 +641,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 @pytest.mark.no_fluidstack
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -688,6 +685,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -728,6 +726,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -793,6 +792,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""

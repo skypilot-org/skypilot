@@ -23,9 +23,6 @@ def _filter_instances(region: str,
                       head_only: bool = False) -> Dict[str, Any]:
     project_id = utils.get_project_by_region(region)
     instances = utils.list_instances(project_id)
-    possible_names = [f'{cluster_name_on_cloud}-head']
-    if not head_only:
-        possible_names.append(f'{cluster_name_on_cloud}-worker')
     filtered_instances = {}
     for instance_id, instance in instances.items():
         if (status_filters is not None and
@@ -34,8 +31,8 @@ def _filter_instances(region: str,
 
         if instance['name'] and instance['name'].startswith(
                 f'{cluster_name_on_cloud}-'):
-            if head_only and not instance['name'].endswith('-head'):
-                filtered_instances[instance_id] = instance
+            if head_only and instance['name'].endswith('-worker'):
+                continue
             else:
                 filtered_instances[instance_id] = instance
     return filtered_instances
