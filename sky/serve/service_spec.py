@@ -145,7 +145,7 @@ class SkyServiceSpec:
             if not 1 <= ports <= 65535:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError('Port must be between 1 and 65535.')
-        service_config['ports'] = str(ports)
+        service_config['ports'] = str(ports) if ports is not None else None
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
