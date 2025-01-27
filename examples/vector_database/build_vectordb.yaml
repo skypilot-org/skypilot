@@ -16,7 +16,7 @@ file_mounts:
 setup: |
   pip install chromadb pandas tqdm pyarrow
 
-workdir: ~/skypilot/examples/batch_inference
+workdir: ~/skypilot/examples/vector_database
 
 run: |
   python scripts/build_vectordb.py \

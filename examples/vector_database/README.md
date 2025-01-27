@@ -27,15 +27,18 @@ We need to convert images into vector representations (embeddings) so they can b
 
 Use the following command to launch a job that processes your image dataset and computes the CLIP embeddings: 
 ```
-python3 launch_managed_jobs.py 
+python3 batch_compute_vectors.py
 ```
+
+This will give 
+
 
 ### Step 2: Construct the Vector Database from Computed Embeddings
 Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
 
 To construct the database from embeddings: 
 ```
-sky jobs launch scripts/build_vectordb.yaml 
+sky jobs launch build_vectordb.yaml 
 ```
 
 ### Step 3: Serve the Constructed Vector Database
