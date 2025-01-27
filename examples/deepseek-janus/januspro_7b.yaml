@@ -2,7 +2,7 @@ envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 resources:
-  accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
+  accelerators: {L4:1, A10G:1, A10:1, A100:8, A100-80GB:1}
   ports:
     - 8000
   disk_tier: best

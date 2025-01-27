@@ -2,7 +2,7 @@
 
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 <p align="center">
-<img src="https://i.imgur.com/fB8MdkI.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/xOc6gx3.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
 </p>
 
 On Jan 27, 2025, DeepSeek AI released the [Janus](https://github.com/deepseek-ai/Janus). It outperforms **state-of-the-art Vision Language Models** such as LLaVA, supporting a variety of Vision-Language tasks such as image generation and Q&A. 
@@ -34,8 +34,7 @@ Run Janus (1.5B) with
 ```
 sky launch janus_1.5b.yaml \
   -c janus \
-  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
-  --gpus L4:1
+  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN 
 ```
 
 or run Janus Pro (7B) with: 
@@ -43,9 +42,15 @@ or run Janus Pro (7B) with:
 ```
 sky launch januspro_7b.yaml \
   -c janus \
-  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
-  --gpus L4:1
+  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN 
 ```
+
+It will show all the available machines that you have and pricing
+
+<p align="center">
+<img src="https://i.imgur.com/DjxZEoW.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
+</p>
+
 
 ### Step 2: Access the deployed server
 You should be able to access directly via a terminal prompt via 
