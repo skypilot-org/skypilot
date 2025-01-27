@@ -357,22 +357,26 @@ class Kubernetes(clouds.Cloud):
         acc_count = k.accelerator_count if k.accelerator_count else 0
         acc_type = k.accelerator_type if k.accelerator_type else None
 
-        image_id_dict = resources.image_id
-        if image_id_dict is not None:
-            # Use custom image specified in resources
-            if None in image_id_dict:
-                image_id = image_id_dict[None]
+        def _get_image_id(resources: 'resources_lib.Resources') -> str:
+            image_id_dict = resources.image_id
+            if image_id_dict is not None:
+                # Use custom image specified in resources
+                if None in image_id_dict:
+                    image_id = image_id_dict[None]
+                else:
+                    assert resources.region in image_id_dict, image_id_dict
+                    image_id = image_id_dict[resources.region]
+                if image_id.startswith('docker:'):
+                    image_id = image_id[len('docker:'):]
             else:
-                assert resources.region in image_id_dict, image_id_dict
-                image_id = image_id_dict[resources.region]
-            if image_id.startswith('docker:'):
-                image_id = image_id[len('docker:'):]
-        else:
-            # Select image based on whether we are using GPUs or not.
-            image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
-            # Get the container image ID from the service catalog.
-            image_id = service_catalog.get_image_id_from_tag(
-                image_id, clouds='kubernetes')
+                # Select image based on whether we are using GPUs or not.
+                image_id = self.IMAGE_GPU if acc_count > 0 else self.IMAGE_CPU
+                # Get the container image ID from the service catalog.
+                image_id = service_catalog.get_image_id_from_tag(
+                    image_id, clouds='kubernetes')
+            return image_id
+
+        image_id = _get_image_id(resources)
         # TODO(romilb): Create a lightweight image for SSH jump host
         ssh_jump_image = service_catalog.get_image_id_from_tag(
             self.IMAGE_CPU, clouds='kubernetes')

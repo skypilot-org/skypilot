@@ -314,6 +314,13 @@ def _execute(
             logger.info('Dryrun finished.')
             return None, None
 
+        # TODO(andyl): extend to more clouds beyond Kubernetes.
+        is_high_avail_controller = (
+            controller_utils.Controllers.from_name(cluster_name) is not None
+            and isinstance(handle, backends.CloudVmRayResourceHandle)
+            and isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
+        )
+
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
         do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
@@ -332,7 +339,7 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            backend.setup(handle, task, detach_setup=detach_setup)
+            backend.setup(handle, task, detach_setup=detach_setup, dump_setup_script=is_high_avail_controller)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -348,7 +355,8 @@ def _execute(
                 job_id = backend.execute(handle,
                                          task,
                                          detach_run,
-                                         dryrun=dryrun)
+                                         dryrun=dryrun,
+                                         is_high_avail_controller=is_high_avail_controller)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)

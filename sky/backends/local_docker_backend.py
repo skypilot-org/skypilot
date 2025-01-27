@@ -212,7 +212,7 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         self.volume_mounts[handle] = docker_mounts
 
     def _setup(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
-               detach_setup: bool) -> None:
+               detach_setup: bool, dump_setup_script: bool = False) -> None:
         """Launches a container and runs a sleep command on it.
 
         setup() in LocalDockerBackend runs the container with a sleep job
@@ -223,6 +223,10 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         style = colorama.Style
         assert handle in self.images, \
             f'No image found for {handle}, have you run Backend.provision()?'
+        if dump_setup_script:
+            raise NotImplementedError('dump_setup_script flag is for High Availability '
+                                      'controller, which is not supported in '
+                                      'LocalDockerBackend.')
         image_tag, metadata = self.images[handle]
         volumes = self.volume_mounts[handle]
         runtime = 'nvidia' if self._use_gpu else None
@@ -274,8 +278,12 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  handle: LocalDockerResourceHandle,
                  task: 'task_lib.Task',
                  detach_run: bool,
-                 dryrun: bool = False) -> None:
+                 dryrun: bool = False,
+                 is_high_avail_controller: bool = False) -> None:
         """ Launches the container."""
+        if is_high_avail_controller:
+            raise NotImplementedError('High availability controller is not supported in '
+                                      'LocalDockerBackend.')
 
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '

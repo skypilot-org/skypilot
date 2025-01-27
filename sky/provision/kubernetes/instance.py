@@ -503,37 +503,40 @@ def _create_serve_controller_deployment(
     assert len(
         pod_spec['spec']['containers']) == 1, 'Only one container is supported'
 
-    # The reason we mount the whole /home/sky/.sky instead of just
-    # /home/sky/.sky/serve is that k8s changes the ownership of the
-    # mounted directory to root:root. If we only mount /home/sky/.sky/serve,
-    # the serve controller will not be able to create the serve directory.
-    # pylint: disable=line-too-long
+
+    # Please be careful when changing this.
+    # When mounting, Kubernetes changes the ownership of the parent directory
+    # to root:root.
     # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
 
-    # TODO(andyl): Are we mounting too much? Should we do a more fine-grained
-    # mounting?
-    # TODO(andyl): The sematic of `~/.sky` is not clear.
     volume_mounts = {
-        # TODO(andyl): use some constants here
-        'sky-data': '/home/sky/.sky',
+        # TODO(andyl): make sure user is sky, and use constant here
+        'sky-data': '/home/sky',
     }
 
+    # The pod template part of pod_spec is used in the deployment
+    # spec.template.spec
+    # TODO(andyl): Make sure we are not ignoring any other
+    # fields in pod_spec.
+    spec = pod_spec['spec']
+    container = spec['containers'][0]
+
     if volume_mounts:
-        if pod_spec['spec'].get('volumes') is None:
-            pod_spec['spec']['volumes'] = []
-        if pod_spec['spec']['containers'][0].get('volumeMounts') is None:
-            pod_spec['spec']['containers'][0]['volumeMounts'] = []
+        if spec.get('volumes') is None:
+            spec['volumes'] = []
+        if container.get('volumeMounts') is None:
+            container['volumeMounts'] = []
 
     for name, mount_path in volume_mounts.items():
         pvc_name = f'{cluster_name_on_cloud}-{name}'
         _create_persistent_volume_claim(namespace, context, pvc_name)
-        pod_spec['spec']['volumes'].append({
+        spec['volumes'].append({
             'name': name,
             'persistentVolumeClaim': {
                 'claimName': pvc_name
             }
         })
-        pod_spec['spec']['containers'][0]['volumeMounts'].append({
+        container['volumeMounts'].append({
             'mountPath': mount_path,
             'name': name
         })
@@ -545,8 +548,25 @@ def _create_serve_controller_deployment(
     }
     template_metadata['labels'].update(deployment_labels)
 
-    # The pod template part of pod_spec is used in the deployment
-    # spec.template.spec
+    image_id = container['image']
+    assert image_id is not None, 'Image ID is None'
+    init_containers = spec.get('initContainers', [])
+    if init_containers:
+        init_containers.append({
+            'name': 'init-copy-home',
+            'image': image_id,
+            'command': ['/bin/sh', '-c'],
+            'args': [
+                'echo "Copying home directory to /mnt/home"; '
+                'rsync -a /home/sky/ /mnt/home; '
+                'echo "Copy completed.";'
+                'ls -la /mnt/home'
+            ],
+            'volumeMounts': [{
+                'name': 'sky-data',
+                'mountPath': '/mnt/home'
+            }]
+        })
 
     deployment_spec = {
         'apiVersion': 'apps/v1',
@@ -563,7 +583,9 @@ def _create_serve_controller_deployment(
             'template': {
                 'metadata': template_metadata,
                 'spec': {
-                    **pod_spec['spec'], 'restartPolicy': 'Always'
+                    'initContainers': init_containers,
+                    **spec,
+                    'restartPolicy': 'Always'
                 }
             }
         }
