@@ -321,6 +321,7 @@ def test_kubernetes_context_switch():
 
 
 @pytest.mark.no_vast  # Requires AWS
+@pytest.mark.no_nebius  # Docker image is currently not supported on Nebius.
 @pytest.mark.parametrize(
     'image_id',
     [

@@ -548,6 +548,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
