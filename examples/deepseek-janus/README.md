@@ -2,7 +2,7 @@
 
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 <p align="center">
-<img src="https://i.imgur.com/fB8MdkI.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/fB8MdkI.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
 </p>
 
 On Jan 27, 2025, DeepSeek AI released the [Janus](https://github.com/deepseek-ai/Janus). It outperforms **state-of-the-art Vision Language Models** such as LLaVA, supporting a variety of Vision-Language tasks such as image generation and Q&A. 
@@ -59,8 +59,8 @@ echo `sky status --ip janus`
 
 ### Example Prompts
 ```
-A modern fighter jet soaring through a vast, vibrant blue sky filled with fluffy white clouds. The jet leaves behind a sleek contrail as it cuts through the atmosphere. The sunlight reflects off the jet's metallic surface, highlighting its aerodynamic design. The pilot, wearing a high-tech flight suit and helmet with a reflective visor, gazes into the horizon. The sky transitions from a deep azure at the top to a soft pastel near the horizon, creating a stunning gradient. Cinematic lighting, ultra-realistic details, and dynamic motion blur effects.
+A blue sky,  vast fluffy clouds surrounding, enchanting, immortal, dynamic motion, cinematic, Unreal Engine 5 and Octane Render, highly detailed, photorealistic, natural colors, epic atmosphere, and breathtaking realism
 ```
 <p align="center">
-<img src="https://i.imgur.com/k4yh5BR.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/k4yh5BR.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
 </p>
