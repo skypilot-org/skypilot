@@ -122,7 +122,15 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
 @_thread_local_lru_cache()
 def session():
     """Create an AWS session."""
-    return _create_aws_object(boto3.session.Session, 'session')
+    s = _create_aws_object(boto3.session.Session, 'session')
+    if s.get_credentials() is None:
+        # s.get_credentials() can be None if there are actually no credentials,
+        # or if we fail to get credentials from IMDS (e.g. due to throttling).
+        # Technically, it could be okay to have no credentials, as certain AWS
+        # APIs don't actually need them. But afaik everything we use AWS for
+        # needs credentials.
+        raise botocore_exceptions().NoCredentialsError()
+    return s
 
 
 # Avoid caching the resource/client objects. If we are using the assumed role,
