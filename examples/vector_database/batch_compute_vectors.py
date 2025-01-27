@@ -68,7 +68,7 @@ def main():
         raise ValueError("HF_TOKEN not found in ~/.env or environment variable")
 
     # Load the task template
-    task = sky.Task.from_yaml('clip.yaml')
+    task = sky.Task.from_yaml('compute_vectors.yaml')
 
     # Launch jobs for each partition
     for job_rank in range(args.num_jobs):
@@ -89,7 +89,7 @@ def main():
                 name=f'clip-inference-{job_start}-{job_end}',
             )
         else:
-            sky.launch(task_copy,)
+            sky.launch(task_copy)
 
 
 if __name__ == '__main__':

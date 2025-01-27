@@ -1,4 +1,4 @@
-name: clip-batch-inference
+name: clip-batch-compute-vectors
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, V100:1}
@@ -16,7 +16,7 @@ envs:
   START_IDX: ${START_IDX}
   END_IDX: ${END_IDX}
 
-workdir: ~/skypilot/examples/batch_inference
+workdir: ~/skypilot/examples/vector_database
 
 setup: |
   pip install numpy==1.26.4
@@ -25,7 +25,7 @@ setup: |
   pip install fastapi uvicorn aiohttp pandas pyarrow tenacity
 
 run: |
-  python scripts/batch_process_clip.py \
+  python scripts/compute_vectors.py \
     --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
     --start-idx ${START_IDX} \
     --end-idx ${END_IDX} \
