@@ -46,11 +46,19 @@ sky launch januspro_7b.yaml \
 ```
 
 It will show all the available machines that you have and pricing
+```
+...
 
-<p align="center">
-<img src="https://i.imgur.com/DjxZEoW.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
-</p>
-
+Considered resources (1 node):
+-------------------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE                   vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN   
+-------------------------------------------------------------------------------------------------------
+ AWS     g6.4xlarge                 16      64        L4:1           us-east-1     1.32          ✔     
+ AWS     g5.4xlarge                 16      64        A10G:1         us-east-1     1.62                
+ Azure   Standard_NV36ads_A10_v5    36      440       A10:1          eastus        3.20                
+ Azure   Standard_NC24ads_A100_v4   24      220       A100-80GB:1    eastus        3.67                
+-------------------------------------------------------------------------------------------------------
+````
 
 ### Step 2: Access the deployed server
 You should be able to access directly via a terminal prompt via 
