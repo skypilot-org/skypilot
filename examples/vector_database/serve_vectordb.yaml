@@ -17,7 +17,7 @@ setup: |
   pip install open_clip_torch chromadb pandas
   pip install fastapi uvicorn pydantic
 
-workdir: ~/skypilot/examples/batch_inference
+workdir: ~/skypilot/examples/vector_database
 
 run: |
   python scripts/serve_vectordb.py \

@@ -29,8 +29,7 @@ Use the following command to launch a job that processes your image dataset and 
 ```
 python3 batch_compute_vectors.py
 ```
-
-This will give 
+This will automatically find the cheapest available machines to compute the vectors. 
 
 
 ### Step 2: Construct the Vector Database from Computed Embeddings
@@ -39,6 +38,15 @@ Once you have the image embeddings, you need a specialized engine to perform rap
 To construct the database from embeddings: 
 ```
 sky jobs launch build_vectordb.yaml 
+```
+
+This process the generated clip embeddings in batches, generating output: 
+```
+(vectordb-build, pid=2457) INFO:__main__:Processing /clip_embeddings/embeddings_0_500.parquet_part_0/data.parquet
+Processing batches: 100%|██████████| 1/1 [00:00<00:00,  1.19it/s]
+Processing files:  92%|█████████▏| 11/12 [00:02<00:00,  5.36it/s]INFO:__main__:Processing /clip_embeddings/embeddings_500_1000.parquet_part_0/data.parquet
+Processing batches: 100%|██████████| 1/1 [00:02<00:00,  2.39s/it]
+Processing files: 100%|██████████| 12/12 [00:05<00:00,  2.04it/s]/1 [00:00<?, ?it/s]
 ```
 
 ### Step 3: Serve the Constructed Vector Database
@@ -59,7 +67,17 @@ This will deploy your vector database as a service on a cloud instance and a llo
 ### Step 4: Query the Deployed Vector Database
 Querying allows you to confirm that your database is working and retrieve semantic matches for a given text query. You can integrate this endpoint into larger applications (like an image search engine or recommendation system).
 
-To query the constructed database, run 
+To query the constructed database, 
+
+If you run through `sky launch`, use 
 ```
 $(sky status --ip vecdb_serve)
 ```
+deployed cluster. 
+
+If you run through `sky serve`, you may run
+```
+sky serve status vectordb --endpoint
+```
+
+to get the endpoint address of the service. 
