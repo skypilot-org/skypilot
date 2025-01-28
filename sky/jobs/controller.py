@@ -259,7 +259,7 @@ class JobsController:
                         handle = clusters[0].get('handle')
                         # Best effort to download and stream the logs.
                         self._download_log_and_stream(task_id, handle)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-except
                     # We don't want to crash here, so just log and continue.
                     logger.warning(
                         f'Failed to download and stream logs: '
