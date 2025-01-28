@@ -711,7 +711,7 @@ class AWS(clouds.Cloud):
     @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
-            sts = aws.client('sts')
+            sts = aws.client('sts', check_credentials=False)
             # The caller identity contains 3 fields: UserId, Account, Arn.
             # 1. 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
