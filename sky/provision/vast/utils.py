@@ -73,7 +73,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          of the type.
 
     """
-    cpu_ram  = float(instance_type.split('-')[-1])/1024
+    cpu_ram = float(instance_type.split('-')[-1]) / 1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
