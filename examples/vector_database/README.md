@@ -29,8 +29,16 @@ Use the following command to launch a job that processes your image dataset and 
 ```
 python3 batch_compute_vectors.py
 ```
-This will automatically find the cheapest available machines to compute the vectors. 
-
+This will automatically find the cheapest available machines to compute the vectors. Expect: 
+```
+...
+(clip-batch-compute-vectors, pid=2523) 2025-01-27 23:57:27,387 - root - INFO - Saved partition 2 to /output/embeddings_90000_100000.parquet_part_2/data.parquet
+(clip-batch-compute-vectors, pid=2523) 2025-01-27 23:59:39,720 - root - INFO - Saved partition 3 to /output/embeddings_90000_100000.parquet_part_3/data.parquet
+(clip-batch-compute-vectors, pid=2523) 2025-01-28 00:01:56,707 - root - INFO - Saved partition 4 to /output/embeddings_90000_100000.parquet_part_4/data.parquet
+(clip-batch-compute-vectors, pid=2523) 2025-01-28 00:04:12,200 - root - INFO - Saved partition 5 to /output/embeddings_90000_100000.parquet_part_5/data.parquet
+(clip-batch-compute-vectors, pid=2523) 2025-01-28 00:06:25,009 - root - INFO - Saved partition 6 to /output/embeddings_90000_100000.parquet_part_6/data.parquet
+...
+```
 
 ### Step 2: Construct the Vector Database from Computed Embeddings
 Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
