@@ -320,3 +320,8 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
+
+# Constants for path in K8S pod to store persistent setup and run scripts
+# so that we can run them again after the pod restarts.
+PERSISTENT_SETUP_SCRIPT_PATH = '~/.sky/setup_commands.sh'
+PERSISTENT_RUN_SCRIPT_DIR = '~/.sky/task_run'

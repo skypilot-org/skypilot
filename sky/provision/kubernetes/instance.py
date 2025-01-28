@@ -12,7 +12,6 @@ from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
-from sky.provision import docker_utils
 from sky.provision.kubernetes import config as config_lib
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -503,10 +502,10 @@ def _create_serve_controller_deployment(
     assert len(
         pod_spec['spec']['containers']) == 1, 'Only one container is supported'
 
-
     # Please be careful when changing this.
     # When mounting, Kubernetes changes the ownership of the parent directory
     # to root:root.
+    # pylint: disable=line-too-long
     # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
 
     volume_mounts = {
@@ -584,8 +583,7 @@ def _create_serve_controller_deployment(
                 'metadata': template_metadata,
                 'spec': {
                     'initContainers': init_containers,
-                    **spec,
-                    'restartPolicy': 'Always'
+                    **spec, 'restartPolicy': 'Always'
                 }
             }
         }

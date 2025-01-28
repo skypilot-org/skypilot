@@ -102,10 +102,16 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
-    def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-              detach_setup: bool, dump_setup_script: bool = False) -> None:
+    def setup(self,
+              handle: _ResourceHandleType,
+              task: 'task_lib.Task',
+              detach_setup: bool,
+              dump_final_script: bool = False) -> None:
         with rich_utils.safe_status(ux_utils.spinner_message('Running setup')):
-            return self._setup(handle, task, detach_setup, dump_setup_script=dump_setup_script)
+            return self._setup(handle,
+                               task,
+                               detach_setup,
+                               dump_final_script=dump_final_script)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
@@ -127,7 +133,8 @@ class Backend(Generic[_ResourceHandleType]):
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
         with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
-            return self._execute(handle, task, detach_run, dryrun, is_high_avail_controller)
+            return self._execute(handle, task, detach_run, dryrun,
+                                 is_high_avail_controller)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -174,8 +181,11 @@ class Backend(Generic[_ResourceHandleType]):
     ) -> None:
         raise NotImplementedError
 
-    def _setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
-               detach_setup: bool, dump_setup_script: bool = False) -> None:
+    def _setup(self,
+               handle: _ResourceHandleType,
+               task: 'task_lib.Task',
+               detach_setup: bool,
+               dump_final_script: bool = False) -> None:
         raise NotImplementedError
 
     def _execute(self,

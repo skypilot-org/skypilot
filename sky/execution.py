@@ -316,10 +316,9 @@ def _execute(
 
         # TODO(andyl): extend to more clouds beyond Kubernetes.
         is_high_avail_controller = (
-            controller_utils.Controllers.from_name(cluster_name) is not None
-            and isinstance(handle, backends.CloudVmRayResourceHandle)
-            and isinstance(handle.launched_resources.cloud, clouds.Kubernetes)
-        )
+            controller_utils.Controllers.from_name(cluster_name) is not None and
+            isinstance(handle, backends.CloudVmRayResourceHandle) and
+            isinstance(handle.launched_resources.cloud, clouds.Kubernetes))
 
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
@@ -339,7 +338,10 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            backend.setup(handle, task, detach_setup=detach_setup, dump_setup_script=is_high_avail_controller)
+            backend.setup(handle,
+                          task,
+                          detach_setup=detach_setup,
+                          dump_final_script=is_high_avail_controller)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -352,11 +354,12 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun,
-                                         is_high_avail_controller=is_high_avail_controller)
+                job_id = backend.execute(
+                    handle,
+                    task,
+                    detach_run,
+                    dryrun=dryrun,
+                    is_high_avail_controller=is_high_avail_controller)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
