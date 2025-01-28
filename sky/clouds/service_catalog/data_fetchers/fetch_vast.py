@@ -53,7 +53,7 @@ if __name__ == '__main__':
     # which will have less diskspace and network
     # bandwidth than others.
     offerList = vast.vast().search_offers(
-        query='inet_down >= 100 disk_space >= 256', limit=10000)
+        query='inet_down >= 100 disk_space >= 80', limit=10000)
     priceMap: Dict[str, List] = collections.defaultdict(list)
     for offer in offerList:
         entry = {}
