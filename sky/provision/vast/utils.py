@@ -64,11 +64,16 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          search for the machine again and potentially return a failure
          if there is no availability.
 
+	  *  We pass in the cpu_ram here as a guarantor to make sure the
+		 instance we match with will be compliant with the requested
+		 amount of memory.
+
       *  Vast instance types are an invention for skypilot. Refer to
          service_catalog/vast_catalog.py for the current construction
          of the type.
 
     """
+    cpu_ram  = float(instance_type.split('-')[-1])/1024
     gpu_name = instance_type.split('-')[1].replace('_', ' ')
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
@@ -77,6 +82,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
         f'gpu_name="{gpu_name}"',
+        f'cpu_ram>="{cpu_ram}"',
     ])
 
     instance_list = vast.vast().search_offers(query=query)
