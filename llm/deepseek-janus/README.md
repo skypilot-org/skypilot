@@ -20,7 +20,7 @@ pip install 'skypilot-nightly[all]'
 
 Pick one of the following depending on what infra you want to run:
 
-**If your local machine/cluster has GPU**: you can run SkyPilot [directly on existing machines](https://docs.skypilot.co/en/latest/reservations/existing-machines.html) with 
+**If your local machine/cluster has GPU**: you can run SkyPilot [directly on existing machines](https://docs.skypilot.co/en/latest/reservations/existing-machines.html).
 
 **If you want to use Clouds** (15+ clouds are supported):
 See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html) for details.
@@ -28,9 +28,10 @@ See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 
 ### Step 1: Run it with SkyPilot
 
-Now it's time to run Janus with SkyPilot. The instruction can be dependent on your existing hardware.  
+Now it's time to run Janus with SkyPilot. Commands may vary based on the GPUs available to you.  
+ 
 
-Run Janus (1.5B) with
+Run Janus (1.5B) with:
 ```
 sky launch janus_1.5b.yaml \
   -c janus \
