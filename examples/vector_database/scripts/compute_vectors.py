@@ -9,10 +9,11 @@ from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
                     TypeVar)
 
 import numpy as np
+import pandas as pd
 from PIL import Image
 import torch
 from tqdm import tqdm
-import pandas as pd
+
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
 ModelInputType = TypeVar('ModelInputType')
@@ -127,7 +128,6 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         return [(idx, pickle.dumps((images_base64[idx], arr)))
                 for idx, arr in zip(indices, embeddings)]
 
-
     async def run(self):
         """
         Run the batch processing pipeline without appending to existing files.
@@ -139,7 +139,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         async for idx, input_data in self.do_data_loading():
             self._current_batch.append((idx, input_data))
             if len(self._current_batch) >= self.batch_size:
-                batch_results = await self.do_batch_processing(self._current_batch)
+                batch_results = await self.do_batch_processing(
+                    self._current_batch)
                 results.extend(batch_results)
                 self._current_batch = []
 
@@ -151,7 +152,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                     output_file = os.path.join(partition_dir, "data.parquet")
 
                     df.to_parquet(output_file, engine="pyarrow", index=False)
-                    logging.info(f"Saved partition {partition_counter} to {output_file}")
+                    logging.info(
+                        f"Saved partition {partition_counter} to {output_file}")
                     results.clear()
                     partition_counter += 1
 
@@ -168,7 +170,9 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             output_file = os.path.join(partition_dir, "data.parquet")
 
             df.to_parquet(output_file, engine="pyarrow", index=False)
-            logging.info(f"Saved final partition {partition_counter} to {output_file}")
+            logging.info(
+                f"Saved final partition {partition_counter} to {output_file}")
+
 
 async def main():
     """Example usage of the batch processing framework."""
