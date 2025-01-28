@@ -3,13 +3,12 @@ name: clip-batch-compute-vectors
 resources:
   accelerators: {L4:1, A10G:1, A10:1, V100:1}
   memory: 32+
-  cloud: aws
 
 num_nodes: 1
 
 file_mounts:
   /output:
-    source: s3://sky-clip-embedding
+    name: sky-clip-embedding
     mode: MOUNT
 
 envs:
