@@ -224,8 +224,22 @@ class JobsController:
                 self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = managed_job_utils.get_job_timestamp(
-                    self._backend, cluster_name, get_end_time=True)
+                try:
+                    end_time = managed_job_utils.get_job_timestamp(
+                        self._backend, cluster_name, get_end_time=True)
+                except exceptions.CommandError as e:
+                    if e.returncode == 255:
+                        # Failed to connect - probably the instance was
+                        # preempted since the job completed. We shouldn't crash
+                        # here, so just log and use the current time.
+                        logger.info(
+                            f'Failed to connect to the instance {cluster_name} '
+                            'since the job completed. Assuming the instance '
+                            'was preempted.')
+                        end_time = time.time()
+                    else:
+                        raise
+
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
@@ -235,15 +249,23 @@ class JobsController:
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
-                clusters = backend_utils.get_clusters(
-                    cluster_names=[cluster_name],
-                    refresh=False,
-                    include_controller=False)
-                if clusters:
-                    assert len(clusters) == 1, (clusters, cluster_name)
-                    handle = clusters[0].get('handle')
-                    # Best effort to download and stream the logs.
-                    self._download_log_and_stream(task_id, handle)
+                try:
+                    clusters = backend_utils.get_clusters(
+                        cluster_names=[cluster_name],
+                        refresh=False,
+                        include_controller=False)
+                    if clusters:
+                        assert len(clusters) == 1, (clusters, cluster_name)
+                        handle = clusters[0].get('handle')
+                        # Best effort to download and stream the logs.
+                        self._download_log_and_stream(task_id, handle)
+                except Exception as e:
+                    # We don't want to crash here, so just log and continue.
+                    logger.warning(
+                        f'Failed to download and stream logs: '
+                        f'{common_utils.format_exception(e)}',
+                        exc_info=True)
+
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 managed_job_utils.terminate_cluster(cluster_name=cluster_name)
@@ -291,13 +313,29 @@ class JobsController:
                     continue
                 elif job_status in job_lib.JobStatus.user_code_failure_states():
                     # The user code has probably crashed, fail immediately.
-                    end_time = managed_job_utils.get_job_timestamp(
-                        self._backend, cluster_name, get_end_time=True)
+                    try:
+                        end_time = managed_job_utils.get_job_timestamp(
+                            self._backend, cluster_name, get_end_time=True)
+                    except exceptions.CommandError as e:
+                        if e.returncode == 255:
+                            end_time = time.time()
+                            logger.info(
+                                f'Failed to connect to cluster {cluster_name} '
+                                'to fetch job end time. Assuming the cluster '
+                                'was preempted, and using the current time.')
+                        else:
+                            raise
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(task_id, handle)
+                    try:
+                        self._download_log_and_stream(task_id, handle)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.error(
+                            'Failed to download and stream logs: '
+                            f'{common_utils.format_exception(e)}',
+                            exc_info=True)
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
