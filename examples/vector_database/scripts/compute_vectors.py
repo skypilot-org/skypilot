@@ -131,7 +131,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
     async def run(self):
         """
         Run the batch processing pipeline without appending to existing files.
-        Each partition writes a new Parquet file in its own directory.
+        Each partition is written atomically using a temporary file.
         """
         results = []
         partition_counter = 0
@@ -139,21 +139,26 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         async for idx, input_data in self.do_data_loading():
             self._current_batch.append((idx, input_data))
             if len(self._current_batch) >= self.batch_size:
-                batch_results = await self.do_batch_processing(
-                    self._current_batch)
+                batch_results = await self.do_batch_processing(self._current_batch)
                 results.extend(batch_results)
                 self._current_batch = []
 
                 if len(results) >= self.checkpoint_size:
-                    # Convert results to a DataFrame and write out
+                    # Convert results to a DataFrame
                     df = pd.DataFrame(results, columns=["idx", "output"])
-                    partition_dir = f"{self.output_path}_part_{partition_counter}"
-                    os.makedirs(partition_dir, exist_ok=True)
-                    output_file = os.path.join(partition_dir, "data.parquet")
-
-                    df.to_parquet(output_file, engine="pyarrow", index=False)
+                    
+                    # Create temporary and final file paths
+                    final_path = f"{self.output_path}_part_{partition_counter}.parquet"
+                    temp_path = f"/tmp/{partition_counter}.tmp"
+                    
+                    # Write to temporary file first
+                    df.to_parquet(temp_path, engine="pyarrow", index=False)
+                    
+                    # Atomic move to final destination
+                    os.replace(temp_path, final_path)
+                    
                     logging.info(
-                        f"Saved partition {partition_counter} to {output_file}")
+                        f"Saved partition {partition_counter} to {final_path} with {len(df)} rows")
                     results.clear()
                     partition_counter += 1
 
@@ -165,13 +170,13 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         # Write the final partition if there are any leftover results
         if results:
             df = pd.DataFrame(results, columns=["idx", "output"])
-            partition_dir = f"{self.output_path}_part_{partition_counter}"
-            os.makedirs(partition_dir, exist_ok=True)
-            output_file = os.path.join(partition_dir, "data.parquet")
-
-            df.to_parquet(output_file, engine="pyarrow", index=False)
-            logging.info(
-                f"Saved final partition {partition_counter} to {output_file}")
+            final_path = f"{self.output_path}_part_{partition_counter}.parquet"
+            temp_path = f"/tmp/{partition_counter}.tmp"
+            
+            df.to_parquet(temp_path, engine="pyarrow", index=False)
+            os.replace(temp_path, final_path)
+            
+            logging.info(f"Saved final partition {partition_counter} to {final_path}")
 
 
 async def main():
