@@ -478,6 +478,13 @@ def total_number_provisioning_replicas() -> int:
     return provisioning_count
 
 
+def get_replicas_at_status(
+        service_name: str,
+        status: ReplicaStatus) -> List['replica_managers.ReplicaInfo']:
+    replicas = get_replica_infos(service_name)
+    return [replica for replica in replicas if replica.status == status]
+
+
 # === Version functions ===
 def add_version(service_name: str) -> int:
     """Adds a version to the database."""

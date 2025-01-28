@@ -634,9 +634,38 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
 
+        self._recover_replica_operations()
+
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
+
+    def _recover_replica_operations(self):
+        """Let's see are there something to do for ReplicaManager in a
+        recovery run"""
+        assert (not self._launch_process_pool and not self._down_process_pool
+               ), 'We should not have any running processes in a recovery run'
+
+        # Pending replicas can be dropped safely, and we're only risk
+        # of launching less replicas than expected.
+        # But for provisioning and shutting down replicas, we need to
+        # be careful to prevent resource leak.
+        to_down_replicas = serve_state.get_replicas_at_status(
+            self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN)
+
+        to_down_replicas += serve_state.get_replicas_at_status(
+            self._service_name, serve_state.ReplicaStatus.PROVISIONING)
+
+        for replica_id in to_down_replicas:
+            try:
+                self._terminate_replica(replica_id.replica_id,
+                                        sync_down_logs=False,
+                                        replica_drain_delay_seconds=0)
+            # pylint: disable=broad-except
+            except Exception as e:
+                logger.error(
+                    f'Failed to terminate replica {replica_id} in recovery'
+                    f'run: {e}')
 
     ################################
     # Replica management functions #
