@@ -49,7 +49,11 @@ if __name__ == '__main__':
     writer = csv.DictWriter(sys.stdout, fieldnames=[x[1] for x in mapped_keys])
     writer.writeheader()
 
-    offerList = vast.vast().search_offers(limit=10000)
+    # Vast has a wide variety of machines, some of
+    # which will have less diskspace and network
+    # bandwidth than others.
+    offerList = vast.vast().search_offers(
+        query='inet_down >= 100 disk_space >= 256', limit=10000)
     priceMap: Dict[str, List] = collections.defaultdict(list)
     for offer in offerList:
         entry = {}
