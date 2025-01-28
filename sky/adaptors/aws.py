@@ -120,7 +120,7 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
-def session(check_credentials=True):
+def session(check_credentials: bool = True):
     """Create an AWS session."""
     s = _create_aws_object(boto3.session.Session, 'session')
     if check_credentials and s.get_credentials() is None:
