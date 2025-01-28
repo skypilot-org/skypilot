@@ -5,6 +5,7 @@ from io import BytesIO
 import logging
 import os
 import pickle
+import shutil
 from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
                     TypeVar)
 
@@ -13,7 +14,6 @@ import pandas as pd
 from PIL import Image
 import torch
 from tqdm import tqdm
-import shutil
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -140,27 +140,29 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         async for idx, input_data in self.do_data_loading():
             self._current_batch.append((idx, input_data))
             if len(self._current_batch) >= self.batch_size:
-                batch_results = await self.do_batch_processing(self._current_batch)
+                batch_results = await self.do_batch_processing(
+                    self._current_batch)
                 results.extend(batch_results)
                 self._current_batch = []
 
                 if len(results) >= self.checkpoint_size:
                     # Convert results to a DataFrame
                     df = pd.DataFrame(results, columns=["idx", "output"])
-                    
+
                     # Create temporary and final file paths
                     final_path = f"{self.output_path}_part_{partition_counter}.parquet"
                     temp_path = f"/tmp/{partition_counter}.tmp"
-                    
+
                     # Write to temporary file first
                     df.to_parquet(temp_path, engine="pyarrow", index=False)
-                    
+
                     # Copy from temp to final destination
                     shutil.copy2(temp_path, final_path)
                     os.remove(temp_path)  # Clean up temp file
-                    
+
                     logging.info(
-                        f"Saved partition {partition_counter} to {final_path} with {len(df)} rows")
+                        f"Saved partition {partition_counter} to {final_path} with {len(df)} rows"
+                    )
                     results.clear()
                     partition_counter += 1
 
@@ -174,12 +176,13 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             df = pd.DataFrame(results, columns=["idx", "output"])
             final_path = f"{self.output_path}_part_{partition_counter}.parquet"
             temp_path = f"/tmp/{partition_counter}.tmp"
-            
+
             df.to_parquet(temp_path, engine="pyarrow", index=False)
             shutil.copy2(temp_path, final_path)
             os.remove(temp_path)  # Clean up temp file
-            
-            logging.info(f"Saved final partition {partition_counter} to {final_path}")
+
+            logging.info(
+                f"Saved final partition {partition_counter} to {final_path}")
 
 
 async def main():
