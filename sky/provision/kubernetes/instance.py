@@ -515,9 +515,7 @@ def _create_serve_controller_deployment(
 
     # The pod template part of pod_spec is used in the deployment
     # spec.template.spec
-    # TODO(andyl): Make sure we are not ignoring any other
-    # fields in pod_spec.
-    spec = pod_spec['spec']
+    spec = pod_spec.pop('spec')
     container = spec['containers'][0]
 
     if volume_mounts:
@@ -541,6 +539,7 @@ def _create_serve_controller_deployment(
         })
 
     template_metadata = pod_spec.pop('metadata')
+    assert pod_spec.keys() == {"apiVersion", "kind"}, f"pod_spec has fields {pod_spec.keys()}"
 
     deployment_labels = {
         'app': cluster_name_on_cloud,
@@ -550,22 +549,21 @@ def _create_serve_controller_deployment(
     image_id = container['image']
     assert image_id is not None, 'Image ID is None'
     init_containers = spec.get('initContainers', [])
-    if init_containers:
-        init_containers.append({
-            'name': 'init-copy-home',
-            'image': image_id,
-            'command': ['/bin/sh', '-c'],
-            'args': [
-                'echo "Copying home directory to /mnt/home"; '
-                'rsync -a /home/sky/ /mnt/home; '
-                'echo "Copy completed.";'
-                'ls -la /mnt/home'
-            ],
-            'volumeMounts': [{
-                'name': 'sky-data',
-                'mountPath': '/mnt/home'
-            }]
-        })
+    init_containers.append({
+        'name': 'init-copy-home',
+        'image': image_id,
+        'command': ['/bin/sh', '-c'],
+        'args': [
+            'echo "Copying home directory to /mnt/home"; '
+            'rsync -a /home/sky/ /mnt/home; '
+            'echo "Copy completed.";'
+            'ls -la /mnt/home'
+        ],
+        'volumeMounts': [{
+            'name': 'sky-data',
+            'mountPath': '/mnt/home'
+        }]
+    })
 
     deployment_spec = {
         'apiVersion': 'apps/v1',
