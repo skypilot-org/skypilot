@@ -87,6 +87,32 @@
             </div>
         </header>
 
+        {% if status_counts %}
+        <p>In progress tasks: 
+            {% for status, count in status_counts|dictsort %}
+                {{ count }} 
+                {% if status.startswith('RUNNING') %}
+                <span class="badge bg-primary">{{ status }}</span>
+                {% elif status.startswith('PENDING') or status.startswith('SUBMITTED') %}
+                <span class="badge bg-light">{{ status }}</span>
+                {% elif status.startswith('RECOVERING') or status.startswith('CANCELLING') or status.startswith('STARTING') %}
+                <span class="badge bg-info">{{ status }}</span>
+                {% elif status.startswith('SUCCEEDED') %}
+                <span class="badge bg-success">{{ status }}</span>
+                {% elif status.startswith('CANCELLED') %}
+                <span class="badge bg-secondary">{{ status }}</span>
+                {% elif status.startswith('FAILED') %}
+                <span class="badge bg-warning">{{ status }}</span>
+                {% else %}
+                {{ status }}
+                {% endif %}
+                {% if not loop.last %}, {% endif %}
+            {% endfor %}
+        </p>
+        {% else %}
+        <p>No in-progress managed jobs.</p>
+        {% endif %}
+
         <table class="table table-hover table-hover-selected fixed-header-table" id="jobs-table">
             <thead>
                 <tr>

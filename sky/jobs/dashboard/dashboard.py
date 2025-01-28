@@ -6,6 +6,7 @@ https://github.com/ray-project/ray/tree/master/dashboard/client/src) and/or get
 rid of the SSH port-forwarding business (see cli.py's job_dashboard()
 comment).
 """
+import collections
 import datetime
 import pathlib
 
@@ -54,6 +55,12 @@ def home():
     rows = managed_jobs.format_job_table(all_managed_jobs,
                                          show_all=True,
                                          return_rows=True)
+
+    status_counts = collections.defaultdict(int)
+    for task in all_managed_jobs:
+        if not task['status'].is_terminal():
+            status_counts[task['status'].value] += 1
+
     # Add an empty column for the dropdown button. This will be added in the
     # jobs/templates/index.html file.
     rows = [[''] + row for row in rows]
@@ -63,7 +70,7 @@ def home():
     columns = [
         '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
         'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
-        'Failure'
+        'Description'
     ]
     if rows and len(rows[0]) != len(columns):
         raise RuntimeError(
@@ -83,6 +90,7 @@ def home():
         rows=rows,
         last_updated_timestamp=timestamp,
         status_values=status_values,
+        status_counts=status_counts,
     )
     return rendered_html
 
