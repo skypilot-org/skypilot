@@ -187,7 +187,7 @@ To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS con
                 provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
           provision_timeout: 900
 
-    resourcse:
+    resources:
       cloud: kubernetes
       accelerators: A100:8
       labels:
