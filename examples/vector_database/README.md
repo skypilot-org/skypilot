@@ -22,7 +22,7 @@ HF_TOKEN=hf_xxxxx
 ```
 or set up the environment variable `HF_TOKEN`. 
 
-### Step 1: Compute Vectors from Image Data with CLIP
+### Step 1: Compute Vectors from Image Data with OpenAI CLIP
 We need to convert images into vector representations (embeddings) so they can be stored in a vector database. Models like [CLIP by OpenAI](https://openai.com/index/clip/) learn powerful representations that map images and text into the same embedding space. This allows for semantic similarity calculations, making queries like “a photo of a cloud” match relevant images.
 
 Use the following command to launch a job that processes your image dataset and computes the CLIP embeddings: 

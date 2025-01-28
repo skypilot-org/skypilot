@@ -47,9 +47,6 @@ def main():
                         type=int,
                         default=2,
                         help='Number of jobs to partition the work across')
-    parser.add_argument('--run-as-launch',
-                        action='store_true',
-                        help='Run as a launch')
     parser.add_argument("--env-path", type=str, default="~/.env")
     args = parser.parse_args()
 
@@ -83,14 +80,12 @@ def main():
             'HF_TOKEN': hf_token,
         })
 
-        if not args.run_as_launch:
-            sky.jobs.launch(
-                task_copy,
-                name=f'clip-inference-{job_start}-{job_end}',
-                detach_run=True,
-            )
-        else:
-            sky.launch(task_copy)
+        sky.jobs.launch(
+            task_copy,
+            name=f'vector-compute-{job_start}-{job_end}',
+            detach_run=True,
+        )
+
 
 
 if __name__ == '__main__':
