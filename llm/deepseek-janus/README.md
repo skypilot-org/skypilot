@@ -2,7 +2,7 @@
 
 > SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 <p align="center">
-<img src="https://i.imgur.com/xOc6gx3.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/BGws6TV.png" alt="DeepSeek-Janus on SkyPilot" style="width: 70%;">
 </p>
 
 On Jan 27, 2025, DeepSeek AI released the [Janus](https://github.com/deepseek-ai/Janus). It outperforms **state-of-the-art Vision Language Models** such as LLaVA, supporting a variety of Vision-Language tasks such as image generation and Q&A. 
