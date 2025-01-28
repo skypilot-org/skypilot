@@ -851,7 +851,7 @@ def test_skyserve_https(generic_cloud: str):
                 # Self signed certificate should fail without -k.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'output=$(curl $endpoint 2>&1); echo $output; '
-                'echo $output | grep "self-signed certificate"',
+                'echo $output | grep -E "self[ -]signed certificate"',
                 # curl with wrong schema (http) should fail.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'http_endpoint="${endpoint/https:/http:}"; '
