@@ -51,14 +51,24 @@ It will show all the available machines that you have and pricing
 ...
 
 Considered resources (1 node):
--------------------------------------------------------------------------------------------------------
- CLOUD   INSTANCE                   vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE   COST ($)   CHOSEN   
--------------------------------------------------------------------------------------------------------
- AWS     g6.4xlarge                 16      64        L4:1           us-east-1     1.32          ✔     
- AWS     g5.4xlarge                 16      64        A10G:1         us-east-1     1.62                
- Azure   Standard_NV36ads_A10_v5    36      440       A10:1          eastus        3.20                
- Azure   Standard_NC24ads_A100_v4   24      220       A100-80GB:1    eastus        3.67                
--------------------------------------------------------------------------------------------------------
+-----------------------------------------------------------------------------------------------------------------
+ CLOUD        INSTANCE                   vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE        COST ($)   CHOSEN   
+-----------------------------------------------------------------------------------------------------------------
+ Kubernetes   4CPU--16GB--1L4             4       16        L4:1           gke-cluster        0.00          ✔    
+ RunPod       1x_L4_SECURE               4       24        L4:1           CA                 0.44                
+ GCP          g2-standard-4              4       16        L4:1           us-east4-a         0.70                
+ AWS          g6.xlarge                  4       16        L4:1           us-east-1          0.80                
+ AWS          g5.xlarge                  4       16        A10G:1         us-east-1          1.01                
+ Fluidstack   A100_PCIE_80GB::1          28      120       A100-80GB:1    ARIZONA_USA        1.80                
+ RunPod       1x_A100-80GB_SECURE        8       80        A100-80GB:1    CA                 1.99                
+ Paperspace   A100-80G                   12      80        A100-80GB:1    East Coast (NY2)   3.18                
+ Azure        Standard_NV36ads_A10_v5    36      440       A10:1          eastus             3.20                
+ Azure        Standard_NC24ads_A100_v4   24      220       A100-80GB:1    eastus             3.67                
+ GCP          a2-ultragpu-1g             12      170       A100-80GB:1    us-central1-a      5.03                
+ Azure        Standard_ND96asr_v4        96      900       A100:8         eastus             27.20               
+ GCP          a2-highgpu-8g              96      680       A100:8         us-central1-a      29.39               
+ AWS          p4d.24xlarge               96      1152      A100:8         us-east-1          32.77               
+-----------------------------------------------------------------------------------------------------------------
 ````
 
 ### Step 2: Access the deployed server
