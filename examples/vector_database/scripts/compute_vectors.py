@@ -13,6 +13,7 @@ import pandas as pd
 from PIL import Image
 import torch
 from tqdm import tqdm
+import shutil
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -154,8 +155,9 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                     # Write to temporary file first
                     df.to_parquet(temp_path, engine="pyarrow", index=False)
                     
-                    # Atomic move to final destination
-                    os.replace(temp_path, final_path)
+                    # Copy from temp to final destination
+                    shutil.copy2(temp_path, final_path)
+                    os.remove(temp_path)  # Clean up temp file
                     
                     logging.info(
                         f"Saved partition {partition_counter} to {final_path} with {len(df)} rows")
@@ -174,7 +176,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
             temp_path = f"/tmp/{partition_counter}.tmp"
             
             df.to_parquet(temp_path, engine="pyarrow", index=False)
-            os.replace(temp_path, final_path)
+            shutil.copy2(temp_path, final_path)
+            os.remove(temp_path)  # Clean up temp file
             
             logging.info(f"Saved final partition {partition_counter} to {final_path}")
 
