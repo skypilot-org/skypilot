@@ -224,6 +224,7 @@ class Vast(clouds.Cloud):
             cpus=resources.cpus,
             region=resources.region,
             zone=resources.zone,
+            memory=resources.memory,
             clouds='vast')
         if instance_list is None:
             return resources_utils.FeasibleResources([], fuzzy_candidate_list,
