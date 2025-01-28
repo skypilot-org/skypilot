@@ -84,6 +84,8 @@ Runnable examples:
 
 * **LLMs on SkyPilot**
 
+  * `DeepSeek-R1 <https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1>`_
+  * `DeepSeek-Janus <https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-janus>`_
   * `Llama 3.2: lightweight and vision models <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_2>`_
   * `Pixtral <https://github.com/skypilot-org/skypilot/tree/master/llm/pixtral>`_
   * `Llama 3.1 finetuning <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1-finetuning>`_ and `serving <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1>`_
