@@ -2,7 +2,7 @@
 import os
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -43,7 +43,7 @@ def launch(
         detach_run: bool = False,
         # TODO(cooperc): remove fast arg before 0.8.0
         fast: bool = True,  # pylint: disable=unused-argument for compatibility
-) -> Optional[int]:
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 
@@ -63,9 +63,11 @@ def launch(
         sky.exceptions.NotSupportedError: the feature is not supported.
 
     Returns:
-        job_id: Optional[int]; The job ID of the managed job. None if the
+      job_id: Optional[int]; the job ID of the submitted job. None if the
         backend is not CloudVmRayBackend, or no job is submitted to
         the cluster.
+      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
+        if dryrun.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
@@ -145,7 +147,7 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        job_id, _ = sky.launch(task=controller_task,
+        return sky.launch(task=controller_task,
                                stream_logs=stream_logs,
                                cluster_name=controller_name,
                                detach_run=detach_run,
@@ -154,7 +156,6 @@ def launch(
                                retry_until_up=True,
                                fast=True,
                                _disable_controller_check=True)
-        return job_id
 
 
 def queue_from_kubernetes_pod(
