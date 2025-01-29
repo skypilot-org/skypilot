@@ -42,7 +42,11 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     Notes:
 
-      *  `disk_size`: we look for instances that are of the requested
+      *  `georegion`: This is a feature flag to provide an additional 
+         scope of geographical specificy while maintaining backward
+         compatibility.
+
+      *  `disk_size`: We look for instances that are of the requested
          size or greater than it. For instance, `disk_size=100` might
          return something with `disk_size` at 102 or even 1000.
 
@@ -78,6 +82,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
     query = ' '.join([
+        'georegion=true',
         f'geolocation="{region[-2:]}"',
         f'disk_space>={disk_size}',
         f'num_gpus={num_gpus}',
@@ -88,7 +93,9 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     instance_list = vast.vast().search_offers(query=query)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
-        return ''
+        raise RuntimeError(
+                'Failed to create instances, could not find an '
+                f'offer that satisfies the requirements "{query}".')
 
     instance_touse = instance_list[0]
 
