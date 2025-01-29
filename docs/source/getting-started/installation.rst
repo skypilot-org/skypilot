@@ -304,7 +304,7 @@ Vast
 
 .. code-block:: shell
   
-  pip install "vastai-sdk>=0.1.11"
+  pip install "vastai-sdk>=0.1.12"
   echo "<your_api_key_here>" > ~/.vast_api_key
 
 RunPod
