@@ -23,13 +23,13 @@ HF_TOKEN=hf_xxxxx
 or set up the environment variable `HF_TOKEN`. 
 
 ### Step 1: Compute Vectors from Image Data with OpenAI CLIP
-We need to convert images into vector representations (embeddings) so they can be stored in a vector database. Models like [CLIP by OpenAI](https://openai.com/index/clip/) learn powerful representations that map images and text into the same embedding space. This allows for semantic similarity calculations, making queries like “a photo of a cloud” match relevant images.
+You need to convert images into vector representations (embeddings) so they can be stored in a vector database. Models like [CLIP by OpenAI](https://openai.com/index/clip/) learn powerful representations that map images and text into the same embedding space. This allows for semantic similarity calculations, making queries like “a photo of a cloud” match relevant images.
 
 Use the following command to launch a job that processes your image dataset and computes the CLIP embeddings: 
 ```
 python3 batch_compute_vectors.py
 ```
-This will automatically find the cheapest available machines to compute the vectors. Expect: 
+This will automatically find the available machines to compute the vectors. Expect: 
 ```
 ...
 (clip-batch-compute-vectors, pid=2523) 2025-01-27 23:57:27,387 - root - INFO - Saved partition 2 to /output/embeddings_90000_100000.parquet_part_2/data.parquet
@@ -41,7 +41,7 @@ This will automatically find the cheapest available machines to compute the vect
 ```
 
 ### Step 2: Construct the Vector Database from Computed Embeddings
-Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
+Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. In this example, we use [ChromaDB](https://docs.trychroma.com/getting-started) to store and query the embeddings. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
 
 To construct the database from embeddings: 
 ```
@@ -59,17 +59,17 @@ Processing files: 100%|██████████| 12/12 [00:05<00:00,  2.04
 
 ### Step 3: Serve the Constructed Vector Database
 
-A vector database is only useful if you can *query* it. By serving the database, you expose an API endpoint that other applications (or your local client) can call to perform semantic search.
+To serve the constructed database, you expose an API endpoint that other applications (or your local client) can call to perform semantic search.
 
 To serve the constructed database: 
 ```
 sky launch -c vecdb_serve serve_vectordb.yaml
 ```
-you can also run 
+which runs the hosted vector database service. Alternatively, you can run 
 ```
 sky serve up serve_vectordb.yaml -n vectordb
 ```
-This will deploy your vector database as a service on a cloud instance and a llow you to interact with it via a public endpoint.
+This will deploy your vector database as a service on a cloud instance and allow you to interact with it via a public endpoint. Sky Serve facilitates automatic health checks and scaling of the service.
 
 
 ### Step 4: Query the Deployed Vector Database
