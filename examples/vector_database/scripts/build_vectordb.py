@@ -33,13 +33,8 @@ def process_batch(collection, batch_df):
     unpacked_data = [pickle.loads(row) for row in batch_df['output']]
     # Each row now contains (image_base64, embedding)
     images_base64, embeddings = zip(*unpacked_data)
-
-    embeddings = [embedding for embedding in embeddings]
-    # Store both image data and embeddings in metadata
-    images = [{'image_base64': img} for img in images_base64]
-
     # Add to collection
-    collection.add(ids=ids, embeddings=embeddings, documents=images)
+    collection.add(ids=list(ids), embeddings=list(embeddings), documents=list(images_base64))
 
 
 def main():
