@@ -66,8 +66,8 @@ def launch(
       job_id: Optional[int]; the job ID of the submitted job. None if the
         backend is not CloudVmRayBackend, or no job is submitted to
         the cluster.
-      handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
-        if dryrun.
+      handle: Optional[backends.ResourceHandle]; handle to the controller VM.
+        None if dryrun.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
