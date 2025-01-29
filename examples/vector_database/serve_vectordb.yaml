@@ -1,8 +1,9 @@
 name: vectordb-serve
 
+workdir: ~/skypilot/examples/vector_database
+
 resources:
-  cloud: aws
-  accelerators: {L4:1, A10G:1, A10:1, V100:1}
+  accelerators: {T4:1, L4:1, A10G:1, A10:1, V100:1, A100:1} # GPU is required for serving
   memory: 32+
   ports: 8000
 
@@ -17,7 +18,7 @@ setup: |
   pip install open_clip_torch chromadb pandas
   pip install fastapi uvicorn pydantic
 
-workdir: ~/skypilot/examples/vector_database
+
 
 run: |
   python scripts/serve_vectordb.py \

@@ -1,25 +1,25 @@
 name: vectordb-build
 
-resources:
-  cloud: aws 
-  # instance_type: r5.2xlarge 
+workdir: ~/skypilot/examples/vector_database
 
 file_mounts:
   /clip_embeddings:
     name: sky-clip-embedding
+    # this needs to be the same as the source in the compute_vectors.yaml
     mode: MOUNT
   
   /vectordb:
     name: sky-vectordb 
+    # this needs to be the same as the source in the serve_vectordb.yaml
     mode: MOUNT
 
 setup: |
   pip install chromadb pandas tqdm pyarrow
 
-workdir: ~/skypilot/examples/vector_database
 
 run: |
   python scripts/build_vectordb.py \
     --collection-name clip_embeddings \
     --persist-dir /vectordb/chroma \
+    --embedding-dir /clip_embeddings \
     --batch-size 1000 
