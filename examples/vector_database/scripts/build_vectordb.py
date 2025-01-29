@@ -23,10 +23,6 @@ def list_local_parquet_files(mount_path: str, prefix: str) -> list:
     return parquet_files
 
 
-def read_parquet_file(file_path: str) -> pd.DataFrame:
-    """Read a parquet file into a pandas DataFrame."""
-    return pd.read_parquet(file_path)
-
 
 def process_batch(collection, batch_df):
     """Process a batch of data and add it to the ChromaDB collection."""
@@ -40,10 +36,10 @@ def process_batch(collection, batch_df):
 
     embeddings = [embedding for embedding in embeddings]
     # Store both image data and embeddings in metadata
-    metadatas = [{'image_base64': img} for img in images_base64]
+    images = [{'image_base64': img} for img in images_base64]
 
     # Add to collection
-    collection.add(ids=ids, embeddings=embeddings, metadatas=metadatas)
+    collection.add(ids=ids, embeddings=embeddings, documents=images)
 
 
 def main():
@@ -60,7 +56,7 @@ def main():
     parser.add_argument('--batch-size',
                         type=int,
                         default=1000,
-                        help='Batch size for processing')
+                        help='Batch size for processing, this needs to fit in memory')
     parser.add_argument('--embeddings-dir',
                         type=str,
                         default='/clip_embeddings',
@@ -99,7 +95,7 @@ def main():
         for parquet_file in tqdm(parquet_files, desc="Processing files"):
             logger.info(f"Processing {parquet_file}")
             try:
-                df = read_parquet_file(parquet_file)
+                df = pd.read_parquet(parquet_file)
 
                 # Process in batches
                 for i in tqdm(range(0, len(df), args.batch_size),
