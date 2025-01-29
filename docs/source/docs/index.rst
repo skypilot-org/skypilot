@@ -30,6 +30,20 @@ Welcome to SkyPilot!
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
+.. .. image:: ../images/skypilot-abstractions.png
+..     :width: 400px
+..     :align: center
+
+.. .. raw:: html
+
+..    <p align="center">
+..    <picture>
+..       <img alt="SkyPilot overview" src="https://i.imgur.com/HkSJXSG.png" width=400px>
+..    </picture>
+..    </p>
+
+
+
 SkyPilot **abstracts away infra burdens**:
 
 - Launch :ref:`dev clusters <dev-cluster>`, :ref:`jobs <managed-jobs>`, and :ref:`serving <sky-serve>` on any infra
@@ -47,6 +61,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 * :ref:`Optimizer <auto-failover>`: 2x cost savings by auto-picking the cheapest & most available infra
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
+
 
 :ref:`Current supported infra <installation>` (Kubernetes; AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack, RunPod, Cudo, Paperspace, Cloudflare, Samsung, IBM, VMware vSphere):
 
@@ -132,6 +147,7 @@ Read the research:
    :maxdepth: 1
    :caption: Getting Started
 
+   ../getting-started/key-concepts
    ../getting-started/installation
    ../getting-started/quickstart
    ../examples/interactive-development
