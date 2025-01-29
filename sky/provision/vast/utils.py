@@ -46,6 +46,11 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
          scope of geographical specificy while maintaining backward
          compatibility.
 
+      *  `chunked`: This is a feature flag to give breadth to the 
+         snowflake nature of the vast catalog marketplace. It rounds
+         down various specifications of machines to emulate an instance
+         type and make them more interchangeable. 
+
       *  `disk_size`: We look for instances that are of the requested
          size or greater than it. For instance, `disk_size=100` might
          return something with `disk_size` at 102 or even 1000.
@@ -82,6 +87,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     num_gpus = int(instance_type.split('-')[0].replace('x', ''))
 
     query = ' '.join([
+        'chunked=true',
         'georegion=true',
         f'geolocation="{region[-2:]}"',
         f'disk_space>={disk_size}',
