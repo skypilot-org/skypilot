@@ -522,12 +522,14 @@ available_node_types:
               mkdir -p ~/.sky/task_run
               if [ -f ~/.sky/k8s_container_ready ]; then
                 # ! Keep this aligned with `CloudVmRayBackend._setup()`
+                chmod +x ~/.sky/setup_commands.sh
                 /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && ~/.sky/setup_commands.sh > /tmp/setup_commands.log 2>&1"
                 echo "=== Controller setup commands completed for recovery ==="
 
                 for file in ~/.sky/task_run/*; do
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
-                  /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file"
+                  chmod +x $file
+                  /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
                   echo "=== Controller task run for service (file: $file) completed for recovery ==="
                 done
               fi
