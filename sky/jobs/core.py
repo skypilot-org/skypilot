@@ -37,12 +37,12 @@ if typing.TYPE_CHECKING:
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-        task: Union['sky.Task', 'sky.Dag'],
-        name: Optional[str] = None,
-        stream_logs: bool = True,
-        detach_run: bool = False,
-        # TODO(cooperc): remove fast arg before 0.8.0
-        fast: bool = True,  # pylint: disable=unused-argument for compatibility
+    task: Union['sky.Task', 'sky.Dag'],
+    name: Optional[str] = None,
+    stream_logs: bool = True,
+    detach_run: bool = False,
+    # TODO(cooperc): remove fast arg before 0.8.0
+    fast: bool = True,  # pylint: disable=unused-argument for compatibility
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
@@ -148,14 +148,14 @@ def launch(
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
         return sky.launch(task=controller_task,
-                               stream_logs=stream_logs,
-                               cluster_name=controller_name,
-                               detach_run=detach_run,
-                               idle_minutes_to_autostop=skylet_constants.
-                               CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                               retry_until_up=True,
-                               fast=True,
-                               _disable_controller_check=True)
+                          stream_logs=stream_logs,
+                          cluster_name=controller_name,
+                          detach_run=detach_run,
+                          idle_minutes_to_autostop=skylet_constants.
+                          CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                          retry_until_up=True,
+                          fast=True,
+                          _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
