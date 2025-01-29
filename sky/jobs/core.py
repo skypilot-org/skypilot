@@ -43,7 +43,7 @@ def launch(
         detach_run: bool = False,
         # TODO(cooperc): remove fast arg before 0.8.0
         fast: bool = True,  # pylint: disable=unused-argument for compatibility
-) -> None:
+) -> Optional[int]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 
@@ -61,6 +61,11 @@ def launch(
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
+
+    Returns:
+        job_id: Optional[int]; The job ID of the managed job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
@@ -140,7 +145,7 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky.launch(task=controller_task,
+        job_id, _ = sky.launch(task=controller_task,
                    stream_logs=stream_logs,
                    cluster_name=controller_name,
                    detach_run=detach_run,
@@ -149,6 +154,7 @@ def launch(
                    retry_until_up=True,
                    fast=True,
                    _disable_controller_check=True)
+        return job_id
 
 
 def queue_from_kubernetes_pod(
