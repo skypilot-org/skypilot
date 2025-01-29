@@ -42,14 +42,14 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
 
     Notes:
 
-      *  `georegion`: This is a feature flag to provide an additional 
+      *  `georegion`: This is a feature flag to provide an additional
          scope of geographical specificy while maintaining backward
          compatibility.
 
-      *  `chunked`: This is a feature flag to give breadth to the 
+      *  `chunked`: This is a feature flag to give breadth to the
          snowflake nature of the vast catalog marketplace. It rounds
          down various specifications of machines to emulate an instance
-         type and make them more interchangeable. 
+         type and make them more interchangeable.
 
       *  `disk_size`: We look for instances that are of the requested
          size or greater than it. For instance, `disk_size=100` might
@@ -99,9 +99,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
     instance_list = vast.vast().search_offers(query=query)
 
     if isinstance(instance_list, int) or len(instance_list) == 0:
-        raise RuntimeError(
-                'Failed to create instances, could not find an '
-                f'offer that satisfies the requirements "{query}".')
+        raise RuntimeError('Failed to create instances, could not find an '
+                           f'offer that satisfies the requirements "{query}".')
 
     instance_touse = instance_list[0]
 

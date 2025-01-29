@@ -52,8 +52,35 @@ if __name__ == '__main__':
     # Vast has a wide variety of machines, some of
     # which will have less diskspace and network
     # bandwidth than others.
+    #
+    # The machine normally have high specificity
+    # in the vast catalog - this is fairly unique
+    # to Vast and can make bucketing them into
+    # instance types difficult.
+    #
+    # The flags
+    #
+    #   * georegion consolidates geographic areas
+    #
+    #   * chunked rounds down specifications (such
+    #     as 1025GB to 1024GB disk) in order to
+    #     make machine specifications look more
+    #     consistent
+    #
+    #   * inet_down makes sure that only machines
+    #     with "reasonable" downlink speed are
+    #     considered
+    #
+    #   * disk_space sets a lower limit of how
+    #     much space is availble to be allocated
+    #     in order to ensure that machines with
+    #     small disk pools aren't listed
+    #
     offerList = vast.vast().search_offers(
-        query='inet_down >= 100 disk_space >= 80', limit=10000)
+        query=('georegion = true chunked = true '
+               'inet_down >= 100 disk_space >= 80'),
+        limit=10000)
+
     priceMap: Dict[str, List] = collections.defaultdict(list)
     for offer in offerList:
         entry = {}
