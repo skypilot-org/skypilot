@@ -13,8 +13,8 @@ SkyPilot streamlines the process of running such large-scale jobs in the cloud. 
 
 ### Step 0: Set Up The Environment
 Install the following Prerequisites:  
-* SkyPilot: Make sure you have SkyPilot installed and configured. Refer to [SkyPilot’s documentation](https://docs.skypilot.co/en/latest/getting-started/installation.html) for instructions.
-* Hugging Face Token: If you are using a private model or want faster/authorized downloads from the Hugging Face Hub, you will need your token. Follow the steps below to configure your token.
+* SkyPilot: Make sure you have SkyPilot installed and configured with `sky check`. Refer to [SkyPilot’s documentation](https://docs.skypilot.co/en/latest/getting-started/installation.html) for instructions.
+* Hugging Face Token: To download dataset from Hugging Face Hub, you will need your token. Follow the steps below to configure your token.
 
 Setup Huggingface token in `~/.env`
 ```

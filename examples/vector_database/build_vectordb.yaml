@@ -4,7 +4,7 @@ workdir: ~/skypilot/examples/vector_database
 
 file_mounts:
   /clip_embeddings:
-    name: sky-clip-embedding
+    name: sky-embeddings
     # this needs to be the same as the source in the compute_vectors.yaml
     mode: MOUNT
   

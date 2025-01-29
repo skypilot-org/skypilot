@@ -1,14 +1,17 @@
 name: clip-batch-compute-vectors
 
 resources:
-  accelerators: {L4:1, A10G:1, A10:1, V100:1}
+  accelerators: {T4:1, L4:1, A10G:1, A10:1, V100:1}
   memory: 32+
+  any_of:
+    - use_spot: true 
+    - use_spot: false
 
 num_nodes: 1
 
 file_mounts:
   /output:
-    name: sky-clip-embedding
+    name: sky-embeddings
     mode: MOUNT
 
 envs:
@@ -29,6 +32,6 @@ run: |
     --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
     --start-idx ${START_IDX} \
     --end-idx ${END_IDX} \
-    --batch-size 50 \
+    --batch-size 64 \
     --checkpoint-size 1000 
   echo "Processing complete. Results saved in node-specific files under /output/"

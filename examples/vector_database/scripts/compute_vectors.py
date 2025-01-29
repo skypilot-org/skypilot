@@ -8,12 +8,14 @@ import pickle
 import shutil
 from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
                     TypeVar)
+from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from PIL import Image
 import torch
 from tqdm import tqdm
+import pyarrow.parquet as pq
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -21,7 +23,7 @@ ModelInputType = TypeVar('ModelInputType')
 ModelOutputType = TypeVar('ModelOutputType')
 
 
-class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
+class BatchProcessor():
     """Process ImageNet images with CLIP."""
 
     def __init__(self,
@@ -36,7 +38,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                  checkpoint_size: int = 100,
                  start_idx: int = 0,
                  end_idx: Optional[int] = None):
-        self.output_path = output_path
+        self.output_path = Path(output_path)  # Convert to Path object
         self.batch_size = batch_size
         self.checkpoint_size = checkpoint_size
         self.start_idx = start_idx
@@ -52,6 +54,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         self.streaming = streaming
         self.model = None
         self.preprocess = None
+        self.partition_counter = 0
 
     async def setup_model(self):
         """Set up the CLIP model."""
@@ -129,13 +132,70 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
         return [(idx, pickle.dumps((images_base64[idx], arr)))
                 for idx, arr in zip(indices, embeddings)]
 
+    async def find_existing_progress(self) -> Tuple[int, int]:
+        """
+        Find the highest processed index and partition counter from existing files.
+        Returns:
+            Tuple[int, int]: (highest_index, next_partition_number)
+        """
+        if not self.output_path.parent.exists():
+            self.output_path.parent.mkdir(parents=True, exist_ok=True)
+            return self.start_idx, 0
+
+        partition_files = list(self.output_path.parent.glob(f"{self.output_path.stem}_part_*.parquet"))
+        print(f"Partition files: {partition_files}")
+        if not partition_files:
+            return self.start_idx, 0
+
+        max_idx = self.start_idx
+        max_partition = -1
+        
+        for file in partition_files:
+            # Extract partition number from filename
+            try:
+                partition_num = int(file.stem.split('_part_')[1])
+                max_partition = max(max_partition, partition_num)
+                
+                # Read the file and find highest index
+                df = pd.read_parquet(file)
+                if not df.empty:
+                    max_idx = max(max_idx, df['idx'].max())
+            except Exception as e:
+                logging.warning(f"Error processing file {file}: {e}")
+
+        return max_idx, max_partition + 1
+
     async def run(self):
         """
-        Run the batch processing pipeline without appending to existing files.
-        Each partition is written atomically using a temporary file.
+        Run the batch processing pipeline with recovery support.
         """
+        # Find existing progress
+        resume_idx, self.partition_counter = await self.find_existing_progress()
+        self.start_idx = max(self.start_idx, resume_idx + 1)
+        
+        logging.info(f"Starting processing from index {self.start_idx} (partition {self.partition_counter})")
+        
         results = []
-        partition_counter = 0
+        def save_results_to_parquet(self, results: list):
+            """Save results to a parquet file with atomic write."""
+            if not results:
+                return
+                
+            df = pd.DataFrame(results, columns=["idx", "output"])
+            final_path = f"{self.output_path}_part_{self.partition_counter}.parquet"
+            temp_path = f"/tmp/{self.partition_counter}.tmp"
+
+            # Write to temporary file first
+            df.to_parquet(temp_path, engine="pyarrow", index=False)
+
+            # Copy from temp to final destination
+            shutil.copy2(temp_path, final_path)
+            os.remove(temp_path)  # Clean up temp file
+
+            logging.info(
+                f"Saved partition {self.partition_counter} to {final_path} with {len(df)} rows"
+            )
+            self.partition_counter += 1
 
         async for idx, input_data in self.do_data_loading():
             self._current_batch.append((idx, input_data))
@@ -146,25 +206,8 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
                 self._current_batch = []
 
                 if len(results) >= self.checkpoint_size:
-                    # Convert results to a DataFrame
-                    df = pd.DataFrame(results, columns=["idx", "output"])
-
-                    # Create temporary and final file paths
-                    final_path = f"{self.output_path}_part_{partition_counter}.parquet"
-                    temp_path = f"/tmp/{partition_counter}.tmp"
-
-                    # Write to temporary file first
-                    df.to_parquet(temp_path, engine="pyarrow", index=False)
-
-                    # Copy from temp to final destination
-                    shutil.copy2(temp_path, final_path)
-                    os.remove(temp_path)  # Clean up temp file
-
-                    logging.info(
-                        f"Saved partition {partition_counter} to {final_path} with {len(df)} rows"
-                    )
+                    self.save_results_to_parquet(results)
                     results.clear()
-                    partition_counter += 1
 
         # Process any remaining items in the batch
         if self._current_batch:
@@ -173,16 +216,7 @@ class BatchProcessor(Generic[InputType, OutputType], abc.ABC):
 
         # Write the final partition if there are any leftover results
         if results:
-            df = pd.DataFrame(results, columns=["idx", "output"])
-            final_path = f"{self.output_path}_part_{partition_counter}.parquet"
-            temp_path = f"/tmp/{partition_counter}.tmp"
-
-            df.to_parquet(temp_path, engine="pyarrow", index=False)
-            shutil.copy2(temp_path, final_path)
-            os.remove(temp_path)  # Clean up temp file
-
-            logging.info(
-                f"Saved final partition {partition_counter} to {final_path}")
+            self.save_results_to_parquet(results)
 
 
 async def main():

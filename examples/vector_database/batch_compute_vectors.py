@@ -1,3 +1,11 @@
+"""
+Use skypilot to launch managed jobs that will run the embedding calculation.  
+
+This script is responsible for splitting the input dataset up among several workers,  
+then using skypilot to launch managed jobs for each worker. We use compute_vectors.yaml  
+to define the managed job info.
+"""
+
 #!/usr/bin/env python3
 
 import argparse
@@ -17,7 +25,7 @@ def calculate_job_range(start_idx: int, end_idx: int, job_rank: int,
         total_jobs: Total number of jobs
         
     Returns:
-        Tuple of (job_start_idx, job_end_idx)
+        Tuple of [job_start_idx, job_end_idx)
     """
     total_range = end_idx - start_idx
     chunk_size = total_range // total_jobs
@@ -42,12 +50,15 @@ def main():
     parser.add_argument('--end-idx',
                         type=int,
                         default=1000000,
-                        help='Global end index in dataset')
+                        help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,
-                        default=20,
+                        default=100,
                         help='Number of jobs to partition the work across')
-    parser.add_argument("--env-path", type=str, default="~/.env")
+    parser.add_argument('--env-path',
+                        type=str,
+                        default='~/.env',
+                        help='Path to the environment file')
     args = parser.parse_args()
 
     # Try to get HF_TOKEN from environment first, then ~/.env file
