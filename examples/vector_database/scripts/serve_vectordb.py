@@ -62,10 +62,10 @@ def query_collection(query_embedding: np.ndarray,
 
     results = collection.query(query_embeddings=query_embedding.tolist(),
                                n_results=n_results,
-                               include=["metadatas", "distances"])
+                               include=["metadatas", "distances", "documents"])
 
-    # Get images and distances
-    images = [item['image_base64'] for item in results['metadatas'][0]]
+    # Get images and distances, images in documents
+    images = results['documents'][0]
     distances = results['distances'][0]
 
     # Convert distances to similarities (cosine similarity = 1 - distance/2)
