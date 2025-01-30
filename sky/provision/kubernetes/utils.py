@@ -1267,8 +1267,10 @@ class KubernetesInstanceType:
     def __str__(self):
         return self.name
 
+
 def is_serve_controller(cluster_name_on_cloud: str) -> bool:
     return cluster_name_on_cloud.startswith('sky-serve-controller-')
+
 
 def get_head_pod_name_from_deployment(cluster_name: str) -> str:
     """Get the name of the head pod from the deployment."""
