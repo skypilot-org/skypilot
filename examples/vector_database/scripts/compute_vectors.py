@@ -1,3 +1,7 @@
+"""
+This script is responsible for computing the embeddings for the ImageNet dataset.
+"""
+
 import abc
 import asyncio
 import base64

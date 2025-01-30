@@ -1,3 +1,8 @@
+"""
+This script is responsible for building the vector database from the mounted bucket and save 
+it to another mounted bucket.
+"""
+
 import argparse
 import base64
 import glob
