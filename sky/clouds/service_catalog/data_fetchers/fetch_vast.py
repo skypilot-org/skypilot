@@ -26,8 +26,7 @@ _map = {
 
 def create_instance_type(obj: Dict[str, Any]) -> str:
     stubify = lambda x: re.sub(r'\s', '_', x)
-    return '{}x-{}-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
-                                 obj['cpu_cores'], obj['cpu_ram'])
+    return '{}x-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']))
 
 
 def dot_get(d: dict, key: str) -> Any:
@@ -125,7 +124,7 @@ if __name__ == '__main__':
 
     for instanceList in priceMap.values():
         priceList = sorted([x['Price'] for x in instanceList])
-        index = math.ceil(0.8 * len(priceList)) - 1
+        index = math.ceil(0.5 * len(priceList)) - 1
         priceTarget = priceList[index]
         toList: List = []
         for instance in instanceList:
