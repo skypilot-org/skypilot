@@ -1,24 +1,14 @@
-.. _key-concepts:
+.. _overview:
 
 ========================
 Overview
 ========================
 
-.. TODO: seems ok to just use "cluster" instead of "dev cluster" everywhere?
-
-
 SkyPilot enables you to combine your cloud infra --- Kubernetes
 clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool.
 
-.. .. image:: images/skypilot-abstractions-long.png
-..     :align: center
-
 .. image:: images/skypilot-abstractions-long-2.png
     :align: center
-
-.. .. image:: images/skypilot-abstractions.png
-..     :width: 400px
-..     :align: center
 
 You can then run workloads on this pool in a unified interface, using these core abstractions:
 
@@ -26,27 +16,10 @@ You can then run workloads on this pool in a unified interface, using these core
 - Jobs
 - Services
 
-.. - :ref:`Dev clusters <concept-dev-clusters>`
-.. - :ref:`Jobs <concept-jobs>`
-.. - :ref:`Serving <concept-services>`
-
-
-.. With these, you can use SkyPilot to run all use cases in the entire AI and batch job lifecycle:
-
 These abstractions allow you to run all use cases in the AI lifecycle:
 Batch processing, development, (pre)training, finetuning, hparam sweeps, batch inference, and online serving.
 
-
-.. - :ref:`Jobs on dev clusters <concept-jobs-on-dev-cluster>`
-.. - :ref:`Managed jobs <concept-managed-jobs>`
-
 In SkyPilot, every workload benefits from:
-
-.. - **Unified, any-infra**: You use the same way to launch on any cloud infra you own; it is automatically multicloud, multi-region, and multi-cluster.
-.. - **Cost and capacity-optimizing**: When launching a workload, SkyPilot will automatically choose
-..   the cheapest and most available infra choice in your search space.
-.. - **Auto-failover**: If an infra choice is not available, SkyPilot will automatically failover.
-
 
 .. dropdown:: Unified execution on any cloud, region, and cluster
 
@@ -74,33 +47,12 @@ In SkyPilot, every workload benefits from:
     No complex migration or workflow changes.
     See the underlying :ref:`Sky Computing <sky-computing>` vision.
 
-.. .. dropdown:: Future-proof your infra
-
-.. At its core, SkyPilot provides a "kernel", the ``sky launch`` CLI/API, that forms the basis of all three
-.. abstractions.
-
-.. ``sky launch`` is used to launch dev clusters that is (1) natively multi-cloud/cluster/region, with auto-failover; (2) optimizing for cost and capacity.
-.. Managed jobs and services are then implemented on top of ``sky launch``, and therefore automatically inherit all of the benefits above.
-
-
 .. _concept-dev-clusters:
 
 Clusters
 ------------
 
-
-.. Dev clusters are a set of nodes (VMs; or pods in Kubernetes) that you launch with ``sky launch``.
-
-.. You can use ``sky launch`` to launch a dev cluster, which is a set of *nodes*
-.. (VMs, or pods in Kubernetes). A cluster is the core compute resource unit in
-.. SkyPilot.
-
-.. A cluster is a set of nodes --- VMs, or pods in Kubernetes --- which are interconnected in one location (the same zone/k8s cluster).
-
 A *cluster* is SkyPilot's core resource unit: one or more VMs or Kubernetes pods in the same location.
-
-.. A *cluster* is a set of VMs or Kubernetes pods in the same location.
-.. It is the core resource unit in SkyPilot.
 
 You can use ``sky launch`` to launch a cluster:
 
@@ -134,10 +86,6 @@ You can do the following with a cluster:
 - Have it automatically shut down or stop to save costs
 - Easily launch and use many virtual, ephemeral clusters
 
-.. - Treat it as your dev machine on the cloud
-.. - ...and more
-
-.. A dev cluster's spec (e.g., resource spec; setup commands) is declaratively written in a YAML file.
 
 You can optionally bring your custom Docker or VM image when launching, or use SkyPilot's sane defaults, which configure the correct CUDA versions for different GPUs.
 
@@ -175,12 +123,8 @@ A *job* is a program you want to run. Two types of jobs are supported:
      - Ideal for jobs requiring recovery (e.g., spot instances) or scaling to many parallel jobs.
 
 
-.. A job can contain one or more tasks; that said, most jobs have only one task, and we will refer to "job" and "task" interchangeably.
-
 
 A job can contain one or :ref:`more <pipeline>` tasks. In most cases, a job has just one task; we'll refer to them interchangeably.
-
-.. *Terminology*: While :ref:`certain jobs <pipeline>` can have multiple tasks, most jobs have only one task, where we will refer to "job" and "task" interchangeably.
 
 
 
@@ -239,9 +183,6 @@ Managed jobs
 auto-recovery. A lightweight jobs controller is used to offer hands-off monitoring and recovery.
 You can use ``sky jobs launch`` to launch managed jobs.
 
-.. A *managed job* runs on its own job-scoped cluster, and it
-.. comes with auto-recovery offered by a lightweight jobs controller.
-
 Managed jobs are especially ideal for running jobs on preemptible spot instances (e.g.,
 finetuning, batch inference). Spot GPUs can typically save 3--6x costs. They are also
 ideal for scaling to many parallel jobs.
@@ -251,13 +192,6 @@ use managed jobs to run them at scale.
 
 See :ref:`managed-jobs` and :ref:`many-jobs` to get started.
 
-.. .. tip::
-
-..     .. **Terminology**:
-
-..     A managed job can contain multiple tasks (see :ref:`pipelines <pipeline>`). When a job has only one task, as is the common case, "job" and "task" are used interchangeably.
-
-
 .. _concept-services:
 
 Services
@@ -266,23 +200,10 @@ Services
 A *service* is for AI model serving.
 A service can have one or more replicas, potentially spanning across locations (regions, clouds, clusters), pricing models (on-demand, spot, etc.), or even GPU types.
 
-.. Each service can have multiple
-.. replicas---potentially spanning different locations (clouds, regions, clusters),
-.. pricing models (on-demand, spot), or GPU types. A lightweight service controller offers load balancing, monitoring, and replica recovery.
-
-.. A *service* is used for serving AI models.
-
-.. Think of each replica as a cluster, launched by ``sky launch``.
-
 See :ref:`sky-serve` to get started.
-
-.. TODO: seeing is believing. Add snippet (cli + api).
 
 Bringing your infra
 -------------------------------------------------------------------
-
-.. SkyPilot is designed to easily connect to your existing infra.
-.. By default, existing auth is reused.
 
 SkyPilot easily connects to your existing infra---clouds, Kubernetes
 clusters, or on-prem machines---using each infra's native authentication
@@ -306,11 +227,6 @@ SkyPilot supports most major cloud providers. See :ref:`cloud-account-setup` for
    </p>
 
 By default, SkyPilot reuses your existing cloud authentication methods.  Optionally, you can also :ref:`set up <cloud-permissions>` specific roles, permissions, or service accounts for SkyPilot to use.
-
-.. .. tip::
-
-..     Cloud VMs are the most flexible option because they provide many regions and hardware
-..     options. This can maximally improve GPU availability and cost savings.
 
 .. _concept-kubernetes-clusters:
 
@@ -360,29 +276,8 @@ See :ref:`Using Existing Machines <existing-machines>`.
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-dark
 
-.. ``sky launch``: Any-infra provisioner and orchestrator
-.. ``sky launch``: Cost and capacity-optimizing provisioner
-
 SkyPilot's cost and capacity optimization
 -------------------------------------------------------------------
-
-.. TODO: Kind of weird to call an CLI a provisioner/orchestrator. Also, this is describing the hammer.
-
-.. How does SkyPilot offer (1) unified execution across infra, and (2) cost and capacity optimization?
-
-.. .. , and all higher-level abstractions/libraries (managed jobs; serving) util
-.. .. upon it.
-
-.. .. is used to launch dev clusters. It
-
-
-.. In SkyPilot, ``sky launch``  is the core "kernel"
-.. that delivers these benefits.  It is used to launch all underlying compute resources.
-.. Every ``sky launch`` performs the following:
-
-.. - Natively optimizes for cost and capacity in the given search space
-.. - Provisions compute resources with auto-failover
-.. - Sets up the environment (images, dependencies, file mounts, etc.) in an infrastructure-as-code manner
 
 SkyPilot comes with a provisioner that natively optimizes for cost and capacity whenever it is provisioning compute.
 (This applies to all compute needed for clusters, jobs, and services.)
@@ -400,9 +295,6 @@ with auto-failover:
 As such, SkyPilot users no longer need to worry about specific infra details, manual retry, or manual setup.
 Workloads also obtain higher GPU capacity and cost savings.
 
-.. Every launch can take a search space that is as flexible (e.g., use any of the accessible infra; any of the supported GPUs) or as specific (e.g., must use a specific zone or cloud) as you need.
-
-
 Users can specify each workload's search space. It can be as flexible or as specific as desired. Example search spaces that can be specified:
 
 - Use the cheapest and available GPUs out of a set, ``{A10g:8, A10:8, L4:8, A100:8}``
@@ -413,23 +305,3 @@ Users can specify each workload's search space. It can be as flexible or as spec
 
 Optimization is performed within the search space.
 See :ref:`auto-failover` for details.
-
-.. TODO: make this a bullet list. include spot/on-demand, GDPR, etc.
-
-.. Users can specify each workload's search space. It can be as flexible (e.g., use any of the accessible clouds, or any of the specified GPUs) or as specific (e.g., must use a specific zone or cloud) as you like.
-.. Optimization automatically occurs within the search space.
-
-
-
-.. - Schedules, executes, and monitors the workload on the compute resources.
-
-.. ``sky launch`` offers several unique benefits:
-
-.. - Automatically multicloud, multi-region, and multi-cluster: this is a ``any-infra`` kernel.
-.. - Cost and capacity-optimizing: ``sky launch``
-.. - Auto-failover:
-.. - As flexible or as specific as you need: you can either leave the resource
-..   specification as flexible as possible, or get as specific as your workload
-..   requires.
-
-.. TODO: As flexible or as specific as you need:
