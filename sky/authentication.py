@@ -456,7 +456,12 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   SSHConfigHelper to use a different ProxyCommand for each pod.
         #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
         #   on GKE.
-        ssh_target = config['cluster_name'] + '-head'
+
+        # TODO(andyl): extract a common constant for the head pod pattern
+        if kubernetes_utils.is_serve_controller(config['cluster_name']):
+            ssh_target = kubernetes_utils.get_head_pod_name_from_deployment(config['cluster_name'])
+        else:
+            ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_target,
             port_forward_mode,

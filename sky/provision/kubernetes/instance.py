@@ -459,11 +459,6 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # Re-raise the exception if it's a different error
             raise e
 
-
-def _is_serve_controller(cluster_name_on_cloud: str) -> bool:
-    return cluster_name_on_cloud.startswith('sky-serve-controller-')
-
-
 def _create_persistent_volume_claim(namespace: str, context: Optional[str],
                                     pvc_name: str) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
@@ -762,7 +757,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             }
             pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
 
-        if _is_serve_controller(cluster_name_on_cloud):
+        if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
             deployment_spec = _create_serve_controller_deployment(
                 pod_spec_copy, cluster_name_on_cloud, namespace, context)
             try:
@@ -780,7 +775,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
                                             range(to_start_count), _NUM_THREADS)
 
-    if _is_serve_controller(cluster_name_on_cloud):
+    if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
         deployments = copy.deepcopy(pods)
         pods.clear()  # Since it's not pods. What created here are true pods.
         for deployment in deployments:
@@ -901,7 +896,7 @@ def _terminate_node(namespace: str, context: Optional[str],
         _delete_k8s_resource_with_retry(
             delete_func=lambda name=service_name: kubernetes.core_api(
                 context).delete_namespaced_service(name=name,
-                                                   namespace=namespace,
+                    namespace=namespace,
                                                    _request_timeout=config_lib.
                                                    DELETION_TIMEOUT),
             resource_type='service',
