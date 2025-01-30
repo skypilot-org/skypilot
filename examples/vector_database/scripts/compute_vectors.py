@@ -4,18 +4,18 @@ import base64
 from io import BytesIO
 import logging
 import os
+from pathlib import Path
 import pickle
 import shutil
 from typing import (Any, AsyncIterator, Dict, Generic, List, Optional, Tuple,
                     TypeVar)
-from pathlib import Path
 
 import numpy as np
 import pandas as pd
 from PIL import Image
+import pyarrow.parquet as pq
 import torch
 from tqdm import tqdm
-import pyarrow.parquet as pq
 
 InputType = TypeVar('InputType')
 OutputType = TypeVar('OutputType')
@@ -142,20 +142,22 @@ class BatchProcessor():
             self.output_path.parent.mkdir(parents=True, exist_ok=True)
             return self.start_idx, 0
 
-        partition_files = list(self.output_path.parent.glob(f"{self.output_path.stem}_part_*.parquet"))
+        partition_files = list(
+            self.output_path.parent.glob(
+                f"{self.output_path.stem}_part_*.parquet"))
         print(f"Partition files: {partition_files}")
         if not partition_files:
             return self.start_idx, 0
 
         max_idx = self.start_idx
         max_partition = -1
-        
+
         for file in partition_files:
             # Extract partition number from filename
             try:
                 partition_num = int(file.stem.split('_part_')[1])
                 max_partition = max(max_partition, partition_num)
-                
+
                 # Read the file and find highest index
                 df = pd.read_parquet(file)
                 if not df.empty:
@@ -172,15 +174,18 @@ class BatchProcessor():
         # Find existing progress
         resume_idx, self.partition_counter = await self.find_existing_progress()
         self.start_idx = max(self.start_idx, resume_idx + 1)
-        
-        logging.info(f"Starting processing from index {self.start_idx} (partition {self.partition_counter})")
-        
+
+        logging.info(
+            f"Starting processing from index {self.start_idx} (partition {self.partition_counter})"
+        )
+
         results = []
+
         def save_results_to_parquet(self, results: list):
             """Save results to a parquet file with atomic write."""
             if not results:
                 return
-                
+
             df = pd.DataFrame(results, columns=["idx", "output"])
             final_path = f"{self.output_path}_part_{self.partition_counter}.parquet"
             temp_path = f"/tmp/{self.partition_counter}.tmp"

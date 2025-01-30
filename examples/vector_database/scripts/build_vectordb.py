@@ -23,7 +23,6 @@ def list_local_parquet_files(mount_path: str, prefix: str) -> list:
     return parquet_files
 
 
-
 def process_batch(collection, batch_df):
     """Process a batch of data and add it to the ChromaDB collection."""
     # Extract data from DataFrame and unpack the pickled data
@@ -34,7 +33,9 @@ def process_batch(collection, batch_df):
     # Each row now contains (image_base64, embedding)
     images_base64, embeddings = zip(*unpacked_data)
     # Add to collection
-    collection.add(ids=list(ids), embeddings=list(embeddings), documents=list(images_base64))
+    collection.add(ids=list(ids),
+                   embeddings=list(embeddings),
+                   documents=list(images_base64))
 
 
 def main():
@@ -48,10 +49,11 @@ def main():
                         type=str,
                         default='/vectordb/chroma',
                         help='Directory to persist ChromaDB')
-    parser.add_argument('--batch-size',
-                        type=int,
-                        default=1000,
-                        help='Batch size for processing, this needs to fit in memory')
+    parser.add_argument(
+        '--batch-size',
+        type=int,
+        default=1000,
+        help='Batch size for processing, this needs to fit in memory')
     parser.add_argument('--embeddings-dir',
                         type=str,
                         default='/clip_embeddings',
