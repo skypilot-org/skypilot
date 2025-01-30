@@ -30,23 +30,9 @@ Welcome to SkyPilot!
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-.. .. image:: ../images/skypilot-abstractions.png
-..     :width: 400px
-..     :align: center
-
-.. .. raw:: html
-
-..    <p align="center">
-..    <picture>
-..       <img alt="SkyPilot overview" src="https://i.imgur.com/HkSJXSG.png" width=400px>
-..    </picture>
-..    </p>
-
-
-
 SkyPilot **abstracts away infra burdens**:
 
-- Launch :ref:`dev clusters <dev-cluster>`, :ref:`jobs <managed-jobs>`, and :ref:`serving <sky-serve>` on any infra
+- Launch :ref:`clusters <dev-cluster>`, :ref:`jobs <managed-jobs>`, and :ref:`serving <sky-serve>` on any infra
 - Easy job management: queue, run, and auto-recover many jobs
 
 SkyPilot **supports multiple clusters, clouds, and hardware** (`the Sky <https://arxiv.org/abs/2205.07147>`_):
@@ -77,7 +63,7 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
 Ready to get started?
 ----------------------
 
-:ref:`Install SkyPilot <installation>` in 1 minute. Then, launch your first dev cluster in 2 minutes in :ref:`Quickstart <quickstart>`.
+:ref:`Install SkyPilot <installation>` in 1 minute. Then, launch your first cluster in 2 minutes in :ref:`Quickstart <quickstart>`.
 
 SkyPilot is BYOC: Everything is launched within your cloud accounts, VPCs, and clusters.
 

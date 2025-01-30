@@ -98,8 +98,6 @@ See :ref:`quickstart` and :ref:`dev-cluster` to get started.
     <concept-kubernetes-clusters>` or :ref:`existing machines
     <concept-existing-machines>`.
 
-    *Terminology*: "Clusters" and "dev clusters" are used interchangeably.
-
 
 .. _concept-jobs:
 
