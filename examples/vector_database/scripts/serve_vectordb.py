@@ -233,11 +233,20 @@ async def get_search_page():
                 try {
                     const response = await fetch('/search', {
                         method: 'POST',
-                        headers: {'Content-Type': 'application/json'},
-                        body: JSON.stringify({text: searchInput.value, n_results: 12})
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            text: searchInput.value.trim(),
+                            n_results: 12
+                        })
                     });
                     
-                    if (!response.ok) throw new Error('Search failed');
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Search failed');
+                    }
                     
                     const results = await response.json();
                     resultsDiv.innerHTML = results.map(result => `
@@ -254,7 +263,7 @@ async def get_search_page():
                 } catch (error) {
                     resultsDiv.innerHTML = `
                         <p style="color: #e74c3c; text-align: center; width: 100%;">
-                            An error occurred while searching. Please try again.
+                            Error: ${error.message}
                         </p>
                     `;
                 } finally {

@@ -164,7 +164,28 @@ class BatchProcessor():
                 logging.warning(f"Error processing file {file}: {e}")
 
         return max_idx, max_partition + 1
+    
+    def save_results_to_parquet(self, results: list):
+        """Save results to a parquet file with atomic write."""
+        if not results:
+            return
 
+        df = pd.DataFrame(results, columns=["idx", "output"])
+        final_path = f"{self.output_path}_part_{self.partition_counter}.parquet"
+        temp_path = f"/tmp/{self.partition_counter}.tmp"
+
+        # Write to temporary file first
+        df.to_parquet(temp_path, engine="pyarrow", index=False)
+
+        # Copy from temp to final destination
+        shutil.copy2(temp_path, final_path)
+        os.remove(temp_path)  # Clean up temp file
+
+        logging.info(
+            f"Saved partition {self.partition_counter} to {final_path} with {len(df)} rows"
+        )
+        self.partition_counter += 1
+        
     async def run(self):
         """
         Run the batch processing pipeline with recovery support.
@@ -178,27 +199,6 @@ class BatchProcessor():
         )
 
         results = []
-
-        def save_results_to_parquet(self, results: list):
-            """Save results to a parquet file with atomic write."""
-            if not results:
-                return
-
-            df = pd.DataFrame(results, columns=["idx", "output"])
-            final_path = f"{self.output_path}_part_{self.partition_counter}.parquet"
-            temp_path = f"/tmp/{self.partition_counter}.tmp"
-
-            # Write to temporary file first
-            df.to_parquet(temp_path, engine="pyarrow", index=False)
-
-            # Copy from temp to final destination
-            shutil.copy2(temp_path, final_path)
-            os.remove(temp_path)  # Clean up temp file
-
-            logging.info(
-                f"Saved partition {self.partition_counter} to {final_path} with {len(df)} rows"
-            )
-            self.partition_counter += 1
 
         async for idx, input_data in self.do_data_loading():
             self._current_batch.append((idx, input_data))
