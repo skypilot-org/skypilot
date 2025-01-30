@@ -660,6 +660,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             try:
                 self._terminate_replica(replica_id.replica_id,
                                         sync_down_logs=False,
+                                        purge=True,
                                         replica_drain_delay_seconds=0)
             # pylint: disable=broad-except
             except Exception as e:

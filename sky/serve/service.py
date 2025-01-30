@@ -29,6 +29,8 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
+from pathlib import Path
+
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.service` namespace when executed directly, so as
 # to inherit the setup from the `sky` logger.
@@ -292,6 +294,16 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.remove_service(service_name)
             serve_state.delete_all_versions(service_name)
             logger.info(f'Service {service_name} terminated successfully.')
+
+        task_run_dir = Path('~/.sky/task_run').expanduser()
+        if task_run_dir.exists():
+            # Please see `kubernetes-ray.yml.j2` for more details.
+            this_task_run_script = task_run_dir / f'sky_job_{job_id}'
+            if this_task_run_script.exists():
+                this_task_run_script.unlink()
+                logger.info(f'Task run script {this_task_run_script} removed')
+            else:
+                logger.warning(f'Task run script {this_task_run_script} not found')
 
 
 if __name__ == '__main__':
