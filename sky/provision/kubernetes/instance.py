@@ -550,8 +550,13 @@ def _create_serve_controller_deployment(
         'command': ['/bin/sh', '-c'],
         'args': [
             'echo "Copying home directory to /mnt/home"; '
-            'rsync -a --chown=sky:sky /home/sky/ /mnt/home; '
-            'echo "Copy completed.";'
+            # ! This `sudo` is important for SSH pubkey auth to work.
+            # It would fail even if the parent directory, i.e.
+            # /home/sky, were not having the correct permissions,
+            # because `StrictModes` is by default enabled in sshd_config.
+            # And `chown` the mount path requires `sudo`.
+            'sudo rsync -a --chown=sky:sky /home/sky/ /mnt/home; '
+            'echo "Copy completed."; '
             'ls -la /mnt/home'
         ],
         'volumeMounts': [{
