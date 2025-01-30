@@ -17,12 +17,6 @@ import pyarrow.parquet as pq
 import torch
 from tqdm import tqdm
 
-InputType = TypeVar('InputType')
-OutputType = TypeVar('OutputType')
-ModelInputType = TypeVar('ModelInputType')
-ModelOutputType = TypeVar('ModelOutputType')
-
-
 class BatchProcessor():
     """Process ImageNet images with CLIP."""
 

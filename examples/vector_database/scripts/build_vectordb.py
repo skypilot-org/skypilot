@@ -6,6 +6,8 @@ import os
 import pickle
 import shutil
 import tempfile
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import chromadb
 import numpy as np
@@ -23,19 +25,26 @@ def list_local_parquet_files(mount_path: str, prefix: str) -> list:
     return parquet_files
 
 
-def process_batch(collection, batch_df):
-    """Process a batch of data and add it to the ChromaDB collection."""
-    # Extract data from DataFrame and unpack the pickled data
-    ids = [str(idx) for idx in batch_df['idx']]
-
-    # Unpack the pickled data to get images and embeddings
-    unpacked_data = [pickle.loads(row) for row in batch_df['output']]
-    # Each row now contains (image_base64, embedding)
-    images_base64, embeddings = zip(*unpacked_data)
-    # Add to collection
-    collection.add(ids=list(ids),
-                   embeddings=list(embeddings),
-                   documents=list(images_base64))
+def process_parquet_file(args):
+    """Process a single parquet file and return the processed data."""
+    parquet_file, batch_size = args
+    try:
+        results = []
+        df = pd.read_parquet(parquet_file)
+        
+        # Process in batches
+        for i in range(0, len(df), batch_size):
+            batch_df = df.iloc[i:i + batch_size]
+            # Extract data from DataFrame and unpack the pickled data
+            ids = [str(idx) for idx in batch_df['idx']]
+            unpacked_data = [pickle.loads(row) for row in batch_df['output']]
+            images_base64, embeddings = zip(*unpacked_data)
+            results.append((ids, embeddings, images_base64))
+            
+        return results
+    except Exception as e:
+        logger.error(f"Error processing file {parquet_file}: {str(e)}")
+        return None
 
 
 def main():
@@ -88,21 +97,34 @@ def main():
                                                  args.prefix)
         logger.info(f"Found {len(parquet_files)} parquet files")
 
-        # Process each parquet file
-        for parquet_file in tqdm(parquet_files, desc="Processing files"):
-            logger.info(f"Processing {parquet_file}")
-            try:
-                df = pd.read_parquet(parquet_file)
-
-                # Process in batches
-                for i in tqdm(range(0, len(df), args.batch_size),
-                              desc="Processing batches"):
-                    batch_df = df.iloc[i:i + args.batch_size]
-                    process_batch(collection, batch_df)
-
-            except Exception as e:
-                logger.error(f"Error processing file {parquet_file}: {str(e)}")
-                continue
+        # Process files in parallel
+        max_workers = max(1, multiprocessing.cpu_count() - 1)  # Leave one CPU free
+        logger.info(f"Processing files using {max_workers} workers")
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            # Submit all files for processing
+            future_to_file = {
+                executor.submit(process_parquet_file, (file, args.batch_size)): file
+                for file in parquet_files
+            }
+            
+            # Process results as they complete
+            for future in tqdm(as_completed(future_to_file), 
+                             total=len(parquet_files),
+                             desc="Processing files"):
+                file = future_to_file[future]
+                try:
+                    results = future.result()
+                    if results:
+                        for ids, embeddings, images_base64 in results:
+                            collection.add(
+                                ids=list(ids),
+                                embeddings=list(embeddings),
+                                documents=list(images_base64)
+                            )
+                except Exception as e:
+                    logger.error(f"Error processing file {file}: {str(e)}")
+                    continue
 
         logger.info("Vector database build complete!")
         logger.info(f"Total documents in collection: {collection.count()}")
