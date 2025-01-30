@@ -175,7 +175,7 @@ def up(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, path='serve')
+            task, task_type='serve')
 
     tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
         service_name, task)
@@ -458,7 +458,7 @@ def update(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, path='serve')
+            task, task_type='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
     returncode, version_string_payload, stderr = backend.run_on_head(

@@ -7,6 +7,7 @@ import os
 import tempfile
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
+import uuid
 
 import colorama
 
@@ -642,7 +643,7 @@ def replace_skypilot_config_path_in_file_mounts(
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
-                                                  path: str) -> None:
+                                                  task_type: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -651,6 +652,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     If there are no local source paths to be translated, this function would
     still sync up any storage mounts with local source paths (which do not
     undergo translation).
+
+    When jobs.bucket or serve.bucket is not specified, an intermediate storage
+    dedicated for the job is created for the workdir and local file mounts and
+    the storage is deleted when the job finishes. We don't share the storage
+    between jobs, because jobs might have different resources requirements, and
+    sharing storage between jobs may cause egress costs or slower transfer
+    speeds.
     """
 
     # ================================================================
@@ -669,11 +677,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store.delete()
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
-                    f'Jobs bucket {store.name!r} does not exist.  '
-                    'Please check jobs.bucket configuration in '
+                    f'{task_type.capitalize()} bucket {store.name!r} does not '
+                    'exist. Please check jobs.bucket configuration in '
                     'your SkyPilot config.')
 
-    run_id = common_utils.get_usage_run_id()[:8]
+    # We use uuid to generate a unique run id for the job, so that the bucket/
+    # subdirectory name is unique across different jobs/services.
+    # We should not use common_utils.get_usage_run_id() here, because when
+    # Python API is used, the run id will be the same across multiple
+    # jobs.launch/serve.up calls after the sky is imported.
+    run_id = str(uuid.uuid4())[:8]
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
@@ -701,7 +714,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Get the bucket name for the workdir and file mounts,
     # we store all these files in same bucket from config.
-    bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    bucket_wth_prefix = skypilot_config.get_nested((task_type, 'bucket'), None)
     store_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
         store_type = store_cls = sub_path = None
@@ -798,7 +811,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
-        path)
+        task_type)
     if copy_mounts_with_file_in_src:
         src_to_file_id = {}
         for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
