@@ -1280,21 +1280,37 @@ def get_head_pod_name_from_deployment(cluster_name: str) -> str:
 def construct_ssh_jump_command(
         private_key_path: str,
         ssh_jump_ip: str,
+        network_mode: kubernetes_enums.KubernetesNetworkingMode,
         ssh_jump_port: Optional[int] = None,
         ssh_jump_user: str = 'sky',
+        *,
         proxy_cmd_path: Optional[str] = None,
         proxy_cmd_target_pod: Optional[str] = None,
         current_kube_context: Optional[str] = None,
-        current_kube_namespace: Optional[str] = None) -> str:
+        current_kube_namespace: Optional[str] = None,
+        use_single_layer: bool = False) -> str:
     ssh_jump_proxy_command = (f'ssh -tt -i {private_key_path} '
                               '-o StrictHostKeyChecking=no '
                               '-o UserKnownHostsFile=/dev/null '
-                              f'-o IdentitiesOnly=yes '
-                              r'-W \[%h\]:%p '
-                              f'{ssh_jump_user}@{ssh_jump_ip}')
-    if ssh_jump_port is not None:
-        ssh_jump_proxy_command += f' -p {ssh_jump_port} '
-    if proxy_cmd_path is not None:
+                              f'-o IdentitiesOnly=yes ')
+
+    if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
+        assert (proxy_cmd_path is None and proxy_cmd_target_pod is None and
+                current_kube_context is None and current_kube_namespace is None
+               ), 'Nodeport mode does not use proxy command'
+        assert not use_single_layer, (
+            'Single-layer mode is not supported for NodePort')
+
+        ssh_jump_proxy_command += r'-W \[%h\]:%p '
+        ssh_jump_proxy_command += f'{ssh_jump_user}@{ssh_jump_ip}'
+
+        if ssh_jump_port is not None:
+            ssh_jump_proxy_command += f' -p {ssh_jump_port} '
+
+    elif network_mode == kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD:
+        assert (proxy_cmd_path is not None and proxy_cmd_target_pod
+                is not None), 'Portforward mode requires proxy command'
+
         proxy_cmd_path = os.path.expanduser(proxy_cmd_path)
         # adding execution permission to the proxy command script
         os.chmod(proxy_cmd_path, os.stat(proxy_cmd_path).st_mode | 0o111)
@@ -1302,10 +1318,17 @@ def construct_ssh_jump_command(
             current_kube_context is not None) else ''
         kube_namespace_flag = f'-n {current_kube_namespace} ' if (
             current_kube_namespace is not None) else ''
-        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{proxy_cmd_path} '
-                                   f'{kube_context_flag}'
-                                   f'{kube_namespace_flag}'
-                                   f'{proxy_cmd_target_pod}\'')
+
+        inner_proxy_cmd = (f'{proxy_cmd_path} '
+                           f'{kube_context_flag}'
+                           f'{kube_namespace_flag}'
+                           f'{proxy_cmd_target_pod}')
+        if use_single_layer:
+            return inner_proxy_cmd
+
+        ssh_jump_proxy_command += f'{ssh_jump_user}@127.0.0.1'
+        ssh_jump_proxy_command += (f' -o ProxyCommand=\'{inner_proxy_cmd}\'')
+
     return ssh_jump_proxy_command
 
 
@@ -1315,6 +1338,7 @@ def get_ssh_proxy_command(
     private_key_path: str,
     context: Optional[str],
     namespace: str,
+    use_single_layer: bool = False,
 ) -> str:
     """Generates the SSH proxy command to connect to the pod.
 
@@ -1367,14 +1391,17 @@ def get_ssh_proxy_command(
     assert private_key_path is not None, 'Private key path must be provided'
     if network_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         assert namespace is not None, 'Namespace must be provided for NodePort'
+        assert not use_single_layer, (
+            'Single-layer mode is not supported for NodePort')
         ssh_jump_port = get_port(k8s_ssh_target, namespace, context)
         ssh_jump_proxy_command = construct_ssh_jump_command(
-            private_key_path, ssh_jump_ip, ssh_jump_port=ssh_jump_port)
+            private_key_path, ssh_jump_ip, network_mode, ssh_jump_port)
     else:
         ssh_jump_proxy_command_path = create_proxy_command_script()
         ssh_jump_proxy_command = construct_ssh_jump_command(
             private_key_path,
             ssh_jump_ip,
+            network_mode,
             ssh_jump_user=constants.SKY_SSH_USER_PLACEHOLDER,
             proxy_cmd_path=ssh_jump_proxy_command_path,
             proxy_cmd_target_pod=k8s_ssh_target,
@@ -1382,7 +1409,8 @@ def get_ssh_proxy_command(
             # command to make sure SSH still works when the current
             # context/namespace is changed by the user.
             current_kube_context=context,
-            current_kube_namespace=namespace)
+            current_kube_namespace=namespace,
+            use_single_layer=use_single_layer)
     return ssh_jump_proxy_command
 
 
