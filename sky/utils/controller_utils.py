@@ -678,7 +678,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
                     f'{task_type.capitalize()} bucket {store.name!r} does not '
-                    'exist. Please check jobs.bucket configuration in '
+                    f'exist. Please check {task_type}.bucket configuration in '
                     'your SkyPilot config.')
 
     # We use uuid to generate a unique run id for the job, so that the bucket/
