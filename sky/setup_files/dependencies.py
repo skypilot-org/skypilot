@@ -51,7 +51,7 @@ local_ray = [
 ]
 
 remote = [
-    'grpcio>=1.56.2'
+    'grpcio>=1.56.2',
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
