@@ -8,15 +8,15 @@ Overview
 
 
 SkyPilot enables you to combine your cloud infra --- Kubernetes
-clusters, cloud accounts/regions for VMs, and existing machines --- into a unified compute pool.
+clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool.
 
-.. .. image:: ../images/skypilot-abstractions-long.png
+.. .. image:: images/skypilot-abstractions-long.png
 ..     :align: center
 
-.. image:: ../images/skypilot-abstractions-long-2.png
+.. image:: images/skypilot-abstractions-long-2.png
     :align: center
 
-.. .. image:: ../images/skypilot-abstractions.png
+.. .. image:: images/skypilot-abstractions.png
 ..     :width: 400px
 ..     :align: center
 
@@ -34,7 +34,7 @@ You can then run workloads on this pool in a unified interface, using these core
 .. With these, you can use SkyPilot to run all use cases in the entire AI and batch job lifecycle:
 
 These abstractions allow you to run all use cases in the AI lifecycle:
-Batch processing, development, (pre)training, massively parallel tuning/batch inference, and online serving.
+Batch processing, development, (pre)training, finetuning, hparam sweeps, batch inference, and online serving.
 
 
 .. - :ref:`Jobs on dev clusters <concept-jobs-on-dev-cluster>`
@@ -138,6 +138,7 @@ You can do the following with a cluster:
 .. - ...and more
 
 .. A dev cluster's spec (e.g., resource spec; setup commands) is declaratively written in a YAML file.
+
 You can optionally bring your custom Docker or VM image when launching, or use SkyPilot's sane defaults, which configure the correct CUDA versions for different GPUs.
 
 See :ref:`quickstart` and :ref:`dev-cluster` to get started.
@@ -219,6 +220,7 @@ See :ref:`job-queue` to get started.
             # Queue a job requesting 1 GPU.
             train = sky.Task(run='python train.py').set_resources(
                 sky.Resources(accelerators='L4:1'))
+            train = sky.Task.from_yaml('train.yaml')  # Or load from a YAML.
             sky.exec(train, cluster_name='my-cluster', detach_run=True)
 
             # Queue a job requesting 0.5 GPU.
@@ -241,7 +243,8 @@ You can use ``sky jobs launch`` to launch managed jobs.
 .. comes with auto-recovery offered by a lightweight jobs controller.
 
 Managed jobs are especially ideal for running jobs on preemptible spot instances (e.g.,
-finetuning, batch inference). Spot GPUs can typically save 3--6x costs.
+finetuning, batch inference). Spot GPUs can typically save 3--6x costs. They are also
+ideal for scaling to many parallel jobs.
 
 Suggested pattern: Use clusters to interactively develop and debug your code first, and then
 use managed jobs to run them at scale.
@@ -280,7 +283,7 @@ Bringing your infra
 
 .. SkyPilot is designed to easily connect to your existing infra.
 .. By default, existing auth is reused.
-SkyPilot easily connects to your existing infra---cloud accounts, Kubernetes
+SkyPilot easily connects to your existing infra---clouds, Kubernetes
 clusters, or on-prem machines---using each infra's native authentication
 (cloud credentials, kubeconfig, SSH).
 
@@ -319,7 +322,7 @@ between multiple Kubernetes clusters is also supported.
 
 See :ref:`kubernetes-overview`.
 
-.. figure:: ../images/k8s-skypilot-architecture-dark.png
+.. figure:: images/k8s-skypilot-architecture-dark.png
    :width: 50%
    :align: center
    :alt: SkyPilot on Kubernetes
@@ -327,7 +330,7 @@ See :ref:`kubernetes-overview`.
 
    SkyPilot layers on top of your Kubernetes cluster(s).
 
-.. figure:: ../images/k8s-skypilot-architecture-light.png
+.. figure:: images/k8s-skypilot-architecture-light.png
    :width: 50%
    :align: center
    :alt: SkyPilot on Kubernetes
@@ -344,13 +347,13 @@ If you have existing machines, i.e., a list of IP addresses you can SSH into, yo
 
 See :ref:`Using Existing Machines <existing-machines>`.
 
-.. figure:: ../images/sky-existing-infra-workflow-light.png
+.. figure:: images/sky-existing-infra-workflow-light.png
    :width: 85%
    :align: center
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-light
 
-.. figure:: ../images/sky-existing-infra-workflow-dark.png
+.. figure:: images/sky-existing-infra-workflow-dark.png
    :width: 85%
    :align: center
    :alt: Deploying SkyPilot on existing machines

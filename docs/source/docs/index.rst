@@ -147,7 +147,7 @@ Read the research:
    :maxdepth: 1
    :caption: Getting Started
 
-   ../getting-started/key-concepts
+   ../overview
    ../getting-started/installation
    ../getting-started/quickstart
    ../examples/interactive-development
