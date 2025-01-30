@@ -686,7 +686,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # We should not use common_utils.get_usage_run_id() here, because when
     # Python API is used, the run id will be the same across multiple
     # jobs.launch/serve.up calls after the sky is imported.
-    run_id = str(uuid.uuid4())[:8]
+    run_id = common_utils.base36_encode(uuid.uuid4().hex)[:8]
+    user_hash = common_utils.get_user_hash()
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
@@ -720,7 +721,9 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         store_type = store_cls = sub_path = None
         storage_account_name = region = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(), id=run_id)
+            username=common_utils.get_cleaned_username(),
+            user_hash=user_hash,
+            id=run_id)
     else:
         store_type, store_cls, bucket_name, sub_path, storage_account_name, \
             region = storage_lib.StoreType.get_fields_from_store_url(
