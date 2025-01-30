@@ -15,6 +15,10 @@ MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
 
 POLL_INTERVAL = 5
 
+_token = None
+# https://github.com/grpc/grpc/issues/37642 to avoid spam in console
+os.environ['GRPC_VERBOSITY'] = 'NONE'
+
 nebius = common.LazyImport(
     'nebius',
     import_error_message='Failed to import dependencies for Nebius AI Cloud. '
@@ -50,13 +54,15 @@ def vpc():
 
 
 def get_iam_token():
-    try:
-        with open(os.path.expanduser(f'~/.nebius/{NEBIUS_IAM_TOKEN_PATH}'),
-                  encoding='utf-8') as file:
-            iam_token = file.read().strip()
-        return iam_token
-    except FileNotFoundError:
-        return None
+    global _token
+    if _token is None:
+        try:
+            with open(os.path.expanduser(f'~/.nebius/{NEBIUS_IAM_TOKEN_PATH}'),
+                      encoding='utf-8') as file:
+                _token = file.read().strip()
+        except FileNotFoundError:
+            return None
+    return _token
 
 
 def get_tenant_id():
@@ -69,5 +75,5 @@ def get_tenant_id():
         return None
 
 
-def sdk(credentials):
-    return nebius.sdk.SDK(credentials=credentials)
+def sdk():
+    return nebius.sdk.SDK(credentials=get_iam_token())

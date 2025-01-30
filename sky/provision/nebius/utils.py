@@ -1,4 +1,4 @@
-"""RunPod library wrapper for SkyPilot."""
+"""Nebius library wrapper for SkyPilot."""
 import time
 from typing import Any, Dict
 import uuid
@@ -8,8 +8,6 @@ from sky.adaptors import nebius
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
-
-sdk = nebius.sdk(credentials=nebius.get_iam_token())
 
 POLL_INTERVAL = 5
 
@@ -34,7 +32,7 @@ def retry(func):
 
 
 def get_project_by_region(region: str) -> str:
-    service = nebius.iam().ProjectServiceClient(sdk)
+    service = nebius.iam().ProjectServiceClient(nebius.sdk())
     projects = service.list(nebius.iam().ListProjectsRequest(
         parent_id=nebius.get_tenant_id())).wait()
     for project in projects.items:
@@ -55,7 +53,7 @@ def get_or_creat_gpu_cluster(name: str, region: str) -> str:
     https://docs.nebius.com/compute/clusters/gpu
     """
     project_id = get_project_by_region(region)
-    service = nebius.compute().GpuClusterServiceClient(sdk)
+    service = nebius.compute().GpuClusterServiceClient(nebius.sdk())
     try:
         cluster = service.get_by_name(nebius.nebius_common().GetByNameRequest(
             parent_id=project_id,
@@ -84,7 +82,7 @@ def get_or_creat_gpu_cluster(name: str, region: str) -> str:
 def delete_cluster(name: str, region: str) -> None:
     """Delete a GPU cluster."""
     project_id = get_project_by_region(region)
-    service = nebius.compute().GpuClusterServiceClient(sdk)
+    service = nebius.compute().GpuClusterServiceClient(nebius.sdk())
     try:
         cluster = service.get_by_name(nebius.nebius_common().GetByNameRequest(
             parent_id=project_id,
@@ -103,7 +101,7 @@ def delete_cluster(name: str, region: str) -> None:
 
 def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
     """Lists instances associated with API key."""
-    service = nebius.compute().InstanceServiceClient(sdk)
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
     result = service.list(
         nebius.compute().ListInstancesRequest(parent_id=project_id)).wait()
 
@@ -125,11 +123,11 @@ def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
 
 
 def stop(instance_id: str) -> None:
-    service = nebius.compute().InstanceServiceClient(sdk)
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
     service.stop(nebius.compute().StopInstanceRequest(id=instance_id)).wait()
     retry_count = 0
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_STOP:
-        service = nebius.compute().InstanceServiceClient(sdk)
+        service = nebius.compute().InstanceServiceClient(nebius.sdk())
         instance = service.get(nebius.compute().GetInstanceRequest(
             id=instance_id,)).wait()
         if instance.status.state.name == 'STOPPED':
@@ -147,11 +145,11 @@ def stop(instance_id: str) -> None:
 
 
 def start(instance_id: str) -> None:
-    service = nebius.compute().InstanceServiceClient(sdk)
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
     service.start(nebius.compute().StartInstanceRequest(id=instance_id)).wait()
     retry_count = 0
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_START:
-        service = nebius.compute().InstanceServiceClient(sdk)
+        service = nebius.compute().InstanceServiceClient(nebius.sdk())
         instance = service.get(nebius.compute().GetInstanceRequest(
             id=instance_id,)).wait()
         if instance.status.state.name == 'RUNNING':
@@ -186,7 +184,7 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
             cluster_id = get_or_creat_gpu_cluster(cluster_name_on_cloud, region)
 
     project_id = get_project_by_region(region)
-    service = nebius.compute().DiskServiceClient(sdk)
+    service = nebius.compute().DiskServiceClient(nebius.sdk())
     disk = service.create(nebius.compute().CreateDiskRequest(
         metadata=nebius.nebius_common().ResourceMetadata(
             parent_id=project_id,
@@ -218,11 +216,11 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
             f' seconds) while waiting for disk {disk_name}'
             f' to be ready.')
 
-    service = nebius.vpc().SubnetServiceClient(sdk)
+    service = nebius.vpc().SubnetServiceClient(nebius.sdk())
     sub_net = service.list(nebius.vpc().ListSubnetsRequest(
         parent_id=project_id,)).wait()
 
-    service = nebius.compute().InstanceServiceClient(sdk)
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
     service.create(nebius.compute().CreateInstanceRequest(
         metadata=nebius.nebius_common().ResourceMetadata(
             parent_id=project_id,
@@ -248,7 +246,7 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
     instance_id = ''
     retry_count = 0
     while retry_count < nebius.MAX_RETRIES_TO_INSTANCE_READY:
-        service = nebius.compute().InstanceServiceClient(sdk)
+        service = nebius.compute().InstanceServiceClient(nebius.sdk())
         instance = service.get_by_name(nebius.nebius_common().GetByNameRequest(
             parent_id=project_id,
             name=instance_name,
@@ -271,7 +269,7 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
 
 def remove(instance_id: str) -> None:
     """Terminates the given instance."""
-    service = nebius.compute().InstanceServiceClient(sdk)
+    service = nebius.compute().InstanceServiceClient(nebius.sdk())
     result = service.get(
         nebius.compute().GetInstanceRequest(id=instance_id)).wait()
     disk_id = result.spec.boot_disk.existing_disk.id
@@ -280,7 +278,7 @@ def remove(instance_id: str) -> None:
     retry_count = 0
     while retry_count < nebius.MAX_RETRIES_TO_DISK_DELETE:
         try:
-            service = nebius.compute().DiskServiceClient(sdk)
+            service = nebius.compute().DiskServiceClient(nebius.sdk())
             service.delete(
                 nebius.compute().DeleteDiskRequest(id=disk_id)).wait()
             break
