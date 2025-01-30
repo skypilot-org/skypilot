@@ -51,7 +51,7 @@ In SkyPilot, every workload benefits from:
 .. dropdown:: Unified execution on any cloud, region, and cluster
 
     Regardless of how many clouds, regions, and clusters you have, you can use a unified interface
-    to run workloads on them.
+    to submit, run, and manage workloads on them.
 
     Your focus on the workload, and SkyPilot alleviates the burden of
     dealing with cloud infra details and differences.
@@ -283,6 +283,7 @@ Bringing your infra
 
 .. SkyPilot is designed to easily connect to your existing infra.
 .. By default, existing auth is reused.
+
 SkyPilot easily connects to your existing infra---clouds, Kubernetes
 clusters, or on-prem machines---using each infra's native authentication
 (cloud credentials, kubeconfig, SSH).
