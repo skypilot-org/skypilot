@@ -550,7 +550,7 @@ def _create_serve_controller_deployment(
         'command': ['/bin/sh', '-c'],
         'args': [
             'echo "Copying home directory to /mnt/home"; '
-            'rsync -a /home/sky/ /mnt/home; '
+            'rsync -a --chown=sky:sky /home/sky/ /mnt/home; '
             'echo "Copy completed.";'
             'ls -la /mnt/home'
         ],
