@@ -32,7 +32,7 @@ logger = sky_logging.init_logger(__name__)
 # the same content as the `task_name` column.
 # The `job_id` is now not really a job id, but a only a unique
 # identifier/primary key for all the tasks. We will use `spot_job_id`
-# to identify the spot job.
+# to identify the job.
 # TODO(zhwu): schema migration may be needed.
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.

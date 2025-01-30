@@ -3419,10 +3419,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # already 2x vCPU controller processes running on the controller VM,
             # e.g., 16 controller processes running on a controller with 8
             # vCPUs.
-            # The managed job should be set to PENDING state *after* the
-            # controller process job has been queued, as our skylet on spot
-            # controller will set the managed job in FAILED state if the
-            # controller process job does not exist.
             # We cannot set the managed job to PENDING state in the codegen for
             # the controller process job, as it will stay in the job pending
             # table and not be executed until there is an empty slot.

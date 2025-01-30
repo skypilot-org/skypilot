@@ -288,7 +288,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
     # TODO(zhwu): we need to avoid uploading the public ssh key to the
-    # nodes, as that will cause problem when the node is used as spot
+    # nodes, as that will cause problem when the node is used as jobs
     # controller, i.e., the public and private key on the node may
     # not match.
     file_mounts = config['file_mounts']
