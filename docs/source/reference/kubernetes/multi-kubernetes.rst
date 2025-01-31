@@ -26,9 +26,9 @@ Setup your Multiple Kubernetes Clusters
 Step 1: Set Up Credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To work with multiple Kubernetes clusters, you need to ensure you have the necessary credentials for each cluster.
-Check that your local ``~/.kube/config`` file has the credentials for each cluster. For setting up clusters and their credentials,
-see :ref:`kubernetes-setup-deploy`.
+To work with multiple Kubernetes clusters, their credentials must be set up as individual `contexts <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/>`_ in your local ``~/.kube/config`` file. 
+
+For deploying new clusters and getting  credentials, see :ref:`kubernetes-setup-deploy`.
 
 For example, a ``~/.kube/config`` file may look like this:
 
@@ -141,5 +141,5 @@ When launching a SkyPilot cluster or task, you can also specify the context name
 Dynamically Update Kubernetes Clusters to Use
 ----------------------------------------------
 
-To see how to dynamically update Kubernetes clusters to use, refer to :ref:`dynamic-kubernetes-contexts-update-policy`.
+You can have configure SkyPilot to dynamically fetch Kubernetes cluster configs and enforce restrictions on which clusters are used. Refer to :ref:`dynamic-kubernetes-contexts-update-policy` for more.
 
