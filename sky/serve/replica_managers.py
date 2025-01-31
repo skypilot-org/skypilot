@@ -27,6 +27,7 @@ from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
 from sky.serve import service
+from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
@@ -621,6 +622,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                  task_yaml_path: str) -> None:
         super().__init__(service_name, spec)
         self._task_yaml_path = task_yaml_path
+        task = sky.Task.from_yaml(task_yaml_path)
+        self._spot_placer: Optional[spot_placer.SpotPlacer] = (
+            spot_placer.SpotPlacer.from_task(spec, task))
         # TODO(tian): Store launch/down pid in the replica table, to make the
         # manager more persistent. Current blocker is that we need to manually
         # poll the Process (by join or is_launch), otherwise, it will never
@@ -654,6 +658,23 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        if self._spot_placer is not None:
+            # TODO(tian): Currently, the resources_override can only be
+            # `use_spot=True/False`, which will not cause any conflict with
+            # spot placer's cloud, region & zone. When we add more resources
+            # to the resources_override, we need to make sure they won't
+            # conflict with the spot placer's selection.
+            if resources_override is None:
+                resources_override = {}
+            current_resources = []
+            for info in serve_state.get_replica_infos(self._service_name):
+                handle = global_user_state.get_handle_from_cluster_name(
+                    info.cluster_name)
+                assert handle is not None and isinstance(
+                    handle, backends.CloudVmRayResourceHandle)
+                current_resources.append(handle.launched_resources)
+            resources_override.update(
+                self._spot_placer.select_next_location(current_resources))
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
@@ -814,6 +835,8 @@ class SkyPilotReplicaManager(ReplicaManager):
         logger.info(
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
         info.status_property.preempted = True
+        if self._spot_placer is not None:
+            self._spot_placer.set_preemptive(handle.launched_resources)
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
         self._terminate_replica(info.replica_id,
@@ -868,6 +891,26 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
+                    if self._spot_placer is not None:
+                        handle = global_user_state.get_handle_from_cluster_name(
+                            info.cluster_name)
+                        assert handle is not None and isinstance(
+                            handle, backends.CloudVmRayResourceHandle)
+                        # TODO(tian): Currently, we set the location to
+                        # preemptive if the launch process failed. This is
+                        # because if the error is not related to the
+                        # availability of the location, then all locations
+                        # should failed for same reason. So it does not matter
+                        # which location is preemptive or not, instead, all
+                        # locations would fail. We should implement a log parser
+                        # to detect if the error is actually related to the
+                        # availability of the location later.
+                        if p.exitcode != 0:
+                            self._spot_placer.set_preemptive(
+                                handle.launched_resources)
+                        else:
+                            self._spot_placer.set_active(
+                                handle.launched_resources)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:

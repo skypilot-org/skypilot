@@ -10,6 +10,7 @@ from sky import serve
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
+from sky.serve import spot_placer as spot_placer_lib
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -32,6 +33,7 @@ class SkyServiceSpec:
         readiness_headers: Optional[Dict[str, str]] = None,
         dynamic_ondemand_fallback: Optional[bool] = None,
         base_ondemand_fallback_replicas: Optional[int] = None,
+        spot_placer: Optional[str] = None,
         upscale_delay_seconds: Optional[int] = None,
         downscale_delay_seconds: Optional[int] = None,
         load_balancing_policy: Optional[str] = None,
@@ -83,6 +85,7 @@ class SkyServiceSpec:
             bool] = dynamic_ondemand_fallback
         self._base_ondemand_fallback_replicas: Optional[
             int] = base_ondemand_fallback_replicas
+        self._spot_placer: Optional[str] = spot_placer
         self._upscale_delay_seconds: Optional[int] = upscale_delay_seconds
         self._downscale_delay_seconds: Optional[int] = downscale_delay_seconds
         self._load_balancing_policy: Optional[str] = load_balancing_policy
@@ -174,6 +177,8 @@ class SkyServiceSpec:
                     'base_ondemand_fallback_replicas', None)
             service_config['dynamic_ondemand_fallback'] = policy_section.get(
                 'dynamic_ondemand_fallback', None)
+            service_config['spot_placer'] = policy_section.get(
+                'spot_placer', None)
 
         service_config['load_balancing_policy'] = config.get(
             'load_balancing_policy', None)
@@ -239,6 +244,7 @@ class SkyServiceSpec:
                         self.dynamic_ondemand_fallback)
         add_if_not_none('replica_policy', 'base_ondemand_fallback_replicas',
                         self.base_ondemand_fallback_replicas)
+        add_if_not_none('replica_policy', 'spot_placer', self.spot_placer)
         add_if_not_none('replica_policy', 'upscale_delay_seconds',
                         self.upscale_delay_seconds)
         add_if_not_none('replica_policy', 'downscale_delay_seconds',
@@ -264,6 +270,9 @@ class SkyServiceSpec:
         policy_strs: List[str] = []
         if (self.dynamic_ondemand_fallback is not None and
                 self.dynamic_ondemand_fallback):
+            if self.spot_placer is not None:
+                if self.spot_placer == spot_placer_lib.SPOT_HEDGE_PLACER:
+                    return 'SpotHedge'
             policy_strs.append('Dynamic on-demand fallback')
             if self.base_ondemand_fallback_replicas is not None:
                 policy_strs.append(
@@ -276,8 +285,12 @@ class SkyServiceSpec:
                 policy_strs.append('Static spot mixture with '
                                    f'{self.base_ondemand_fallback_replicas} '
                                    f'base on-demand replica{plural}')
+        if self.spot_placer is not None:
+            if not policy_strs:
+                policy_strs.append('Spot placement')
+            policy_strs.append(f'with {self.spot_placer} placer')
         if not policy_strs:
-            return 'No spot fallback policy'
+            return 'No spot policy'
         return ' '.join(policy_strs)
 
     def autoscaling_policy_str(self):
@@ -366,6 +379,10 @@ class SkyServiceSpec:
     @property
     def dynamic_ondemand_fallback(self) -> Optional[bool]:
         return self._dynamic_ondemand_fallback
+
+    @property
+    def spot_placer(self) -> Optional[str]:
+        return self._spot_placer
 
     @property
     def upscale_delay_seconds(self) -> Optional[int]:

@@ -4216,6 +4216,7 @@ def serve_up(
     )
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
+    serve_lib.validate_service_task(task)
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
@@ -4334,6 +4335,7 @@ def serve_update(
     )
     click.secho('Service Spec:', fg='cyan')
     click.echo(task.service)
+    serve_lib.validate_service_task(task)
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')

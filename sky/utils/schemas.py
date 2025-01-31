@@ -317,6 +317,7 @@ def get_service_schema():
     # To avoid circular imports, only import when needed.
     # pylint: disable=import-outside-toplevel
     from sky.serve import load_balancing_policies
+    from sky.serve import spot_placer
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -379,6 +380,11 @@ def get_service_schema():
                     'base_ondemand_fallback_replicas': {
                         'type': 'integer',
                         'minimum': 0,
+                    },
+                    'spot_placer': {
+                        'type': 'string',
+                        'case_insensitive_enum': list(
+                            spot_placer.SPOT_PLACERS.keys())
                     },
                     'upscale_delay_seconds': {
                         'type': 'number',

@@ -18,6 +18,7 @@ from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -32,7 +33,7 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def _validate_service_task(task: 'sky.Task') -> None:
+def validate_service_task(task: 'sky.Task') -> None:
     """Validate the task for Sky Serve.
 
     Args:
@@ -68,6 +69,10 @@ def _validate_service_task(task: 'sky.Task') -> None:
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
+    # Try to create a spot placer from the task yaml. Check if the task yaml
+    # is valid for spot placer.
+    spot_placer.SpotPlacer.from_task(task.service, task)
+
     replica_ingress_port: Optional[int] = int(
         task.service.ports) if (task.service.ports is not None) else None
     for requested_resources in task.resources:
@@ -78,6 +83,12 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     '`use_ondemand_fallback` is only supported '
                     'for spot resources. Please explicitly specify '
                     '`use_spot: true` in resources for on-demand fallback.')
+        if (task.service.spot_placer is not None and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`spot_placer` is only supported for spot resources. '
+                    'Please explicitly specify `use_spot: true` in resources.')
         if task.service.ports is None:
             requested_ports = list(
                 resources_utils.port_ranges_to_set(requested_resources.ports))
@@ -112,7 +123,7 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
         The generated template variables for TLS.
     """
     service_spec = task.service
-    # Already checked by _validate_service_task
+    # Already checked by validate_service_task
     assert service_spec is not None
     if service_spec.tls_credential is None:
         return {'use_tls': False}
@@ -164,7 +175,7 @@ def up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    _validate_service_task(task)
+    validate_service_task(task)
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -319,7 +330,7 @@ def up(
                 skip_status_check=True).get(lb_port)
             assert socket_endpoint is not None, (
                 'Did not get endpoint for controller.')
-            # Already checked by _validate_service_task
+            # Already checked by validate_service_task
             assert task.service is not None
             protocol = ('http'
                         if task.service.tls_credential is None else 'https')
@@ -371,7 +382,7 @@ def update(
         task: sky.Task to update.
         service_name: Name of the service.
     """
-    _validate_service_task(task)
+    validate_service_task(task)
 
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG

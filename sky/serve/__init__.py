@@ -11,6 +11,7 @@ from sky.serve.core import tail_logs
 from sky.serve.core import terminate_replica
 from sky.serve.core import up
 from sky.serve.core import update
+from sky.serve.core import validate_service_task
 from sky.serve.load_balancing_policies import LB_POLICIES
 from sky.serve.serve_state import ReplicaStatus
 from sky.serve.serve_state import ServiceStatus
