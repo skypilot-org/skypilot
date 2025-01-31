@@ -850,6 +850,28 @@ def test_skyserve_https(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.serve
+def test_skyserve_multi_ports(generic_cloud: str):
+    """Test skyserve with multiple ports"""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        f'test-skyserve-multi-ports',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/multi_ports.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
+            f'export replica_endpoint=$(sky serve status {name} | tail -n 1 | awk \'{{print $4}}\'); '
+            'export replica_endpoint_alt=$(echo $endpoint | sed "s/8080/8081/"); '
+            'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
+            'curl $replica_endpoint_alt | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
 # TODO(Ziming, Tian): Add tests for autoscaling.
 
 
