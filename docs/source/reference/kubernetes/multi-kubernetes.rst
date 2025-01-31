@@ -65,7 +65,10 @@ In this example, we have two Kubernetes clusters: ``my-h100-cluster`` and ``my-t
 Step 2: Configure SkyPilot to Access Multiple Kubernetes Clusters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-By default, SkyPilot will only use the current context in the kubeconfig, e.g., ``current-context: my-h100-cluster`` or you can get the current context with ``kubectl config current-context``.
+Unlike clouds, SkyPilot does not failover through different Kubernetes clusters (regions) by default because each Kubernetes clusters can have a different purpose.
+
+By default, SkyPilot only uses the current context in the kubeconfig, e.g., ``current-context: my-h100-cluster`` or you can get the current context with ``kubectl config current-context``.
+
 To allow SkyPilot to access multiple Kubernetes clusters, you can set the ``kubernetes.allowed_contexts`` in the SkyPilot config.
 
 .. code-block:: yaml
@@ -81,10 +84,11 @@ To check the enabled Kubernetes clusters, you can run ``sky check kubernetes``.
 
     $ sky check kubernetes
 
-    Enabled Kubernetes clusters:
-    - my-h100-cluster
-    - my-tpu-cluster
-
+    🎉 Enabled clouds 🎉
+      ✔ Kubernetes
+        Allowed contexts:
+        ├── my-h100-cluster
+        └── my-tpu-cluster
 
 
 Failover across Multiple Kubernetes Clusters
@@ -96,7 +100,7 @@ order as they are specified.
 
 .. code-block:: console
 
-    $ sky launch --cloud kubernetes echo 'Hello World'
+    $ sky launch --gpus H100 --cloud kubernetes echo 'Hello World'
 
     Considered resources (1 node):
     ------------------------------------------------------------------------------------------------------------
