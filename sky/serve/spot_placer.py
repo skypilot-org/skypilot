@@ -61,17 +61,16 @@ def _get_possible_location_from_resources(resources: 'resources_lib.Resources',
         raise_if_no_cloud_access=False)
     clouds_list: List['sky_clouds.Cloud'] = (
         [resources.cloud] if resources.cloud is not None else enabled_clouds)
-    all_possible_resources = []
+    possible_locations = set()
     for cloud in clouds_list:
         feasible_resources = cloud.get_feasible_launchable_resources(
             resources, num_nodes=num_nodes)
         for feasible in feasible_resources.resources_list:
-            all_possible_resources.extend(
-                resources_utils.make_launchables_for_valid_region_zones(
-                    feasible))
-    return [
-        Location.from_resources(resource) for resource in all_possible_resources
-    ]
+            for launchable in (
+                    resources_utils.make_launchables_for_valid_region_zones(
+                        feasible)):
+                possible_locations.add(Location.from_resources(launchable))
+    return list(possible_locations)
 
 
 class SpotPlacer:
