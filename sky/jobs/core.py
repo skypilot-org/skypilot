@@ -101,7 +101,7 @@ def launch(
             ux_utils.spinner_message('Initializing managed job')):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, path='jobs')
+                task_, task_type='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
