@@ -6,12 +6,12 @@ import typing
 from typing import Any, Dict, List, Optional
 
 from sky import check as sky_check
+from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    from sky import clouds as sky_clouds
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.serve import service_spec
@@ -47,6 +47,28 @@ class Location:
 
     def to_dict(self) -> Dict[str, Any]:
         return {'cloud': self.cloud, 'region': self.region, 'zone': self.zone}
+
+    @classmethod
+    def from_pickleable(
+            cls, data: Optional[Dict[str,
+                                     Optional[str]]]) -> Optional['Location']:
+        if data is None:
+            return None
+        cloud = sky_clouds.CLOUD_REGISTRY.from_str(data['cloud'])
+        assert cloud is not None
+        assert data['region'] is not None
+        return cls(
+            cloud=cloud,
+            region=data['region'],
+            zone=data['zone'],
+        )
+
+    def to_pickleable(self) -> Dict[str, Optional[str]]:
+        return {
+            'cloud': str(self.cloud),
+            'region': self.region,
+            'zone': self.zone,
+        }
 
 
 class LocationStatus(enum.Enum):
@@ -100,19 +122,16 @@ class SpotPlacer:
                 'Only one policy can be default.')
             DEFAULT_SPOT_PLACER = name
 
-    def select_next_location(
-            self, current_resources: List['resources_lib.Resources']
-    ) -> Dict[str, Any]:
+    def select_next_location(self,
+                             current_locations: List[Location]) -> Location:
         """Select next location to place spot instance."""
         raise NotImplementedError
 
-    def set_active(self, resources: 'resources_lib.Resources') -> None:
-        location = Location.from_resources(resources)
+    def set_active(self, location: Location) -> None:
         assert location in self.location2status, location
         self.location2status[location] = LocationStatus.ACTIVE
 
-    def set_preemptive(self, resources: 'resources_lib.Resources') -> None:
-        location = Location.from_resources(resources)
+    def set_preemptive(self, location: Location) -> None:
         assert location in self.location2status, location
         self.location2status[location] = LocationStatus.PREEMPTED
 
@@ -155,12 +174,8 @@ class DynamicFallbackSpotPlacer(SpotPlacer,
                                 default=True):
     """Dynamic Fallback Placer."""
 
-    def select_next_location(
-            self, current_resources: List['resources_lib.Resources']
-    ) -> Dict[str, Any]:
-        current_locations = [
-            Location.from_resources(resource) for resource in current_resources
-        ]
+    def select_next_location(self,
+                             current_locations: List[Location]) -> Location:
         active_locations = self.active_locations()
         # Prioritize locations that are not currently used.
         candidate_locations: List[Location] = [
@@ -170,10 +185,10 @@ class DynamicFallbackSpotPlacer(SpotPlacer,
         # If no candidate locations, use all active locations.
         if not candidate_locations:
             candidate_locations = active_locations
-        return self._min_cost_location(candidate_locations).to_dict()
+        return self._min_cost_location(candidate_locations)
 
-    def set_preemptive(self, resources: 'resources_lib.Resources') -> None:
-        super().set_preemptive(resources)
+    def set_preemptive(self, location: Location) -> None:
+        super().set_preemptive(location)
         # Prevent the case with only one active location.
         if len(self.active_locations()) < 2:
             self.clear_preemptive_locations()

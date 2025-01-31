@@ -60,6 +60,7 @@ def launch_cluster(replica_id: int,
                    task_yaml_path: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
+                   retry_until_up: bool = True,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -100,7 +101,7 @@ def launch_cluster(replica_id: int,
                        cluster_name,
                        detach_setup=True,
                        detach_run=True,
-                       retry_until_up=True,
+                       retry_until_up=retry_until_up,
                        _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
@@ -248,6 +249,10 @@ class ReplicaStatusProperty:
     preempted: bool = False
     # Whether the replica is purged.
     purged: bool = False
+    # Whether the replica failed to launch due to spot availability.
+    # This is only possible when spot placer is enabled, so the retry until up
+    # is set to True and it can fail immediately due to spot availability.
+    failed_spot_availability: bool = False
 
     def remove_terminated_replica(self) -> bool:
         """Whether to remove the replica record from the replica table.
@@ -387,10 +392,11 @@ class ReplicaStatusProperty:
 class ReplicaInfo:
     """Replica info for each replica."""
 
-    _VERSION = 0
+    _VERSION = 1
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, version: int) -> None:
+                 is_spot: bool, location: Optional[spot_placer.Location],
+                 version: int) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
@@ -400,6 +406,11 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
         self.is_spot: bool = is_spot
+        self.location: Optional[Dict[str, Optional[str]]] = (
+            location.to_pickleable() if location is not None else None)
+
+    def get_spot_location(self) -> Optional[spot_placer.Location]:
+        return spot_placer.Location.from_pickleable(self.location)
 
     def handle(
         self,
@@ -485,6 +496,7 @@ class ReplicaInfo:
                 f'version={self.version}, '
                 f'replica_port={self.replica_port}, '
                 f'is_spot={self.is_spot}, '
+                f'location={self.location}, '
                 f'status={self.status}, '
                 f'launched_at={info_dict["launched_at"]}{handle_str})')
         return info
@@ -558,6 +570,9 @@ class ReplicaInfo:
             # It will be handled with RequestRateAutoscaler.
             # Treated similar to on-demand instances.
             self.is_spot = False
+
+        if version < 1:
+            self.location = None
 
         self.__dict__.update(state)
 
@@ -658,7 +673,12 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        retry_until_up = True
+        location = None
         if self._spot_placer is not None:
+            # For spot placer, we don't retry until up so any launch failed
+            # due to availability issue will be handled by the placer.
+            retry_until_up = False
             # TODO(tian): Currently, the resources_override can only be
             # `use_spot=True/False`, which will not cause any conflict with
             # spot placer's cloud, region & zone. When we add more resources
@@ -666,28 +686,28 @@ class SkyPilotReplicaManager(ReplicaManager):
             # conflict with the spot placer's selection.
             if resources_override is None:
                 resources_override = {}
-            current_resources = []
+            current_spot_locations: List[spot_placer.Location] = []
             for info in serve_state.get_replica_infos(self._service_name):
-                handle = global_user_state.get_handle_from_cluster_name(
-                    info.cluster_name)
-                assert handle is not None and isinstance(
-                    handle, backends.CloudVmRayResourceHandle)
-                current_resources.append(handle.launched_resources)
-            resources_override.update(
-                self._spot_placer.select_next_location(current_resources))
+                if info.is_spot:
+                    spot_location = info.get_spot_location()
+                    if spot_location is not None:
+                        current_spot_locations.append(spot_location)
+            location = self._spot_placer.select_next_location(
+                current_spot_locations)
+            resources_override.update(location.to_dict())
         p = multiprocessing.Process(
             target=ux_utils.RedirectOutputForProcess(
                 launch_cluster,
                 log_file_name,
             ).run,
             args=(replica_id, self._task_yaml_path, cluster_name,
-                  resources_override),
+                  resources_override, retry_until_up),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           self.latest_version)
+                           location, self.latest_version)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.
@@ -836,7 +856,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             f'Replica {info.replica_id} is preempted{cluster_status_str}.')
         info.status_property.preempted = True
         if self._spot_placer is not None:
-            self._spot_placer.set_preemptive(handle.launched_resources)
+            spot_location = info.get_spot_location()
+            assert spot_location is not None
+            self._spot_placer.set_preemptive(spot_location)
         serve_state.add_or_update_replica(self._service_name, info.replica_id,
                                           info)
         self._terminate_replica(info.replica_id,
@@ -891,11 +913,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     else:
                         info.status_property.sky_launch_status = (
                             ProcessStatus.SUCCEEDED)
-                    if self._spot_placer is not None:
-                        handle = global_user_state.get_handle_from_cluster_name(
-                            info.cluster_name)
-                        assert handle is not None and isinstance(
-                            handle, backends.CloudVmRayResourceHandle)
+                    if self._spot_placer is not None and info.is_spot:
                         # TODO(tian): Currently, we set the location to
                         # preemptive if the launch process failed. This is
                         # because if the error is not related to the
@@ -905,12 +923,13 @@ class SkyPilotReplicaManager(ReplicaManager):
                         # locations would fail. We should implement a log parser
                         # to detect if the error is actually related to the
                         # availability of the location later.
+                        location = info.get_spot_location()
+                        assert location is not None
                         if p.exitcode != 0:
-                            self._spot_placer.set_preemptive(
-                                handle.launched_resources)
+                            self._spot_placer.set_preemptive(location)
+                            info.status_property.failed_spot_availability = True
                         else:
-                            self._spot_placer.set_active(
-                                handle.launched_resources)
+                            self._spot_placer.set_active(location)
                 serve_state.add_or_update_replica(self._service_name,
                                                   replica_id, info)
                 if error_in_sky_launch:
@@ -961,6 +980,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     removal_reason = 'for version outdated'
                 elif info.status_property.purged:
                     removal_reason = 'for purge'
+                elif info.status_property.failed_spot_availability:
+                    removal_reason = 'for spot availability failure'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '

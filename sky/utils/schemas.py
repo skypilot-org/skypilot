@@ -370,6 +370,10 @@ def get_service_schema():
                         'type': 'integer',
                         'minimum': 0,
                     },
+                    'num_overprovision': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
                     'target_qps_per_replica': {
                         'type': 'number',
                         'minimum': 0,

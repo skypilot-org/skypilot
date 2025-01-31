@@ -26,6 +26,7 @@ class SkyServiceSpec:
         readiness_timeout_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
+        num_overprovision: Optional[int] = None,
         ports: Optional[str] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
@@ -75,6 +76,7 @@ class SkyServiceSpec:
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
+        self._num_overprovision: Optional[int] = num_overprovision
         self._ports: Optional[str] = ports
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
@@ -159,6 +161,7 @@ class SkyServiceSpec:
                 min_replicas = constants.DEFAULT_MIN_REPLICAS
             service_config['min_replicas'] = min_replicas
             service_config['max_replicas'] = None
+            service_config['num_overprovision'] = None
             service_config['target_qps_per_replica'] = None
             service_config['upscale_delay_seconds'] = None
             service_config['downscale_delay_seconds'] = None
@@ -166,6 +169,8 @@ class SkyServiceSpec:
             service_config['min_replicas'] = policy_section['min_replicas']
             service_config['max_replicas'] = policy_section.get(
                 'max_replicas', None)
+            service_config['num_overprovision'] = policy_section.get(
+                'num_overprovision', None)
             service_config['target_qps_per_replica'] = policy_section.get(
                 'target_qps_per_replica', None)
             service_config['upscale_delay_seconds'] = policy_section.get(
@@ -238,6 +243,8 @@ class SkyServiceSpec:
         add_if_not_none('readiness_probe', 'headers', self._readiness_headers)
         add_if_not_none('replica_policy', 'min_replicas', self.min_replicas)
         add_if_not_none('replica_policy', 'max_replicas', self.max_replicas)
+        add_if_not_none('replica_policy', 'num_overprovision',
+                        self.num_overprovision)
         add_if_not_none('replica_policy', 'target_qps_per_replica',
                         self.target_qps_per_replica)
         add_if_not_none('replica_policy', 'dynamic_ondemand_fallback',
@@ -302,9 +309,13 @@ class SkyServiceSpec:
         assert self.target_qps_per_replica is not None
         # TODO(tian): Refactor to contain more information
         max_plural = '' if self.max_replicas == 1 else 's'
+        overprovision_str = ''
+        if self.num_overprovision is not None:
+            overprovision_str = (
+                f' with {self.num_overprovision} overprovisioned replicas')
         return (f'Autoscaling from {self.min_replicas} to {self.max_replicas} '
-                f'replica{max_plural} (target QPS per replica: '
-                f'{self.target_qps_per_replica})')
+                f'replica{max_plural}{overprovision_str} (target QPS per '
+                f'replica: {self.target_qps_per_replica})')
 
     def set_ports(self, ports: str) -> None:
         self._ports = ports
@@ -346,6 +357,10 @@ class SkyServiceSpec:
     def max_replicas(self) -> Optional[int]:
         # If None, treated as having the same value of min_replicas.
         return self._max_replicas
+
+    @property
+    def num_overprovision(self) -> Optional[int]:
+        return self._num_overprovision
 
     @property
     def ports(self) -> Optional[str]:
