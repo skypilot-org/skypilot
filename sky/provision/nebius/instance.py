@@ -152,7 +152,7 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    assert provider_config is not None, provider_config['region']
+    assert provider_config is not None
     exist_instances = _filter_instances(provider_config['region'],
                                         cluster_name_on_cloud, ['RUNNING'])
     for instance in exist_instances:
@@ -168,9 +168,10 @@ def terminate_instances(
 ) -> None:
     """See sky/provision/__init__.py"""
 
-    assert provider_config is not None, provider_config['region']
+    assert provider_config is not None
     instances = _filter_instances(provider_config['region'],
-                                  cluster_name_on_cloud, status_filters=None)
+                                  cluster_name_on_cloud,
+                                  status_filters=None)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):

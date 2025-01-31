@@ -138,8 +138,7 @@ extras_require: Dict[str, List[str]] = {
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius
 if sys.version_info < (3, 10):
-    filtered_keys = [key for key in extras_require.keys() if key != 'nebius']
+    filtered_keys = [k for k in extras_require if k != 'nebius']
     extras_require['all'] = sum((extras_require[k] for k in filtered_keys), [])
 else:
     extras_require['all'] = sum(extras_require.values(), [])
-

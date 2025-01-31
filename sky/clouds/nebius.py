@@ -49,7 +49,6 @@ class Nebius(clouds.Cloud):
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
-
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
