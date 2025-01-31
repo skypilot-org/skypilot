@@ -127,5 +127,5 @@ order as they are specified.
 Dynamically Update Kubernetes Clusters to Use
 ----------------------------------------------
 
-To see how to dynamically update Kubernetes clusters to use, refer to :ref:`dynamic-kubernetes-contexts-update-policy`.
+You can have configure SkyPilot to dynamically fetch Kubernetes cluster configs and enforce restrictions on which clusters are used. Refer to :ref:`dynamic-kubernetes-contexts-update-policy` for more.
 
