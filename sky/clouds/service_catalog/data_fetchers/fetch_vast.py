@@ -26,7 +26,8 @@ _map = {
 
 def create_instance_type(obj: Dict[str, Any]) -> str:
     stubify = lambda x: re.sub(r'\s', '_', x)
-    return '{}x-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']))
+    return '{}x-{}-{}-{}'.format(obj['num_gpus'], stubify(obj['gpu_name']),
+                                 obj['cpu_cores'], obj['cpu_ram'])
 
 
 def dot_get(d: dict, key: str) -> Any:
@@ -36,6 +37,7 @@ def dot_get(d: dict, key: str) -> Any:
 
 
 if __name__ == '__main__':
+    seen = set()
     # InstanceType and gpuInfo are basically just stubs
     # so that the dictwriter is happy without weird
     # code.
@@ -134,5 +136,8 @@ if __name__ == '__main__':
 
         maxBid = max([x.get('SpotPrice') for x in toList])
         for instance in toList:
-            instance['SpotPrice'] = '{:.2f}'.format(maxBid)
-            writer.writerow(instance)
+            stub = f'{instance["InstanceType"]} {instance["Region"][-2:]}'
+            if stub not in seen:
+                instance['SpotPrice'] = '{:.2f}'.format(maxBid)
+                writer.writerow(instance)
+                seen.add(stub)
