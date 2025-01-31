@@ -77,7 +77,7 @@ def main():
         type=str,
         default='',
         help='Prefix path within mounted bucket to search for parquet files')
-
+    
     args = parser.parse_args()
 
     # Create a temporary directory for building the database
@@ -121,11 +121,11 @@ def main():
                 try:
                     results = future.result()
                     if results:
-                        for ids, embeddings, images_base64 in results:
+                        for ids, embeddings, images_paths in results:
                             collection.add(
                                 ids=list(ids),
                                 embeddings=list(embeddings),
-                                documents=list(images_base64)
+                                documents=list(images_paths)
                             )
                 except Exception as e:
                     logger.error(f"Error processing file {file}: {str(e)}")

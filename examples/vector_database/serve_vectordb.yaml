@@ -10,6 +10,11 @@ resources:
 file_mounts:
   /vectordb:
     name: sky-vectordb
+    # this needs to be the same as the source in the build_vectordb.yaml
+    mode: MOUNT
+  /images:
+    name: sky-images
+    # this needs to be the same as the source in the build_vectordb.yaml
     mode: MOUNT
 
 setup: |
@@ -18,12 +23,11 @@ setup: |
   pip install open_clip_torch chromadb pandas
   pip install fastapi uvicorn pydantic
 
-
-
 run: |
   python scripts/serve_vectordb.py \
     --collection-name clip_embeddings \
     --persist-dir /vectordb/chroma \
+    --images-dir /images \
     --host 0.0.0.0 \
     --port 8000 
 

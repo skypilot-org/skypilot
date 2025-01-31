@@ -11,7 +11,12 @@ num_nodes: 1
 
 file_mounts:
   /output:
-    name: sky-embeddings
+    name: sky-embedding
+    # this needs to be the same as the source in the build_vectordb.yaml
+    mode: MOUNT
+  /images:
+    name: sky-images
+    # this needs to be the same as the source in the build_vectordb.yaml
     mode: MOUNT
 
 envs:

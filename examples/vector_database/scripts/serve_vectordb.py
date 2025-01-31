@@ -5,12 +5,14 @@ This script is responsible for serving the vector database.
 import argparse
 import base64
 import logging
+import os
+from pathlib import Path
 from typing import List, Optional
 
 import chromadb
-from fastapi import FastAPI
-from fastapi import HTTPException
-from fastapi.responses import HTMLResponse
+from fastapi import FastAPI, HTTPException
+from fastapi.responses import HTMLResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 import numpy as np
 import open_clip
 from pydantic import BaseModel
@@ -28,6 +30,7 @@ model = None
 tokenizer = None
 collection = None
 device = None
+images_dir = None
 
 
 class SearchQuery(BaseModel):
@@ -36,7 +39,7 @@ class SearchQuery(BaseModel):
 
 
 class SearchResult(BaseModel):
-    image_base64: str
+    image_path: str
     similarity: float
 
 
@@ -64,16 +67,16 @@ def query_collection(query_embedding: np.ndarray,
                                n_results=n_results,
                                include=["metadatas", "distances", "documents"])
 
-    # Get images and distances, images in documents
-    images = results['documents'][0]
+    # Get image paths and distances
+    image_paths = results['documents'][0]
     distances = results['distances'][0]
 
     # Convert distances to similarities (cosine similarity = 1 - distance/2)
     similarities = [1 - (d / 2) for d in distances]
 
     return [
-        SearchResult(image_base64=img, similarity=similarity)
-        for img, similarity in zip(images, similarities)
+        SearchResult(image_path=img_path, similarity=similarity)
+        for img_path, similarity in zip(image_paths, similarities)
     ]
 
 
@@ -91,6 +94,15 @@ async def search(query: SearchQuery):
     except Exception as e:
         logger.error(f"Error processing query: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/image/{subpath:path}")
+async def get_image(subpath: str):
+    """Serve an image from the mounted bucket."""
+    image_path = os.path.join(images_dir, subpath)
+    if not os.path.exists(image_path):
+        raise HTTPException(status_code=404, detail="Image not found")
+    return FileResponse(image_path, media_type="image/jpeg")
 
 
 @app.get("/health")
@@ -251,7 +263,7 @@ async def get_search_page():
                     const results = await response.json();
                     resultsDiv.innerHTML = results.map(result => `
                         <div class="result">
-                            <img src="data:image/jpeg;base64,${result.image_base64}"
+                            <img src="/image/${result.image_path}"
                                 alt="Search result">
                             <div class="result-info">
                                 <p class="similarity-score">
@@ -295,6 +307,10 @@ def main():
                         type=str,
                         default='/vectordb/chroma',
                         help='Directory where ChromaDB is persisted')
+    parser.add_argument('--images-dir',
+                        type=str,
+                        default='/images',
+                        help='Directory where images are stored')
     parser.add_argument('--model-name',
                         type=str,
                         default='ViT-bigG-14',
@@ -303,11 +319,14 @@ def main():
     args = parser.parse_args()
 
     # Initialize global variables
-    global model, tokenizer, collection, device
+    global model, tokenizer, collection, device, images_dir
 
     # Set device
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info(f"Using device: {device}")
+
+    # Set images directory
+    images_dir = args.images_dir
 
     # Load the model
     import open_clip

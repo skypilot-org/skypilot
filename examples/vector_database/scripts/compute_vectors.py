@@ -26,6 +26,7 @@ class BatchProcessor():
 
     def __init__(self,
                  output_path: str,
+                 images_path: str = "/images",
                  model_name: str = "ViT-bigG-14",
                  dataset_name: str = "ILSVRC/imagenet-1k",
                  pretrained: str = "laion2b_s39b_b160k",
@@ -37,11 +38,15 @@ class BatchProcessor():
                  start_idx: int = 0,
                  end_idx: Optional[int] = None):
         self.output_path = Path(output_path)  # Convert to Path object
+        self.images_path = Path(images_path)  # Path to store images
         self.batch_size = batch_size
         self.checkpoint_size = checkpoint_size
         self.start_idx = start_idx
         self.end_idx = end_idx
         self._current_batch = []
+
+        # Create images directory if it doesn't exist
+        self.images_path.mkdir(parents=True, exist_ok=True)
 
         # CLIP-specific attributes
         self.model_name = model_name
@@ -96,6 +101,20 @@ class BatchProcessor():
                 logging.debug(
                     f"Error preprocessing image at index {idx}: {str(e)}")
 
+    def save_image(self, idx: int, image: Image.Image) -> str:
+        """Save image to the mounted bucket and return its path."""
+        # Create a subdirectory based on the first few digits of the index to avoid too many files in one directory
+        subdir = str(idx // 100000).zfill(4)
+        save_dir = self.images_path / subdir
+        save_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Save image with index as filename
+        image_path = save_dir / f"{idx}.jpg"
+        image.save(image_path, format="JPEG", quality=95)
+        
+        # Return relative path from images root
+        return str(Path(subdir) / f"{idx}.jpg")
+
     async def do_batch_processing(
         self, batch: List[Tuple[int, Tuple[torch.Tensor, Any]]]
     ) -> List[Tuple[int, bytes]]:
@@ -118,16 +137,14 @@ class BatchProcessor():
         # Convert to numpy arrays
         embeddings = features.cpu().numpy()
 
-        # Convert original images to base64
-        images_base64 = {}
+        # Save images and store their paths
+        image_paths = {}
         for idx, img in zip(indices, original_images):
-            buffered = BytesIO()
-            img.save(buffered, format="JPEG")
-            img_str = base64.b64encode(buffered.getvalue()).decode()
-            images_base64[idx] = img_str
+            image_path = self.save_image(idx, img)
+            image_paths[idx] = image_path
 
-        # Return both embeddings and images
-        return [(idx, pickle.dumps((images_base64[idx], arr)))
+        # Return both embeddings and image paths
+        return [(idx, pickle.dumps((image_paths[idx], arr)))
                 for idx, arr in zip(indices, embeddings)]
 
     async def find_existing_progress(self) -> Tuple[int, int]:
@@ -253,6 +270,11 @@ async def main():
                         type=str,
                         default='ViT-bigG-14',
                         help='CLIP model name')
+    
+    parser.add_argument('--images-path',
+                        type=str,
+                        default='/images',
+                        help='Path to store images')
 
     args = parser.parse_args()
 
@@ -267,7 +289,8 @@ async def main():
                                end_idx=args.end_idx,
                                batch_size=args.batch_size,
                                checkpoint_size=args.checkpoint_size,
-                               model_name=args.model_name)
+                               model_name=args.model_name,
+                               images_path=args.images_path)
 
     # Run processing
     await processor.run()
