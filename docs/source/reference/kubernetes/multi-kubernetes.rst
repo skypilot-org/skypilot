@@ -1,6 +1,6 @@
 .. _multi-kubernetes:
 
-Multiple Kubernetes Clusters
+Multi-Kubernetes Clusters
 =============================
 
 
