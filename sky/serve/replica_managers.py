@@ -72,6 +72,10 @@ def launch_cluster(replica_id: int,
             or some error happened before provisioning and will happen again
             if retry.
     """
+    if resources_override is not None:
+        logger.info(f'Scaling up replica (id: {replica_id}) cluster '
+                    f'{cluster_name} with resources override: '
+                    f'{resources_override}')
     try:
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         task = sky.Task.from_yaml_config(config)
@@ -659,6 +663,9 @@ class SkyPilotReplicaManager(ReplicaManager):
     # Replica management functions #
     ################################
 
+    # Adding lock here to make sure spot placer's current locations are
+    # consistent with the replicas' status.
+    @with_lock
     def _launch_replica(
         self,
         replica_id: int,
@@ -673,9 +680,10 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
             self._service_name, replica_id)
+        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
         retry_until_up = True
         location = None
-        if self._spot_placer is not None:
+        if use_spot and self._spot_placer is not None:
             # For spot placer, we don't retry until up so any launch failed
             # due to availability issue will be handled by the placer.
             retry_until_up = False
@@ -704,7 +712,6 @@ class SkyPilotReplicaManager(ReplicaManager):
                   resources_override, retry_until_up),
         )
         replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            location, self.latest_version)

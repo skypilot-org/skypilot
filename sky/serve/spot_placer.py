@@ -51,8 +51,9 @@ class Location:
 
     @classmethod
     def from_pickleable(
-            cls, data: Optional[Dict[str,
-                                     Optional[str]]]) -> Optional['Location']:
+        cls,
+        data: Optional[Dict[str, Optional[str]]],
+    ) -> Optional['Location']:
         if data is None:
             return None
         cloud = sky_clouds.CLOUD_REGISTRY.from_str(data['cloud'])
@@ -168,11 +169,13 @@ class SpotPlacer:
         logger.info(f'{len(possible_locations)} possible location candidates '
                     'are enabled for spot placement.')
         logger.debug(f'All possible locations: {possible_locations}')
-        self.location2status = {
+        self.location2status: Dict[Location, LocationStatus] = {
             location: LocationStatus.ACTIVE for location in possible_locations
         }
+        self.location2cost: Dict[Location, float] = {}
         # Already checked there is only one resource in the task.
         self.resources = list(task.resources)[0]
+        self.num_nodes = task.num_nodes
 
     def __init_subclass__(cls, name: str, default: bool = False):
         SPOT_PLACERS[name] = cls
@@ -202,9 +205,22 @@ class SpotPlacer:
     def _min_cost_location(self, locations: List[Location]) -> Location:
 
         def _get_cost_per_hour(location: Location) -> float:
+            if location in self.location2cost:
+                return self.location2cost[location]
+            # TODO(tian): Is there a better way to do this? This is for filling
+            # instance type so the get_cost() can operate normally.
             r: 'resources_lib.Resources' = self.resources.copy(
                 **location.to_dict())
-            return r.get_cost(seconds=3600)
+            assert r.cloud is not None
+            rs = r.cloud.get_feasible_launchable_resources(
+                r, num_nodes=self.num_nodes).resources_list
+            # For some clouds, there might have multiple instance types
+            # satisfying the resource request. In such case we choose the
+            # cheapest one, as the optimizer does. Reference:
+            # sky/optimizer.py::Optimizer::_print_candidates
+            cost = min(r.get_cost(seconds=3600) for r in rs)
+            self.location2cost[location] = cost
+            return cost
 
         return min(locations, key=_get_cost_per_hour)
 
@@ -239,13 +255,18 @@ class DynamicFallbackSpotPlacer(SpotPlacer,
         active_locations = self.active_locations()
         # Prioritize locations that are not currently used.
         candidate_locations: List[Location] = [
-            location for location in current_locations
-            if location not in active_locations
+            location for location in active_locations
+            if location not in current_locations
         ]
         # If no candidate locations, use all active locations.
         if not candidate_locations:
             candidate_locations = active_locations
-        return self._min_cost_location(candidate_locations)
+        res = self._min_cost_location(candidate_locations)
+        logger.info(f'Active locations: {active_locations}\n'
+                    f'Current locations: {current_locations}\n'
+                    f'Candidate locations: {candidate_locations}\n'
+                    f'Selected location: {res}\n')
+        return res
 
     def set_preemptive(self, location: Location) -> None:
         super().set_preemptive(location)

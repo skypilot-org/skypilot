@@ -1,5 +1,6 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
+import copy
 import dataclasses
 import enum
 import math
@@ -56,8 +57,8 @@ class AutoscalerDecision:
 def _generate_scale_up_decisions(
         num: int, target: Optional[Dict[str, Any]]) -> List[AutoscalerDecision]:
     return [
-        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP, target)
-        for _ in range(num)
+        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                           copy.copy(target)) for _ in range(num)
     ]
 
 

@@ -14,7 +14,7 @@ service:
           content: Hello! What is your name?
       max_tokens: 1
   replica_policy:
-    min_replicas: 1
+    min_replicas: 2
     max_replicas: 5
     num_overprovision: 1
     target_qps_per_replica: 10
@@ -22,6 +22,12 @@ service:
     spot_placer: dynamic_fallback
 
 resources:
+  any_of:
+    # Enable one region in AWS.
+    - cloud: aws
+      region: us-east-1
+    # Enable all region in GCP.
+    - cloud: gcp
   use_spot: true
   accelerators: L4
   cpus: 32+
