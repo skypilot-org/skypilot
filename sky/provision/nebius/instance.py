@@ -143,8 +143,23 @@ def run_instances(region: str, cluster_name_on_cloud: str,
 
 def wait_instances(region: str, cluster_name_on_cloud: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
-    del state
     _wait_until_no_pending(region, cluster_name_on_cloud)
+    if state is not None:
+        if state == status_lib.ClusterStatus.UP:
+            stopped_instances = _filter_instances(region, cluster_name_on_cloud,
+                                                  ['STOPPED'])
+            if stopped_instances:
+                raise RuntimeError(
+                    f'Cluster {cluster_name_on_cloud} is in UP state, but '
+                    f'{len(stopped_instances)} instances are stopped.')
+        if state == status_lib.ClusterStatus.STOPPED:
+            running_instances = _filter_instances(region, cluster_name_on_cloud,
+                                                  ['RUNNIG'])
+
+            if running_instances:
+                raise RuntimeError(
+                    f'Cluster {cluster_name_on_cloud} is in STOPPED state, but '
+                    f'{len(running_instances)} instances are running.')
 
 
 def stop_instances(

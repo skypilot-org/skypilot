@@ -35,6 +35,13 @@ def get_project_by_region(region: str) -> str:
     service = nebius.iam().ProjectServiceClient(nebius.sdk())
     projects = service.list(nebius.iam().ListProjectsRequest(
         parent_id=nebius.get_tenant_id())).wait()
+    # To find a project in a specific region, we rely on the project ID to
+    # deduce the region, since there is currently no method to retrieve region
+    # information directly from the project. Additionally, there is only one
+    # project per region, and projects cannot be created at this time.
+    # The region is determined from the project ID using a region-specific
+    # identifier embedded in it.
+    # https://docs.nebius.com/overview/regions
     for project in projects.items:
         if region == 'eu-north1' and project.metadata.id[8:11] == 'e00':
             return project.metadata.id
