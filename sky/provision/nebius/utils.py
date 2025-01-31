@@ -43,7 +43,7 @@ def get_project_by_region(region: str) -> str:
     raise Exception(f'No project found for region "{region}".')
 
 
-def get_or_creat_gpu_cluster(name: str, region: str) -> str:
+def get_or_create_gpu_cluster(name: str, region: str) -> str:
     """Creates a GPU cluster.
     When creating a GPU cluster, select an InfiniBand fabric for it:
 
@@ -181,7 +181,7 @@ def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
     # https://docs.nebius.com/compute/clusters/gpu
     if platform in ('gpu-h100-sxm', 'gpu-h200-sxm'):
         if preset == '8gpu-128vcpu-1600gb':
-            cluster_id = get_or_creat_gpu_cluster(cluster_name_on_cloud, region)
+            cluster_id = get_or_create_gpu_cluster(cluster_name_on_cloud, region)
 
     project_id = get_project_by_region(region)
     service = nebius.compute().DiskServiceClient(nebius.sdk())

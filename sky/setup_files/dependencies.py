@@ -5,6 +5,7 @@ This file is imported by setup.py, so:
   correct.
 - It should not import any dependencies, as they may not be installed yet.
 """
+import sys
 from typing import Dict, List
 
 install_requires = [
@@ -135,4 +136,10 @@ extras_require: Dict[str, List[str]] = {
     'nebius': ['nebius>=0.2.0',]
 }
 
-extras_require['all'] = sum(extras_require.values(), [])
+# Nebius needs python3.10. If python 3.9 [all] will not install nebius
+if sys.version_info < (3, 10):
+    filtered_keys = [key for key in extras_require.keys() if key != 'nebius']
+    extras_require['all'] = sum((extras_require[k] for k in filtered_keys), [])
+else:
+    extras_require['all'] = sum(extras_require.values(), [])
+

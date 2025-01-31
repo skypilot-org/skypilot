@@ -3,19 +3,23 @@ import os
 
 from sky.adaptors import common
 
-NB_TENANT_ID_PATH = 'NB_TENANT_ID.txt'
-NEBIUS_IAM_TOKEN_PATH = 'NEBIUS_IAM_TOKEN.txt'
+NEBIUS_TENANT_ID_FILENAME = 'NEBIUS_TENANT_ID.txt'
+NEBIUS_IAM_TOKEN_FILENAME = 'NEBIUS_IAM_TOKEN.txt'
+NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
+NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
 
 MAX_RETRIES_TO_DISK_CREATE = 120
 MAX_RETRIES_TO_INSTANCE_STOP = 120
 MAX_RETRIES_TO_INSTANCE_START = 120
 MAX_RETRIES_TO_INSTANCE_READY = 240
+
 MAX_RETRIES_TO_DISK_DELETE = 120
 MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
 
 POLL_INTERVAL = 5
 
-_token = None
+_iam_token = None
+_tenant_id = None
 # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
 os.environ['GRPC_VERBOSITY'] = 'NONE'
 
@@ -54,25 +58,27 @@ def vpc():
 
 
 def get_iam_token():
-    global _token
-    if _token is None:
+    global _iam_token
+    if _iam_token is None:
         try:
-            with open(os.path.expanduser(f'~/.nebius/{NEBIUS_IAM_TOKEN_PATH}'),
+            with open(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH),
                       encoding='utf-8') as file:
-                _token = file.read().strip()
+                _iam_token = file.read().strip()
         except FileNotFoundError:
             return None
-    return _token
+    return _iam_token
 
 
 def get_tenant_id():
-    try:
-        with open(os.path.expanduser(f'~/.nebius/{NB_TENANT_ID_PATH}'),
-                  encoding='utf-8') as file:
-            tenant_id = file.read().strip()
-        return tenant_id
-    except FileNotFoundError:
-        return None
+    global _tenant_id
+    if _tenant_id is None:
+        try:
+            with open(os.path.expanduser(NEBIUS_TENANT_ID_PATH),
+                      encoding='utf-8') as file:
+                _tenant_id = file.read().strip()
+        except FileNotFoundError:
+            return None
+    return _tenant_id
 
 
 def sdk():

@@ -13,8 +13,8 @@ if typing.TYPE_CHECKING:
 
 _CREDENTIAL_FILES = [
     # credential files for Nebius
-    nebius.NB_TENANT_ID_PATH,
-    nebius.NEBIUS_IAM_TOKEN_PATH
+    nebius.NEBIUS_TENANT_ID_FILENAME,
+    nebius.NEBIUS_IAM_TOKEN_FILENAME
 ]
 
 
@@ -49,10 +49,6 @@ class Nebius(clouds.Cloud):
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
-    @classmethod
-    def _cloud_unsupported_features(
-            cls) -> Dict[clouds.CloudImplementationFeatures, str]:
-        return cls._CLOUD_UNSUPPORTED_FEATURES
 
     @classmethod
     def _unsupported_features_for_resources(
@@ -100,7 +96,6 @@ class Nebius(clouds.Cloud):
         accelerators: Optional[Dict[str, int]] = None,
         use_spot: bool = False,
     ) -> Iterator[None]:
-        logging.debug('Nebius cloud zone provision loop: %s', cls._REPR)
         del num_nodes  # unused
         regions = cls.regions_with_offering(instance_type,
                                             accelerators,
@@ -116,7 +111,6 @@ class Nebius(clouds.Cloud):
                                      use_spot: bool,
                                      region: Optional[str] = None,
                                      zone: Optional[str] = None) -> float:
-        logging.debug('Nebius cloud instance type to hourly cost: %s',)
         return service_catalog.get_hourly_cost(instance_type,
                                                use_spot=use_spot,
                                                region=region,
@@ -138,10 +132,9 @@ class Nebius(clouds.Cloud):
         return 0.0
 
     def __repr__(self):
-        return 'Nebius'
+        return self._REPR
 
     def is_same_cloud(self, other: clouds.Cloud) -> bool:
-        logging.debug('Nebius cloud is same: %s', self)
         # Returns true if the two clouds are the same cloud type.
         return isinstance(other, Nebius)
 
@@ -153,7 +146,6 @@ class Nebius(clouds.Cloud):
             disk_tier: Optional[resources_utils.DiskTier] = None
     ) -> Optional[str]:
         """Returns the default instance type for Nebius."""
-        logging.debug('Nebius cloud default instance type: %s', cls._REPR)
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
                                                          disk_tier=disk_tier,
@@ -169,7 +161,6 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def get_zone_shell_cmd(cls) -> Optional[str]:
-        logging.debug('Nebius cloud get zone shell cmd: %s',)
         return None
 
     def make_deploy_resources_variables(
@@ -264,9 +255,9 @@ class Nebius(clouds.Cloud):
         logging.debug('Nebius cloud check credentials')
         token = nebius.get_iam_token()
         token_msg = ('    Credentials can be set up by running: \n'\
-                    f'        $ nebius iam get-access-token > ~/.nebius/{nebius.NEBIUS_IAM_TOKEN_PATH} \n')  # pylint: disable=line-too-long
+                    f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n')  # pylint: disable=line-too-long
         tenant_msg = ('   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                      f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > ~/.nebius/{nebius.NB_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
+                      f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
         if token is None:
             return False, f'{token_msg}'
         sdk = nebius.sdk()

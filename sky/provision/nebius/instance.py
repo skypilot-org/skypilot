@@ -1,6 +1,5 @@
 """Nebius instance provisioning."""
 import time
-from time import sleep
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
@@ -109,7 +108,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             except Exception as e:  # pylint: disable=broad-except
                 logger.warning(f'Start instance error: {e}')
                 raise
-            sleep(utils.POLL_INTERVAL)  # to avoid fake STOPPED status
+            time.sleep(utils.POLL_INTERVAL)  # to avoid fake STOPPED status
             logger.info(f'Started instance {stopped_instance_id}.')
 
     for _ in range(to_start_count):
@@ -153,13 +152,13 @@ def stop_instances(
     provider_config: Optional[Dict[str, Any]] = None,
     worker_only: bool = False,
 ) -> None:
-    if provider_config is not None and provider_config['region']:
-        exist_instances = _filter_instances(provider_config['region'],
-                                            cluster_name_on_cloud, ['RUNNING'])
-        for instance in exist_instances:
-            if worker_only and instance.endswith('-head'):
-                continue
-            utils.stop(instance)
+    assert provider_config is not None, provider_config['region']
+    exist_instances = _filter_instances(provider_config['region'],
+                                        cluster_name_on_cloud, ['RUNNING'])
+    for instance in exist_instances:
+        if worker_only and instance.endswith('-head'):
+            continue
+        utils.stop(instance)
 
 
 def terminate_instances(
@@ -168,22 +167,23 @@ def terminate_instances(
     worker_only: bool = False,
 ) -> None:
     """See sky/provision/__init__.py"""
-    if provider_config is not None and provider_config['region']:
-        instances = _filter_instances(provider_config['region'],
-                                      cluster_name_on_cloud, None)
-        for inst_id, inst in instances.items():
-            logger.debug(f'Terminating instance {inst_id}: {inst}')
-            if worker_only and inst['name'].endswith('-head'):
-                continue
-            try:
-                utils.remove(inst_id)
-            except Exception as e:  # pylint: disable=broad-except
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        f'Failed to terminate instance {inst_id}: '
-                        f'{common_utils.format_exception(e, use_bracket=False)}'
-                    ) from e
-        utils.delete_cluster(cluster_name_on_cloud, provider_config['region'])
+
+    assert provider_config is not None, provider_config['region']
+    instances = _filter_instances(provider_config['region'],
+                                  cluster_name_on_cloud, status_filters=None)
+    for inst_id, inst in instances.items():
+        logger.debug(f'Terminating instance {inst_id}: {inst}')
+        if worker_only and inst['name'].endswith('-head'):
+            continue
+        try:
+            utils.remove(inst_id)
+        except Exception as e:  # pylint: disable=broad-except
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError(
+                    f'Failed to terminate instance {inst_id}: '
+                    f'{common_utils.format_exception(e, use_bracket=False)}'
+                ) from e
+    utils.delete_cluster(cluster_name_on_cloud, provider_config['region'])
 
 
 def get_cluster_info(
@@ -206,7 +206,7 @@ def get_cluster_info(
         ]
         if instance_info['name'].endswith('-head'):
             head_instance_id = instance_id
-
+    assert head_instance_id is not None
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
