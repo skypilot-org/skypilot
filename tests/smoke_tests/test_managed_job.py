@@ -166,6 +166,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_vast  # Test fails to stay within a single cloud
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
@@ -876,6 +877,7 @@ def test_managed_jobs_tpu():
 
 
 # ---------- Testing env for managed jobs ----------
+@pytest.mark.no_vast  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
