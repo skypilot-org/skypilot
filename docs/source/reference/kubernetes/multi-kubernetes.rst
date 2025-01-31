@@ -16,10 +16,15 @@ You may have multiple Kubernetes clusters for different:
 
 
 .. image:: /images/multi-kubernetes.svg
+    :width: 80%
 
+.. original image: https://docs.google.com/presentation/d/1_NzqS_ccihsQKfbOTewPaH8D496zaHMuh-fvPsPf9y0/edit#slide=id.p
 
-Set Up Credentials for Multiple Kubernetes Clusters
----------------------------------------------------
+Setup your Multiple Kubernetes Clusters
+-----------------------------------------
+
+Step 1: Set Up Credentials
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To work with multiple Kubernetes clusters, you need to ensure you have the necessary credentials for each cluster.
 Check that your local ``~/.kube/config`` file has the credentials for each cluster. For setting up clusters and their credentials,
@@ -57,10 +62,55 @@ For example, a ``~/.kube/config`` file may look like this:
 
 In this example, we have two Kubernetes clusters: ``my-h100-cluster`` and ``my-tpu-cluster``, and each Kubernetes cluster has a context for it.
 
+Step 2: Configure SkyPilot to Access Multiple Kubernetes Clusters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+By default, SkyPilot will only use the current context in the kubeconfig, e.g., ``current-context: my-h100-cluster`` or you can get the current context with ``kubectl config current-context``.
+To allow SkyPilot to access multiple Kubernetes clusters, you can set the ``kubernetes.allowed_contexts`` in the SkyPilot config.
+
+.. code-block:: yaml
+
+    kubernetes:
+      allowed_contexts:
+        - my-h100-cluster
+        - my-tpu-cluster
+
+To check the enabled Kubernetes clusters, you can run ``sky check kubernetes``.
+
+.. code-block:: console
+
+    $ sky check kubernetes
+
+    Enabled Kubernetes clusters:
+    - my-h100-cluster
+    - my-tpu-cluster
+
+
+
+Failover across Multiple Kubernetes Clusters
+--------------------------------------------
+
+With the ``kubernetes.allowed_contexts`` global config, SkyPilot failover through the Kubernetes clusters in the ``allowed_contexts`` in the same
+order as they are specified.
+
+
+.. code-block:: console
+
+    $ sky launch --cloud kubernetes echo 'Hello World'
+
+    Considered resources (1 node):
+    ------------------------------------------------------------------------------------------------------------
+    CLOUD        INSTANCE           vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE           COST ($)   CHOSEN   
+    ------------------------------------------------------------------------------------------------------------
+    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-gke   0.00          ✔     
+    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-eks   0.00                
+    ------------------------------------------------------------------------------------------------------------
+
+
 Point to a Kubernetes Cluster and Launch
 -----------------------------------------
 
-SkyPilot borrows the ``region`` concept from clouds to denote a Kubernetes cluster. You can point to a Kubernetes cluster
+SkyPilot borrows the ``region`` concept from clouds to denote a Kubernetes context. You can point to a Kubernetes cluster
 by specifying the ``--region`` with the context name for that cluster.
 
 .. code-block:: console
@@ -82,46 +132,6 @@ When launching a SkyPilot cluster or task, you can also specify the context name
 .. code-block:: console
 
     $ sky launch --cloud kubernetes --region my-tpu-cluster echo 'Hello World'
-
-
-.. note::
-
-    When you don't specify a region, SkyPilot will use the current context.
-
-
-Failover across Multiple Kubernetes Clusters
---------------------------------------------
-
-SkyPilot enables you to failover across multiple Kubernetes clusters. It is useful when you want to launch a task in any of the clusters with available GPUs.
-
-Different from cloud providers, SkyPilot does not failover through different regions (contexts) by default, because multiple
-Kubernetes clusters can be for different purposes.
-
-To enable the failover, you can specify the ``kubernetes.allowed_contexts`` in SkyPilot config, ``~/.sky/config.yaml`` (See config YAML spec: :ref:`config-yaml`).
-
-.. code-block:: yaml
-
-    kubernetes:
-      allowed_contexts:
-        - my-h100-cluster-gke
-        - my-h100-cluster-eks
-
-With this global config, SkyPilot will failover through the Kubernetes clusters in the ``allowed_contexts`` with in the same
-order as they are specified.
-
-
-.. code-block:: console
-
-    $ sky launch --cloud kubernetes echo 'Hello World'
-
-    Considered resources (1 node):
-    ------------------------------------------------------------------------------------------------------------
-    CLOUD        INSTANCE           vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE           COST ($)   CHOSEN   
-    ------------------------------------------------------------------------------------------------------------
-    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-gke   0.00          ✔     
-    Kubernetes   2CPU--8GB--1H100   2       8         H100:1         my-h100-cluster-eks   0.00                
-    ------------------------------------------------------------------------------------------------------------
-
 
 
 Dynamically Update Kubernetes Clusters to Use
