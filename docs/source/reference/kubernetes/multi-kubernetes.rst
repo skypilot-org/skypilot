@@ -17,11 +17,12 @@ You may have multiple Kubernetes clusters for different:
 
 .. image:: /images/multi-kubernetes.svg
     :width: 80%
+    :align: center
 
 .. original image: https://docs.google.com/presentation/d/1_NzqS_ccihsQKfbOTewPaH8D496zaHMuh-fvPsPf9y0/edit#slide=id.p
 
-Setup your Multiple Kubernetes Clusters
------------------------------------------
+Configuration
+-------------
 
 Step 1: Set Up Credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -62,8 +63,8 @@ For example, a ``~/.kube/config`` file may look like this:
 
 In this example, we have two Kubernetes clusters: ``my-h100-cluster`` and ``my-tpu-cluster``, and each Kubernetes cluster has a context for it.
 
-Step 2: Configure SkyPilot to Access Multiple Kubernetes Clusters
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Step 2: Setup SkyPilot to Access Multiple Kubernetes Clusters
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Unlike clouds, SkyPilot does not failover through different Kubernetes clusters (regions) by default because each Kubernetes clusters can have a different purpose.
 
