@@ -312,6 +312,7 @@ def test_large_job_queue(generic_cloud: str):
 
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+@pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
     name = smoke_tests_utils.get_cluster_name()
