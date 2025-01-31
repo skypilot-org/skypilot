@@ -219,7 +219,8 @@ def need_to_query_reservations() -> bool:
 
 
 def make_launchables_for_valid_region_zones(
-    launchable_resources: 'resources_lib.Resources'
+    launchable_resources: 'resources_lib.Resources',
+    override_optimize_by_zone: bool = False,
 ) -> List['resources_lib.Resources']:
     assert launchable_resources.is_launchable()
     # In principle, all provisioning requests should be made at the granularity
@@ -247,8 +248,13 @@ def make_launchables_for_valid_region_zones(
     launchables = []
     regions = launchable_resources.get_valid_regions_for_launchable()
     for region in regions:
-        if (launchable_resources.use_spot and region.zones is not None or
-                launchable_resources.cloud.optimize_by_zone()):
+        optimize_by_zone = (override_optimize_by_zone or
+                            launchable_resources.cloud.optimize_by_zone())
+        # It is possible that we force the optimize_by_zone but some clouds
+        # do not support zone-level provisioning (i.e. Azure). So we check
+        # if there is zone-level information in the region first.
+        if (region.zones is not None and
+            (launchable_resources.use_spot or optimize_by_zone)):
             # Spot instances.
             # Do not batch the per-zone requests.
             for zone in region.zones:
