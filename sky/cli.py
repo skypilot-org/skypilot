@@ -3600,12 +3600,6 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(cooperc): remove this flag before releasing 0.8.0
-@click.option('--fast',
-              default=False,
-              is_flag=True,
-              help=('[Deprecated] Does nothing. Previous flag behavior is now '
-                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3631,7 +3625,6 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
-    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3673,16 +3666,6 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-
-    # Deprecation. The default behavior is fast, and the flag will be removed.
-    # The flag was not present in 0.7.x (only nightly), so we will remove before
-    # 0.8.0 so that it never enters a stable release.
-    if fast:
-        click.secho(
-            'Flag --fast is deprecated, as the behavior is now default. The '
-            'flag will be removed soon. Please do not use it, so that you '
-            'avoid "No such option" errors.',
-            fg='yellow')
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
