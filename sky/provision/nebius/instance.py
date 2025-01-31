@@ -95,8 +95,8 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resumed_instance_ids = []
     stopped_instances = _filter_instances(region, cluster_name_on_cloud,
                                           ['STOPPED'])
-    # pylint: disable=consider-using-dict-items
-    for stopped_instance_id in stopped_instances:
+
+    for stopped_instance_id, _ in stopped_instances.items():
         if to_start_count > 0:
             try:
                 utils.start(stopped_instance_id)
