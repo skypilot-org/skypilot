@@ -81,7 +81,7 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
 .. _kubernetes-optimizer-table:
 
-4. You can now run any SkyPilot task on your Kubernetes cluster.
+3. You can now run any SkyPilot task on your Kubernetes cluster.
 
    .. code-block:: console
 
@@ -119,6 +119,37 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
     $ kubectl config set-context --current --namespace=mynamespace
 
 
+Listing available GPUs
+----------------------
+
+You can list the GPUs available on your cluster with :code:`sky show-gpus`.
+It will show the total GPUs and free GPUs for each GPU type on the cluster, as well as the per node GPU availability.
+
+.. code-block:: console
+
+  $ sky show-gpus
+  Kubernetes GPUs
+  GPU   QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+  L4    1, 2, 4       12          2
+  H100  1, 2, 4, 8    16          12
+
+  Kubernetes per node GPU availability
+  NODE_NAME                  GPU_NAME  TOTAL_GPUS  FREE_GPUS
+  gke-inference-pool-0       L4        4           2
+  gke-inference-pool-1       L4        4           0
+  gke-inference-pool-2       L4        2           0
+  gke-inference-pool-3       L4        2           0
+  gke-training-pool-0        H100      8           8
+  gke-training-pool-1        H100      8           4
+  
+  Cloud GPUs
+  COMMON_GPU  AVAILABLE_QUANTITIES
+  A10         1, 2, 4
+  A100        1, 2, 4, 8, 16
+  A100-80GB   1, 2, 4, 8
+  H100        1, 2, 4, 8, 12
+  ...
+  
 
 Viewing cluster status
 ----------------------
@@ -331,7 +362,7 @@ FAQs
 * **Are autoscaling Kubernetes clusters supported?**
 
   To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
-  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud).
 
   If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
 

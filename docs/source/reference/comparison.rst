@@ -54,6 +54,8 @@ SkyPilot provides faster iteration for interactive development. For example, a c
     Iterative Development with Kubernetes requires tedious updates to Docker images and multiple steps to update the training run. With SkyPilot, all you need is one CLI (``sky launch``).
 
 
+.. _sky-compare-k8s-simpler-yamls:
+
 Simpler YAMLs
 ^^^^^^^^^^^^^
 
