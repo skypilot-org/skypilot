@@ -1,5 +1,7 @@
 name: clip-batch-compute-vectors
 
+workdir: ~/skypilot/examples/vector_database
+
 resources:
   accelerators: {T4:1, L4:1, A10G:1, A10:1, V100:1}
   memory: 32+
@@ -23,8 +25,6 @@ envs:
   HF_TOKEN: ${HF_TOKEN}
   START_IDX: ${START_IDX}
   END_IDX: ${END_IDX}
-
-workdir: ~/skypilot/examples/vector_database
 
 setup: |
   pip install numpy==1.26.4
