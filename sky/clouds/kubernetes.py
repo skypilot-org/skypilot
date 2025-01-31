@@ -131,7 +131,7 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def _existing_allowed_contexts(cls) -> List[str]:
+    def existing_allowed_contexts(cls) -> List[str]:
         """Get existing allowed contexts.
 
         If None is returned in the list, it means that we are running in a pod
@@ -175,7 +175,7 @@ class Kubernetes(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators, zone, use_spot  # unused
-        existing_contexts = cls._existing_allowed_contexts()
+        existing_contexts = cls.existing_allowed_contexts()
 
         regions = []
         for context in existing_contexts:
@@ -591,7 +591,7 @@ class Kubernetes(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         # Test using python API
         try:
-            existing_allowed_contexts = cls._existing_allowed_contexts()
+            existing_allowed_contexts = cls.existing_allowed_contexts()
         except ImportError as e:
             return (False,
                     f'{common_utils.format_exception(e, use_bracket=True)}')

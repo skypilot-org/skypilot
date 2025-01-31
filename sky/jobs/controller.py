@@ -1,4 +1,7 @@
-"""Controller: handles the life cycle of a managed job."""
+"""Controller: handles the life cycle of a managed job.
+
+TODO(cooperc): Document lifecycle, and multiprocess layout.
+"""
 import argparse
 import multiprocessing
 import os

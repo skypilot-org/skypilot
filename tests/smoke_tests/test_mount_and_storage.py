@@ -220,9 +220,8 @@ def test_azure_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
-    default_region = 'eastus'
-    storage_account_name = (storage_lib.AzureBlobStore.
-                            get_default_storage_account_name(default_region))
+    storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+    )
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     # if the file does not exist, az storage blob list returns '[]'
@@ -587,6 +586,18 @@ class TestStorageWithCredentials:
     }
 
     @staticmethod
+    def get_az_storage_account_name(default_region: str = 'centralus'):
+        config_storage_account = skypilot_config.get_nested(
+            ('azure', 'storage_account'), None)
+        if config_storage_account is not None:
+            storage_account_name = config_storage_account
+        else:
+            storage_account_name = (
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
+        return storage_account_name
+
+    @staticmethod
     def create_dir_structure(base_path, structure):
         # creates a given file STRUCTURE in BASE_PATH
         for name, substructure in structure.items():
@@ -612,10 +623,8 @@ class TestStorageWithCredentials:
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.AZURE:
-            default_region = 'eastus'
-            storage_account_name = (
-                storage_lib.AzureBlobStore.get_default_storage_account_name(
-                    default_region))
+            storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+            )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage container delete '
@@ -694,13 +703,8 @@ class TestStorageWithCredentials:
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             # azure isrecursive by default
-            default_region = 'eastus'
-            config_storage_account = skypilot_config.get_nested(
-                ('azure', 'storage_account'), None)
-            storage_account_name = config_storage_account if (
-                config_storage_account is not None) else (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+            storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+            )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
@@ -762,10 +766,8 @@ class TestStorageWithCredentials:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
             if storage_account_name is None:
-                default_region = 'eastus'
-                storage_account_name = (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+                storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+                )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -789,10 +791,8 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.GCS:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
-            default_region = 'eastus'
-            storage_account_name = (
-                storage_lib.AzureBlobStore.get_default_storage_account_name(
-                    default_region))
+            storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+            )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -1009,10 +1009,8 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_az_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
-        default_region = 'eastus'
-        storage_account_name = (
-            storage_lib.AzureBlobStore.get_default_storage_account_name(
-                default_region))
+        storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+        )
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
@@ -1299,10 +1297,8 @@ class TestStorageWithCredentials:
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('https'):
-                default_region = 'eastus'
-                storage_account_name = (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+                storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+                )
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
@@ -1499,9 +1495,7 @@ class TestStorageWithCredentials:
                                                      tmp_gitignore_storage_obj):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
-
         tmp_gitignore_storage_obj.add_store(store_type)
-
         upload_file_name = 'included'
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
@@ -1510,7 +1504,6 @@ class TestStorageWithCredentials:
             tmp_gitignore_storage_obj.name, file_name='.git')
         cnt_num_file_cmd = self.cli_count_file_in_bucket(
             store_type, tmp_gitignore_storage_obj.name)
-
         up_output = subprocess.check_output(up_cmd, shell=True)
         git_exclude_output = subprocess.check_output(git_exclude_cmd,
                                                      shell=True)

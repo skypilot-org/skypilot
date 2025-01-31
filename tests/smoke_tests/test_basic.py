@@ -139,7 +139,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
                 timeout=autostop_timeout),
             # Even the cluster is stopped, cloud platform may take a while to
             # delete the VM.
-            f'sleep {smoke_tests_utils.BUMP_UP_SECONDS}',
+            f'sleep 35',
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',

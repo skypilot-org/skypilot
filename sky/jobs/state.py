@@ -230,12 +230,12 @@ class ManagedJobStatus(enum.Enum):
     # RECOVERING: The cluster is preempted, and the controller process is
     # recovering the cluster (relaunching/failover).
     RECOVERING = 'RECOVERING'
-    # Terminal statuses
-    # SUCCEEDED: The job is finished successfully.
-    SUCCEEDED = 'SUCCEEDED'
     # CANCELLING: The job is requested to be cancelled by the user, and the
     # controller is cleaning up the cluster.
     CANCELLING = 'CANCELLING'
+    # Terminal statuses
+    # SUCCEEDED: The job is finished successfully.
+    SUCCEEDED = 'SUCCEEDED'
     # CANCELLED: The job is cancelled by the user. When the managed job is in
     # CANCELLED status, the cluster has been cleaned up.
     CANCELLED = 'CANCELLED'
@@ -281,7 +281,6 @@ class ManagedJobStatus(enum.Enum):
             cls.FAILED_PRECHECKS,
             cls.FAILED_NO_RESOURCE,
             cls.FAILED_CONTROLLER,
-            cls.CANCELLING,
             cls.CANCELLED,
         ]
 
@@ -313,6 +312,8 @@ _SPOT_STATUS_TO_COLOR = {
 class ManagedJobScheduleState(enum.Enum):
     """Captures the state of the job from the scheduler's perspective.
 
+    A job that predates the introduction of the scheduler will be INVALID.
+
     A newly created job will be INACTIVE.  The following transitions are valid:
     - INACTIVE -> WAITING: The job is "submitted" to the scheduler, and its job
       controller can be started.
@@ -342,6 +343,10 @@ class ManagedJobScheduleState(enum.Enum):
     briefly observe inconsistent states, like a job that just finished but
     hasn't yet transitioned to DONE.
     """
+    # This job may have been created before scheduler was introduced in #4458.
+    # This state is not used by scheduler but just for backward compatibility.
+    # TODO(cooperc): remove this in v0.11.0
+    INVALID = None
     # The job should be ignored by the scheduler.
     INACTIVE = 'INACTIVE'
     # The job is waiting to transition to LAUNCHING for the first time. The
@@ -506,8 +511,12 @@ def set_failed(
     failure_reason: str,
     callback_func: Optional[CallbackType] = None,
     end_time: Optional[float] = None,
+    override_terminal: bool = False,
 ):
-    """Set an entire job or task to failed, if they are in non-terminal states.
+    """Set an entire job or task to failed.
+
+    By default, don't override tasks that are already terminal (that is, for
+    which end_at is already set).
 
     Args:
         job_id: The job id.
@@ -516,12 +525,13 @@ def set_failed(
         failure_type: The failure type. One of ManagedJobStatus.FAILED_*.
         failure_reason: The failure reason.
         end_time: The end time. If None, the current time will be used.
+        override_terminal: If True, override the current status even if end_at
+            is already set.
     """
     assert failure_type.is_failed(), failure_type
     end_time = time.time() if end_time is None else end_time
 
-    fields_to_set = {
-        'end_at': end_time,
+    fields_to_set: Dict[str, Any] = {
         'status': failure_type.value,
         'failure_reason': failure_reason,
     }
@@ -536,14 +546,31 @@ def set_failed(
             # affect the job duration calculation.
             fields_to_set['last_recovered_at'] = end_time
         set_str = ', '.join(f'{k}=(?)' for k in fields_to_set)
-        task_str = '' if task_id is None else f' AND task_id={task_id}'
+        task_query_str = '' if task_id is None else 'AND task_id=(?)'
+        task_value = [] if task_id is None else [
+            task_id,
+        ]
 
-        cursor.execute(
-            f"""\
-            UPDATE spot SET
-            {set_str}
-            WHERE spot_job_id=(?){task_str} AND end_at IS null""",
-            (*list(fields_to_set.values()), job_id))
+        if override_terminal:
+            # Use COALESCE for end_at to avoid overriding the existing end_at if
+            # it's already set.
+            cursor.execute(
+                f"""\
+                UPDATE spot SET
+                end_at = COALESCE(end_at, ?),
+                {set_str}
+                WHERE spot_job_id=(?) {task_query_str}""",
+                (end_time, *list(fields_to_set.values()), job_id, *task_value))
+        else:
+            # Only set if end_at is null, i.e. the previous status is not
+            # terminal.
+            cursor.execute(
+                f"""\
+                UPDATE spot SET
+                end_at = (?),
+                {set_str}
+                WHERE spot_job_id=(?) {task_query_str} AND end_at IS null""",
+                (end_time, *list(fields_to_set.values()), job_id, *task_value))
     if callback_func:
         callback_func('FAILED')
     logger.info(failure_reason)
@@ -669,6 +696,50 @@ def get_schedule_live_jobs(job_id: Optional[int]) -> List[Dict[str, Any]]:
             }
             jobs.append(job_dict)
         return jobs
+
+
+def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
+    """Get jobs that need controller process checking.
+
+    Args:
+        job_id: Optional job ID to check. If None, checks all jobs.
+
+    Returns a list of job_ids, including the following:
+    - For jobs with schedule state: jobs that have schedule state not DONE
+    - For legacy jobs (no schedule state): jobs that are in non-terminal status
+    """
+    job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
+    job_value = () if job_id is None else (job_id,)
+
+    status_filter_str = ', '.join(['?'] *
+                                  len(ManagedJobStatus.terminal_statuses()))
+    terminal_status_values = [
+        status.value for status in ManagedJobStatus.terminal_statuses()
+    ]
+
+    # Get jobs that are either:
+    # 1. Have schedule state that is not DONE, or
+    # 2. Have no schedule state (legacy) AND are in non-terminal status
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            f"""\
+            SELECT DISTINCT spot.spot_job_id
+            FROM spot
+            LEFT OUTER JOIN job_info
+            ON spot.spot_job_id=job_info.spot_job_id
+            WHERE (
+                (job_info.schedule_state IS NOT NULL AND
+                 job_info.schedule_state IS NOT ?)
+                OR
+                (job_info.schedule_state IS NULL AND
+                 status NOT IN ({status_filter_str}))
+            )
+            {job_filter}
+            ORDER BY spot.spot_job_id DESC""", [
+                ManagedJobScheduleState.DONE.value, *terminal_status_values,
+                *job_value
+            ]).fetchall()
+        return [row[0] for row in rows if row[0] is not None]
 
 
 def get_all_job_ids_by_name(name: Optional[str]) -> List[int]:
