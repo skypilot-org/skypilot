@@ -4,8 +4,8 @@ server:
   http_listen_port: 9090
   http_server_read_timeout: 300s
   http_server_write_timeout: 300s
-  grpc_server_max_recv_msg_size: 1073741824  # 128 MB
-  grpc_server_max_send_msg_size: 1073741824  # 128 MB
+  grpc_server_max_recv_msg_size: 1073741824  # 1 GB
+  grpc_server_max_send_msg_size: 1073741824  # 1 GB
 
 schema_config:
   configs:
@@ -52,13 +52,18 @@ storage_config:
     cache_location: /loki/tsdb-cache
 
 querier:
-  max_concurrent: 32
+  max_concurrent: 64
 query_scheduler:
   max_outstanding_requests_per_tenant: 4096
 frontend:
   max_outstanding_per_tenant: 4096
 query_range:
   parallelise_shardable_queries: true
+
+frontend_worker:
+  grpc_client_config:
+    max_recv_msg_size: 1073741824  # 1 GB
+    max_send_msg_size: 1073741824  # 1 GB
 
 limits_config:
   max_query_series: 5000

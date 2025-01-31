@@ -41,8 +41,6 @@ def launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
-    # TODO(cooperc): remove fast arg before 0.8.0
-    fast: bool = True,  # pylint: disable=unused-argument for compatibility
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
@@ -54,8 +52,6 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
-        fast: [Deprecated] Does nothing, and will be removed soon. We will
-          always use fast mode as it's fully safe now.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
