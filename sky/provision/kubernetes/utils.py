@@ -320,6 +320,14 @@ class GKELabelFormatter(GPULabelFormatter):
     GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
     label, which is used to identify the GPU type.
     """
+    # Mapping from TPU count to topology. Used when determining TPU topology
+    # label to use in an autoscaling environment. For list of topologies, see:
+    # https://cloud.google.com/tpu/docs/tpus-in-gke
+    GKE_TPU_COUNT_TO_TOPOLOGY = {
+        1: '1x1',
+        4: '2x2',
+        8: '2x4'
+    }
 
     GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
     TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
@@ -343,6 +351,14 @@ class GKELabelFormatter(GPULabelFormatter):
     @classmethod
     def get_tpu_topology_label_key(cls) -> str:
         return cls.TPU_TOPOLOGY_LABEL_KEY
+
+    @classmethod
+    def get_tpu_topology_label_value(cls, acc_count: int) -> str:
+        """Returns the TPU topology label value for the given TPU count.
+
+        e.g. 8 -> '2x4'
+        """
+        return cls.GKE_TPU_COUNT_TO_TOPOLOGY[acc_count]
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -723,8 +739,14 @@ def get_accelerator_label_key_value(
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
         assert formatter is not None, ('Unsupported autoscaler type:'
                                        f' {autoscaler_type}')
+        tpu_topology_label_key = None
+        tpu_topology_label_value = None
+        if is_tpu_on_gke(acc_type):
+            tpu_topology_label_key = formatter.get_tpu_topology_label_key()
+            tpu_topology_label_value = formatter.get_tpu_topology_label_value(
+                acc_count)
         return formatter.get_label_key(acc_type), formatter.get_label_value(
-            acc_type), None, None
+            acc_type), tpu_topology_label_key, tpu_topology_label_value
 
     has_gpus, cluster_resources = detect_accelerator_resource(context)
     if has_gpus:
@@ -787,7 +809,11 @@ def get_accelerator_label_key_value(
                             if node_metadata_labels.get(
                                     label_formatter.TPU_LABEL_KEY) == acc_type:
                                 topology_label_key = (
-                                    label_formatter.TPU_TOPOLOGY_LABEL_KEY)
+                                    label_formatter.get_tpu_topology_label_key())
+                                # Instead of using get_tpu_topology_label_value,
+                                # we use the node's label value to determine the
+                                # topology. This is to make sure the node's 
+                                # available topology matches our request.
                                 topology_value = node_metadata_labels.get(
                                     topology_label_key)
                                 assert topology_value is not None
