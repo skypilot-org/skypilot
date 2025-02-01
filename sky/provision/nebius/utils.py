@@ -41,6 +41,10 @@ def get_project_by_region(region: str) -> str:
     # project per region, and projects cannot be created at this time.
     # The region is determined from the project ID using a region-specific
     # identifier embedded in it.
+    # Project id looks like project-e00xxxxxxxxxxxxxx where
+    # e00 - id of region 'eu-north1'
+    # e01 - id of region 'eu-west1'
+    # TODO(SalikovAlex): fix when info about region will be in projects list
     # https://docs.nebius.com/overview/regions
     for project in projects.items:
         if region == 'eu-north1' and project.metadata.id[8:11] == 'e00':
@@ -284,6 +288,8 @@ def remove(instance_id: str) -> None:
     service.delete(
         nebius.compute().DeleteInstanceRequest(id=instance_id)).wait()
     retry_count = 0
+    # The instance begins deleting and attempts to delete the disk.
+    # Must wait until the disk is unlocked and becomes deletable.
     while retry_count < nebius.MAX_RETRIES_TO_DISK_DELETE:
         try:
             service = nebius.compute().DiskServiceClient(nebius.sdk())
