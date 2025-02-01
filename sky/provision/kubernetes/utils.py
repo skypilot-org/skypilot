@@ -671,6 +671,7 @@ def check_instance_fits(context: Optional[str],
         # If GPU/TPUs are requested, check if GPU/TPU type is available, and
         # if so, check if CPU and memory requirements on the specific node are
         # met.
+        assert acc_count is not None, (acc_type, acc_count)
         try:
             gpu_label_key, gpu_label_val, _, _ = (
                 get_accelerator_label_key_value(context, acc_type, acc_count))
@@ -715,7 +716,7 @@ def check_instance_fits(context: Optional[str],
 def get_accelerator_label_key_value(
     context: Optional[str],
     acc_type: str,
-    acc_count: Optional[int],
+    acc_count: int,
     check_mode=False
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Returns the label key and value for the given GPU/TPU type.
