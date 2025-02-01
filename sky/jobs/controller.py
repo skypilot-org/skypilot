@@ -224,8 +224,8 @@ class JobsController:
                 self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = managed_job_utils.get_job_timestamp(
-                    self._backend, cluster_name, get_end_time=True)
+                end_time = managed_job_utils.try_to_get_job_end_time(
+                    self._backend, cluster_name)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
@@ -235,15 +235,23 @@ class JobsController:
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
-                clusters = backend_utils.get_clusters(
-                    cluster_names=[cluster_name],
-                    refresh=False,
-                    include_controller=False)
-                if clusters:
-                    assert len(clusters) == 1, (clusters, cluster_name)
-                    handle = clusters[0].get('handle')
-                    # Best effort to download and stream the logs.
-                    self._download_log_and_stream(task_id, handle)
+                try:
+                    clusters = backend_utils.get_clusters(
+                        cluster_names=[cluster_name],
+                        refresh=False,
+                        include_controller=False)
+                    if clusters:
+                        assert len(clusters) == 1, (clusters, cluster_name)
+                        handle = clusters[0].get('handle')
+                        # Best effort to download and stream the logs.
+                        self._download_log_and_stream(task_id, handle)
+                except Exception as e:  # pylint: disable=broad-except
+                    # We don't want to crash here, so just log and continue.
+                    logger.warning(
+                        f'Failed to download and stream logs: '
+                        f'{common_utils.format_exception(e)}',
+                        exc_info=True)
+
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 managed_job_utils.terminate_cluster(cluster_name=cluster_name)
@@ -291,8 +299,8 @@ class JobsController:
                     continue
                 elif job_status in job_lib.JobStatus.user_code_failure_states():
                     # The user code has probably crashed, fail immediately.
-                    end_time = managed_job_utils.get_job_timestamp(
-                        self._backend, cluster_name, get_end_time=True)
+                    end_time = managed_job_utils.try_to_get_job_end_time(
+                        self._backend, cluster_name)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')

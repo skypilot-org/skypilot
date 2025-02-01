@@ -315,6 +315,8 @@ def download_and_stream_latest_job_log(
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
+
+    If the log cannot be fetched for any reason, return None.
     """
     os.makedirs(local_dir, exist_ok=True)
     log_file = None
@@ -329,31 +331,47 @@ def download_and_stream_latest_job_log(
             # job_ids all represent the same logical managed job.
             job_ids=None,
             local_dir=local_dir)
-    except exceptions.CommandError as e:
-        logger.info(f'Failed to download the logs: '
-                    f'{common_utils.format_exception(e)}')
-    else:
-        if not log_dirs:
-            logger.error('Failed to find the logs for the user program.')
-        else:
-            log_dir = list(log_dirs.values())[0]
-            log_file = os.path.join(log_dir, 'run.log')
-            # Print the logs to the console.
-            # TODO(zhwu): refactor this into log_utils, along with the
-            # refactoring for the log_lib.tail_logs.
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    # Stream the logs to the console without reading the whole
-                    # file into memory.
-                    start_streaming = False
-                    for line in f:
-                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                            start_streaming = True
-                        if start_streaming:
-                            print(line, end='', flush=True)
-            except FileNotFoundError:
-                logger.error('Failed to find the logs for the user '
-                             f'program at {log_file}.')
+    except Exception as e:  # pylint: disable=broad-except
+        # We want to avoid crashing the controller. sync_down_logs() is pretty
+        # complicated and could crash in various places (creating remote
+        # runners, executing remote code, decoding the payload, etc.). So, we
+        # use a broad except and just return None.
+        logger.info(
+            f'Failed to download the logs: '
+            f'{common_utils.format_exception(e)}',
+            exc_info=True)
+        return None
+
+    if not log_dirs:
+        logger.error('Failed to find the logs for the user program.')
+        return None
+
+    log_dir = list(log_dirs.values())[0]
+    log_file = os.path.join(log_dir, 'run.log')
+
+    # Print the logs to the console.
+    # TODO(zhwu): refactor this into log_utils, along with the refactoring for
+    # the log_lib.tail_logs.
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            # Stream the logs to the console without reading the whole file into
+            # memory.
+            start_streaming = False
+            for line in f:
+                if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                    start_streaming = True
+                if start_streaming:
+                    print(line, end='', flush=True)
+    except FileNotFoundError:
+        logger.error('Failed to find the logs for the user '
+                     f'program at {log_file}.')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(
+            f'Failed to stream the logs for the user program at '
+            f'{log_file}: {common_utils.format_exception(e)}',
+            exc_info=True)
+        # Return the log_file anyway.
+
     return log_file
 
 

@@ -356,6 +356,28 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     return float(stdout)
 
 
+def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
+                            cluster_name: str) -> float:
+    """Try to get the end time of the job.
+
+    If the job is preempted or we can't connect to the instance for whatever
+    reason, fall back to the current time.
+    """
+    try:
+        return get_job_timestamp(backend, cluster_name, get_end_time=True)
+    except exceptions.CommandError as e:
+        if e.returncode == 255:
+            # Failed to connect - probably the instance was preempted since the
+            # job completed. We shouldn't crash here, so just log and use the
+            # current time.
+            logger.info(f'Failed to connect to the instance {cluster_name} '
+                        'since the job completed. Assuming the instance '
+                        'was preempted.')
+            return time.time()
+        else:
+            raise
+
+
 def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
     """Run event callback for the task."""
 
