@@ -185,6 +185,22 @@ class GPULabelFormatter:
     """
 
     @classmethod
+    def get_tpu_topology_label_key(cls) -> str:
+        """Returns the label for TPU topology used by the Kubernetes cluster.
+
+        Only implemented by formatters that support TPUs.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_tpu_topology_label_value(cls, acc_type: str, acc_count: int) -> str:
+        """Returns the TPU topology value for the given TPU type and count.
+
+        Only implemented by formatters that support TPUs.
+        """
+        raise NotImplementedError
+
+    @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
         """Returns the label key for GPU type used by the Kubernetes cluster"""
         raise NotImplementedError
@@ -378,8 +394,8 @@ class GKELabelFormatter(GPULabelFormatter):
                 for tpu, topologies in cls.GKE_TPU_TOPOLOGIES.items()
             }
             raise ValueError(
-                f'No TPU topology found for {acc_type} with count {acc_count}. Supported TPU types and counts: {supported_tpus}'
-            )
+                f'No TPU topology found for {acc_type} with count {acc_count}. '
+                f'Supported TPU types and counts: {supported_tpus}')
         return count_to_topology
 
     @classmethod
