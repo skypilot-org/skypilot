@@ -331,9 +331,19 @@ class GKELabelFormatter(GPULabelFormatter):
     # tpu v5p: https://cloud.google.com/tpu/docs/v5p
     # TODO(romilb): Add support for TPU v4.
     GKE_TPU_TOPOLOGIES = {
-        'tpu-v5-lite-podslice': {1: '1x1', 4: '2x2', 8: '2x4'},
-        'tpu-v5-lite-device': {1: '1x1', 4: '2x2', 8: '2x4'},
-        'tpu-v5p-slice': {4: '2x2x1'},
+        'tpu-v5-lite-podslice': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        },
+        'tpu-v5-lite-device': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        },
+        'tpu-v5p-slice': {
+            4: '2x2x1'
+        },
     }
 
     @classmethod
@@ -360,11 +370,16 @@ class GKELabelFormatter(GPULabelFormatter):
 
         e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
-        count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type, {}).get(acc_count, None)
+        count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
+                                                       {}).get(acc_count, None)
         if count_to_topology is None:
-            supported_tpus = {tpu: list(topologies.values()) 
-                            for tpu, topologies in cls.GKE_TPU_TOPOLOGIES.items()}
-            raise ValueError(f'No TPU topology found for {acc_type} with count {acc_count}. Supported TPU types and counts: {supported_tpus}')
+            supported_tpus = {
+                tpu: list(topologies.values())
+                for tpu, topologies in cls.GKE_TPU_TOPOLOGIES.items()
+            }
+            raise ValueError(
+                f'No TPU topology found for {acc_type} with count {acc_count}. Supported TPU types and counts: {supported_tpus}'
+            )
         return count_to_topology
 
     @classmethod
