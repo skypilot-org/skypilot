@@ -361,7 +361,7 @@ FAQs
   .. code-block:: yaml
 
     resources:
-      accelerators: tpu-v5-lite-podslice:1  # or tpu-v5-lite-device, tpu-v5p-slice, tpu-v4-podslice
+      accelerators: tpu-v5-lite-podslice:1  # or tpu-v5-lite-device, tpu-v5p-slice
 
 * **I am using a custom image. How can I speed up the pod startup time?**
 
