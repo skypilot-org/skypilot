@@ -320,15 +320,21 @@ class GKELabelFormatter(GPULabelFormatter):
     GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
     label, which is used to identify the GPU type.
     """
-    # Mapping from TPU count to topology. Used when determining TPU topology
-    # label to use in an autoscaling environment. For list of topologies, see:
-    # https://cloud.google.com/tpu/docs/tpus-in-gke
-    GKE_TPU_COUNT_TO_TOPOLOGY = {1: '1x1', 4: '2x2', 8: '2x4'}
-
     GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
     TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
     ACCELERATOR_COUNT_LABEL_KEY = 'cloud.google.com/gke-accelerator-count'
     TPU_TOPOLOGY_LABEL_KEY = 'cloud.google.com/gke-tpu-topology'
+
+    # Mapping from TPU type to {count: topologies}. Used to determine topology
+    # label to use in an autoscaling environment. For list of topologies, see:
+    # tpu v5e: https://cloud.google.com/tpu/docs/tpus-in-gke
+    # tpu v5p: https://cloud.google.com/tpu/docs/v5p
+    # TODO(romilb): Add support for TPU v4.
+    GKE_TPU_TOPOLOGIES = {
+        'tpu-v5-lite-podslice': {1: '1x1', 4: '2x2', 8: '2x4'},
+        'tpu-v5-lite-device': {1: '1x1', 4: '2x2', 8: '2x4'},
+        'tpu-v5p-slice': {4: '2x2x1'},
+    }
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
@@ -349,12 +355,17 @@ class GKELabelFormatter(GPULabelFormatter):
         return cls.TPU_TOPOLOGY_LABEL_KEY
 
     @classmethod
-    def get_tpu_topology_label_value(cls, acc_count: int) -> str:
+    def get_tpu_topology_label_value(cls, acc_type: str, acc_count: int) -> str:
         """Returns the TPU topology label value for the given TPU count.
 
-        e.g. 8 -> '2x4'
+        e.g. tpu-v5-lite-podslice:8 -> '2x4'
         """
-        return cls.GKE_TPU_COUNT_TO_TOPOLOGY[acc_count]
+        count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type, {}).get(acc_count, None)
+        if count_to_topology is None:
+            supported_tpus = {tpu: list(topologies.values()) 
+                            for tpu, topologies in cls.GKE_TPU_TOPOLOGIES.items()}
+            raise ValueError(f'No TPU topology found for {acc_type} with count {acc_count}. Supported TPU types and counts: {supported_tpus}')
+        return count_to_topology
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -738,10 +749,10 @@ def get_accelerator_label_key_value(
         tpu_topology_label_key = None
         tpu_topology_label_value = None
         if is_tpu_on_gke(acc_type):
-            assert isinstance(formatter, GKELabelFormatter)
+            assert formatter == GKELabelFormatter, formatter
             tpu_topology_label_key = formatter.get_tpu_topology_label_key()
             tpu_topology_label_value = formatter.get_tpu_topology_label_value(
-                acc_count)
+                acc_type, acc_count)
         return formatter.get_label_key(acc_type), formatter.get_label_value(
             acc_type), tpu_topology_label_key, tpu_topology_label_value
 
