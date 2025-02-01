@@ -323,11 +323,7 @@ class GKELabelFormatter(GPULabelFormatter):
     # Mapping from TPU count to topology. Used when determining TPU topology
     # label to use in an autoscaling environment. For list of topologies, see:
     # https://cloud.google.com/tpu/docs/tpus-in-gke
-    GKE_TPU_COUNT_TO_TOPOLOGY = {
-        1: '1x1',
-        4: '2x2',
-        8: '2x4'
-    }
+    GKE_TPU_COUNT_TO_TOPOLOGY = {1: '1x1', 4: '2x2', 8: '2x4'}
 
     GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
     TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
@@ -742,6 +738,7 @@ def get_accelerator_label_key_value(
         tpu_topology_label_key = None
         tpu_topology_label_value = None
         if is_tpu_on_gke(acc_type):
+            assert isinstance(formatter, GKELabelFormatter)
             tpu_topology_label_key = formatter.get_tpu_topology_label_key()
             tpu_topology_label_value = formatter.get_tpu_topology_label_value(
                 acc_count)
@@ -809,10 +806,11 @@ def get_accelerator_label_key_value(
                             if node_metadata_labels.get(
                                     label_formatter.TPU_LABEL_KEY) == acc_type:
                                 topology_label_key = (
-                                    label_formatter.get_tpu_topology_label_key())
+                                    label_formatter.get_tpu_topology_label_key(
+                                    ))
                                 # Instead of using get_tpu_topology_label_value,
                                 # we use the node's label value to determine the
-                                # topology. This is to make sure the node's 
+                                # topology. This is to make sure the node's
                                 # available topology matches our request.
                                 topology_value = node_metadata_labels.get(
                                     topology_label_key)
@@ -2366,7 +2364,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 
 def is_tpu_on_gke(accelerator: str) -> bool:
-    """Determins if the given accelerator is a TPU supported on GKE."""
+    """Determines if the given accelerator is a TPU supported on GKE."""
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
