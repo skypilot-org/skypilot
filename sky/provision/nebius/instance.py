@@ -95,6 +95,15 @@ def run_instances(region: str, cluster_name_on_cloud: str,
     resumed_instance_ids = []
     stopped_instances = _filter_instances(region, cluster_name_on_cloud,
                                           ['STOPPED'])
+    if config.resume_stopped_nodes and len(stopped_instances) > to_start_count:
+
+        raise RuntimeError(
+            'The number of running/stopped/stopping instances combined '
+            f'({len(stopped_instances) + len(running_instances)}) in '
+            f'cluster "{cluster_name_on_cloud}" is greater than the '
+            f'number requested by the user ({config.count}). '
+            'This is likely a resource leak. '
+            'Use "sky down" to terminate the cluster.')
 
     for stopped_instance_id, _ in stopped_instances.items():
         if to_start_count > 0:
