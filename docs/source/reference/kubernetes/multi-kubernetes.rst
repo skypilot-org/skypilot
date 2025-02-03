@@ -68,7 +68,7 @@ Step 2: Setup SkyPilot to Access Multiple Kubernetes Clusters
 
 Unlike clouds, SkyPilot does not failover through different Kubernetes clusters (regions) by default because each Kubernetes clusters can have a different purpose.
 
-By default, SkyPilot only uses the current context in the kubeconfig, e.g., ``current-context: my-h100-cluster`` or you can get the current context with ``kubectl config current-context``.
+By default, SkyPilot only uses the context set as the ``current-context`` in the kubeconfig. You can get the current context with ``kubectl config current-context``.
 
 To allow SkyPilot to access multiple Kubernetes clusters, you can set the ``kubernetes.allowed_contexts`` in the SkyPilot config.
 
