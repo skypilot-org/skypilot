@@ -126,7 +126,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
             platform, preset = config.node_config['InstanceType'].split('_')
             instance_id = utils.launch(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                instance_type=node_type,
+                node_type=node_type,
                 platform=platform,
                 preset=preset,
                 region=region,

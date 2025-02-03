@@ -177,12 +177,12 @@ def start(instance_id: str) -> None:
             f' to be ready.')
 
 
-def launch(cluster_name_on_cloud: str, instance_type: str, platform: str,
+def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
            preset: str, region: str, image_family: str, disk_size: int,
            user_data: str) -> str:
 
     instance_name = (f'{cluster_name_on_cloud}-'
-                     f'{uuid.uuid4().hex[:4]}-{instance_type}')
+                     f'{uuid.uuid4().hex[:4]}-{node_type}')
     logger.debug(f'Launching instance: {instance_name}')
 
     disk_name = 'disk-' + instance_name
