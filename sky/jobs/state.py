@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import exceptions
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import db_utils
@@ -420,9 +421,16 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             run_timestamp=(?),
             specs=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""",
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""",
             (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
-             run_timestamp, json.dumps(specs), job_id, task_id))
+             run_timestamp, json.dumps(specs), job_id, task_id,
+             ManagedJobStatus.PENDING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to submitted. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('SUBMITTED')
 
 
@@ -434,7 +442,14 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
             """\
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""", (ManagedJobStatus.STARTING.value, job_id, task_id))
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""", (ManagedJobStatus.STARTING.value, job_id,
+                                task_id, ManagedJobStatus.SUBMITTED.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to starting. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('STARTING')
 
 
@@ -447,15 +462,25 @@ def set_started(job_id: int, task_id: int, start_time: float,
             """\
             UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""",
+            task_id=(?) AND
+            status IN (?, ?) AND
+            end_at IS null""",
             (
                 ManagedJobStatus.RUNNING.value,
                 start_time,
                 start_time,
                 job_id,
                 task_id,
+                ManagedJobStatus.STARTING.value,
+                # If the task is empty, we will jump straight from PENDING tos
+                # RUNNING
+                ManagedJobStatus.PENDING.value,
             ),
         )
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to started. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('STARTED')
 
 
@@ -468,8 +493,15 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
                 UPDATE spot SET
                 status=(?), job_duration=job_duration+(?)-last_recovered_at
                 WHERE spot_job_id=(?) AND
-                task_id=(?)""",
-            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id))
+                task_id=(?) AND
+                status=(?) AND
+                end_at IS null""",
+            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id,
+             ManagedJobStatus.RUNNING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to recovering. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('RECOVERING')
 
 
@@ -482,8 +514,15 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
             UPDATE spot SET
             status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
             WHERE spot_job_id=(?) AND
-            task_id=(?)""",
-            (ManagedJobStatus.RUNNING.value, recovered_time, job_id, task_id))
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""",
+            (ManagedJobStatus.RUNNING.value, recovered_time, job_id, task_id,
+             ManagedJobStatus.RECOVERING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to recovered. '
+                f'({cursor.rowcount} rows updated)')
     logger.info('==== Recovered. ====')
     callback_func('RECOVERED')
 
@@ -496,10 +535,16 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
             """\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND task_id=(?)
-            AND end_at IS null""",
-            (ManagedJobStatus.SUCCEEDED.value, end_time, job_id, task_id))
-
+            WHERE spot_job_id=(?) AND
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""",
+            (ManagedJobStatus.SUCCEEDED.value, end_time, job_id, task_id,
+             ManagedJobStatus.RUNNING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to succeeded. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
@@ -571,7 +616,9 @@ def set_failed(
                 {set_str}
                 WHERE spot_job_id=(?) {task_query_str} AND end_at IS null""",
                 (end_time, *list(fields_to_set.values()), job_id, *task_value))
-    if callback_func:
+
+        updated = cursor.rowcount > 0
+    if callback_func and updated:
         callback_func('FAILED')
     logger.info(failure_reason)
 
@@ -589,13 +636,16 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
             status=(?)
             WHERE spot_job_id=(?) AND end_at IS null""",
             (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
-        if rows.rowcount > 0:
-            logger.info('Cancelling the job...')
-            callback_func('CANCELLING')
+        updated = rows.rowcount > 0
+    if updated:
+        logger.info('Cancelling the job...')
+        callback_func('CANCELLING')
+    else:
+        logger.info('Cancellation skipped, job is already terminal')
 
 
 def set_cancelled(job_id: int, callback_func: CallbackType):
-    """Set tasks in the job as cancelled, if they are in CANCELLING state.
+    """Set tasks in the job as cancelled, if they are in non-terminal states.
 
     The set_cancelling should be called before this function.
     """
@@ -606,9 +656,12 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             status=(?), end_at=(?)
             WHERE spot_job_id=(?) AND end_at IS null""",
             (ManagedJobStatus.CANCELLED.value, time.time(), job_id))
-        if rows.rowcount > 0:
-            logger.info('Job cancelled.')
-            callback_func('CANCELLED')
+        updated = rows.rowcount > 0
+    if updated:
+        logger.info('Job cancelled.')
+        callback_func('CANCELLED')
+    else:
+        logger.info('Cancellation skipped, job is already terminal')
 
 
 def set_local_log_file(job_id: int, task_id: Optional[int],
