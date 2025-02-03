@@ -8,11 +8,11 @@ SkyPilot allows you to manage dev pods, jobs and services across multiple Kubern
 
 You may have multiple Kubernetes clusters for different:
 
-* **Use cases:** e.g., a production cluster and a development/testing cluster.
-* **Regions or clouds:** e.g., US and EU regions; or AWS and Lambda clouds.
-* **Accelerators:** e.g., NVIDIA H100 cluster and a Google TPU cluster.
-* **Configurations:** e.g., a small cluster for a single node and a large cluster for multiple nodes.
-* **Kubernetes versions:** e.g., to upgrade a cluster from Kubernetes 1.20 to 1.21, you may create a new Kubernetes cluster to avoid downtime or unexpected errors.
+* **Use cases**, e.g., a production cluster and a development/testing cluster.
+* **Regions or clouds**, e.g., US and EU regions; or AWS and Lambda clouds.
+* **Accelerators**, e.g., NVIDIA H100 cluster and a Google TPU cluster.
+* **Configurations**, e.g., a small cluster for a single node and a large cluster for multiple nodes.
+* **Kubernetes versions**, e.g., to upgrade a cluster from Kubernetes 1.20 to 1.21, you may create a new Kubernetes cluster to avoid downtime or unexpected errors.
 
 
 .. image:: /images/multi-kubernetes.svg
