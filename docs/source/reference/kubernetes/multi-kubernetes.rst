@@ -1,7 +1,7 @@
 .. _multi-kubernetes:
 
-Multi-Kubernetes Clusters
-=============================
+Multiple Kubernetes Clusters
+================================
 
 
 SkyPilot allows you to manage dev pods, jobs and services across multiple Kubernetes clusters in a single pane of glass.
