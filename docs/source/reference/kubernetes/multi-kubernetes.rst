@@ -118,7 +118,7 @@ Point to a Kubernetes Cluster and Launch
 SkyPilot borrows the ``region`` concept from clouds to denote a Kubernetes context. You can point to a Kubernetes cluster
 by specifying the ``--region`` with the context name for that cluster.
 
-.. code-block:: console
+.. code-block:: bash
 
     # Check the GPUs available in a Kubernetes cluster
     $ sky show-gpus --cloud kubernetes --region my-h100-cluster
