@@ -8,19 +8,21 @@ comment).
 """
 import collections
 import datetime
-import pathlib
 import os
-from flask import send_file, abort
+import pathlib
 
 import flask
+from flask import abort
+from flask import send_file
 import yaml
 
 from sky import jobs as managed_jobs
+from sky.jobs import constants as managed_job_constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.jobs import constants as managed_job_constants
 
 app = flask.Flask(__name__)
+
 
 def _is_running_on_jobs_controller() -> bool:
     """Am I running on jobs controller?
@@ -43,6 +45,7 @@ def _is_running_on_jobs_controller() -> bool:
             for name in candidate_controller_names)
     return False
 
+
 # Column indices for job table
 class JobTableColumns:
     DROPDOWN = 0
@@ -61,12 +64,14 @@ class JobTableColumns:
     DESCRIPTION = 13
     ACTIONS = 14  # New column for actions
 
+
 # Column headers matching the indices above
 JOB_TABLE_COLUMNS = [
     '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
     'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
     'Description', 'Actions'
 ]
+
 
 @app.route('/')
 def home():
@@ -92,7 +97,8 @@ def home():
             status_counts[task['status'].value] += 1
 
     # Add an empty column for the dropdown button and actions column
-    rows = [[''] + row + [''] for row in rows]  # Add empty cell for actions column
+    rows = [[''] + row + [''] for row in rows
+           ]  # Add empty cell for actions column
 
     # Validate column count
     if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
@@ -101,14 +107,19 @@ def home():
 
     # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
     for row in rows:
-        row[JobTableColumns.STATUS] = common_utils.remove_color(row[JobTableColumns.STATUS])
-    
+        row[JobTableColumns.STATUS] = common_utils.remove_color(
+            row[JobTableColumns.STATUS])
+
     # Remove filler rows ([''], ..., ['-'])
-    rows = [row for row in rows if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != '']
+    rows = [
+        row for row in rows
+        if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != ''
+    ]
 
     # Get all unique status values
-    status_values = sorted(list(set(row[JobTableColumns.STATUS] for row in rows)))
-    
+    status_values = sorted(
+        list(set(row[JobTableColumns.STATUS] for row in rows)))
+
     rendered_html = flask.render_template(
         'index.html',
         columns=JOB_TABLE_COLUMNS,
@@ -119,6 +130,7 @@ def home():
     )
     return rendered_html
 
+
 @app.route('/download_log/<job_id>')
 def download_log(job_id):
     try:
@@ -127,13 +139,14 @@ def download_log(job_id):
             f'{job_id}.log')
         if not os.path.exists(log_path):
             abort(404)
-        return send_file(log_path, 
-                        mimetype='text/plain',
-                        as_attachment=True,
-                        download_name=f'job_{job_id}.log')
+        return send_file(log_path,
+                         mimetype='text/plain',
+                         as_attachment=True,
+                         download_name=f'job_{job_id}.log')
     except Exception as e:
         app.logger.error(f'Error downloading log for job {job_id}: {str(e)}')
         abort(500)
+
 
 if __name__ == '__main__':
     app.run()
