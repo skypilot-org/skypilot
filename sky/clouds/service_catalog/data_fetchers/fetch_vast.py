@@ -137,7 +137,11 @@ if __name__ == '__main__':
         maxBid = max([x.get('SpotPrice') for x in toList])
         for instance in toList:
             stub = f'{instance["InstanceType"]} {instance["Region"][-2:]}'
-            if stub not in seen:
-                instance['SpotPrice'] = '{:.2f}'.format(maxBid)
-                writer.writerow(instance)
+            if stub in seen:
+                printstub = f'{stub}#print'
+                if printstub not in seen:
+                    instance['SpotPrice'] = f'{maxBid:.2f}'
+                    writer.writerow(instance)
+                    seen.add(printstub)
+            else:
                 seen.add(stub)
