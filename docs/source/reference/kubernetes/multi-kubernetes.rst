@@ -29,7 +29,7 @@ Step 1: Set Up Credentials
 
 To work with multiple Kubernetes clusters, their credentials must be set up as individual `contexts <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/>`_ in your local ``~/.kube/config`` file. 
 
-For deploying new clusters and getting  credentials, see :ref:`kubernetes-setup-deploy`.
+For deploying new clusters and getting  credentials, see :ref:`kubernetes-deployment`.
 
 For example, a ``~/.kube/config`` file may look like this:
 
