@@ -4,29 +4,31 @@
 Overview
 ========================
 
-SkyPilot enables you to combine your cloud infra --- Kubernetes
-clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool.
+SkyPilot combines your cloud infra --- Kubernetes
+clusters, clouds and regions for VMs, and existing machines --- into a unified compute pool, which is optimized for running AI workloads.
 
 .. image:: images/skypilot-abstractions-long-2.png
+    :width: 90%
     :align: center
 
-You can then run workloads on this pool in a unified interface, using these core abstractions:
+
+You can run AI workloads on this pool in a unified interface, using these core abstractions:
 
 - Clusters
 - Jobs
 - Services
 
-These abstractions allow you to run all use cases in the AI lifecycle:
-Batch processing, development, (pre)training, finetuning, hparam sweeps, batch inference, and online serving.
+These abstractions support all use cases in the AI lifecycle:
+Batch processing, development, (pre)training, finetuning, hyperparameter sweeps, batch inference, and online serving.
 
-In SkyPilot, every workload benefits from:
+Using SkyPilot to run workloads offers these benefits:
 
 .. dropdown:: Unified execution on any cloud, region, and cluster
 
     Regardless of how many clouds, regions, and clusters you have, you can use a unified interface
     to submit, run, and manage workloads on them.
 
-    Your focus on the workload, and SkyPilot alleviates the burden of
+    You focus on the workload, and SkyPilot alleviates the burden of
     dealing with cloud infra details and differences.
 
 .. dropdown:: Cost and capacity optimization
@@ -65,8 +67,8 @@ You can use ``sky launch`` to launch a cluster:
 
             $ sky launch
             $ sky launch --gpus L4:8
-            $ sky launch --num-nodes 10 --cpus 2+ --memory 2+ --down
-            $ sky launch cluster.yaml
+            $ sky launch --num-nodes 10 --cpus 32+
+            $ sky launch --down cluster.yaml
             $ sky launch --help  # See all flags.
 
     .. tab-item:: Python
@@ -87,17 +89,14 @@ You can do the following with a cluster:
 - Easily launch and use many virtual, ephemeral clusters
 
 
-You can optionally bring your custom Docker or VM image when launching, or use SkyPilot's sane defaults, which configure the correct CUDA versions for different GPUs.
+Optionally, you can bring your custom Docker or VM image when launching, or use SkyPilot's sane defaults, which configure the correct CUDA versions for different GPUs.
+
+Note that a SkyPilot cluster is a *virtual* collection of either cloud instances, or pods
+launched on the *physical* clusters you bring to SkyPilot (:ref:`Kubernetes
+clusters <concept-kubernetes-clusters>` or :ref:`existing machines
+<concept-existing-machines>`).
 
 See :ref:`quickstart` and :ref:`dev-cluster` to get started.
-
-.. tip::
-
-    Think of clusters as *virtual* in nature. They can be launched on *physical*
-    clusters you bring to SkyPilot, such as :ref:`Kubernetes clusters
-    <concept-kubernetes-clusters>` or :ref:`existing machines
-    <concept-existing-machines>`.
-
 
 .. _concept-jobs:
 
@@ -233,25 +232,19 @@ Kubernetes clusters
 
 You can bring existing Kubernetes clusters, including managed clusters (e.g.,
 EKS, GKE, AKS) or on-prem ones, into SkyPilot.  Auto-failover
-between multiple Kubernetes clusters is also supported.
+between multiple clusters is also supported.
+
+.. image:: images/k8s-skypilot-architecture-light.png
+    :width: 45%
+    :align: center
+    :class: no-scaled-link, only-light
+
+.. image:: images/k8s-skypilot-architecture-dark.png
+    :width: 45%
+    :align: center
+    :class: no-scaled-link, only-dark
 
 See :ref:`kubernetes-overview`.
-
-.. figure:: images/k8s-skypilot-architecture-dark.png
-   :width: 50%
-   :align: center
-   :alt: SkyPilot on Kubernetes
-   :class: no-scaled-link, only-dark
-
-   SkyPilot layers on top of your Kubernetes cluster(s).
-
-.. figure:: images/k8s-skypilot-architecture-light.png
-   :width: 50%
-   :align: center
-   :alt: SkyPilot on Kubernetes
-   :class: no-scaled-link, only-light
-
-   SkyPilot layers on top of your Kubernetes cluster(s).
 
 .. _concept-existing-machines:
 
@@ -259,8 +252,6 @@ Existing machines
 ~~~~~~~~~~~~~~~~~~~~~
 
 If you have existing machines, i.e., a list of IP addresses you can SSH into, you can bring them into SkyPilot.
-
-See :ref:`Using Existing Machines <existing-machines>`.
 
 .. figure:: images/sky-existing-infra-workflow-light.png
    :width: 85%
@@ -274,14 +265,16 @@ See :ref:`Using Existing Machines <existing-machines>`.
    :alt: Deploying SkyPilot on existing machines
    :class: no-scaled-link, only-dark
 
+See :ref:`Using Existing Machines <existing-machines>`.
+
 SkyPilot's cost and capacity optimization
 -------------------------------------------------------------------
 
-SkyPilot comes with a provisioner that natively optimizes for cost and capacity whenever it is provisioning compute.
-(This applies to all compute needed for clusters, jobs, and services.)
+Whenever new compute is needed for a cluster, job, or service,
+SkyPilot's provisioner natively optimizes for cost and capacity, choosing the infra option that is the cheapest and available.
 
-For example, if you want to launch 8 A100 GPUs, SkyPilot will try all infra
-options in the given search space  in the "cheapest and most available" order,
+For example, if you want to launch a cluster with 8 A100 GPUs, SkyPilot will try all infra
+options in the given search space in the "cheapest and available" order,
 with auto-failover:
 
 .. figure:: https://blog.skypilot.co/ai-on-kubernetes/images/failover.png
