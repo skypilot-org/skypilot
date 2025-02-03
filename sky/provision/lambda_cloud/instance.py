@@ -64,6 +64,13 @@ def _get_ssh_key_name(prefix: str = '') -> str:
     return name
 
 
+def _get_private_ip(cluster_name_on_cloud: str,
+                    instance_info: Dict[str, Any]) -> str:
+    if len(_filter_instances(cluster_name_on_cloud, None)) == 1:
+        return instance_info.get('private_ip', '127.0.0.1')
+    return instance_info['private_ip']
+
+
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster"""
@@ -203,7 +210,8 @@ def get_cluster_info(
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['private_ip'],
+                internal_ip=_get_private_ip(cluster_name_on_cloud,
+                                            instance_info),
                 external_ip=instance_info['ip'],
                 ssh_port=22,
                 tags={},
