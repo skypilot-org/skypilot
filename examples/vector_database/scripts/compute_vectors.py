@@ -21,6 +21,7 @@ import pyarrow.parquet as pq
 import torch
 from tqdm import tqdm
 
+
 class BatchProcessor():
     """Process ImageNet images with CLIP.
     
@@ -114,11 +115,11 @@ class BatchProcessor():
         subdir = str(idx // 100000).zfill(4)
         save_dir = self.images_path / subdir
         save_dir.mkdir(parents=True, exist_ok=True)
-        
+
         # Save image with index as filename
         image_path = save_dir / f"{idx}.jpg"
         image.save(image_path, format="JPEG", quality=95)
-        
+
         # Return relative path from images root
         return str(Path(subdir) / f"{idx}.jpg")
 
@@ -188,7 +189,7 @@ class BatchProcessor():
                 logging.warning(f"Error processing file {file}: {e}")
 
         return max_idx, max_partition + 1
-    
+
     def save_results_to_parquet(self, results: list):
         """Save results to a parquet file with atomic write."""
         if not results:
@@ -209,7 +210,7 @@ class BatchProcessor():
             f"Saved partition {self.partition_counter} to {final_path} with {len(df)} rows"
         )
         self.partition_counter += 1
-        
+
     async def run(self):
         """
         Run the batch processing pipeline with recovery support.
@@ -277,7 +278,7 @@ async def main():
                         type=str,
                         default='ViT-bigG-14',
                         help='CLIP model name')
-    
+
     parser.add_argument('--images-path',
                         type=str,
                         default='/images',

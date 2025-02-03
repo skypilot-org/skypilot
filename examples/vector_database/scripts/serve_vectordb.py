@@ -10,8 +10,10 @@ from pathlib import Path
 from typing import List, Optional
 
 import chromadb
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import HTMLResponse, FileResponse
+from fastapi import FastAPI
+from fastapi import HTTPException
+from fastapi.responses import FileResponse
+from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 import numpy as np
 import open_clip

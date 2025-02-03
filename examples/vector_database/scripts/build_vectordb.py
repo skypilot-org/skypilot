@@ -5,14 +5,15 @@ it to another mounted bucket.
 
 import argparse
 import base64
+from concurrent.futures import as_completed
+from concurrent.futures import ProcessPoolExecutor
 import glob
 import logging
+import multiprocessing
 import os
 import pickle
 import shutil
 import tempfile
-import multiprocessing
-from concurrent.futures import ProcessPoolExecutor, as_completed
 
 import chromadb
 import numpy as np
@@ -36,7 +37,7 @@ def process_parquet_file(args):
     try:
         results = []
         df = pd.read_parquet(parquet_file)
-        
+
         # Process in batches
         for i in range(0, len(df), batch_size):
             batch_df = df.iloc[i:i + batch_size]
@@ -45,7 +46,7 @@ def process_parquet_file(args):
             unpacked_data = [pickle.loads(row) for row in batch_df['output']]
             images_base64, embeddings = zip(*unpacked_data)
             results.append((ids, embeddings, images_base64))
-            
+
         return results
     except Exception as e:
         logger.error(f"Error processing file {parquet_file}: {str(e)}")
@@ -77,7 +78,7 @@ def main():
         type=str,
         default='',
         help='Prefix path within mounted bucket to search for parquet files')
-    
+
     args = parser.parse_args()
 
     # Create a temporary directory for building the database
@@ -103,30 +104,29 @@ def main():
         logger.info(f"Found {len(parquet_files)} parquet files")
 
         # Process files in parallel
-        max_workers = max(1, multiprocessing.cpu_count() - 1)  # Leave one CPU free
+        max_workers = max(1,
+                          multiprocessing.cpu_count() - 1)  # Leave one CPU free
         logger.info(f"Processing files using {max_workers} workers")
-        
+
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all files for processing
             future_to_file = {
-                executor.submit(process_parquet_file, (file, args.batch_size)): file
-                for file in parquet_files
+                executor.submit(process_parquet_file, (file, args.batch_size)):
+                file for file in parquet_files
             }
-            
+
             # Process results as they complete
-            for future in tqdm(as_completed(future_to_file), 
-                             total=len(parquet_files),
-                             desc="Processing files"):
+            for future in tqdm(as_completed(future_to_file),
+                               total=len(parquet_files),
+                               desc="Processing files"):
                 file = future_to_file[future]
                 try:
                     results = future.result()
                     if results:
                         for ids, embeddings, images_paths in results:
-                            collection.add(
-                                ids=list(ids),
-                                embeddings=list(embeddings),
-                                documents=list(images_paths)
-                            )
+                            collection.add(ids=list(ids),
+                                           embeddings=list(embeddings),
+                                           documents=list(images_paths))
                 except Exception as e:
                     logger.error(f"Error processing file {file}: {str(e)}")
                     continue
