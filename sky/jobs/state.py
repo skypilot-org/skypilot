@@ -586,7 +586,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
         rows = cursor.execute(
             """\
             UPDATE spot SET
-            status=(?), end_at=(?)
+            status=(?)
             WHERE spot_job_id=(?) AND end_at IS null""",
             (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
         if rows.rowcount > 0:
