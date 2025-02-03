@@ -13,7 +13,7 @@ SkyPilot streamlines the process of running such large-scale jobs in the cloud. 
 
 ### Step 0: Set Up The Environment
 Install the following Prerequisites:  
-* SkyPilot: Make sure you have SkyPilot installed and configured with `sky check`. Refer to [SkyPilot’s documentation](https://docs.skypilot.co/en/latest/getting-started/installation.html) for instructions.
+* SkyPilot: Make sure you have SkyPilot installed and `sky check` should succeed. Refer to [SkyPilot’s documentation](https://docs.skypilot.co/en/latest/getting-started/installation.html) for instructions.
 * Hugging Face Token: To download dataset from Hugging Face Hub, you will need your token. Follow the steps below to configure your token.
 
 Setup Huggingface token in `~/.env`
@@ -59,7 +59,7 @@ Processing files: 100%|██████████| 12/12 [00:05<00:00,  2.04
 
 ### Step 3: Serve the Constructed Vector Database
 
-To serve the constructed database, you expose an API endpoint that other applications (or your local client) can call to perform semantic search.
+To serve the constructed database, you expose an API endpoint that other applications (or your local client) can call to perform semantic search. Querying allows you to confirm that your database is working and retrieve semantic matches for a given text query. You can integrate this endpoint into larger applications (like an image search engine or recommendation system).
 
 To serve the constructed database: 
 ```
@@ -72,14 +72,11 @@ sky serve up serve_vectordb.yaml -n vectordb
 This will deploy your vector database as a service on a cloud instance and allow you to interact with it via a public endpoint. Sky Serve facilitates automatic health checks and scaling of the service.
 
 
-### Step 4: Query the Deployed Vector Database
-Querying allows you to confirm that your database is working and retrieve semantic matches for a given text query. You can integrate this endpoint into larger applications (like an image search engine or recommendation system).
-
 To query the constructed database, 
 
 If you run through `sky launch`, use 
 ```
-$(sky status --ip vecdb_serve)
+sky status --ip vecdb_serve
 ```
 deployed cluster. 
 

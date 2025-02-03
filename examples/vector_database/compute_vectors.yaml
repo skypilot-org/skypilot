@@ -3,7 +3,14 @@ name: clip-batch-compute-vectors
 workdir: ~/skypilot/examples/vector_database
 
 resources:
-  accelerators: {T4:1, L4:1, A10G:1, A10:1, V100:1}
+  accelerators: 
+    # ordered by pricing (cheapest to most expensive)
+    # skypilot will try to use the cheapest available accelerator
+    T4: 1
+    L4: 1
+    A10G: 1
+    A10: 1
+    V100: 1
   memory: 32+
   any_of:
     - use_spot: true 

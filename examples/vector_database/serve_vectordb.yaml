@@ -3,9 +3,20 @@ name: vectordb-serve
 workdir: ~/skypilot/examples/vector_database
 
 resources:
-  accelerators: {T4:1, L4:1, A10G:1, A10:1, V100:1, A100:1} # GPU is required for serving
+  accelerators: 
+    # ordered by pricing (cheapest to most expensive)
+    # skypilot will try to use the cheapest available accelerator
+    # serve requires a GPU to compute the embeddings
+    T4: 1
+    L4: 1
+    A10G: 1
+    A10: 1
+    V100: 1
   memory: 32+
   ports: 8000
+  any_of:
+    - use_spot: true 
+    - use_spot: false
 
 file_mounts:
   /vectordb:

@@ -22,7 +22,14 @@ import torch
 from tqdm import tqdm
 
 class BatchProcessor():
-    """Process ImageNet images with CLIP."""
+    """Process ImageNet images with CLIP.
+    
+    This script is responsible for computing the embeddings for the ImageNet dataset.
+    1. setup_model initializes the model
+    2. get_dataset_iterator will yield individual items from the dataset
+    3. do_data_loading will get an item from the dataset iterator and do any preprocessing
+    4. the loaded items will be batched and handed to do_batch_processing for the ultimate processing
+    """
 
     def __init__(self,
                  output_path: str,
