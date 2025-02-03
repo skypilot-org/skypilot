@@ -9,6 +9,8 @@ comment).
 import collections
 import datetime
 import pathlib
+import os
+from flask import send_file, abort
 
 import flask
 import yaml
@@ -16,6 +18,7 @@ import yaml
 from sky import jobs as managed_jobs
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.jobs import constants as managed_job_constants
 
 app = flask.Flask(__name__)
 
@@ -56,12 +59,13 @@ class JobTableColumns:
     CLUSTER = 11
     REGION = 12
     DESCRIPTION = 13
+    ACTIONS = 14  # New column for actions
 
 # Column headers matching the indices above
 JOB_TABLE_COLUMNS = [
     '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
     'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
-    'Description'
+    'Description', 'Actions'
 ]
 
 @app.route('/')
@@ -87,8 +91,8 @@ def home():
         if not task['status'].is_terminal():
             status_counts[task['status'].value] += 1
 
-    # Add an empty column for the dropdown button
-    rows = [[''] + row for row in rows]
+    # Add an empty column for the dropdown button and actions column
+    rows = [[''] + row + [''] for row in rows]  # Add empty cell for actions column
 
     # Validate column count
     if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
@@ -100,7 +104,7 @@ def home():
         row[JobTableColumns.STATUS] = common_utils.remove_color(row[JobTableColumns.STATUS])
     
     # Remove filler rows ([''], ..., ['-'])
-    rows = [row for row in rows if ''.join(map(str, row)) != '']
+    rows = [row for row in rows if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != '']
 
     # Get all unique status values
     status_values = sorted(list(set(row[JobTableColumns.STATUS] for row in rows)))
@@ -115,6 +119,21 @@ def home():
     )
     return rendered_html
 
+@app.route('/download_log/<job_id>')
+def download_log(job_id):
+    try:
+        log_path = os.path.join(
+            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
+            f'{job_id}.log')
+        if not os.path.exists(log_path):
+            abort(404)
+        return send_file(log_path, 
+                        mimetype='text/plain',
+                        as_attachment=True,
+                        download_name=f'job_{job_id}.log')
+    except Exception as e:
+        app.logger.error(f'Error downloading log for job {job_id}: {str(e)}')
+        abort(500)
 
 if __name__ == '__main__':
     app.run()

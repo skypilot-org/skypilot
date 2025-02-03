@@ -155,6 +155,14 @@
                     <td>{{ row[11] }}</td>
                     <td>{{ row[12] }}</td>
                     <td>{{ row[13] }}</td>
+                    <td>
+                        {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
+                        <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}" 
+                           class="btn btn-sm btn-outline-secondary">
+                            Download Log
+                        </a>
+                        {% endif %}
+                    </td>
                 </tr>
                 {% endfor %}
             </tbody>
