@@ -245,10 +245,10 @@ def _format_enabled_cloud(cloud_name: str) -> str:
                 # here we are using rich. We should migrate this file to
                 # use colorama as we do in the rest of the codebase.
                 symbol = ('└── ' if i == len(existing_contexts) - 1 else '├── ')
-                contexts_formatted.append(f'\n        {symbol}{context}')
+                contexts_formatted.append(f'\n    {symbol}{context}')
             context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
         else:
             context_info = f'Active context: {existing_contexts[0]}'
 
-        return f'{cloud_name}[/green][dim]\n    └── {context_info}[/dim][green]'
+        return f'{cloud_name}[/green][dim]\n    {context_info}[/dim][green]'
     return cloud_name
