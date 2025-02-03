@@ -170,9 +170,9 @@
         .status-container:hover::after {
             content: attr(title);
             position: absolute;
-            left: 50%;
+            left: 0;          /* Changed from 50% */
             bottom: 100%;
-            transform: translateX(-50%) translateY(-8px);
+            transform: translateY(-8px);  /* Removed translateX */
             z-index: 9999;
             background-color: rgba(33, 37, 41, 0.9);
             color: white;
@@ -180,21 +180,21 @@
             border-radius: 6px;
             font-size: 0.875rem;
             white-space: pre;
-            min-width: 400px;
-            max-width: 700px;
+            min-width: 500px;
+            max-width: 800px;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
             pointer-events: none;
             opacity: 0;
             animation: tooltipFadeIn 0.2s ease-in-out forwards;
         }
 
-        /* Add a small arrow to the tooltip */
+        /* Update the arrow position */
         .status-container:hover::before {
             content: '';
             position: absolute;
-            left: 50%;
+            left: 20px;       /* Changed from 50% */
             bottom: 100%;
-            transform: translateX(-50%);
+            transform: none;   /* Removed transform */
             border: 8px solid transparent;
             border-top-color: rgba(33, 37, 41, 0.9);
             z-index: 9999;
@@ -206,7 +206,7 @@
         @keyframes tooltipFadeIn {
             to {
                 opacity: 1;
-                transform: translateX(-50%) translateY(0);
+                transform: translateY(0);  /* Simplified animation */
             }
         }
 
@@ -236,7 +236,7 @@
     <div class="container">
         <header>
             <div class="d-flex justify-content-between align-items-center">
-                <h1>SkyPilot Dashboard</h1>
+                <h1>SkyPilot Managed Jobs Dashboard</h1>
                 <div class="d-flex align-items-center">
                     <div class="form-check form-switch me-3">
                         <input class="form-check-input" type="checkbox" id="refresh-toggle" checked>

@@ -83,29 +83,35 @@ def _extract_launch_history(log_content: str) -> str:
         A formatted string containing the launch history.
     """
     launches = []
+    current_launch = None
+    
     for line in log_content.splitlines():
-        if 'Launching on' in line or 'Tried on' in line:
-            # Extract timestamp and message
+        if 'Launching on' in line:
             try:
-                # Split by ']' to remove the logging prefix
                 parts = line.split(']')
                 if len(parts) >= 2:
-                    # Extract timestamp from the logging prefix
-                    timestamp = parts[0].split()[1:3]  # Get the date and time parts
-                    # Extract the actual message, remove color codes and symbols
+                    timestamp = parts[0].split()[1:3]
                     message = parts[1].replace('[0m⚙︎', '').strip()
-                    # Combine timestamp and cleaned message
                     formatted_line = f"{' '.join(timestamp)} {message}"
-                    launches.append(formatted_line)
+                    
+                    # If we already had a launch, it was actually a "tried to launch"
+                    if current_launch:
+                        # Convert the previous "Launching on" to "Tried to launch on"
+                        prev_time, prev_target = current_launch.rsplit(' Launching on ', 1)
+                        launches.append(f"{prev_time} Tried to launch on {prev_target}")
+                    
+                    # Store the current launch
+                    current_launch = formatted_line
             except IndexError:
-                # Fallback if parsing fails
                 launches.append(line.strip())
     
-    if not launches:
-        return 'No launch history found'
+    # Add the final (successful) launch at the beginning
+    if current_launch:
+        result = [current_launch]
+        result.extend(launches)
+        return '\n'.join(result)
     
-    # Format the launch history with timestamps
-    return '\n'.join(launches)
+    return 'No launch history found'
 
 
 @app.route('/')
