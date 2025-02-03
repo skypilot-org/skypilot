@@ -140,6 +140,63 @@
             0% { transform: rotate(0deg); }
             100% { transform: rotate(360deg); }
         }
+
+        .status-container {
+            cursor: help;
+            position: relative;
+            display: inline-block;
+        }
+
+        .status-container:hover::after {
+            content: attr(title);
+            position: absolute;
+            left: 50%;
+            bottom: 100%;
+            transform: translateX(-50%) translateY(-8px);
+            z-index: 9999;
+            background-color: rgba(33, 37, 41, 0.9);
+            color: white;
+            padding: 0.75rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            white-space: pre-wrap;
+            max-width: 300px;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+            pointer-events: none;
+            opacity: 0;
+            animation: tooltipFadeIn 0.2s ease-in-out forwards;
+        }
+
+        /* Add a small arrow to the tooltip */
+        .status-container:hover::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            bottom: 100%;
+            transform: translateX(-50%);
+            border: 8px solid transparent;
+            border-top-color: rgba(33, 37, 41, 0.9);
+            z-index: 9999;
+            pointer-events: none;
+            opacity: 0;
+            animation: tooltipFadeIn 0.2s ease-in-out forwards;
+        }
+
+        @keyframes tooltipFadeIn {
+            to {
+                opacity: 1;
+                transform: translateX(-50%) translateY(0);
+            }
+        }
+
+        /* Ensure the table doesn't cut off tooltips */
+        .table {
+            overflow: visible !important;
+        }
+        
+        .fixed-header-table {
+            overflow: visible !important;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
@@ -207,7 +264,9 @@
             <thead>
                 <tr>
                     {% for column in columns %}
+                    {% if column != 'Description' %}  {# Skip the Description column #}
                     <th>{{ column }}</th>
+                    {% endif %}
                     {% endfor %}
                 </tr>
             </thead>
@@ -224,27 +283,28 @@
                     <td>{{ row[7] }}</td>
                     <td>{{ row[8] }}</td>
                     <td>
-                        <!-- https://getbootstrap.com/docs/4.0/components/badge/ -->
-                        {% if row[9].startswith('RUNNING') %}
-                        <span class="badge bg-primary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
-                        {% elif row[9].startswith('PENDING') or row[9].startswith('SUBMITTED') %}
-                        <span class="badge bg-light">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
-                        {% elif row[9].startswith('RECOVERING') or row[9].startswith('CANCELLING') or row[9].startswith('STARTING') %}
-                        <span class="badge bg-info">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
-                        {% elif row[9].startswith('SUCCEEDED') %}
-                        <span class="badge bg-success">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
-                        {% elif row[9].startswith('CANCELLED') %}
-                        <span class="badge bg-secondary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
-                        {% elif row[9].startswith('FAILED') %}
-                        <span class="badge bg-warning">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
-                        {% else %}
-                        {{ row[9] }}
-                        {% endif %}
+                        <!-- Status column with tooltip -->
+                        <div class="status-container" style="position: relative;" title="{{ row[13] }}">
+                            {% if row[9].startswith('RUNNING') %}
+                            <span class="badge bg-primary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            {% elif row[9].startswith('PENDING') or row[9].startswith('SUBMITTED') %}
+                            <span class="badge bg-light">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            {% elif row[9].startswith('RECOVERING') or row[9].startswith('CANCELLING') or row[9].startswith('STARTING') %}
+                            <span class="badge bg-info">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            {% elif row[9].startswith('SUCCEEDED') %}
+                            <span class="badge bg-success">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            {% elif row[9].startswith('CANCELLED') %}
+                            <span class="badge bg-secondary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            {% elif row[9].startswith('FAILED') %}
+                            <span class="badge bg-warning">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            {% else %}
+                            {{ row[9] }}
+                            {% endif %}
+                        </div>
                     </td>
                     <td>{{ row[10] }}</td>
                     <td>{{ row[11] }}</td>
                     <td>{{ row[12] }}</td>
-                    <td>{{ row[13] }}</td>
                     <td>
                         {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
                         <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}" 
@@ -406,6 +466,14 @@
                 this.style.transform = 'scale(1)';
             });
         });
+    </script>
+    <script>
+        // Column indices for job table
+        const JOB_TABLE_COLUMNS = [
+            '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
+            'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
+            'Actions'  // Removed 'Description'
+        ];
     </script>
 
 </body>
