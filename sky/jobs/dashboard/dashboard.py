@@ -19,7 +19,6 @@ from sky.utils import controller_utils
 
 app = flask.Flask(__name__)
 
-
 def _is_running_on_jobs_controller() -> bool:
     """Am I running on jobs controller?
 
@@ -41,6 +40,29 @@ def _is_running_on_jobs_controller() -> bool:
             for name in candidate_controller_names)
     return False
 
+# Column indices for job table
+class JobTableColumns:
+    DROPDOWN = 0
+    ID = 1
+    TASK = 2
+    NAME = 3
+    RESOURCES = 4
+    SUBMITTED = 5
+    TOTAL_DURATION = 6
+    JOB_DURATION = 7
+    RECOVERIES = 8
+    STATUS = 9
+    STARTED = 10
+    CLUSTER = 11
+    REGION = 12
+    DESCRIPTION = 13
+
+# Column headers matching the indices above
+JOB_TABLE_COLUMNS = [
+    '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
+    'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
+    'Description'
+]
 
 @app.route('/')
 def home():
@@ -50,6 +72,10 @@ def home():
     else:
         job_table = managed_jobs.dump_managed_job_queue()
         all_managed_jobs = managed_jobs.load_managed_job_queue(job_table)
+
+    app.logger.error('All managed jobs:')
+    for job in all_managed_jobs:
+        app.logger.error(job)
 
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     rows = managed_jobs.format_job_table(all_managed_jobs,
@@ -61,32 +87,27 @@ def home():
         if not task['status'].is_terminal():
             status_counts[task['status'].value] += 1
 
-    # Add an empty column for the dropdown button. This will be added in the
-    # jobs/templates/index.html file.
+    # Add an empty column for the dropdown button
     rows = [[''] + row for row in rows]
 
-    # FIXME(zongheng): make the job table/queue funcs return structured info so
-    # that we don't have to do things like row[-5] below.
-    columns = [
-        '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
-        'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
-        'Description'
-    ]
-    if rows and len(rows[0]) != len(columns):
+    # Validate column count
+    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
         raise RuntimeError(
             'Dashboard code and managed job queue code are out of sync.')
 
-    # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'.
+    # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
     for row in rows:
-        row[-5] = common_utils.remove_color(row[-5])
-    # Remove filler rows ([''], ..., ['-']).
+        row[JobTableColumns.STATUS] = common_utils.remove_color(row[JobTableColumns.STATUS])
+    
+    # Remove filler rows ([''], ..., ['-'])
     rows = [row for row in rows if ''.join(map(str, row)) != '']
 
-    # Get all unique status values.
-    status_values = sorted(list(set(row[-5] for row in rows)))
+    # Get all unique status values
+    status_values = sorted(list(set(row[JobTableColumns.STATUS] for row in rows)))
+    
     rendered_html = flask.render_template(
         'index.html',
-        columns=columns,
+        columns=JOB_TABLE_COLUMNS,
         rows=rows,
         last_updated_timestamp=timestamp,
         status_values=status_values,
