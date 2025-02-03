@@ -25,8 +25,8 @@
         }
 
         .container {
-            max-width: 1400px;  /* Increased from default 1140px */
-            width: 95%;        /* Use percentage for responsive width */
+            max-width: 1800px;  /* Increased from 1400px */
+            width: 98%;        /* Increased from 95% */
             background-color: white;
             border-radius: 12px;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
@@ -47,9 +47,11 @@
         }
 
         .table {
+            width: 100%;       /* Ensure table takes full container width */
             border-radius: 8px;
             overflow: hidden;
             box-shadow: 0 0 8px rgba(0, 0, 0, 0.05);
+            table-layout: auto;  /* Allow table to adjust column widths automatically */
         }
 
         .fixed-header-table thead th {
@@ -59,9 +61,25 @@
             border-bottom: 2px solid #dee2e6;
         }
 
-        .table tbody td {
+        .table th:nth-child(2),  /* ID column */
+        .table td:nth-child(2) {
+            min-width: 100px;
+        }
+
+        .table th:nth-child(4),  /* Name column */
+        .table td:nth-child(4) {
+            min-width: 150px;
+        }
+
+        .table th:nth-child(10),  /* Status column */
+        .table td:nth-child(10) {
+            min-width: 120px;
+        }
+
+        .table th,
+        .table td {
             padding: 0.8rem 1rem;
-            vertical-align: middle;
+            white-space: nowrap;  /* Prevent text wrapping in cells */
         }
 
         .badge {
@@ -161,8 +179,9 @@
             padding: 0.75rem 1rem;
             border-radius: 6px;
             font-size: 0.875rem;
-            white-space: pre-wrap;
-            max-width: 300px;
+            white-space: pre;
+            min-width: 400px;
+            max-width: 700px;
             box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
             pointer-events: none;
             opacity: 0;

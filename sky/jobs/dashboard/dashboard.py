@@ -73,6 +73,41 @@ JOB_TABLE_COLUMNS = [
 ]
 
 
+def _extract_launch_history(log_content: str) -> str:
+    """Extract launch history from log content.
+    
+    Args:
+        log_content: Content of the log file.
+        
+    Returns:
+        A formatted string containing the launch history.
+    """
+    launches = []
+    for line in log_content.splitlines():
+        if 'Launching on' in line or 'Tried on' in line:
+            # Extract timestamp and message
+            try:
+                # Split by ']' to remove the logging prefix
+                parts = line.split(']')
+                if len(parts) >= 2:
+                    # Extract timestamp from the logging prefix
+                    timestamp = parts[0].split()[1:3]  # Get the date and time parts
+                    # Extract the actual message, remove color codes and symbols
+                    message = parts[1].replace('[0m⚙︎', '').strip()
+                    # Combine timestamp and cleaned message
+                    formatted_line = f"{' '.join(timestamp)} {message}"
+                    launches.append(formatted_line)
+            except IndexError:
+                # Fallback if parsing fails
+                launches.append(line.strip())
+    
+    if not launches:
+        return 'No launch history found'
+    
+    # Format the launch history with timestamps
+    return '\n'.join(launches)
+
+
 @app.route('/')
 def home():
     if not _is_running_on_jobs_controller():
@@ -81,10 +116,6 @@ def home():
     else:
         job_table = managed_jobs.dump_managed_job_queue()
         all_managed_jobs = managed_jobs.load_managed_job_queue(job_table)
-
-    app.logger.error('All managed jobs:')
-    for job in all_managed_jobs:
-        app.logger.error(job)
 
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     rows = managed_jobs.format_job_table(all_managed_jobs,
@@ -115,6 +146,24 @@ def home():
         row for row in rows
         if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != ''
     ]
+
+    # Add log content as description for each job
+    for row in rows:
+        job_id = str(row[JobTableColumns.ID]).strip().replace(' ⤳', '')
+        if job_id and job_id != '-':
+            try:
+                log_path = os.path.join(
+                    os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
+                    f'{job_id}.log')
+                if os.path.exists(log_path):
+                    with open(log_path, 'r', encoding='utf-8') as f:
+                        log_content = f.read()
+                        row[JobTableColumns.DESCRIPTION] = _extract_launch_history(log_content)
+                else:
+                    row[JobTableColumns.DESCRIPTION] = 'Log file not found'
+            except Exception as e:
+                row[JobTableColumns.DESCRIPTION] = f'Error reading log: {str(e)}'
+    app.logger.error('All managed jobs:')
 
     # Get all unique status values
     status_values = sorted(
