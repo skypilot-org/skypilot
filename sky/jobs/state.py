@@ -604,9 +604,8 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             """\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND status=(?)""",
-            (ManagedJobStatus.CANCELLED.value, time.time(), job_id,
-             ManagedJobStatus.CANCELLING.value))
+            WHERE spot_job_id=(?) AND end_at IS null""",
+            (ManagedJobStatus.CANCELLED.value, time.time(), job_id))
         if rows.rowcount > 0:
             logger.info('Job cancelled.')
             callback_func('CANCELLED')
