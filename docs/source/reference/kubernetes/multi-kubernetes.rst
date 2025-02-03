@@ -4,7 +4,7 @@ Multiple Kubernetes Clusters
 ================================
 
 
-SkyPilot allows you to manage dev pods, jobs and services across multiple Kubernetes clusters in a single pane of glass.
+SkyPilot allows you to manage dev pods, jobs and services across multiple Kubernetes clusters through a single pane of glass.
 
 You may have multiple Kubernetes clusters for different:
 
@@ -29,7 +29,7 @@ Step 1: Set Up Credentials
 
 To work with multiple Kubernetes clusters, their credentials must be set up as individual `contexts <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/>`_ in your local ``~/.kube/config`` file. 
 
-For deploying new clusters and getting  credentials, see :ref:`kubernetes-setup-deploy`.
+For deploying new clusters and getting  credentials, see :ref:`kubernetes-deployment`.
 
 For example, a ``~/.kube/config`` file may look like this:
 
@@ -68,7 +68,7 @@ Step 2: Setup SkyPilot to Access Multiple Kubernetes Clusters
 
 Unlike clouds, SkyPilot does not failover through different Kubernetes clusters (regions) by default because each Kubernetes clusters can have a different purpose.
 
-By default, SkyPilot only uses the current context in the kubeconfig, e.g., ``current-context: my-h100-cluster`` or you can get the current context with ``kubectl config current-context``.
+By default, SkyPilot only uses the context set as the ``current-context`` in the kubeconfig. You can get the current context with ``kubectl config current-context``.
 
 To allow SkyPilot to access multiple Kubernetes clusters, you can set the ``kubernetes.allowed_contexts`` in the SkyPilot config.
 
@@ -118,7 +118,7 @@ Point to a Kubernetes Cluster and Launch
 SkyPilot borrows the ``region`` concept from clouds to denote a Kubernetes context. You can point to a Kubernetes cluster
 by specifying the ``--region`` with the context name for that cluster.
 
-.. code-block:: console
+.. code-block:: bash
 
     # Check the GPUs available in a Kubernetes cluster
     $ sky show-gpus --cloud kubernetes --region my-h100-cluster
