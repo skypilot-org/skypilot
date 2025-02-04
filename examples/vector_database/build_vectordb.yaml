@@ -1,6 +1,6 @@
 name: vectordb-build
 
-workdir: ~/skypilot/examples/vector_database
+workdir: .
 
 file_mounts:
   /clip_embeddings:

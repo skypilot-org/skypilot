@@ -1,6 +1,6 @@
 name: vectordb-serve
 
-workdir: ~/skypilot/examples/vector_database
+workdir: .
 
 resources:
   accelerators: 

@@ -1,6 +1,6 @@
 name: clip-batch-compute-vectors
 
-workdir: ~/skypilot/examples/vector_database
+workdir: .
 
 resources:
   accelerators: 
