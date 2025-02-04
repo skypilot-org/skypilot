@@ -129,6 +129,15 @@ def _list_accelerators(
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
+
+    # First check if Kubernetes is enabled. This ensures k8s python client is
+    # installed. Do not put any k8s-specific logic before this check.
+    k8s_cloud = Kubernetes()
+    if not any(
+            map(k8s_cloud.is_same_cloud,
+                sky_check.get_cached_enabled_clouds_or_refresh())):
+        return {}, {}, {}
+
     # TODO(zhwu): this should return all accelerators in multiple kubernetes
     # clusters defined by allowed_contexts.
     if region_filter is None:
@@ -142,11 +151,8 @@ def _list_accelerators(
     if context is None:
         return {}, {}, {}
 
-    k8s_cloud = Kubernetes()
-    if not any(
-            map(k8s_cloud.is_same_cloud,
-                sky_check.get_cached_enabled_clouds_or_refresh())
-    ) or not kubernetes_utils.check_credentials(context)[0]:
+    # Verify that the credentials are still valid.
+    if not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_accelerator_resource(context)
