@@ -53,7 +53,7 @@ def main():
                         help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,
-                        default=25,
+                        default=100,
                         help='Number of jobs to partition the work across')
     parser.add_argument('--env-path',
                         type=str,

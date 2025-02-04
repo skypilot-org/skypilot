@@ -5,7 +5,6 @@ workdir: .
 resources:
   accelerators: 
     # ordered by pricing (cheapest to most expensive)
-    # skypilot will try to use the cheapest available accelerator
     T4: 1
     L4: 1
     A10G: 1
@@ -20,19 +19,19 @@ num_nodes: 1
 
 file_mounts:
   /output:
-    name: sky-embedding
+    name: sky-demo-embedding
     # this needs to be the same as the source in the build_vectordb.yaml
     mode: MOUNT
   /images:
-    name: sky-images
+    name: sky-demo-image
     # this needs to be the same as the source in the build_vectordb.yaml
     mode: MOUNT
 
 envs:
   # These env vars are required but should be passed in at launch time.
-  HF_TOKEN: 
-  START_IDX: 
-  END_IDX: 
+  HF_TOKEN: ${HF_TOKEN}
+  START_IDX: ${START_IDX}
+  END_IDX: ${END_IDX}
 
 setup: |
   pip install numpy==1.26.4
