@@ -266,6 +266,15 @@
             margin-bottom: -8px;
             z-index: 1000;
         }
+
+        .clickable-badge {
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+
+        .clickable-badge:hover {
+            transform: scale(1.1);
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
@@ -291,35 +300,34 @@
                     <p class="text-muted mb-0" id="last-updated"></p>
                 </div>
             </div>
-            <div class="filter-controls">
-                <span class="fw-medium fs-6">Filter by status:</span>
-                <select class="form-select" id="status-filter" style="width: auto;">
-                    <option value="">All statuses</option>
-                    {% for status in status_values %}
-                    <option value="{{ status }}">{{ status }}</option>
-                    {% endfor %}
-                </select>
-            </div>
         </header>
+
+        <!-- Hidden status filter -->
+        <select id="status-filter" style="display: none;">
+            <option value="">All</option>
+            {% for status in status_values %}
+            <option value="{{ status }}">{{ status }}</option>
+            {% endfor %}
+        </select>
 
         {% if status_counts %}
         <p>In progress tasks: 
             {% for status, count in status_counts|dictsort %}
                 {{ count }} 
                 {% if status.startswith('RUNNING') %}
-                <span class="badge bg-primary">{{ status }}</span>
+                <span class="badge bg-primary clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% elif status.startswith('PENDING') or status.startswith('SUBMITTED') %}
-                <span class="badge bg-light">{{ status }}</span>
+                <span class="badge bg-light clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% elif status.startswith('RECOVERING') or status.startswith('CANCELLING') or status.startswith('STARTING') %}
-                <span class="badge bg-info">{{ status }}</span>
+                <span class="badge bg-info clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% elif status.startswith('SUCCEEDED') %}
-                <span class="badge bg-success">{{ status }}</span>
+                <span class="badge bg-success clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% elif status.startswith('CANCELLED') %}
-                <span class="badge bg-secondary">{{ status }}</span>
+                <span class="badge bg-secondary clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% elif status.startswith('FAILED') %}
-                <span class="badge bg-warning">{{ status }}</span>
+                <span class="badge bg-warning clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% else %}
-                {{ status }}
+                <span class="clickable-badge" data-status="{{ status }}">{{ status }}</span>
                 {% endif %}
                 {% if not loop.last %}, {% endif %}
             {% endfor %}
@@ -464,6 +472,7 @@
         } else {
             refreshToggle.checked = false;
         }
+
         // Add event listener to the toggle switch
         function handleAutoRefresh() {
             localStorage.setItem("refreshState", refreshToggle.checked);
@@ -471,6 +480,9 @@
             if (refreshToggle.checked) {
                 // Auto-refresh is enabled
                 refreshInterval = setInterval(function () {
+                    // Store current filter before reload
+                    var currentFilter = document.getElementById("status-filter").value;
+                    localStorage.setItem("statusFilter", currentFilter);
                     location.reload();
                 }, 30000); // 30 seconds in milliseconds
             } else {
@@ -478,6 +490,17 @@
                 clearInterval(refreshInterval);
             }
         }
+
+        // Restore filter state after page load
+        document.addEventListener("DOMContentLoaded", function() {
+            var savedFilter = localStorage.getItem("statusFilter");
+            if (savedFilter) {
+                var statusFilter = document.getElementById("status-filter");
+                statusFilter.value = savedFilter;
+                filterStatus(savedFilter);
+            }
+        });
+
         refreshToggle.addEventListener("change", handleAutoRefresh);
         handleAutoRefresh();
     </script>
@@ -528,6 +551,19 @@
             'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
             'Actions'  // Removed 'Description'
         ];
+    </script>
+    <script>
+        // Add click handler for status badges
+        document.addEventListener("DOMContentLoaded", function() {
+            document.querySelectorAll('.clickable-badge').forEach(function(badge) {
+                badge.addEventListener('click', function() {
+                    const status = this.dataset.status;
+                    const statusFilter = document.getElementById('status-filter');
+                    statusFilter.value = status;
+                    filterStatus(status);
+                });
+            });
+        });
     </script>
 
 </body>
