@@ -472,7 +472,7 @@ def set_started(job_id: int, task_id: int, start_time: float,
                 job_id,
                 task_id,
                 ManagedJobStatus.STARTING.value,
-                # If the task is empty, we will jump straight from PENDING tos
+                # If the task is empty, we will jump straight from PENDING to
                 # RUNNING
                 ManagedJobStatus.PENDING.value,
             ),
@@ -635,7 +635,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
             UPDATE spot SET
             status=(?)
             WHERE spot_job_id=(?) AND end_at IS null""",
-            (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
+            (ManagedJobStatus.CANCELLING.value, job_id))
         updated = rows.rowcount > 0
     if updated:
         logger.info('Cancelling the job...')
