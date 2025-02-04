@@ -29,9 +29,10 @@ file_mounts:
     mode: MOUNT
 
 envs:
-  HF_TOKEN: ${HF_TOKEN}
-  START_IDX: ${START_IDX}
-  END_IDX: ${END_IDX}
+  # These env vars are required but should be passed in at launch time.
+  HF_TOKEN: 
+  START_IDX: 
+  END_IDX: 
 
 setup: |
   pip install numpy==1.26.4
