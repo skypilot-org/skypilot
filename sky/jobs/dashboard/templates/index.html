@@ -273,11 +273,19 @@
 
         .clickable-badge {
             cursor: pointer;
-            transition: transform 0.2s;
+            transition: transform 0.2s, opacity 0.2s;
+            opacity: 0.7;
         }
 
         .clickable-badge:hover {
             transform: scale(1.1);
+            opacity: 1;
+        }
+
+        .clickable-badge.selected-filter {
+            transform: scale(1.1);
+            opacity: 1;
+            box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
         }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
@@ -316,6 +324,7 @@
 
         {% if rows %}
         <p>Jobs by status: 
+            <span class="badge bg-secondary clickable-badge selected-filter me-2" data-status="ALL">All</span>
             {% set status_dict = {} %}
             {% for row in rows %}
                 {% set status = row[9].split()[0] %}
@@ -326,23 +335,24 @@
                 {% endif %}
             {% endfor %}
             {% for status, count in status_dict|dictsort %}
-                {{ count }} 
-                {% if status.startswith('RUNNING') %}
-                <span class="badge bg-primary clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% elif status.startswith('PENDING') or status.startswith('SUBMITTED') %}
-                <span class="badge bg-light clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% elif status.startswith('RECOVERING') or status.startswith('CANCELLING') or status.startswith('STARTING') %}
-                <span class="badge bg-info clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% elif status.startswith('SUCCEEDED') %}
-                <span class="badge bg-success clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% elif status.startswith('CANCELLED') %}
-                <span class="badge bg-secondary clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% elif status.startswith('FAILED') %}
-                <span class="badge bg-warning clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% else %}
-                <span class="clickable-badge" data-status="{{ status }}">{{ status }}</span>
-                {% endif %}
-                {% if not loop.last %}, {% endif %}
+                <span class="me-2">
+                    <span class="me-1">{{ count }}</span>
+                    {% if status.startswith('RUNNING') %}
+                    <span class="badge bg-primary clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% elif status.startswith('PENDING') or status.startswith('SUBMITTED') %}
+                    <span class="badge bg-light clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% elif status.startswith('RECOVERING') or status.startswith('CANCELLING') or status.startswith('STARTING') %}
+                    <span class="badge bg-info clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% elif status.startswith('SUCCEEDED') %}
+                    <span class="badge bg-success clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% elif status.startswith('CANCELLED') %}
+                    <span class="badge bg-secondary clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% elif status.startswith('FAILED') %}
+                    <span class="badge bg-warning clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% else %}
+                    <span class="clickable-badge" data-status="{{ status }}">{{ status }}</span>
+                    {% endif %}
+                </span>
             {% endfor %}
         </p>
         {% else %}
@@ -565,16 +575,41 @@
         ];
     </script>
     <script>
-        // Add click handler for status badges
+        // Replace the existing click handler for status badges with this updated version
         document.addEventListener("DOMContentLoaded", function() {
-            document.querySelectorAll('.clickable-badge').forEach(function(badge) {
+            const statusFilter = document.getElementById('status-filter');
+            const badges = document.querySelectorAll('.clickable-badge');
+            
+            // Set initial state
+            const savedFilter = localStorage.getItem("statusFilter") || '';
+            updateSelectedBadge(savedFilter);
+            
+            badges.forEach(function(badge) {
                 badge.addEventListener('click', function() {
                     const status = this.dataset.status;
-                    const statusFilter = document.getElementById('status-filter');
-                    statusFilter.value = status;
-                    filterStatus(status);
+                    const currentFilter = statusFilter.value;
+                    
+                    // If clicking the already selected filter, clear it (show all)
+                    const newStatus = (status === currentFilter || (status === 'ALL' && currentFilter === '')) ? '' : 
+                                    (status === 'ALL' ? '' : status);
+                    
+                    // Update filter and UI
+                    statusFilter.value = newStatus;
+                    filterStatus(newStatus);
+                    localStorage.setItem("statusFilter", newStatus);
+                    updateSelectedBadge(newStatus);
                 });
             });
+            
+            function updateSelectedBadge(selectedStatus) {
+                badges.forEach(badge => {
+                    badge.classList.remove('selected-filter');
+                    if ((selectedStatus === '' && badge.dataset.status === 'ALL') || 
+                        badge.dataset.status === selectedStatus) {
+                        badge.classList.add('selected-filter');
+                    }
+                });
+            }
         });
     </script>
 
