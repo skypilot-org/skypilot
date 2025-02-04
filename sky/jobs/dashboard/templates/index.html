@@ -35,9 +35,18 @@
         }
 
         header {
+            position: sticky;
+            top: 0;
+            background: white;
+            z-index: 1000;
+            padding: 1.5rem 2rem;
+            margin: -2rem -2rem 1.5rem -2rem;  /* Negative margins to match container padding */
             border-bottom: 1px solid #dee2e6;
-            padding-bottom: 1.5rem;
-            margin-bottom: 1.5rem;
+        }
+
+        /* Add shadow when header is sticky */
+        header.sticky {
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
         }
 
         h1 {
@@ -177,7 +186,7 @@
             left: 0;          /* Changed from 50% */
             bottom: 100%;
             transform: translateY(-8px);  /* Removed translateX */
-            z-index: 9999;
+            z-index: 1001;
             background-color: rgba(33, 37, 41, 0.9);
             color: white;
             padding: 0.75rem 1rem;
@@ -201,7 +210,7 @@
             transform: none;   /* Removed transform */
             border: 8px solid transparent;
             border-top-color: rgba(33, 37, 41, 0.9);
-            z-index: 9999;
+            z-index: 1001;
             pointer-events: none;
             opacity: 0;
             animation: tooltipFadeIn 0.2s ease-in-out forwards;
@@ -287,6 +296,14 @@
             opacity: 1;
             box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
         }
+
+        /* Ensure tooltips appear above the sticky header */
+        .status-container:hover::after,
+        .status-container:hover::before,
+        #last-updated:hover::after,
+        #last-updated:hover::before {
+            z-index: 1001;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
@@ -362,11 +379,19 @@
         <table class="table table-hover table-hover-selected fixed-header-table" id="jobs-table">
             <thead>
                 <tr>
-                    {% for column in columns %}
-                    {% if column != 'Submitted' and column != 'Started' and column != 'Failover' %}  {# Skip these columns #}
-                    <th>{{ column }}</th>
-                    {% endif %}
-                    {% endfor %}
+                    <td></td>
+                    <th>ID</th>
+                    <th>Task</th>
+                    <th>Name</th>
+                    <th>Total Duration</th>
+                    <th>Job Duration</th>
+                    <th>Status</th>
+                    <th>Resources</th>
+                    <th>Cluster</th>
+                    <th>Region</th>
+                    <th>Recoveries</th>
+                    <th>Details</th>
+                    <th>Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -376,7 +401,6 @@
                     <td>{{ row[1]|string|replace(' \u21B3', '') }}</td>
                     <td>{{ row[2] }}</td>
                     <td>{{ row[3] }}</td>
-                    <td>{{ row[4] }}</td>
                     <td>{{ row[6] }}</td>
                     <td>{{ row[7] }}</td>
                     <td>
@@ -385,7 +409,7 @@
                             {% if row[9].startswith('RUNNING') %}
                             <span class="badge bg-primary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% elif row[9].startswith('PENDING') or row[9].startswith('SUBMITTED') %}
-                            <span class="badge bg-light">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            <span class="badge bg-warning">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% elif row[9].startswith('RECOVERING') or row[9].startswith('CANCELLING') or row[9].startswith('STARTING') %}
                             <span class="badge bg-info">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% elif row[9].startswith('SUCCEEDED') %}
@@ -393,16 +417,17 @@
                             {% elif row[9].startswith('CANCELLED') %}
                             <span class="badge bg-secondary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% elif row[9].startswith('FAILED') %}
-                            <span class="badge bg-warning">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
+                            <span class="badge bg-danger">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% else %}
                             {{ row[9] }}
                             {% endif %}
                         </div>
                     </td>
-                    <td>{{ row[11] }}</td>
-                    <td>{{ row[12] }}</td>
-                    <td>{{ row[8] }}</td>
-                    <td>{{ row[13] }}</td>
+                    <td>{{ row[4] }}</td>  {# Resources #}
+                    <td>{{ row[11] }}</td>  {# Cluster #}
+                    <td>{{ row[12] }}</td>  {# Region #}
+                    <td>{{ row[8] }}</td>   {# Recoveries #}
+                    <td>{{ row[13] }}</td>  {# Details #}
                     <td>
                         {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
                         <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}" 
@@ -530,13 +555,15 @@
         function filterStatus(status) {
             var rows = document.querySelectorAll("#jobs-table tbody tr");
             rows.forEach(function(row) {
-                var statusCell = row.querySelector("td:nth-child(8)"); // Status is now in the 8th column
-                var statusText = statusCell.textContent.trim().split(' ')[0]; // Get first word of status
-
-                if (status === '' || statusText === status) {
-                    row.style.display = "";
-                } else {
-                    row.style.display = "none";
+                var statusCell = row.querySelector("td:nth-child(7)"); // Status is now in the 7th column
+                if (statusCell) {
+                    var statusText = statusCell.textContent.trim().split(' ')[0]; // Get first word of status
+                    
+                    if (status === '' || statusText === status) {
+                        row.style.display = "";
+                    } else {
+                        row.style.display = "none";
+                    }
                 }
             });
         }
@@ -567,10 +594,10 @@
         });
     </script>
     <script>
-        // Column indices for job table
+        // Update column indices for job table
         const JOB_TABLE_COLUMNS = [
-            '', 'ID', 'Task', 'Name', 'Resources', 'Total Duration',
-            'Job Duration', 'Status', 'Cluster', 'Region', 'Recoveries', 'Details',
+            '', 'ID', 'Task', 'Name', 'Total Duration',
+            'Job Duration', 'Status', 'Resources', 'Cluster', 'Region', 'Recoveries', 'Details',
             'Actions'
         ];
     </script>
@@ -610,6 +637,21 @@
                     }
                 });
             }
+        });
+    </script>
+    <script>
+        // Add scroll event listener to handle sticky header shadow
+        document.addEventListener("DOMContentLoaded", function() {
+            const header = document.querySelector('header');
+            const container = document.querySelector('.container');
+            
+            window.addEventListener('scroll', function() {
+                if (container.getBoundingClientRect().top < 0) {
+                    header.classList.add('sticky');
+                } else {
+                    header.classList.remove('sticky');
+                }
+            });
         });
     </script>
 
