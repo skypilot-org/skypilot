@@ -225,6 +225,47 @@
                 overflow-x: auto;
             }
         }
+
+        /* Update the timestamp hover styles */
+        #last-updated {
+            position: relative;
+            text-decoration: none;
+            border-bottom: 1px solid transparent;
+            transition: border-bottom-color 0.2s;
+            cursor: help;
+        }
+
+        #last-updated:hover {
+            border-bottom-color: var(--secondary-color);
+        }
+
+        #last-updated:hover::after {
+            content: attr(title);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 0.5rem 1rem;
+            background-color: rgba(33, 37, 41, 0.9);
+            color: white;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            white-space: nowrap;
+            z-index: 1000;
+            margin-bottom: 8px;
+        }
+
+        #last-updated:hover::before {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 8px solid transparent;
+            border-top-color: rgba(33, 37, 41, 0.9);
+            margin-bottom: -8px;
+            z-index: 1000;
+        }
     </style>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/moment.js/2.29.1/moment.min.js"></script>
     <script
@@ -244,7 +285,6 @@
                             Auto-refresh
                             <span class="refresh-indicator">
                                 <span class="refresh-spinner" id="refresh-spinner"></span>
-                                <span id="refresh-countdown"></span>
                             </span>
                         </label>
                     </div>
@@ -337,7 +377,7 @@
                         {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
                         <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}" 
                            class="btn btn-sm btn-outline-secondary">
-                            Download Log
+                            Controller Log
                         </a>
                         {% endif %}
                     </td>
@@ -409,7 +449,9 @@
         document.addEventListener("DOMContentLoaded", function () {
             var timestamp = "{{ last_updated_timestamp }}";  // Get the UTC timestamp from the template
             var localTimestamp = moment.utc(timestamp).tz(moment.tz.guess()).format('YYYY-MM-DD HH:mm:ss z');
+            var utcTimestamp = moment.utc(timestamp).format('YYYY-MM-DD HH:mm:ss UTC');
             document.getElementById("last-updated").textContent = "Last updated: " + localTimestamp;
+            document.getElementById("last-updated").title = utcTimestamp;
         });
     </script>
     <script>
@@ -462,22 +504,6 @@
         });
     </script>
     <script>
-        // Add countdown timer for auto-refresh
-        function updateRefreshCountdown() {
-            if (!refreshToggle.checked) return;
-            
-            const now = Date.now();
-            const nextRefresh = lastRefresh + 30000;
-            const remaining = Math.ceil((nextRefresh - now) / 1000);
-            
-            if (remaining > 0) {
-                document.getElementById('refresh-countdown').textContent = `(${remaining}s)`;
-            }
-        }
-
-        let lastRefresh = Date.now();
-        setInterval(updateRefreshCountdown, 1000);
-
         // Show loading spinner during refresh
         window.addEventListener('beforeunload', function() {
             document.getElementById('refresh-spinner').style.display = 'inline-block';
