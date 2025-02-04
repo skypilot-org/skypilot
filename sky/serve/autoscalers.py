@@ -679,6 +679,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             num_ondemand_to_provision += (num_spot_to_provision -
                                           num_ready_spot)
 
+        # Make sure we don't launch on-demand fallback for
+        # overprovisioned replicas.
+        num_ondemand_to_provision = min(num_ondemand_to_provision,
+                                        self.target_num_replicas)
         if num_ondemand_to_provision > num_nonterminal_ondemand:
             num_ondemand_to_scale_up = (num_ondemand_to_provision -
                                         num_nonterminal_ondemand)
