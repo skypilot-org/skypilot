@@ -371,7 +371,7 @@
                     <td>{{ row[7] }}</td>
                     <td>
                         <!-- Status column with tooltip -->
-                        <div class="status-container" style="position: relative;" title="{{ row[13] }}">
+                        <div class="status-container" style="position: relative;" title="{{ row[14] }}">
                             {% if row[9].startswith('RUNNING') %}
                             <span class="badge bg-primary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% elif row[9].startswith('PENDING') or row[9].startswith('SUBMITTED') %}

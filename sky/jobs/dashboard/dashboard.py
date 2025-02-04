@@ -80,8 +80,8 @@ class JobTableColumns:
     STARTED = 10
     CLUSTER = 11
     REGION = 12
-    FAILOVER = 13
-    DETAILS = 14
+    DETAILS = 13
+    FAILOVER = 14
     ACTIONS = 15
 
 
@@ -152,7 +152,7 @@ def home():
 
     # Add an empty column for the dropdown button and actions column
     rows = [[''] + row + [''] + [''] for row in rows
-           ]  # Add empty cell for actions column and description column
+           ]  # Add empty cell for failover and actions column
     
     # Add log content as failover history for each job
     for row in rows:
