@@ -250,7 +250,16 @@ def _get_job_parallelism() -> int:
     # Assume a running job uses 350MB memory.
     # We observe 230-300 in practice.
     job_memory = 350 * 1024 * 1024
-    return max(psutil.virtual_memory().total // job_memory, 1)
+
+    # Past 2000 simultaneous jobs, we become unstable due to other scale issues.
+    max_job_limit = 2000
+
+    job_limit = min(psutil.virtual_memory().total // job_memory, max_job_limit)
+
+    if job_limit < 1:
+        return 1
+
+    return job_limit
 
 
 def _get_launch_parallelism() -> int:
