@@ -705,8 +705,9 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         job_id: Optional job ID to check. If None, checks all jobs.
 
     Returns a list of job_ids, including the following:
-    - For jobs with schedule state: jobs that have schedule state not DONE
-    - For legacy jobs (no schedule state): jobs that are in non-terminal status
+    - Jobs that have a schedule_state that is not DONE
+    - Jobs have schedule_state DONE but are in a non-terminal status
+    - Legacy jobs (that is, no schedule state) that are in non-terminal status
     """
     job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
     job_value = () if job_id is None else (job_id,)
@@ -728,14 +729,22 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
             LEFT OUTER JOIN job_info
             ON spot.spot_job_id=job_info.spot_job_id
             WHERE (
+                -- non-legacy jobs that are not DONE
                 (job_info.schedule_state IS NOT NULL AND
                  job_info.schedule_state IS NOT ?)
                 OR
-                (job_info.schedule_state IS NULL AND
+                -- legacy or DONE jobs that are in non-terminal status
+                ((-- legacy jobs
+                  job_info.schedule_state IS NULL OR
+                  -- DONE jobs
+                  job_info.schedule_state IS ?
+                 ) AND
+                 -- non-terminal
                  status NOT IN ({status_filter_str}))
             )
             {job_filter}
             ORDER BY spot.spot_job_id DESC""", [
+                ManagedJobScheduleState.DONE.value,
                 ManagedJobScheduleState.DONE.value, *terminal_status_values,
                 *job_value
             ]).fetchall()

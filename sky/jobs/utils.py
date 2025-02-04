@@ -257,7 +257,22 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
 
         # For jobs with schedule state:
         pid = tasks[0]['controller_pid']
-        if pid is None:
+        if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
+            if all(task['status'].is_terminal() for task in tasks):
+                # Turns out this job is fine, even though it got pulled by
+                # get_jobs_to_check_status. Either the job was somehow in an
+                # inconsistent state that already resolved itself, or we have
+                # a bug in the query.
+                logger.warning('We expected to find a nonterminal done job '
+                               f'{job_id}, but all tasks are terminal.')
+                continue
+
+            logger.error(f'Job {job_id} has DONE schedule state, but some '
+                         f'tasks are not terminal. Task statuses: '
+                         f'{", ".join(task["status"].value for task in tasks)}')
+            failure_reason = ('Job controller is DONE, but some tasks are not '
+                              'terminal.')
+        elif pid is None:
             if schedule_state in (
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
                     managed_job_state.ManagedJobScheduleState.WAITING):
