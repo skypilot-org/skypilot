@@ -348,7 +348,7 @@
         </select>
 
         {% if rows %}
-        <p>Jobs by status: 
+        <p>Filter By : 
             <span class="badge bg-secondary clickable-badge selected-filter me-2" data-status="ALL">All</span>
             {% set status_dict = {} %}
             {% for row in rows %}
@@ -361,7 +361,7 @@
             {% endfor %}
             {% for status, count in status_dict|dictsort %}
                 <span class="me-2">
-                    <span class="me-1">{{ count }}</span>
+                    <span class="me-1">; {{ count }}</span>
                     {% if status.startswith('RUNNING') %}
                     <span class="badge bg-primary clickable-badge" data-status="{{ status }}">{{ status }}</span>
                     {% elif status.startswith('PENDING') or status.startswith('SUBMITTED') %}
