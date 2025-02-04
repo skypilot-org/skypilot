@@ -720,7 +720,8 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
 
     # Get jobs that are either:
     # 1. Have schedule state that is not DONE, or
-    # 2. Have no schedule state (legacy) AND are in non-terminal status
+    # 2. Have schedule state DONE AND are in non-terminal status, or
+    # 3. Have no schedule state (legacy) AND are in non-terminal status
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             f"""\
@@ -733,10 +734,11 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
                 (job_info.schedule_state IS NOT NULL AND
                  job_info.schedule_state IS NOT ?)
                 OR
-                -- legacy or DONE jobs that are in non-terminal status
+                -- legacy or that are in non-terminal status or
+                -- DONE jobs that are in non-terminal status
                 ((-- legacy jobs
                   job_info.schedule_state IS NULL OR
-                  -- DONE jobs
+                  -- non-legacy DONE jobs
                   job_info.schedule_state IS ?
                  ) AND
                  -- non-terminal

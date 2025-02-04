@@ -255,24 +255,29 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             _handle_legacy_job(job_id)
             continue
 
-        # For jobs with schedule state:
+        # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
+            # There are two cases where we could get a job that is DONE.
+            # 1. At query time, the job was not yet DONE, but since then it has
+            #    hit a terminal status, marked itself done, and exited. This is
+            #    fine.
+            # 2. The job is DONE, but in a non-terminal status. This is
+            #    unexpected. For instance, the task status is RUNNING, but the
+            #    job schedule_state is DONE.
             if all(task['status'].is_terminal() for task in tasks):
                 # Turns out this job is fine, even though it got pulled by
-                # get_jobs_to_check_status. Either the job was somehow in an
-                # inconsistent state that already resolved itself, or we have
-                # a bug in the query.
-                logger.warning('We expected to find a nonterminal done job '
-                               f'{job_id}, but all tasks are terminal.')
+                # get_jobs_to_check_status. Probably case #1 above.
                 continue
 
             logger.error(f'Job {job_id} has DONE schedule state, but some '
                          f'tasks are not terminal. Task statuses: '
                          f'{", ".join(task["status"].value for task in tasks)}')
-            failure_reason = ('Job controller is DONE, but some tasks are not '
-                              'terminal.')
+            failure_reason = ('Inconsistent internal job state. This is a bug')
         elif pid is None:
+            # Note: we already know that this is a non-legacy job, since it has
+            # a schedule state. (Legacy jobs are handled above.) So we expect
+            # that the controller just hasn't been started yet.
             if schedule_state in (
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
                     managed_job_state.ManagedJobScheduleState.WAITING):
@@ -299,16 +304,6 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):
                 # The controller is still running, so this job is fine.
-                continue
-
-            # Double check job is not already DONE before marking as failed, to
-            # avoid the race where the controller marked itself as DONE and
-            # exited between the state check and the pid check. Since the job
-            # controller process will mark itself DONE _before_ exiting, if it
-            # has exited and it's still not DONE now, it is abnormal.
-            if (managed_job_state.get_job_schedule_state(job_id) ==
-                    managed_job_state.ManagedJobScheduleState.DONE):
-                # Never mind, the job is DONE now. This is fine.
                 continue
 
             logger.error(f'Controller process for {job_id} seems to be dead.')
