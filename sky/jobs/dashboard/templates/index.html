@@ -10,7 +10,6 @@
         integrity="sha384-rbsA2VBKQhggwzxH7pPCaAqO46MgnOM80zW1RWuH61DGLwZJEdK2Kadq2F9CUG65" crossorigin="anonymous">
     <style>
         :root {
-            --primary-color: #0d6efd;
             --secondary-color: #6c757d;
             --success-color: #198754;
             --warning-color: #ffc107;
@@ -98,10 +97,38 @@
 
         /* Allow Details column to wrap */
         .table th:nth-child(12),  /* Details column */
+
         .table td:nth-child(12) {
-            white-space: normal;  /* Allow text wrapping */
-            max-width: 250px;     /* Limit width to prevent excessive stretching */
-            word-wrap: break-word; /* Break long words if needed */
+            max-width: 250px;     /* Limit width */
+            overflow: hidden;     /* Hide overflow */
+            text-overflow: ellipsis; /* Show ellipsis for overflow */
+            position: relative;   /* For tooltip positioning */
+            cursor: pointer !important;  /* Force show pointer cursor */
+            padding-right: 24px;  /* Make room for the arrow */
+        }
+
+        .table td:nth-child(12)::after {
+            content: '▼';
+            position: absolute;
+            right: 8px;
+            top: 12px;
+            font-size: 0.6em;
+            opacity: 0.5;
+            display: none;  /* Hide by default */
+        }
+
+        .table td:nth-child(12).expandable::after {
+            display: block;  /* Only show for expandable content */
+        }
+
+        .table td:nth-child(12).expanded::after {
+            transform: rotate(180deg);
+        }
+
+        .table td:nth-child(12).expanded {
+            max-width: none;
+            white-space: normal;
+            word-wrap: break-word;
         }
 
         .badge {
@@ -190,11 +217,11 @@
         }
 
         .status-container:hover::after {
-            content: attr(title);
+            content: attr(data-tooltip);
             position: absolute;
-            left: 0;          /* Changed from 50% */
-            bottom: 100%;
-            transform: translateY(-8px);  /* Removed translateX */
+            left: 0;
+            top: 100%;
+            transform: translateY(8px);
             z-index: 1001;
             background-color: rgba(33, 37, 41, 0.9);
             color: white;
@@ -214,11 +241,11 @@
         .status-container:hover::before {
             content: '';
             position: absolute;
-            left: 20px;       /* Changed from 50% */
-            bottom: 100%;
-            transform: none;   /* Removed transform */
+            left: 20px;
+            top: 100%;          /* Changed from bottom: 100% */
+            transform: none;
             border: 8px solid transparent;
-            border-top-color: rgba(33, 37, 41, 0.9);
+            border-bottom-color: rgba(33, 37, 41, 0.9);  /* Changed from border-top-color */
             z-index: 1001;
             pointer-events: none;
             opacity: 0;
@@ -236,7 +263,7 @@
         .table {
             overflow: visible !important;
         }
-        
+
         .fixed-header-table {
             overflow: visible !important;
         }
@@ -262,9 +289,9 @@
         }
 
         #last-updated:hover::after {
-            content: attr(title);
+            content: attr(data-tooltip);
             position: absolute;
-            bottom: 100%;
+            top: 100%;           /* Changed from bottom: 100% to top: 100% */
             left: 50%;
             transform: translateX(-50%);
             padding: 0.5rem 1rem;
@@ -274,34 +301,33 @@
             font-size: 0.875rem;
             white-space: nowrap;
             z-index: 1000;
-            margin-bottom: 8px;
+            margin-top: 8px;     /* Changed from margin-bottom to margin-top */
         }
 
         #last-updated:hover::before {
             content: '';
             position: absolute;
-            bottom: 100%;
+            top: 100%;           /* Changed from bottom: 100% to top: 100% */
             left: 50%;
             transform: translateX(-50%);
             border: 8px solid transparent;
-            border-top-color: rgba(33, 37, 41, 0.9);
-            margin-bottom: -8px;
+            border-bottom-color: rgba(33, 37, 41, 0.9);  /* Changed from border-top-color to border-bottom-color */
+            margin-top: -8px;    /* Changed from margin-bottom to margin-top */
             z-index: 1000;
         }
 
         .clickable-badge {
             cursor: pointer;
             transition: transform 0.2s, opacity 0.2s;
-            opacity: 0.4; 
+            opacity: 0.4;
         }
 
         .clickable-badge:hover {
-            transform: scale(1.1);
+            transform: scale(1.05);
             opacity: 1;
         }
 
         .clickable-badge.selected-filter {
-            transform: scale(1.1);
             opacity: 1;
             box-shadow: 0 0 0 2px #fff, 0 0 0 4px currentColor;
         }
@@ -311,6 +337,39 @@
         .status-container:hover::before,
         #last-updated:hover::after,
         #last-updated:hover::before {
+            z-index: 1001;
+        }
+
+        /* Add tooltip styles for refresh label */
+        .refresh-label {
+            position: relative;
+            cursor: help;
+        }
+
+        .refresh-label:hover::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            left: 50%;
+            top: 100%;
+            transform: translateX(-50%) translateY(8px);
+            z-index: 1001;
+            background-color: rgba(33, 37, 41, 0.9);
+            color: white;
+            padding: 0.5rem 1rem;
+            border-radius: 6px;
+            font-size: 0.875rem;
+            white-space: nowrap;
+            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+        }
+
+        .refresh-label:hover::before {
+            content: '';
+            position: absolute;
+            left: 50%;
+            top: 100%;
+            transform: translateX(-50%);
+            border: 8px solid transparent;
+            border-bottom-color: rgba(33, 37, 41, 0.9);
             z-index: 1001;
         }
     </style>
@@ -328,14 +387,14 @@
                 <div class="d-flex align-items-center">
                     <div class="form-check form-switch me-3">
                         <input class="form-check-input" type="checkbox" id="refresh-toggle" checked>
-                        <label class="form-check-label" for="refresh-toggle">
+                        <label class="form-check-label refresh-label" for="refresh-toggle" data-tooltip="Refreshes every 30 seconds">
                             Auto-refresh
                             <span class="refresh-indicator">
                                 <span class="refresh-spinner" id="refresh-spinner"></span>
                             </span>
                         </label>
                     </div>
-                    <p class="text-muted mb-0" id="last-updated"></p>
+                    <p class="text-muted mb-0" id="last-updated" data-tooltip="{{ utcTimestamp }}"></p>
                 </div>
             </div>
         </header>
@@ -349,7 +408,7 @@
         </select>
 
         {% if rows %}
-        <p>Filter By : 
+        <p>Filter by status:
             <span class="badge bg-secondary clickable-badge selected-filter me-2" data-status="ALL">All</span>
             {% set status_dict = {} %}
             {% for row in rows %}
@@ -362,7 +421,7 @@
             {% endfor %}
             {% for status, count in status_dict|dictsort %}
                 <span class="me-2">
-                    <span class="me-1">; {{ count }}</span>
+                    <span class="me-1">| {{ count }}</span>
                     {% if status.startswith('RUNNING') %}
                     <span class="badge bg-primary clickable-badge" data-status="{{ status }}">{{ status }}</span>
                     {% elif status.startswith('PENDING') or status.startswith('SUBMITTED') %}
@@ -414,7 +473,7 @@
                     <td>{{ row[7] }}</td>
                     <td>
                         <!-- Status column with tooltip -->
-                        <div class="status-container" style="position: relative;" title="{{ row[14] }}">
+                        <div class="status-container" style="position: relative;" data-tooltip="{{ row[14] }}">
                             {% if row[9].startswith('RUNNING') %}
                             <span class="badge bg-primary">{{ row[9].split()[0] }}</span>{{ row[9][row[9].split()[0]|length:] }}
                             {% elif row[9].startswith('PENDING') or row[9].startswith('SUBMITTED') %}
@@ -436,12 +495,12 @@
                     <td>{{ row[11] }}</td>  {# Cluster #}
                     <td>{{ row[12] }}</td>  {# Region #}
                     <td>{{ row[8] }}</td>   {# Recoveries #}
-                    <td>{{ row[13] }}</td>  {# Details #}
+                    <td data-full-text="{{ row[13] }}">{{ row[13] }}</td>  {# Details #}
                     <td>
                         {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
-                        <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}" 
+                        <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}"
                            class="btn btn-sm btn-outline-secondary">
-                            Controller Log
+                            controller log
                         </a>
                         {% endif %}
                     </td>
@@ -515,7 +574,7 @@
             var localTimestamp = moment.utc(timestamp).tz(moment.tz.guess()).format('YYYY-MM-DD HH:mm:ss z');
             var utcTimestamp = moment.utc(timestamp).format('YYYY-MM-DD HH:mm:ss UTC');
             document.getElementById("last-updated").textContent = "Last updated: " + localTimestamp;
-            document.getElementById("last-updated").title = utcTimestamp;
+            document.getElementById("last-updated").setAttribute('data-tooltip', utcTimestamp);
         });
     </script>
     <script>
@@ -567,7 +626,7 @@
                 var statusCell = row.querySelector("td:nth-child(7)"); // Status is now in the 7th column
                 if (statusCell) {
                     var statusText = statusCell.textContent.trim().split(' ')[0]; // Get first word of status
-                    
+
                     if (status === '' || statusText === status) {
                         row.style.display = "";
                     } else {
@@ -589,18 +648,6 @@
         window.addEventListener('beforeunload', function() {
             document.getElementById('refresh-spinner').style.display = 'inline-block';
         });
-
-        // Enhance table row hover effect
-        document.querySelectorAll('tbody tr').forEach(row => {
-            row.addEventListener('mouseenter', function() {
-                this.style.transform = 'scale(1.002)';
-                this.style.transition = 'transform 0.2s';
-            });
-            
-            row.addEventListener('mouseleave', function() {
-                this.style.transform = 'scale(1)';
-            });
-        });
     </script>
     <script>
         // Update column indices for job table
@@ -615,20 +662,20 @@
         document.addEventListener("DOMContentLoaded", function() {
             const statusFilter = document.getElementById('status-filter');
             const badges = document.querySelectorAll('.clickable-badge');
-            
+
             // Set initial state
             const savedFilter = localStorage.getItem("statusFilter") || '';
             updateSelectedBadge(savedFilter);
-            
+
             badges.forEach(function(badge) {
                 badge.addEventListener('click', function() {
                     const status = this.dataset.status;
                     const currentFilter = statusFilter.value;
-                    
+
                     // If clicking the already selected filter, clear it (show all)
-                    const newStatus = (status === currentFilter || (status === 'ALL' && currentFilter === '')) ? '' : 
+                    const newStatus = (status === currentFilter || (status === 'ALL' && currentFilter === '')) ? '' :
                                     (status === 'ALL' ? '' : status);
-                    
+
                     // Update filter and UI
                     statusFilter.value = newStatus;
                     filterStatus(newStatus);
@@ -636,11 +683,11 @@
                     updateSelectedBadge(newStatus);
                 });
             });
-            
+
             function updateSelectedBadge(selectedStatus) {
                 badges.forEach(badge => {
                     badge.classList.remove('selected-filter');
-                    if ((selectedStatus === '' && badge.dataset.status === 'ALL') || 
+                    if ((selectedStatus === '' && badge.dataset.status === 'ALL') ||
                         badge.dataset.status === selectedStatus) {
                         badge.classList.add('selected-filter');
                     }
@@ -653,7 +700,7 @@
         document.addEventListener("DOMContentLoaded", function() {
             const header = document.querySelector('header');
             const container = document.querySelector('.container');
-            
+
             window.addEventListener('scroll', function() {
                 if (container.getBoundingClientRect().top < 0) {
                     header.classList.add('sticky');
@@ -663,7 +710,25 @@
             });
         });
     </script>
+<script>
+    // Add click handler for Details cells
+    document.addEventListener('DOMContentLoaded', function() {
+        const detailsCells = document.querySelectorAll('#jobs-table td:nth-child(12)');
 
+        detailsCells.forEach(cell => {
+            // Check if content is truncated
+            if (cell.scrollWidth > cell.clientWidth) {
+                cell.classList.add('expandable');
+            }
+
+            cell.addEventListener('click', function() {
+                if (this.scrollWidth > this.clientWidth || this.classList.contains('expanded')) {
+                    this.classList.toggle('expanded');
+                }
+            });
+        });
+    });
+</script>
 </body>
 
 </html>
