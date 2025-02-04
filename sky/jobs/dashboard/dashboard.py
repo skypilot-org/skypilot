@@ -8,12 +8,11 @@ comment).
 """
 import collections
 import datetime
+import enum
 import os
 import pathlib
 
 import flask
-from flask import abort
-from flask import send_file
 import yaml
 
 from sky import jobs as managed_jobs
@@ -47,7 +46,7 @@ def _is_running_on_jobs_controller() -> bool:
 
 
 # Column indices for job table
-class JobTableColumns:
+class JobTableColumns(enum.IntEnum):
     """Column indices for the jobs table in the dashboard.
 
     - DROPDOWN (0): Column for expandable dropdown arrow
@@ -213,14 +212,14 @@ def download_log(job_id):
             os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
             f'{job_id}.log')
         if not os.path.exists(log_path):
-            abort(404)
-        return send_file(log_path,
-                         mimetype='text/plain',
-                         as_attachment=True,
-                         download_name=f'job_{job_id}.log')
+            flask.abort(404)
+        return flask.send_file(log_path,
+                               mimetype='text/plain',
+                               as_attachment=True,
+                               download_name=f'job_{job_id}.log')
     except (IOError, OSError) as e:
         app.logger.error(f'Error downloading log for job {job_id}: {str(e)}')
-        abort(500)
+        flask.abort(500)
 
 
 if __name__ == '__main__':
