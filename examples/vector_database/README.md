@@ -29,7 +29,7 @@ Use the following command to launch a job that processes your image dataset and 
 ```
 python3 batch_compute_vectors.py
 ```
-This will automatically find the available machines to compute the vectors. Expect: 
+This will automatically find available machines to compute the vectors. Expect: 
 ```
 ...
 (clip-batch-compute-vectors, pid=2523) 2025-01-27 23:57:27,387 - root - INFO - Saved partition 2 to /output/embeddings_90000_100000.parquet_part_2/data.parquet
