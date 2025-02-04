@@ -82,17 +82,22 @@ def main():
     args = parser.parse_args()
 
     # Create a temporary directory for building the database
+    # because the buckets are mounted as read/write only
+    # we need to copy the data to a temporary directory
+    # and then copy it to the final location
     with tempfile.TemporaryDirectory() as temp_dir:
         logger.info(f"Using temporary directory: {temp_dir}")
 
         # Initialize ChromaDB in temporary directory
         client = chromadb.PersistentClient(path=temp_dir)
 
-        # Create or get collection
+        # Create or get collection for chromadb
+        # it attempts to create a collection with the same name
+        # if it already exists, it will get the collection
         try:
             collection = client.create_collection(
                 name=args.collection_name,
-                metadata={"description": "CLIP embeddings from LAION dataset"})
+                metadata={"description": "CLIP embeddings from dataset"})
             logger.info(f"Created new collection: {args.collection_name}")
         except ValueError:
             collection = client.get_collection(name=args.collection_name)

@@ -95,8 +95,6 @@ class BatchProcessor():
     async def do_data_loading(
             self) -> AsyncIterator[Tuple[int, Tuple[torch.Tensor, Any]]]:
         """Load and preprocess ImageNet images."""
-        if self.model is None:
-            await self.setup_model()
 
         async for idx, item in self.get_dataset_iterator():
             try:
@@ -215,6 +213,10 @@ class BatchProcessor():
         """
         Run the batch processing pipeline with recovery support.
         """
+        # Initialize the model
+        if self.model is None:
+            await self.setup_model()
+
         # Find existing progress
         resume_idx, self.partition_counter = await self.find_existing_progress()
         self.start_idx = max(self.start_idx, resume_idx + 1)
