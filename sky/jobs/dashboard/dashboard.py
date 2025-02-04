@@ -91,6 +91,9 @@ JOB_TABLE_COLUMNS = [
     'Recoveries', 'Details', 'Actions'
 ]
 
+# This column is given by format_job_table but should be ignored.
+SCHED_STATE_COLUMN = 12
+
 
 def _extract_launch_history(log_content: str) -> str:
     """Extract launch history from log content.
@@ -151,8 +154,10 @@ def home():
             status_counts[task['status'].value] += 1
 
     # Add an empty column for the dropdown button and actions column
-    rows = [[''] + row + [''] + [''] for row in rows
-           ]  # Add empty cell for failover and actions column
+    # Exclude SCHED. STATE column
+    rows = [[''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
+            # Add empty cell for failover and actions column
+            [''] + [''] for row in rows]
 
     # Add log content as failover history for each job
     for row in rows:
