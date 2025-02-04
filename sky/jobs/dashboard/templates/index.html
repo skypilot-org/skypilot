@@ -95,6 +95,14 @@
             white-space: nowrap;  /* Prevent text wrapping in cells */
         }
 
+        /* Allow Details column to wrap */
+        .table th:nth-child(12),  /* Details column */
+        .table td:nth-child(12) {
+            white-space: normal;  /* Allow text wrapping */
+            max-width: 250px;     /* Limit width to prevent excessive stretching */
+            word-wrap: break-word; /* Break long words if needed */
+        }
+
         .badge {
             padding: 0.5em 0.8em;
             font-weight: 500;
