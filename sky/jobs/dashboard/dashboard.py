@@ -97,7 +97,7 @@ SCHED_STATE_COLUMN = 12
 
 def _extract_launch_history(log_content: str) -> str:
     """Extract launch history from log content.
-    
+
     Args:
         log_content: Content of the log file.
     Returns:
@@ -155,9 +155,11 @@ def home():
 
     # Add an empty column for the dropdown button and actions column
     # Exclude SCHED. STATE column
-    rows = [[''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
-            # Add empty cell for failover and actions column
-            [''] + [''] for row in rows]
+    rows = [
+        [''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
+        # Add empty cell for failover and actions column
+        [''] + [''] for row in rows
+    ]
 
     # Add log content as failover history for each job
     for row in rows:
