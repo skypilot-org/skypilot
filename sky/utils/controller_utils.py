@@ -7,6 +7,7 @@ import os
 import tempfile
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
+import uuid
 
 import colorama
 
@@ -314,6 +315,8 @@ def download_and_stream_latest_job_log(
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
+
+    If the log cannot be fetched for any reason, return None.
     """
     os.makedirs(local_dir, exist_ok=True)
     log_file = None
@@ -328,31 +331,47 @@ def download_and_stream_latest_job_log(
             # job_ids all represent the same logical managed job.
             job_ids=None,
             local_dir=local_dir)
-    except exceptions.CommandError as e:
-        logger.info(f'Failed to download the logs: '
-                    f'{common_utils.format_exception(e)}')
-    else:
-        if not log_dirs:
-            logger.error('Failed to find the logs for the user program.')
-        else:
-            log_dir = list(log_dirs.values())[0]
-            log_file = os.path.join(log_dir, 'run.log')
-            # Print the logs to the console.
-            # TODO(zhwu): refactor this into log_utils, along with the
-            # refactoring for the log_lib.tail_logs.
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    # Stream the logs to the console without reading the whole
-                    # file into memory.
-                    start_streaming = False
-                    for line in f:
-                        if log_lib.LOG_FILE_START_STREAMING_AT in line:
-                            start_streaming = True
-                        if start_streaming:
-                            print(line, end='', flush=True)
-            except FileNotFoundError:
-                logger.error('Failed to find the logs for the user '
-                             f'program at {log_file}.')
+    except Exception as e:  # pylint: disable=broad-except
+        # We want to avoid crashing the controller. sync_down_logs() is pretty
+        # complicated and could crash in various places (creating remote
+        # runners, executing remote code, decoding the payload, etc.). So, we
+        # use a broad except and just return None.
+        logger.info(
+            f'Failed to download the logs: '
+            f'{common_utils.format_exception(e)}',
+            exc_info=True)
+        return None
+
+    if not log_dirs:
+        logger.error('Failed to find the logs for the user program.')
+        return None
+
+    log_dir = list(log_dirs.values())[0]
+    log_file = os.path.join(log_dir, 'run.log')
+
+    # Print the logs to the console.
+    # TODO(zhwu): refactor this into log_utils, along with the refactoring for
+    # the log_lib.tail_logs.
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            # Stream the logs to the console without reading the whole file into
+            # memory.
+            start_streaming = False
+            for line in f:
+                if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                    start_streaming = True
+                if start_streaming:
+                    print(line, end='', flush=True)
+    except FileNotFoundError:
+        logger.error('Failed to find the logs for the user '
+                     f'program at {log_file}.')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(
+            f'Failed to stream the logs for the user program at '
+            f'{log_file}: {common_utils.format_exception(e)}',
+            exc_info=True)
+        # Return the log_file anyway.
+
     return log_file
 
 
@@ -642,7 +661,7 @@ def replace_skypilot_config_path_in_file_mounts(
 
 
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
-                                                  path: str) -> None:
+                                                  task_type: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -651,6 +670,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     If there are no local source paths to be translated, this function would
     still sync up any storage mounts with local source paths (which do not
     undergo translation).
+
+    When jobs.bucket or serve.bucket is not specified, an intermediate storage
+    dedicated for the job is created for the workdir and local file mounts and
+    the storage is deleted when the job finishes. We don't share the storage
+    between jobs, because jobs might have different resources requirements, and
+    sharing storage between jobs may cause egress costs or slower transfer
+    speeds.
     """
 
     # ================================================================
@@ -669,11 +695,17 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store.delete()
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.StorageBucketCreateError(
-                    f'Jobs bucket {store.name!r} does not exist.  '
-                    'Please check jobs.bucket configuration in '
+                    f'{task_type.capitalize()} bucket {store.name!r} does not '
+                    f'exist. Please check {task_type}.bucket configuration in '
                     'your SkyPilot config.')
 
-    run_id = common_utils.get_usage_run_id()[:8]
+    # We use uuid to generate a unique run id for the job, so that the bucket/
+    # subdirectory name is unique across different jobs/services.
+    # We should not use common_utils.get_usage_run_id() here, because when
+    # Python API is used, the run id will be the same across multiple
+    # jobs.launch/serve.up calls after the sky is imported.
+    run_id = common_utils.base36_encode(uuid.uuid4().hex)[:8]
+    user_hash = common_utils.get_user_hash()
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
@@ -701,13 +733,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
 
     # Get the bucket name for the workdir and file mounts,
     # we store all these files in same bucket from config.
-    bucket_wth_prefix = skypilot_config.get_nested(('jobs', 'bucket'), None)
+    bucket_wth_prefix = skypilot_config.get_nested((task_type, 'bucket'), None)
     store_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
         store_type = store_cls = sub_path = None
         storage_account_name = region = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(), id=run_id)
+            username=common_utils.get_cleaned_username(),
+            user_hash=user_hash,
+            id=run_id)
     else:
         store_type, store_cls, bucket_name, sub_path, storage_account_name, \
             region = storage_lib.StoreType.get_fields_from_store_url(
@@ -798,7 +832,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
     os.makedirs(local_fm_path, exist_ok=True)
     file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
-        path)
+        task_type)
     if copy_mounts_with_file_in_src:
         src_to_file_id = {}
         for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):

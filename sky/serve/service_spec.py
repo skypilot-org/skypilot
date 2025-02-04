@@ -25,6 +25,7 @@ class SkyServiceSpec:
         readiness_timeout_seconds: int,
         min_replicas: int,
         max_replicas: Optional[int] = None,
+        ports: Optional[str] = None,
         target_qps_per_replica: Optional[float] = None,
         post_data: Optional[Dict[str, Any]] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None,
@@ -72,6 +73,7 @@ class SkyServiceSpec:
         self._readiness_timeout_seconds: int = readiness_timeout_seconds
         self._min_replicas: int = min_replicas
         self._max_replicas: Optional[int] = max_replicas
+        self._ports: Optional[str] = ports
         self._target_qps_per_replica: Optional[float] = target_qps_per_replica
         self._post_data: Optional[Dict[str, Any]] = post_data
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
@@ -136,6 +138,14 @@ class SkyServiceSpec:
                     ) from e
         service_config['post_data'] = post_data
         service_config['readiness_headers'] = readiness_headers
+
+        ports = config.get('ports', None)
+        if ports is not None:
+            assert isinstance(ports, int)
+            if not 1 <= ports <= 65535:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Port must be between 1 and 65535.')
+        service_config['ports'] = str(ports) if ports is not None else None
 
         policy_section = config.get('replica_policy', None)
         simplified_policy_section = config.get('replicas', None)
@@ -235,6 +245,7 @@ class SkyServiceSpec:
                         self.downscale_delay_seconds)
         add_if_not_none('load_balancing_policy', None,
                         self._load_balancing_policy)
+        add_if_not_none('ports', None, int(self.ports) if self.ports else None)
         if self.tls_credential is not None:
             add_if_not_none('tls', 'keyfile', self.tls_credential.keyfile)
             add_if_not_none('tls', 'certfile', self.tls_credential.certfile)
@@ -282,6 +293,9 @@ class SkyServiceSpec:
                 f'replica{max_plural} (target QPS per replica: '
                 f'{self.target_qps_per_replica})')
 
+    def set_ports(self, ports: str) -> None:
+        self._ports = ports
+
     def tls_str(self):
         if self.tls_credential is None:
             return 'No TLS Enabled'
@@ -319,6 +333,10 @@ class SkyServiceSpec:
     def max_replicas(self) -> Optional[int]:
         # If None, treated as having the same value of min_replicas.
         return self._max_replicas
+
+    @property
+    def ports(self) -> Optional[str]:
+        return self._ports
 
     @property
     def target_qps_per_replica(self) -> Optional[float]:

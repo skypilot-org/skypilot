@@ -3600,12 +3600,6 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(cooperc): remove this flag before releasing 0.8.0
-@click.option('--fast',
-              default=False,
-              is_flag=True,
-              help=('[Deprecated] Does nothing. Previous flag behavior is now '
-                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3631,7 +3625,6 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
-    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3673,16 +3666,6 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-
-    # Deprecation. The default behavior is fast, and the flag will be removed.
-    # The flag was not present in 0.7.x (only nightly), so we will remove before
-    # 0.8.0 so that it never enters a stable release.
-    if fast:
-        click.secho(
-            'Flag --fast is deprecated, as the behavior is now default. The '
-            'flag will be removed soon. Please do not use it, so that you '
-            'avoid "No such option" errors.',
-            fg='yellow')
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
@@ -3997,25 +3980,6 @@ def jobs_dashboard(port: Optional[int]):
             click.echo('Exiting.')
 
 
-# TODO(zhwu): Backward compatibility for the old `sky spot launch` command.
-# It is now renamed to `sky jobs launch` and the old command is deprecated.
-# Remove in v0.8.0.
-@cli.group(cls=_NaturalOrderGroup)
-def spot():
-    """Alias for Managed Jobs CLI (default to managed spot jobs)."""
-    pass
-
-
-_add_command_alias(jobs,
-                   jobs_launch,
-                   new_group=spot,
-                   override_command_argument={'use_spot': True})
-_add_command_alias(jobs, jobs_queue, new_group=spot)
-_add_command_alias(jobs, jobs_logs, new_group=spot)
-_add_command_alias(jobs, jobs_cancel, new_group=spot)
-_add_command_alias(jobs, jobs_dashboard, new_group=spot)
-
-
 @cli.group(cls=_NaturalOrderGroup)
 def serve():
     """SkyServe CLI (multi-region, multi-cloud serving)."""
@@ -4078,32 +4042,64 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    service_port: Optional[int] = None
-    for requested_resources in list(task.resources):
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {service_port_str!r} is not a valid '
-                                 'port number. Please specify a single port '
-                                 f'instead. Got: {service_port_str!r}')
-        # We request all the replicas using the same port for now, but it
-        # should be fine to allow different replicas to use different ports
-        # in the future.
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Got multiple ports: {service_port} and '
-                                 f'{resource_port} in different resources. '
-                                 'Please specify single port instead.')
+
+    # NOTE(yi): we only allow one service port now.
+    service_port: Optional[int] = int(
+        task.service.ports) if task.service.ports is not None else None
+    if service_port is None:
+        for requested_resources in list(task.resources):
+            if requested_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Must specify at least one ports in resources. Each '
+                        'replica will use the port specified as application '
+                        'ingress port if only one port is specified in the '
+                        'replica resources. If there are multiple ports opened '
+                        'in the replica, please set the `service.ports` field '
+                        'in the service config.')
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple ports specified in resources. Please '
+                        'specify the main port in the `service.ports` field.')
+            # We request all the replicas using the same port for now, but it
+            # should be fine to allow different replicas to use different ports
+            # in the future.
+            resource_port = requested_ports[0]
+            if service_port is None:
+                service_port = resource_port
+            if service_port != resource_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{resource_port} in different resources. '
+                        'Please specify the same port in all replicas, or '
+                        'explicitly set the service port in the '
+                        '`service.ports` section.')
+        assert service_port is not None
+        task.service.set_ports(str(service_port))
+    else:
+        for requested_resources in list(task.resources):
+            if requested_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Must specify at least one ports in every replica '
+                        'resources.')
+            ports_set = resources_utils.port_ranges_to_set(
+                requested_resources.ports)
+            if service_port not in ports_set:
+                with ux_utils.print_exception_no_traceback():
+                    # TODO(tian): Automatically infer resource port from
+                    # service port if none of them is specified in the
+                    # replica resources.
+                    raise ValueError(
+                        f'The service port {service_port} specified in the '
+                        'service section is not found in some resources. '
+                        'Please check if the service port is correct or add '
+                        'the service port to replica resources.')
+
     return task
 
 

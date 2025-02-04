@@ -388,6 +388,9 @@ def get_service_schema():
                     },
                 }
             },
+            'ports': {
+                'type': 'integer',
+            },
             'replicas': {
                 'type': 'integer',
             },

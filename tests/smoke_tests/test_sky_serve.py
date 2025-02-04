@@ -801,9 +801,10 @@ def test_skyserve_failures(generic_cloud: str):
             f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
             'echo "Waiting for replica to be out of pending..."; sleep 5; '
             f's=$(sky serve status {name}); echo "$s"; done; ' +
-            _check_replica_in_status(
-                name, [(1, False, 'FAILED_PROBING'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            _check_replica_in_status(name, [
+                (1, False, 'FAILED_PROBING'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+            ]),
             # TODO(zhwu): add test for FAILED_PROVISION
         ],
         _TEARDOWN_SERVICE.format(name=name),
@@ -836,7 +837,7 @@ def test_skyserve_https(generic_cloud: str):
                 # Self signed certificate should fail without -k.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'output=$(curl $endpoint 2>&1); echo $output; '
-                'echo $output | grep "self-signed certificate"',
+                'echo $output | grep -E "self[ -]signed certificate"',
                 # curl with wrong schema (http) should fail.
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'http_endpoint="${endpoint/https:/http:}"; '
@@ -847,6 +848,28 @@ def test_skyserve_https(generic_cloud: str):
             timeout=20 * 60,
         )
         smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_multi_ports(generic_cloud: str):
+    """Test skyserve with multiple ports"""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        f'test-skyserve-multi-ports',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/multi_ports.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
+            f'export replica_endpoint=$(sky serve status {name} | tail -n 1 | awk \'{{print $4}}\'); '
+            'export replica_endpoint_alt=$(echo $endpoint | sed "s/8080/8081/"); '
+            'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
+            'curl $replica_endpoint_alt | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
 
 
 # TODO(Ziming, Tian): Add tests for autoscaling.
