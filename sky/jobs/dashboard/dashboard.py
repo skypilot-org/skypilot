@@ -63,8 +63,9 @@ class JobTableColumns:
     - STARTED (10): Job start timestamp
     - CLUSTER (11): Cluster name
     - REGION (12): Cloud region
-    - DESCRIPTION (13): Job description
-    - ACTIONS (14): Available actions column
+    - FAILOVER (13): Job failover history
+    - DETAILS (14): Job details
+    - ACTIONS (15): Available actions column
     """
     DROPDOWN = 0
     ID = 1
@@ -79,15 +80,16 @@ class JobTableColumns:
     STARTED = 10
     CLUSTER = 11
     REGION = 12
-    DESCRIPTION = 13
-    ACTIONS = 14  # New column for actions
+    FAILOVER = 13
+    DETAILS = 14
+    ACTIONS = 15
 
 
 # Column headers matching the indices above
 JOB_TABLE_COLUMNS = [
     '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
-    'Job Duration', 'Recoveries', 'Status', 'Started', 'Cluster', 'Region',
-    'Description', 'Actions'
+    'Job Duration', 'Status', 'Started', 'Cluster', 'Region',
+    'Failover', 'Recoveries', 'Details', 'Actions'
 ]
 
 
@@ -149,26 +151,10 @@ def home():
             status_counts[task['status'].value] += 1
 
     # Add an empty column for the dropdown button and actions column
-    rows = [[''] + row + [''] for row in rows
-           ]  # Add empty cell for actions column
-
-    # Validate column count
-    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
-        raise RuntimeError(
-            'Dashboard code and managed job queue code are out of sync.')
-
-    # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
-    for row in rows:
-        row[JobTableColumns.STATUS] = common_utils.remove_color(
-            row[JobTableColumns.STATUS])
-
-    # Remove filler rows ([''], ..., ['-'])
-    rows = [
-        row for row in rows
-        if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != ''
-    ]
-
-    # Add log content as description for each job
+    rows = [[''] + row + [''] + [''] for row in rows
+           ]  # Add empty cell for actions column and description column
+    
+    # Add log content as failover history for each job
     for row in rows:
         job_id = str(row[JobTableColumns.ID]).strip().replace(' ⤳', '')
         if job_id and job_id != '-':
@@ -181,13 +167,31 @@ def home():
                     with open(log_path, 'r', encoding='utf-8') as f:
                         log_content = f.read()
                         row[JobTableColumns.
-                            DESCRIPTION] = _extract_launch_history(log_content)
+                            FAILOVER] = _extract_launch_history(log_content)
                 else:
-                    row[JobTableColumns.DESCRIPTION] = 'Log file not found'
+                    row[JobTableColumns.FAILOVER] = 'Log file not found'
             except (IOError, OSError) as e:
                 row[JobTableColumns.
-                    DESCRIPTION] = f'Error reading log: {str(e)}'
+                    FAILOVER] = f'Error reading log: {str(e)}'
     app.logger.error('All managed jobs:')
+
+    # Validate column count
+    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
+        raise RuntimeError(
+            f'Dashboard code and managed job queue code are out of sync. '
+            f'Expected {(JOB_TABLE_COLUMNS)} columns, got {(rows[0])}')
+
+    # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
+    for row in rows:
+        row[JobTableColumns.STATUS] = common_utils.remove_color(
+            row[JobTableColumns.STATUS])
+
+    # Remove filler rows ([''], ..., ['-'])
+    rows = [
+        row for row in rows
+        if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != ''
+    ]
+
 
     # Get all unique status values
     status_values = sorted(
