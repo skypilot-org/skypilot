@@ -19,19 +19,19 @@
         }
 
         body {
-            margin-top: 20px;
+            margin-top: 0;
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-            background-color: #f8f9fa;
+            background-color: white;
         }
 
         .container {
-            max-width: 1800px;  /* Increased from 1400px */
-            width: 98%;        /* Increased from 95% */
+            max-width: 100%;
+            width: 100%;
             background-color: white;
-            border-radius: 12px;
-            box-shadow: 0 2px 12px rgba(0, 0, 0, 0.1);
+            border-radius: 0;
+            box-shadow: none;
             padding: 2rem;
-            margin-bottom: 2rem;
+            margin-bottom: 0;
         }
 
         header {
@@ -63,7 +63,8 @@
             table-layout: auto;  /* Allow table to adjust column widths automatically */
         }
 
-        .fixed-header-table thead th {
+        .fixed-header-table thead th,
+        .fixed-header-table thead td {  /* Added td selector */
             background-color: var(--light-color);
             padding: 1rem;
             font-weight: 600;
