@@ -88,8 +88,8 @@ class JobTableColumns:
 # Column headers matching the indices above
 JOB_TABLE_COLUMNS = [
     '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
-    'Job Duration', 'Status', 'Started', 'Cluster', 'Region',
-    'Failover', 'Recoveries', 'Details', 'Actions'
+    'Job Duration', 'Status', 'Started', 'Cluster', 'Region', 'Failover',
+    'Recoveries', 'Details', 'Actions'
 ]
 
 
@@ -153,7 +153,7 @@ def home():
     # Add an empty column for the dropdown button and actions column
     rows = [[''] + row + [''] + [''] for row in rows
            ]  # Add empty cell for failover and actions column
-    
+
     # Add log content as failover history for each job
     for row in rows:
         job_id = str(row[JobTableColumns.ID]).strip().replace(' ⤳', '')
@@ -166,13 +166,12 @@ def home():
                 if os.path.exists(log_path):
                     with open(log_path, 'r', encoding='utf-8') as f:
                         log_content = f.read()
-                        row[JobTableColumns.
-                            FAILOVER] = _extract_launch_history(log_content)
+                        row[JobTableColumns.FAILOVER] = _extract_launch_history(
+                            log_content)
                 else:
                     row[JobTableColumns.FAILOVER] = 'Log file not found'
             except (IOError, OSError) as e:
-                row[JobTableColumns.
-                    FAILOVER] = f'Error reading log: {str(e)}'
+                row[JobTableColumns.FAILOVER] = f'Error reading log: {str(e)}'
     app.logger.error('All managed jobs:')
 
     # Validate column count
@@ -191,7 +190,6 @@ def home():
         row for row in rows
         if ''.join(map(str, row[:JobTableColumns.ACTIONS])) != ''
     ]
-
 
     # Get all unique status values
     status_values = sorted(
