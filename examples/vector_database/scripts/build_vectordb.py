@@ -1,5 +1,5 @@
 """
-This script is responsible for building the vector database from the mounted bucket and save 
+This script is responsible for building the vector database from the mounted bucket and saving
 it to another mounted bucket.
 """
 
