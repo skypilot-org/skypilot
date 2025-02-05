@@ -99,7 +99,10 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        candidate_cluster_names=[managed_job_utils.JOB_CONTROLLER_NAME],
+        candidate_cluster_names=[
+            managed_job_utils.JOB_CONTROLLER_NAME,
+            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
+        ],
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
