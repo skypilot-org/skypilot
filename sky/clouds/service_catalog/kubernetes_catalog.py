@@ -8,10 +8,10 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
-from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -132,10 +132,8 @@ def _list_accelerators(
 
     # First check if Kubernetes is enabled. This ensures k8s python client is
     # installed. Do not put any k8s-specific logic before this check.
-    k8s_cloud = Kubernetes()
-    if not any(
-            map(k8s_cloud.is_same_cloud,
-                sky_check.get_cached_enabled_clouds_or_refresh())):
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(), enabled_clouds):
         return {}, {}, {}
 
     # TODO(zhwu): this should return all accelerators in multiple kubernetes
