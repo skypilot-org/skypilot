@@ -990,6 +990,8 @@ def write_cluster_config(
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
 
+    config_dict['cluster_name_on_cloud'] = cluster_name_on_cloud
+
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be
     # deterministic.
