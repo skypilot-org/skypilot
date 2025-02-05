@@ -3,7 +3,7 @@
 Using Cloud VMs
 =====================
 
-SkyPilot supports launching cloud instances (virtual machines, or VMs) on a wide range of cloud providers.
+SkyPilot supports launching cloud instances (virtual machines, or VMs) on all major cloud providers.
 See :ref:`concept-cloud-vms` for details.
 
 

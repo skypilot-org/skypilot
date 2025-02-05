@@ -1,7 +1,7 @@
 .. _auto-failover:
 
-Auto-provisioning GPUs
-==========================
+SkyPilot Provisioner
+====================
 
 SkyPilot comes with an auto-failover provisioner, which
 **automatically retries provisioning** a cluster in different regions (or
@@ -62,7 +62,7 @@ provisioner handles such a request:
   $ sky launch -c gpu --gpus A100
 
   ...
-  Launching a new cluster 'gpu'. Proceed? [Y/n]: 
+  Launching a new cluster 'gpu'. Proceed? [Y/n]:
   ⚙️ Launching on GCP us-central1 (us-central1-a).
   W 10-11 18:25:57 instance_utils.py:112] Got return codes 'VM_MIN_COUNT_NOT_REACHED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS' in us-central1-a: 'Requested minimum count of 1 VMs could not be created'; "The zone 'projects/xxxxxx/zones/us-central1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'"
   ...
@@ -91,13 +91,13 @@ GCP, where it succeeded after one region:
 
   Considered resources (1 node):
   ----------------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
   ----------------------------------------------------------------------------------------------------
-   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔     
-   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39               
-   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77               
+   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔
+   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39
+   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77
   ----------------------------------------------------------------------------------------------------
-  Launching a new cluster 'a100-8'. Proceed? [Y/n]: 
+  Launching a new cluster 'a100-8'. Proceed? [Y/n]:
 
   ...
   ⚙️ Launching on Azure eastus.
