@@ -240,7 +240,7 @@ def test_skyserve_oci_http():
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
-@pytest.mark.parametrize('accelerator', [{'do': 'H100', 'nebius': 'H100'}])
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""

@@ -181,7 +181,8 @@ class Nebius(clouds.Cloud):
         elif platform in ('gpu-h100-sxm', 'gpu-h200-sxm', 'gpu-l40s-a'):
             image_family = 'ubuntu22.04-cuda12'
         else:
-            raise RuntimeError(f'Unsupported platform: {platform}')
+            raise RuntimeError('Unsupported instance type for Nebius cloud:'
+                               f' {resources.instance_type}')
         return {
             'instance_type': resources.instance_type,
             'custom_resources': custom_resources,

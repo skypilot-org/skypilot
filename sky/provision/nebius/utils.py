@@ -106,8 +106,6 @@ def delete_cluster(name: str, region: str) -> None:
         logger.debug(f'Deleted GPU Cluster : {cluster_id}.')
     except nebius.request_error():
         logger.debug('GPU Cluster does not exist.')
-        pass
-    return
 
 
 def list_instances(project_id: str) -> Dict[str, Dict[str, Any]]:
