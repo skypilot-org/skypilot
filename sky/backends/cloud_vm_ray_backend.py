@@ -2435,6 +2435,17 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             runners = command_runner.SSHCommandRunner.make_runner_list(
                 zip(ip_list, port_list), **ssh_credentials)
             return runners
+        if self.cached_cluster_info is None:
+            # We have `and self.cached_external_ips is None` here, because
+            # when a cluster's cloud is just upgraded to the new provsioner,
+            # although it has the cached_external_ips, the cached_cluster_info
+            # can be None. We need to update it here, even when force_cached is
+            # set to True.
+            if force_cached:
+                raise RuntimeError(
+                    'Tried to use cached cluster info, but it\'s missing for '
+                    f'cluster "{self.cluster_name}"')
+            self._update_cluster_info()
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
