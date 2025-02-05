@@ -15,6 +15,11 @@ setup: |
   {{cmd}}
   {%- endfor %}
 
+  {% if controller_envs.get('SKYPILOT_DEV') != '0' %}
+  grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
+  {% endif %}
+
   # Install serve dependencies.
   # TODO(tian): Gather those into serve constants.
   pip list | grep uvicorn > /dev/null 2>&1 || pip install uvicorn > /dev/null 2>&1
@@ -29,6 +34,10 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
+{%- if use_tls %}
+  {{remote_tls_keyfile}}: {{local_tls_keyfile}}
+  {{remote_tls_certfile}}: {{local_tls_certfile}}
+{%- endif %}
 
 run: |
   # Activate the Python environment, so that cloud SDKs can be found in the

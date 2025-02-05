@@ -1056,6 +1056,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.RunPod):
         config = auth.setup_runpod_authentication(config)
+    elif isinstance(cloud, clouds.Vast):
+        config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
     else:
@@ -2135,7 +2137,8 @@ def _update_cluster_status_no_lock(
                 except exceptions.CommandError as e:
                     success = False
                     if e.returncode == 255:
-                        logger.debug(f'The cluster is likely {noun}ed.')
+                        word = 'autostopped' if noun == 'autostop' else 'autodowned'
+                        logger.debug(f'The cluster is likely {word}.')
                         reset_local_autostop = False
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                     success = False

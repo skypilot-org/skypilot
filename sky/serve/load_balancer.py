@@ -27,10 +27,12 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self,
-                 controller_url: str,
-                 load_balancer_port: int,
-                 load_balancing_policy_name: Optional[str] = None) -> None:
+    def __init__(
+            self,
+            controller_url: str,
+            load_balancer_port: int,
+            load_balancing_policy_name: Optional[str] = None,
+            tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -38,6 +40,8 @@ class SkyServeLoadBalancer:
             load_balancer_port: The port where the load balancer listens to.
             load_balancing_policy_name: The name of the load balancing policy
                 to use. Defaults to None.
+            tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
+                to None.
         """
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
@@ -49,6 +53,8 @@ class SkyServeLoadBalancer:
                     f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
+        self._tls_credential: Optional[serve_utils.TLSCredential] = (
+            tls_credential)
         # TODO(tian): httpx.Client has a resource limit of 100 max connections
         # for each client. We should wait for feedback on the best max
         # connections.
@@ -231,15 +237,25 @@ class SkyServeLoadBalancer:
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
 
+        uvicorn_tls_kwargs = ({} if self._tls_credential is None else
+                              self._tls_credential.dump_uvicorn_kwargs())
+
+        protocol = 'https' if self._tls_credential is not None else 'http'
+
         logger.info('SkyServe Load Balancer started on '
-                    f'http://0.0.0.0:{self._load_balancer_port}')
+                    f'{protocol}://0.0.0.0:{self._load_balancer_port}')
 
-        uvicorn.run(self._app, host='0.0.0.0', port=self._load_balancer_port)
+        uvicorn.run(self._app,
+                    host='0.0.0.0',
+                    port=self._load_balancer_port,
+                    **uvicorn_tls_kwargs)
 
 
-def run_load_balancer(controller_addr: str,
-                      load_balancer_port: int,
-                      load_balancing_policy_name: Optional[str] = None) -> None:
+def run_load_balancer(
+        controller_addr: str,
+        load_balancer_port: int,
+        load_balancing_policy_name: Optional[str] = None,
+        tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
     """ Run the load balancer.
 
     Args:
@@ -251,7 +267,8 @@ def run_load_balancer(controller_addr: str,
     load_balancer = SkyServeLoadBalancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
-        load_balancing_policy_name=load_balancing_policy_name)
+        load_balancing_policy_name=load_balancing_policy_name,
+        tls_credential=tls_credential)
     load_balancer.run()
 
 

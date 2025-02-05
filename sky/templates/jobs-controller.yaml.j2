@@ -21,9 +21,9 @@ setup: |
   {{cmd}}
   {%- endfor %}
 
-  {% if is_dev %}
-  # Internal: disable logging for manually logging into the jobs controller for debugging.
-  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% if controller_envs.get('SKYPILOT_DEV') != '0' %}
+  grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
 
   # Create systemd service file
