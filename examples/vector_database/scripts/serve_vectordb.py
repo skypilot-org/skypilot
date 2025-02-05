@@ -25,7 +25,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Initialize FastAPI app
-app = FastAPI(title="Vector Database Search API")
+app = FastAPI(title='Vector Database Search API')
 
 # Global variables for model and database
 model = None
@@ -45,7 +45,7 @@ class SearchResult(BaseModel):
     similarity: float
 
 
-def encode_text(text: str, model_name: str = "ViT-bigG-14") -> np.ndarray:
+def encode_text(text: str, model_name: str = 'ViT-bigG-14') -> np.ndarray:
     """Encode text using CLIP model."""
     global model, tokenizer, device
 
@@ -67,7 +67,7 @@ def query_collection(query_embedding: np.ndarray,
 
     results = collection.query(query_embeddings=query_embedding.tolist(),
                                n_results=n_results,
-                               include=["metadatas", "distances", "documents"])
+                               include=['metadatas', 'distances', 'documents'])
 
     # Get image paths and distances
     image_paths = results['documents'][0]
@@ -82,7 +82,7 @@ def query_collection(query_embedding: np.ndarray,
     ]
 
 
-@app.post("/search", response_model=List[SearchResult])
+@app.post('/search', response_model=List[SearchResult])
 async def search(query: SearchQuery):
     """Search endpoint that takes a text query and returns similar images."""
     try:
@@ -94,29 +94,29 @@ async def search(query: SearchQuery):
 
         return results
     except Exception as e:
-        logger.error(f"Error processing query: {str(e)}")
+        logger.error(f'Error processing query: {str(e)}')
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/image/{subpath:path}")
+@app.get('/image/{subpath:path}')
 async def get_image(subpath: str):
     """Serve an image from the mounted bucket."""
     image_path = os.path.join(images_dir, subpath)
     if not os.path.exists(image_path):
-        raise HTTPException(status_code=404, detail="Image not found")
-    return FileResponse(image_path, media_type="image/jpeg")
+        raise HTTPException(status_code=404, detail='Image not found')
+    return FileResponse(image_path, media_type='image/jpeg')
 
 
-@app.get("/health")
+@app.get('/health')
 async def health_check():
     """Health check endpoint."""
     return {
-        "status": "healthy",
-        "collection_size": collection.count() if collection else 0
+        'status': 'healthy',
+        'collection_size': collection.count() if collection else 0
     }
 
 
-@app.get("/", response_class=HTMLResponse)
+@app.get('/', response_class=HTMLResponse)
 async def get_search_page():
     """Serve a simple search interface."""
     return """
@@ -324,8 +324,8 @@ def main():
     global model, tokenizer, collection, device, images_dir
 
     # Set device
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    logger.info(f"Using device: {device}")
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    logger.info(f'Using device: {device}')
 
     # Set images directory
     images_dir = args.images_dir
@@ -333,7 +333,7 @@ def main():
     # Load the model
     import open_clip
     model, _, _ = open_clip.create_model_and_transforms(
-        args.model_name, pretrained="laion2b_s39b_b160k", device=device)
+        args.model_name, pretrained='laion2b_s39b_b160k', device=device)
     tokenizer = open_clip.get_tokenizer(args.model_name)
 
     # Initialize ChromaDB client
@@ -342,12 +342,12 @@ def main():
     try:
         # Get the collection
         collection = client.get_collection(name=args.collection_name)
-        logger.info(f"Connected to collection: {args.collection_name}")
-        logger.info(f"Total documents in collection: {collection.count()}")
+        logger.info(f'Connected to collection: {args.collection_name}')
+        logger.info(f'Total documents in collection: {collection.count()}')
     except ValueError as e:
-        logger.error(f"Error: {str(e)}")
+        logger.error(f'Error: {str(e)}')
         logger.error(
-            "Make sure the collection exists and the persist_dir is correct.")
+            'Make sure the collection exists and the persist_dir is correct.')
         raise
 
     # Start the server
@@ -355,5 +355,5 @@ def main():
     uvicorn.run(app, host=args.host, port=args.port)
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 def list_local_parquet_files(mount_path: str, prefix: str) -> list:
     """List all parquet files in the mounted S3 directory."""
-    search_path = os.path.join(mount_path, prefix, "**/*.parquet")
+    search_path = os.path.join(mount_path, prefix, '**/*.parquet')
     parquet_files = glob.glob(search_path, recursive=True)
     return parquet_files
 
@@ -49,7 +49,7 @@ def process_parquet_file(args):
 
         return results
     except Exception as e:
-        logger.error(f"Error processing file {parquet_file}: {str(e)}")
+        logger.error(f'Error processing file {parquet_file}: {str(e)}')
         return None
 
 
@@ -86,7 +86,7 @@ def main():
     # we need to copy the data to a temporary directory
     # and then copy it to the final location
     with tempfile.TemporaryDirectory() as temp_dir:
-        logger.info(f"Using temporary directory: {temp_dir}")
+        logger.info(f'Using temporary directory: {temp_dir}')
 
         # Initialize ChromaDB in temporary directory
         client = chromadb.PersistentClient(path=temp_dir)
@@ -97,21 +97,21 @@ def main():
         try:
             collection = client.create_collection(
                 name=args.collection_name,
-                metadata={"description": "CLIP embeddings from dataset"})
-            logger.info(f"Created new collection: {args.collection_name}")
+                metadata={'description': 'CLIP embeddings from dataset'})
+            logger.info(f'Created new collection: {args.collection_name}')
         except ValueError:
             collection = client.get_collection(name=args.collection_name)
-            logger.info(f"Using existing collection: {args.collection_name}")
+            logger.info(f'Using existing collection: {args.collection_name}')
 
         # List parquet files from mounted directory
         parquet_files = list_local_parquet_files(args.embeddings_dir,
                                                  args.prefix)
-        logger.info(f"Found {len(parquet_files)} parquet files")
+        logger.info(f'Found {len(parquet_files)} parquet files')
 
         # Process files in parallel
         max_workers = max(1,
                           multiprocessing.cpu_count() - 1)  # Leave one CPU free
-        logger.info(f"Processing files using {max_workers} workers")
+        logger.info(f'Processing files using {max_workers} workers')
 
         with ProcessPoolExecutor(max_workers=max_workers) as executor:
             # Submit all files for processing
@@ -123,7 +123,7 @@ def main():
             # Process results as they complete
             for future in tqdm(as_completed(future_to_file),
                                total=len(parquet_files),
-                               desc="Processing files"):
+                               desc='Processing files'):
                 file = future_to_file[future]
                 try:
                     results = future.result()
@@ -133,20 +133,20 @@ def main():
                                            embeddings=list(embeddings),
                                            documents=list(images_paths))
                 except Exception as e:
-                    logger.error(f"Error processing file {file}: {str(e)}")
+                    logger.error(f'Error processing file {file}: {str(e)}')
                     continue
 
-        logger.info("Vector database build complete!")
-        logger.info(f"Total documents in collection: {collection.count()}")
+        logger.info('Vector database build complete!')
+        logger.info(f'Total documents in collection: {collection.count()}')
 
         # Copy the completed database to the final location
-        logger.info(f"Copying database to final location: {args.persist_dir}")
+        logger.info(f'Copying database to final location: {args.persist_dir}')
         if os.path.exists(args.persist_dir):
-            logger.info("Removing existing database directory")
+            logger.info('Removing existing database directory')
             shutil.rmtree(args.persist_dir)
         shutil.copytree(temp_dir, args.persist_dir)
-        logger.info("Database copy complete!")
+        logger.info('Database copy complete!')
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

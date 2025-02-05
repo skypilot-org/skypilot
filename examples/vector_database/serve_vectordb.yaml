@@ -24,7 +24,7 @@ file_mounts:
     # this needs to be the same as the source in the build_vectordb.yaml
     mode: MOUNT
   /images:
-    name: sky-images
+    name: sky-demo-image
     # this needs to be the same as the source in the build_vectordb.yaml
     mode: MOUNT
 

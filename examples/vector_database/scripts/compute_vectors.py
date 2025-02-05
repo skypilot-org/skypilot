@@ -34,12 +34,12 @@ class BatchProcessor():
 
     def __init__(self,
                  output_path: str,
-                 images_path: str = "/images",
-                 model_name: str = "ViT-bigG-14",
-                 dataset_name: str = "ILSVRC/imagenet-1k",
-                 pretrained: str = "laion2b_s39b_b160k",
+                 images_path: str = '/images',
+                 model_name: str = 'ViT-bigG-14',
+                 dataset_name: str = 'ILSVRC/imagenet-1k',
+                 pretrained: str = 'laion2b_s39b_b160k',
                  device: Optional[str] = None,
-                 split: str = "train",
+                 split: str = 'train',
                  streaming: bool = True,
                  batch_size: int = 32,
                  checkpoint_size: int = 100,
@@ -105,7 +105,7 @@ class BatchProcessor():
                     yield idx, (tensor, item['image'])
             except Exception as e:
                 logging.debug(
-                    f"Error preprocessing image at index {idx}: {str(e)}")
+                    f'Error preprocessing image at index {idx}: {str(e)}')
 
     def save_image(self, idx: int, image: Image.Image) -> str:
         """Save image to the mounted bucket and return its path."""
@@ -115,11 +115,11 @@ class BatchProcessor():
         save_dir.mkdir(parents=True, exist_ok=True)
 
         # Save image with index as filename
-        image_path = save_dir / f"{idx}.jpg"
-        image.save(image_path, format="JPEG", quality=95)
+        image_path = save_dir / f'{idx}.jpg'
+        image.save(image_path, format='JPEG', quality=95)
 
         # Return relative path from images root
-        return str(Path(subdir) / f"{idx}.jpg")
+        return str(Path(subdir) / f'{idx}.jpg')
 
     async def do_batch_processing(
         self, batch: List[Tuple[int, Tuple[torch.Tensor, Any]]]
@@ -165,8 +165,8 @@ class BatchProcessor():
 
         partition_files = list(
             self.output_path.parent.glob(
-                f"{self.output_path.stem}_part_*.parquet"))
-        print(f"Partition files: {partition_files}")
+                f'{self.output_path.stem}_part_*.parquet'))
+        print(f'Partition files: {partition_files}')
         if not partition_files:
             return self.start_idx, 0
 
@@ -184,7 +184,7 @@ class BatchProcessor():
                 if not df.empty:
                     max_idx = max(max_idx, df['idx'].max())
             except Exception as e:
-                logging.warning(f"Error processing file {file}: {e}")
+                logging.warning(f'Error processing file {file}: {e}')
 
         return max_idx, max_partition + 1
 
@@ -193,19 +193,19 @@ class BatchProcessor():
         if not results:
             return
 
-        df = pd.DataFrame(results, columns=["idx", "output"])
-        final_path = f"{self.output_path}_part_{self.partition_counter}.parquet"
-        temp_path = f"/tmp/{self.partition_counter}.tmp"
+        df = pd.DataFrame(results, columns=['idx', 'output'])
+        final_path = f'{self.output_path}_part_{self.partition_counter}.parquet'
+        temp_path = f'/tmp/{self.partition_counter}.tmp'
 
         # Write to temporary file first
-        df.to_parquet(temp_path, engine="pyarrow", index=False)
+        df.to_parquet(temp_path, engine='pyarrow', index=False)
 
         # Copy from temp to final destination
         shutil.copy2(temp_path, final_path)
         os.remove(temp_path)  # Clean up temp file
 
         logging.info(
-            f"Saved partition {self.partition_counter} to {final_path} with {len(df)} rows"
+            f'Saved partition {self.partition_counter} to {final_path} with {len(df)} rows'
         )
         self.partition_counter += 1
 
@@ -222,7 +222,7 @@ class BatchProcessor():
         self.start_idx = max(self.start_idx, resume_idx + 1)
 
         logging.info(
-            f"Starting processing from index {self.start_idx} (partition {self.partition_counter})"
+            f'Starting processing from index {self.start_idx} (partition {self.partition_counter})'
         )
 
         results = []
@@ -306,5 +306,5 @@ async def main():
     await processor.run()
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     asyncio.run(main())

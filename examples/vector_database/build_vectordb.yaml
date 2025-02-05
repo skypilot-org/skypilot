@@ -4,7 +4,7 @@ workdir: .
 
 file_mounts:
   /clip_embeddings:
-    name: sky-embedding
+    name: sky-demo-embedding
     # this needs to be the same as the source in the compute_vectors.yaml
     mode: MOUNT
   
@@ -14,7 +14,7 @@ file_mounts:
     mode: MOUNT
 
   /images:
-    name: sky-images
+    name: sky-demo-image
     # this needs to be the same as the source in compute_vectors.yaml
     mode: MOUNT
 
