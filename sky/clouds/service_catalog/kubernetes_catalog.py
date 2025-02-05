@@ -8,10 +8,10 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
-from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -129,6 +129,14 @@ def _list_accelerators(
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
+
+    # First check if Kubernetes is enabled. This ensures k8s python client is
+    # installed. Do not put any k8s-specific logic before this check.
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(),
+                                        enabled_clouds):
+        return {}, {}, {}
+
     # TODO(zhwu): this should return all accelerators in multiple kubernetes
     # clusters defined by allowed_contexts.
     if region_filter is None:
@@ -142,11 +150,8 @@ def _list_accelerators(
     if context is None:
         return {}, {}, {}
 
-    k8s_cloud = Kubernetes()
-    if not any(
-            map(k8s_cloud.is_same_cloud,
-                sky_check.get_cached_enabled_clouds_or_refresh())
-    ) or not kubernetes_utils.check_credentials(context)[0]:
+    # Verify that the credentials are still valid.
+    if not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_accelerator_resource(context)
