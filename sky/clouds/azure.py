@@ -40,7 +40,7 @@ _DEFAULT_AZURE_UBUNTU_2004_IMAGE_GB = 150
 _DEFAULT_SKYPILOT_IMAGE_GB = 30
 
 # TODO(romilb): Switch back to using our custom images after NCCL + Azure issues
-#  are resolved: https://github.com/skypilot-org/skypilot/issues/4448
+# are resolved: https://github.com/skypilot-org/skypilot/issues/4448
 _DEFAULT_CPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 _DEFAULT_GPU_IMAGE_ID = 'skypilot:gpu-ubuntu-2204'
 _DEFAULT_V1_IMAGE_ID = 'skypilot:v1-ubuntu-2004'
