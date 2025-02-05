@@ -81,10 +81,9 @@ def main():
 
     args = parser.parse_args()
 
-    # Create a temporary directory for building the database
-    # because the buckets are mounted as read/write only
-    # we need to copy the data to a temporary directory
-    # and then copy it to the final location
+    # Create a temporary directory for building the database. The
+    # mounted bucket does not support append operation, so build in
+    # the tmpdir and then copy it to the final location.
     with tempfile.TemporaryDirectory() as temp_dir:
         logger.info(f'Using temporary directory: {temp_dir}')
 
