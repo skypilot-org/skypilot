@@ -97,12 +97,10 @@ def get_user_hash(force_fresh_hash: bool = False) -> str:
             return user_hash
 
     hash_str = user_and_hostname_hash()
-    hex_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    if not _is_valid_user_hash(hex_hash):
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    if not _is_valid_user_hash(user_hash):
         # A fallback in case the hash is invalid.
-        hex_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
-    user_hash = base36_encode(hex_hash)
-
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
     if not force_fresh_hash:
         # Do not cache to file if force_fresh_hash is True since the file may
