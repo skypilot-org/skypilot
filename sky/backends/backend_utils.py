@@ -844,11 +844,6 @@ def write_cluster_config(
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
-    # Deprecated: instance_tags have been replaced by labels. For backward
-    # compatibility, we support them and the schema allows them only if
-    # `labels` are not specified. This should be removed after 0.8.0.
-    labels = skypilot_config.get_nested((str(cloud).lower(), 'instance_tags'),
-                                        labels)
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
@@ -994,12 +989,6 @@ def write_cluster_config(
             _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS)
         with open(tmp_yaml_path, 'w', encoding='utf-8') as f:
             f.write(restored_yaml_content)
-
-    # Read the cluster name from the tmp yaml file, to take the backward
-    # compatbility restortion above into account.
-    # TODO: remove this after 2 minor releases, 0.8.0.
-    yaml_config = common_utils.read_yaml(tmp_yaml_path)
-    config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
     # Make sure to do this before we optimize file mounts. Optimization is
     # non-deterministic, but everything else before this point should be

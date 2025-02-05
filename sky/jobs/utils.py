@@ -6,11 +6,9 @@ ManagedJobCodeGen.
 """
 import collections
 import enum
-import inspect
 import os
 import pathlib
 import shlex
-import shutil
 import textwrap
 import time
 import traceback
@@ -458,17 +456,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
         # Send the signal to the jobs controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
-        legacy_signal_file = pathlib.Path(
-            LEGACY_SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
-            # Backward compatibility for managed jobs launched before #3419. It
-            # can be removed in the future 0.8.0 release.
-            shutil.copy(str(signal_file), str(legacy_signal_file))
         cancelled_job_ids.append(job_id)
 
     if not cancelled_job_ids:
@@ -1125,19 +1118,12 @@ class ManagedJobCodeGen:
 
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
-    # TODO: the try..except.. block is for backward compatibility. Remove it in
-    # v0.8.0.
     _PREFIX = textwrap.dedent("""\
-        managed_job_version = 0
-        try:
-            from sky.jobs import utils
-            from sky.jobs import constants as managed_job_constants
-            from sky.jobs import state as managed_job_state
+        from sky.jobs import utils
+        from sky.jobs import constants as managed_job_constants
+        from sky.jobs import state as managed_job_state
 
-            managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
-        except ImportError:
-            from sky.spot import spot_state as managed_job_state
-            from sky.spot import spot_utils as utils
+        managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
         """)
 
     @classmethod
@@ -1182,11 +1168,6 @@ class ManagedJobCodeGen:
                     job_id: Optional[int],
                     follow: bool = True,
                     controller: bool = False) -> str:
-        # We inspect the source code of the function here for backward
-        # compatibility.
-        # TODO: change to utils.stream_logs(job_id, job_name, follow) in v0.8.0.
-        # Import libraries required by `stream_logs`. The try...except... block
-        # should be removed in v0.8.0.
         code = textwrap.dedent("""\
         import os
         import time
@@ -1194,13 +1175,9 @@ class ManagedJobCodeGen:
         from sky.skylet import job_lib, log_lib
         from sky.skylet import constants
         from sky.utils import ux_utils
-        try:
-            from sky.jobs.utils import stream_logs_by_id
-        except ImportError:
-            from sky.spot.spot_utils import stream_logs_by_id
+        from sky.jobs.utils import stream_logs, stream_logs_by_id
         from typing import Optional
         """)
-        code += inspect.getsource(stream_logs)
         code += textwrap.dedent(f"""\
 
         msg = stream_logs({job_id!r}, {job_name!r},
