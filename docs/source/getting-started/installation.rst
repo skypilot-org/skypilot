@@ -36,6 +36,7 @@ Install SkyPilot using pip:
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[all]"
 
 
@@ -65,6 +66,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
           pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
 
@@ -96,6 +98,7 @@ Install SkyPilot using pip:
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
           pip install -e ".[kubernetes]"
+          pip install -e ".[nebius]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -146,6 +149,7 @@ This will produce a summary like:
     Azure: enabled
     OCI: enabled
     Lambda: enabled
+    Nebius: enabled
     RunPod: enabled
     Paperspace: enabled
     Fluidstack: enabled
@@ -484,6 +488,16 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+Nebius
+~~~~~~
+
+`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.nebius
+  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
+  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
 Kubernetes
 ~~~~~~~~~~
