@@ -28,7 +28,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const newItems = [
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
-        { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
+        // { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
         { selector: '.toctree-l2 > a', text: 'Multiple Kubernetes Clusters' },
     ];
     newItems.forEach(({ selector, text }) => {

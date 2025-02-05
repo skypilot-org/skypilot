@@ -1,5 +1,11 @@
 #!/bin/bash
 
+# Run `sky show-gpus` and save the output.
+sky show-gpus > source/compute/show-gpus.txt
+sky show-gpus -a > source/compute/show-gpus-all.txt
+sed -i '' '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt && echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
+sky show-gpus H100:8 > source/compute/show-gpus-h100-8.txt
+
 rm -rf build docs
 
 # MacOS and GNU `script` have different usages

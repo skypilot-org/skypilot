@@ -158,10 +158,7 @@ Read the research:
    :maxdepth: 1
    :caption: Clusters
 
-   Getting Started <../examples/interactive-development>
-   ../reference/kubernetes/index
-   Using Existing Machines <../reservations/existing-machines>
-   ../reservations/reservations
+   Start a Cluster <../examples/interactive-development>
    SkyPilot Provisioner <../examples/auto-failover>
    ../reference/auto-stop
 
@@ -173,13 +170,13 @@ Read the research:
    Cluster Jobs <../reference/job-queue>
    ../examples/managed-jobs
    Multi-Node Jobs <../running-jobs/distributed-jobs>
-   ../running-jobs/many-jobs
+   Many Parallel Jobs <../running-jobs/many-jobs>
 
 
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Serving
+   :caption: Model Serving
 
    Getting Started <../serving/sky-serve>
    ../serving/user-guides
@@ -196,6 +193,19 @@ Read the research:
 .. toctree::
    :hidden:
    :maxdepth: 1
+   :caption: Infra Choices
+
+   ../compute/gpus
+   Using Cloud VMs <../compute/cloud-vm>
+   ../reference/kubernetes/index
+   Using Existing Machines <../reservations/existing-machines>
+   ../reservations/reservations
+
+
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
    :caption: Data
 
    ../reference/storage
@@ -206,18 +216,19 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   Secrets & Environment Variables <../running-jobs/environment-variables>
    Docker Containers <../examples/docker-containers>
-   ../running-jobs/environment-variables
-   ../reference/tpu
    ../examples/ports
    ../reference/logging
    ../reference/faq
 
 
+   .. :caption: Cloud Admin and Usage
+
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Cloud Admin and Usage
+   :caption: Administrator Guides
 
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
