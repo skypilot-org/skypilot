@@ -459,6 +459,7 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
             # Re-raise the exception if it's a different error
             raise e
 
+
 def _create_persistent_volume_claim(namespace: str, context: Optional[str],
                                     pvc_name: str) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
@@ -534,7 +535,8 @@ def _create_serve_controller_deployment(
         })
 
     template_metadata = pod_spec.pop('metadata')
-    assert pod_spec.keys() == {"apiVersion", "kind"}, f"pod_spec has fields {pod_spec.keys()}"
+    assert pod_spec.keys() == {'apiVersion', 'kind'
+                              }, (f'pod_spec has fields {pod_spec.keys()}')
 
     deployment_labels = {
         'app': cluster_name_on_cloud,
@@ -896,7 +898,7 @@ def _terminate_node(namespace: str, context: Optional[str],
         _delete_k8s_resource_with_retry(
             delete_func=lambda name=service_name: kubernetes.core_api(
                 context).delete_namespaced_service(name=name,
-                    namespace=namespace,
+                                                   namespace=namespace,
                                                    _request_timeout=config_lib.
                                                    DELETION_TIMEOUT),
             resource_type='service',

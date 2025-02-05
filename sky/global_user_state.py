@@ -350,7 +350,7 @@ def remove_cluster(cluster_name: str, terminate: bool) -> None:
         # Must invalidate IP list to avoid directly trying to ssh into a
         # stopped VM, which leads to timeout.
         if hasattr(handle, 'stable_internal_external_ips'):
-            assert isinstance(handle, backends.CloudVmRayResourceHandle)
+            handle = typing.cast('backends.CloudVmRayResourceHandle', handle)
             handle.stable_internal_external_ips = None
         current_time = int(time.time())
         _DB.cursor.execute(

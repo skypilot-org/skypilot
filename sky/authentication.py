@@ -459,7 +459,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
 
         # TODO(andyl): extract a common constant for the head pod pattern
         if kubernetes_utils.is_serve_controller(config['cluster_name']):
-            ssh_target = kubernetes_utils.get_head_pod_name_from_deployment(config['cluster_name'])
+            ssh_target = kubernetes_utils.get_head_pod_name_from_deployment(
+                config['cluster_name'])
         else:
             ssh_target = config['cluster_name'] + '-head'
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(

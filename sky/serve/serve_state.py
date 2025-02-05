@@ -1,12 +1,13 @@
 """The database for services information."""
 import collections
+from collections.abc import Sequence
 import enum
 import json
 import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -478,11 +479,12 @@ def total_number_provisioning_replicas() -> int:
     return provisioning_count
 
 
-def get_replicas_at_status(
-        service_name: str,
-        status: ReplicaStatus) -> List['replica_managers.ReplicaInfo']:
+def get_replicas_at_statuses(
+    service_name: str, statuses: Union[ReplicaStatus, Sequence[ReplicaStatus]]
+) -> List['replica_managers.ReplicaInfo']:
     replicas = get_replica_infos(service_name)
-    return [replica for replica in replicas if replica.status == status]
+    statuses = [statuses] if isinstance(statuses, ReplicaStatus) else statuses
+    return [replica for replica in replicas if replica.status in statuses]
 
 
 # === Version functions ===

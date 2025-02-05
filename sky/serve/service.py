@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 import os
 import pathlib
+from pathlib import Path
 import shutil
 import time
 import traceback
@@ -28,8 +29,6 @@ from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
-
-from pathlib import Path
 
 # Use the explicit logger name so that the logger is under the
 # `sky.serve.service` namespace when executed directly, so as
@@ -303,7 +302,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 this_task_run_script.unlink()
                 logger.info(f'Task run script {this_task_run_script} removed')
             else:
-                logger.warning(f'Task run script {this_task_run_script} not found')
+                logger.warning(
+                    f'Task run script {this_task_run_script} not found')
 
 
 if __name__ == '__main__':

@@ -650,11 +650,14 @@ class SkyPilotReplicaManager(ReplicaManager):
         # of launching less replicas than expected.
         # But for provisioning and shutting down replicas, we need to
         # be careful to prevent resource leak.
-        to_down_replicas = serve_state.get_replicas_at_status(
-            self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN)
+        to_down_replicas = serve_state.get_replicas_at_statuses(
+            self._service_name, [serve_state.ReplicaStatus.SHUTTING_DOWN])
 
-        to_down_replicas += serve_state.get_replicas_at_status(
-            self._service_name, serve_state.ReplicaStatus.PROVISIONING)
+        to_down_replicas += serve_state.get_replicas_at_statuses(
+            self._service_name, [
+                serve_state.ReplicaStatus.PENDING,
+                serve_state.ReplicaStatus.PROVISIONING
+            ])
 
         for replica_id in to_down_replicas:
             try:
@@ -866,7 +869,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         the fly. If any of them finished, it will update the status of the
         corresponding replica.
         """
-        for replica_id, p in list(self._launch_process_pool.items()):
+        for replica_id, p in self._launch_process_pool.items():
             if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
@@ -908,7 +911,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-        for replica_id, p in list(self._down_process_pool.items()):
+        for replica_id, p in self._down_process_pool.items():
             if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')

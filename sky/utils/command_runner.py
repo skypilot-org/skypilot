@@ -289,7 +289,8 @@ class CommandRunner:
             resolved_target = target
             if target.startswith('~'):
                 remote_home_dir = _get_remote_home_dir_with_retry()
-                assert remote_home_dir is not None, 'remote_home_dir returns None'
+                assert remote_home_dir is not None, ('remote_home_dir '
+                                                     'returns None')
                 resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -302,7 +303,8 @@ class CommandRunner:
             resolved_source = source
             if source.startswith('~'):
                 remote_home_dir = _get_remote_home_dir_with_retry()
-                assert remote_home_dir is not None, 'remote_home_dir returns None'
+                assert remote_home_dir is not None, ('remote_home_dir '
+                                                     'returns None')
                 resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{node_destination}:{resolved_source!r}',
@@ -313,7 +315,7 @@ class CommandRunner:
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
-        stdout, stderr = "", ""
+        stdout, stderr = '', ''
         while max_retry >= 0:
             returncode, stdout, stderr = log_lib.run_with_log(
                 command,
@@ -329,7 +331,7 @@ class CommandRunner:
         direction = 'up' if up else 'down'
         error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
                      'Ensure that the network is stable, then retry.')
-        
+
         subprocess_utils.handle_returncode(returncode,
                                            command,
                                            error_msg,
