@@ -645,7 +645,7 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
 
 
 def set_cancelled(job_id: int, callback_func: CallbackType):
-    """Set tasks in the job as cancelled, if they are in non-terminal states.
+    """Set tasks in the job as cancelled, if they are in CANCELLING state.
 
     The set_cancelling should be called before this function.
     """
@@ -654,14 +654,15 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             """\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND end_at IS null""",
-            (ManagedJobStatus.CANCELLED.value, time.time(), job_id))
+            WHERE spot_job_id=(?) AND status=(?)""",
+            (ManagedJobStatus.CANCELLED.value, time.time(), job_id,
+             ManagedJobStatus.CANCELLING.value))
         updated = rows.rowcount > 0
     if updated:
         logger.info('Job cancelled.')
         callback_func('CANCELLED')
     else:
-        logger.info('Cancellation skipped, job is already terminal')
+        logger.info('Cancellation skipped, job is not CANCELLING')
 
 
 def set_local_log_file(job_id: int, task_id: Optional[int],
