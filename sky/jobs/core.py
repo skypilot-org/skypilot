@@ -2,7 +2,7 @@
 import os
 import tempfile
 import typing
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -37,14 +37,11 @@ if typing.TYPE_CHECKING:
 @timeline.event
 @usage_lib.entrypoint
 def launch(
-        task: Union['sky.Task', 'sky.Dag'],
-        name: Optional[str] = None,
-        stream_logs: bool = True,
-        detach_run: bool = False,
-        retry_until_up: bool = False,
-        # TODO(cooperc): remove fast arg before 0.8.0
-        fast: bool = True,  # pylint: disable=unused-argument for compatibility
-) -> None:
+    task: Union['sky.Task', 'sky.Dag'],
+    name: Optional[str] = None,
+    stream_logs: bool = True,
+    detach_run: bool = False,
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 
@@ -55,13 +52,18 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
-        fast: [Deprecated] Does nothing, and will be removed soon. We will
-          always use fast mode as it's fully safe now.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
+
+    Returns:
+      job_id: Optional[int]; the job ID of the submitted job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
+      handle: Optional[backends.ResourceHandle]; handle to the controller VM.
+        None if dryrun.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
@@ -95,7 +97,7 @@ def launch(
             ux_utils.spinner_message('Initializing managed job')):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, path='jobs')
+                task_, task_type='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -115,7 +117,6 @@ def launch(
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
-            'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
@@ -142,15 +143,15 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky.launch(task=controller_task,
-                   stream_logs=stream_logs,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   fast=True,
-                   _disable_controller_check=True)
+        return sky.launch(task=controller_task,
+                          stream_logs=stream_logs,
+                          cluster_name=controller_name,
+                          detach_run=detach_run,
+                          idle_minutes_to_autostop=skylet_constants.
+                          CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                          retry_until_up=True,
+                          fast=True,
+                          _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(

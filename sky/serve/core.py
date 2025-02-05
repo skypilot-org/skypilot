@@ -68,7 +68,8 @@ def _validate_service_task(task: 'sky.Task') -> None:
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
-    replica_ingress_port: Optional[int] = None
+    replica_ingress_port: Optional[int] = int(
+        task.service.ports) if (task.service.ports is not None) else None
     for requested_resources in task.resources:
         if (task.service.use_ondemand_fallback and
                 not requested_resources.use_spot):
@@ -77,22 +78,58 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     '`use_ondemand_fallback` is only supported '
                     'for spot resources. Please explicitly specify '
                     '`use_spot: true` in resources for on-demand fallback.')
-        requested_ports = list(
-            resources_utils.port_ranges_to_set(requested_resources.ports))
-        if len(requested_ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port = requested_ports[0]
-        if replica_ingress_port is None:
-            replica_ingress_port = service_port
-        elif service_port != replica_ingress_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Got multiple ports: {service_port} and '
-                    f'{replica_ingress_port} in different resources. '
-                    'Please specify the same port instead.')
+        if task.service.ports is None:
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'To open multiple ports on the replica, please set the '
+                        '`service.ports` field to specify a main service port. '
+                        'Must only specify one port in resources otherwise. '
+                        'Each replica will use the port specified as '
+                        'application ingress port.')
+            service_port = requested_ports[0]
+            if replica_ingress_port is None:
+                replica_ingress_port = service_port
+            elif service_port != replica_ingress_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{replica_ingress_port} in different resources. '
+                        'Please specify the same port instead.')
+
+
+def _rewrite_tls_credential_paths_and_get_tls_env_vars(
+        service_name: str, task: 'sky.Task') -> Dict[str, Any]:
+    """Rewrite the paths of TLS credentials in the task.
+
+    Args:
+        service_name: Name of the service.
+        task: sky.Task to rewrite.
+
+    Returns:
+        The generated template variables for TLS.
+    """
+    service_spec = task.service
+    # Already checked by _validate_service_task
+    assert service_spec is not None
+    if service_spec.tls_credential is None:
+        return {'use_tls': False}
+    remote_tls_keyfile = (
+        serve_utils.generate_remote_tls_keyfile_name(service_name))
+    remote_tls_certfile = (
+        serve_utils.generate_remote_tls_certfile_name(service_name))
+    tls_template_vars = {
+        'use_tls': True,
+        'remote_tls_keyfile': remote_tls_keyfile,
+        'remote_tls_certfile': remote_tls_certfile,
+        'local_tls_keyfile': service_spec.tls_credential.keyfile,
+        'local_tls_certfile': service_spec.tls_credential.certfile,
+    }
+    service_spec.tls_credential = serve_utils.TLSCredential(
+        remote_tls_keyfile, remote_tls_certfile)
+    return tls_template_vars
 
 
 @usage_lib.entrypoint
@@ -138,7 +175,10 @@ def up(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, path='serve')
+            task, task_type='serve')
+
+    tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
+        service_name, task)
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
@@ -168,6 +208,7 @@ def up(
             'remote_user_config_path': remote_config_yaml_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
@@ -273,10 +314,16 @@ def up(
         else:
             lb_port = serve_utils.load_service_initialization_result(
                 lb_port_payload)
-            endpoint = backend_utils.get_endpoints(
+            socket_endpoint = backend_utils.get_endpoints(
                 controller_handle.cluster_name, lb_port,
                 skip_status_check=True).get(lb_port)
-            assert endpoint is not None, 'Did not get endpoint for controller.'
+            assert socket_endpoint is not None, (
+                'Did not get endpoint for controller.')
+            # Already checked by _validate_service_task
+            assert task.service is not None
+            protocol = ('http'
+                        if task.service.tls_credential is None else 'https')
+            endpoint = f'{protocol}://{socket_endpoint}'
 
         sky_logging.print(
             f'{fore.CYAN}Service name: '
@@ -325,6 +372,7 @@ def update(
         service_name: Name of the service.
     """
     _validate_service_task(task)
+
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -333,6 +381,14 @@ def update(
     dag, _ = admin_policy_utils.apply(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
+
+    assert task.service is not None
+    if task.service.tls_credential is not None:
+        logger.warning('Updating TLS keyfile and certfile is not supported. '
+                       'Any updates to the keyfile and certfile will not take '
+                       'effect. To update TLS keyfile and certfile, please '
+                       'tear down the service and spin up a new one.')
+
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -402,7 +458,7 @@ def update(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, path='serve')
+            task, task_type='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
     returncode, version_string_payload, stderr = backend.run_on_head(
@@ -600,6 +656,7 @@ def status(
             'requested_resources_str': (str) str representation of
               requested resources,
             'load_balancing_policy': (str) load balancing policy name,
+            'tls_encrypted': (bool) whether the service is TLS encrypted,
             'replica_info': (List[Dict[str, Any]]) replica information,
         }
 

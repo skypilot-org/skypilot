@@ -297,6 +297,16 @@ Paperspace
   mkdir -p ~/.paperspace
   echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
+Vast
+~~~~~~~~~~
+
+`Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
+
+.. code-block:: shell
+  
+  pip install "vastai-sdk>=0.1.12"
+  echo "<your_api_key_here>" > ~/.vast_api_key
+
 RunPod
 ~~~~~~~~~~
 
