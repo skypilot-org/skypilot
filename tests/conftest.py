@@ -47,7 +47,7 @@ cloud_to_pytest_keyword = {
     'do': 'do',
     'vast': 'vast',
     'runpod': 'runpod',
-	'nebius': 'nebius'
+    'nebius': 'nebius'
 }
 
 

@@ -190,7 +190,6 @@ class Nebius(clouds.Cloud):
             'image_id': image_family,
             # Nebius does not support specific zones.
             'zones': None,
-            'zones': None,
         }
 
     def _get_feasible_launchable_resources(
