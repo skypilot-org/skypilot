@@ -81,7 +81,6 @@ class Nebius(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Tuple[Optional[float], Optional[float]]:
-        logging.debug('Nebius cloud get vcpus mem: %s', cls._REPR)
         return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
                                                                 clouds='nebius')
 
@@ -122,12 +121,10 @@ class Nebius(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> float:
         """Returns the hourly cost of the accelerators, in dollars/hour."""
-        logging.debug('Nebius cloud accelerators to hourly cost: 0')
         del accelerators, use_spot, region, zone  # unused
         return 0.0
 
     def get_egress_cost(self, num_gigabytes: float) -> float:
-        logging.debug('Nebius cloud get egress cost: 0',)
         return 0.0
 
     def __repr__(self):
@@ -191,6 +188,7 @@ class Nebius(clouds.Cloud):
             'region': region.name,
             'image_id': image_family,
             # Nebius does not support specific zones.
+            'zones': None,
             'zones': None,
         }
 
@@ -275,7 +273,6 @@ class Nebius(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        logging.debug('Nebius cloud get credential file mounts')
         return {
             f'~/.nebius/{filename}': f'~/.nebius/{filename}'
             for filename in _CREDENTIAL_FILES
@@ -283,17 +280,14 @@ class Nebius(clouds.Cloud):
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
-        logging.debug('Nebius cloud get current user identity')
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None
 
     def instance_type_exists(self, instance_type: str) -> bool:
-        logging.debug('Nebius cloud instance type exists: %s', instance_type)
         return service_catalog.instance_type_exists(instance_type, 'nebius')
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        logging.debug('Nebius cloud validate region zone: %s', zone)
         return service_catalog.validate_region_zone(region,
                                                     zone,
                                                     clouds='nebius')
