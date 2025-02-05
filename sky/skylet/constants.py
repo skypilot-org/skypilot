@@ -55,7 +55,7 @@ SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
-SKY_UV_CMD = f'{SKY_UV_INSTALL_DIR}/uv'
+SKY_UV_CMD = f'UV_SYSTEM_PYTHON=false {SKY_UV_INSTALL_DIR}/uv'
 # This won't reinstall uv if it's already installed, so it's safe to re-run.
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
@@ -86,7 +86,7 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '10'
+SKYLET_VERSION = '11'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -268,7 +268,7 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
-FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{id}'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{user_hash}-{id}'
 FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
 FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 

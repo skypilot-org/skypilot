@@ -60,6 +60,14 @@ logger = sky_logging.init_logger('sky.jobs.controller')
 _MANAGED_JOB_SCHEDULER_LOCK = '~/.sky/locks/managed_job_scheduler.lock'
 _ALIVE_JOB_LAUNCH_WAIT_INTERVAL = 0.5
 
+# Based on testing, assume a running job uses 350MB memory.
+JOB_MEMORY_MB = 350
+# Past 2000 simultaneous jobs, we become unstable.
+# See https://github.com/skypilot-org/skypilot/issues/4649.
+MAX_JOB_LIMIT = 2000
+# Number of ongoing launches launches allowed per CPU.
+LAUNCHES_PER_CPU = 4
+
 
 @lru_cache(maxsize=1)
 def _get_lock_path() -> str:
@@ -247,15 +255,16 @@ def _set_alive_waiting(job_id: int) -> None:
 
 
 def _get_job_parallelism() -> int:
-    # Assume a running job uses 350MB memory.
-    # We observe 230-300 in practice.
-    job_memory = 350 * 1024 * 1024
-    return max(psutil.virtual_memory().total // job_memory, 1)
+    job_memory = JOB_MEMORY_MB * 1024 * 1024
+
+    job_limit = min(psutil.virtual_memory().total // job_memory, MAX_JOB_LIMIT)
+
+    return max(job_limit, 1)
 
 
 def _get_launch_parallelism() -> int:
     cpus = os.cpu_count()
-    return cpus * 4 if cpus is not None else 1
+    return cpus * LAUNCHES_PER_CPU if cpus is not None else 1
 
 
 def _can_start_new_job() -> bool:

@@ -26,6 +26,7 @@
 
 ----
 :fire: *News* :fire:
+- [Jan 2025] Launch and Serve **[DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1)** and **[Janus](https://github.com/deepseek-ai/DeepSeek-Janus)** on Kubernetes or Any Cloud: [**R1 example**](./llm/deepseek-r1/) and [**Janus example**](./llm/deepseek-janus/)
 - [Oct 2024] :tada: **SkyPilot crossed 1M+ downloads** :tada:: Thank you to our community! [**Twitter/X**](https://x.com/skypilot_org/status/1844770841718067638)
 - [Sep 2024] Point, Launch and Serve **Llama 3.2** on Kubernetes or Any Cloud: [**example**](./llm/llama-3_2/)
 - [Sep 2024] Run and deploy [**Pixtral**](./llm/pixtral), the first open-source multimodal model from Mistral AI.
@@ -161,6 +162,8 @@ To learn more, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/s
 Runnable examples:
 - [**AI Gallery**](https://docs.skypilot.co/en/latest/gallery/index.html)
 - LLMs on SkyPilot
+  - [DeepSeek-R1](./llm/deepseek-r1/)
+  - [DeepSeek-Janus](./llm/deepseek-janus/)
   - [Llama 3.2: lightweight and vision models](./llm/llama-3_2/)
   - [Pixtral](./llm/pixtral/)
   - [Llama 3.1 finetuning](./llm/llama-3_1-finetuning/) and [serving](./llm/llama-3_1/)
