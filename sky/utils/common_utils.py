@@ -28,7 +28,6 @@ from sky.utils import validator
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
-USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
 # possibilities. considering the final cluster name contains the prefix as well,

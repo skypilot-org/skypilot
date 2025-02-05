@@ -288,7 +288,6 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
     """Test managed job recovery for a pipeline."""
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
-    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     region = aws_config_region
     if region != 'us-east-2':
         pytest.skip('Only run spot pipeline recovery test in us-east-2')
@@ -342,7 +341,6 @@ def test_managed_jobs_pipeline_recovery_gcp():
     name = smoke_tests_utils.get_cluster_name()
     zone = 'us-east4-b'
     user_hash = common_utils.get_user_hash()
-    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     query_cmd = (
         'gcloud compute instances list --filter='
         f'"(labels.ray-cluster-name:*-${{MANAGED_JOB_ID}}-{user_hash})" '
