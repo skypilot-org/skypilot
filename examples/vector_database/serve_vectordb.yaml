@@ -14,9 +14,7 @@ resources:
     V100: 1
   memory: 32+
   ports: 8000
-  any_of:
-    - use_spot: true 
-    - use_spot: false
+  use_spot: true 
 
 file_mounts:
   /vectordb:
