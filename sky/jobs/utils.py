@@ -248,7 +248,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         schedule_state = tasks[0]['schedule_state']
 
         # Backwards compatibility: this job was submitted when ray was still
-        # used for managing the parallelism of job controllers.
+        # used for managing the parallelism of job controllers, before #4485.
         # TODO(cooperc): Remove before 0.11.0.
         if (schedule_state is
                 managed_job_state.ManagedJobScheduleState.INVALID):
@@ -259,7 +259,8 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         pid = tasks[0]['controller_pid']
         if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
             # There are two cases where we could get a job that is DONE.
-            # 1. At query time, the job was not yet DONE, but since then it has
+            # 1. At query time (get_jobs_to_check_status), the job was not yet
+            #    DONE, but since then (before get_managed_jobs is called) it has
             #    hit a terminal status, marked itself done, and exited. This is
             #    fine.
             # 2. The job is DONE, but in a non-terminal status. This is
@@ -304,6 +305,16 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.debug(f'Checking controller pid {pid}')
             if _controller_process_alive(pid, job_id):
                 # The controller is still running, so this job is fine.
+                continue
+
+            # Double check job is not already DONE before marking as failed, to
+            # avoid the race where the controller marked itself as DONE and
+            # exited between the state check and the pid check. Since the job
+            # controller process will mark itself DONE _before_ exiting, if it
+            # has exited and it's still not DONE now, it is abnormal.
+            if (managed_job_state.get_job_schedule_state(job_id) ==
+                    managed_job_state.ManagedJobScheduleState.DONE):
+                # Never mind, the job is DONE now. This is fine.
                 continue
 
             logger.error(f'Controller process for {job_id} seems to be dead.')
