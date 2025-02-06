@@ -276,9 +276,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                          f'{", ".join(task["status"].value for task in tasks)}')
             failure_reason = ('Inconsistent internal job state. This is a bug')
         elif pid is None:
-            # Note: we already know that this is a non-legacy job, since it has
-            # a schedule state. (Legacy jobs are handled above.) So we expect
-            # that the controller just hasn't been started yet.
+            # Non-legacy job and controller process has not yet started.
             if schedule_state in (
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
                     managed_job_state.ManagedJobScheduleState.WAITING):
