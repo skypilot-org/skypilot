@@ -1072,6 +1072,7 @@ def test_azure_start_stop():
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_nebius  # Nebius does not autostop yet
 def test_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1129,7 +1130,7 @@ def test_autostop(generic_cloud: str):
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout + smoke_tests_utils.BUMP_UP_SECONDS),
+                timeout=autostop_timeout),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -1505,7 +1506,7 @@ def test_azure_start_stop_two_nodes():
                 cluster_status=[
                     sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED
                 ],
-                timeout=200 + smoke_tests_utils.BUMP_UP_SECONDS) +
+                timeout=200) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
