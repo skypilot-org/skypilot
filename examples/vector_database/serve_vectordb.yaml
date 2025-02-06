@@ -1,0 +1,46 @@
+name: vectordb-serve
+
+workdir: .
+
+resources:
+  accelerators: 
+    # ordered by pricing (cheapest to most expensive)
+    # skypilot will try to use the cheapest available accelerator
+    # serve requires a GPU to compute the embeddings
+    T4: 1
+    L4: 1
+    A10G: 1
+    A10: 1
+    V100: 1
+  memory: 32+
+  ports: 8000
+  use_spot: true 
+
+file_mounts:
+  /vectordb:
+    name: sky-vectordb
+    # this needs to be the same as the source in the build_vectordb.yaml
+    mode: MOUNT
+  /images:
+    name: sky-demo-image
+    # this needs to be the same as the source in the build_vectordb.yaml
+    mode: MOUNT
+
+setup: |
+  pip install numpy==1.26.4
+  pip install torch==2.5.1 torchvision==0.20.1 ftfy regex tqdm
+  pip install open_clip_torch chromadb pandas
+  pip install fastapi uvicorn pydantic
+
+run: |
+  python scripts/serve_vectordb.py \
+    --collection-name clip_embeddings \
+    --persist-dir /vectordb/chroma \
+    --images-dir /images \
+    --host 0.0.0.0 \
+    --port 8000 
+
+service:
+  replicas: 1
+  readiness_probe:
+    path: /health
