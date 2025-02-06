@@ -241,9 +241,8 @@ Read the research:
    :caption: References
 
    Task YAML <../reference/yaml-spec>
-   ../serving/service-yaml-spec
-   SkyPilot CLI <../reference/cli>
-   SkyPilot Python API <../reference/api>
+   CLI <../reference/cli>
+   Python API <../reference/api>
    ../reference/config
    ../developers/index
 
