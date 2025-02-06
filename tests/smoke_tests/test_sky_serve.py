@@ -238,6 +238,7 @@ def test_skyserve_oci_http():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
@@ -298,6 +299,7 @@ def test_skyserve_spot_recovery():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
 @pytest.mark.no_do
@@ -367,6 +369,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -399,6 +402,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
 def test_skyserve_load_balancer(generic_cloud: str):
@@ -465,6 +469,7 @@ def test_skyserve_auto_restart():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
@@ -490,6 +495,7 @@ def test_skyserve_cancel(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
@@ -509,6 +515,7 @@ def test_skyserve_streaming(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
@@ -532,6 +539,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
@@ -553,6 +561,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -584,6 +593,7 @@ def test_skyserve_update(generic_cloud: str):
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -621,6 +631,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 
 @pytest.mark.no_fluidstack
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -662,6 +673,7 @@ def test_skyserve_fast_update(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
@@ -702,6 +714,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.no_do  # Spot instances not on DO
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -766,6 +779,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
@@ -876,6 +890,7 @@ def test_skyserve_multi_ports(generic_cloud: str):
 
 
 # ------- Testing user dependencies --------
+@pytest.mark.no_vast  # Requires GCS
 def test_user_dependencies(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

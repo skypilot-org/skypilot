@@ -122,7 +122,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,<32.0.0'],
+    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
@@ -131,6 +131,7 @@ extras_require: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
+    'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

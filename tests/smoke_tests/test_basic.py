@@ -34,6 +34,7 @@ from sky.utils import common_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+@pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
@@ -155,6 +156,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_vast  # This requires port opening
 def test_stale_job(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -176,6 +178,7 @@ def test_stale_job(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -213,6 +216,7 @@ def test_aws_stale_job_manual_restart():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -250,6 +254,7 @@ def test_gcp_stale_job_manual_restart():
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -267,6 +272,7 @@ def test_env_check(generic_cloud: str):
 
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -420,6 +426,7 @@ class TestYamlSpecs:
 
 
 # ---------- Testing Multiple Accelerators ----------
+@pytest.mark.no_vast  # Vast has low availability for K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
 @pytest.mark.no_do  # DO does not support K80s
@@ -437,6 +444,7 @@ def test_multiple_accelerators_ordered():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_do  # DO does not have multiple accelerators
@@ -454,6 +462,7 @@ def test_multiple_accelerators_ordered_with_default():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_do  # DO does not have multiple accelerators
@@ -470,6 +479,7 @@ def test_multiple_accelerators_unordered():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
 @pytest.mark.no_do  # DO does not support multiple accelerators
@@ -487,6 +497,7 @@ def test_multiple_accelerators_unordered_with_default():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
@@ -503,6 +514,7 @@ def test_multiple_resources():
 
 # ---------- Sky Benchmark ----------
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 @pytest.mark.aws  # SkyBenchmark requires S3 access

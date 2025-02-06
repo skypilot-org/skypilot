@@ -268,7 +268,7 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 # Used for translate local file mounts to cloud storage. Please refer to
 # sky/execution.py::_maybe_translate_local_file_mounts_and_sync_up for
 # more details.
-FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{id}'
+FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{user_hash}-{id}'
 FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
 FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 
@@ -278,7 +278,7 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
-# The default idle timeout for SkyPilot controllers. This include spot
+# The default idle timeout for SkyPilot controllers. This include jobs
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
