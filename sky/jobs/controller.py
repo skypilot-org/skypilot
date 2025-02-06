@@ -68,7 +68,7 @@ class JobsController:
             else:
                 assert task.name is not None, task
                 task_name = task.name
-                # This is guaranteed by the spot_launch API, where we fill in
+                # This is guaranteed by the jobs.launch API, where we fill in
                 # the task.name with
                 # dag_utils.maybe_infer_and_fill_dag_and_task_names.
                 assert task_name is not None, self._dag
@@ -137,8 +137,8 @@ class JobsController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when
-                all prechecks passed but the maximum number of retries is
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
                 due to:
                 1. Any of the underlying failover exceptions is due to resources
@@ -482,8 +482,6 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
-    # NOTE: The code to get cluster name is same as what we did in the spot
-    # controller, we should keep it in sync with JobsController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
