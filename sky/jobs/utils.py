@@ -274,7 +274,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Job {job_id} has DONE schedule state, but some '
                          f'tasks are not terminal. Task statuses: '
                          f'{", ".join(task["status"].value for task in tasks)}')
-            failure_reason = ('Inconsistent internal job state. This is a bug')
+            failure_reason = ('Inconsistent internal job state. This is a bug.')
         elif pid is None:
             # Non-legacy job and controller process has not yet started.
             if schedule_state in (
