@@ -159,7 +159,7 @@ Read the research:
    :caption: Clusters
 
    Start a Cluster <../examples/interactive-development>
-   SkyPilot Provisioner <../examples/auto-failover>
+   ../examples/auto-failover
    ../reference/auto-stop
 
 .. toctree::
@@ -216,7 +216,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
-   Secrets & Environment Variables <../running-jobs/environment-variables>
+   Secrets and Environment Variables <../running-jobs/environment-variables>
    Docker Containers <../examples/docker-containers>
    ../examples/ports
    ../reference/logging

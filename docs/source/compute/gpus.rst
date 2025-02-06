@@ -1,6 +1,6 @@
 .. _accelerators:
 
-GPUs & Accelerators
+GPUs and Accelerators
 ============================
 
 SkyPilot supports a wide range of GPUs, TPUs, and other accelerators.

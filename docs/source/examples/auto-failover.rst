@@ -1,6 +1,6 @@
 .. _auto-failover:
 
-SkyPilot Provisioner
+Provisioning Compute
 ====================
 
 SkyPilot comes with an auto-failover provisioner, which
