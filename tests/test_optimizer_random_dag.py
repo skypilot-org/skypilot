@@ -10,6 +10,7 @@ import sky
 from sky import clouds
 from sky import exceptions
 from sky.clouds import service_catalog
+from sky.utils import registry
 
 ALL_INSTANCE_TYPE_INFOS = sum(
     sky.list_accelerators(gpus_only=True).values(), [])
@@ -82,7 +83,7 @@ def generate_random_dag(
                     if 'tpu' in candidate.accelerator_name:
                         instance_type = 'TPU-VM'
                 resources = sky.Resources(
-                    cloud=clouds.CLOUD_REGISTRY.from_str(candidate.cloud),
+                    cloud=registry.CLOUD_REGISTRY.from_str(candidate.cloud),
                     instance_type=instance_type,
                     accelerators={
                         candidate.accelerator_name: candidate.accelerator_count

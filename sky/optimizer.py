@@ -1,7 +1,6 @@
 """Optimizer: assigns best resources to user tasks."""
 import collections
 import copy
-import enum
 import json
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
@@ -17,6 +16,8 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -43,12 +44,6 @@ _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
 _PerCloudCandidates = Dict[clouds.Cloud, List[resources_lib.Resources]]
 # task -> per-cloud candidates
 _TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
-
-
-# Constants: minimize what target?
-class OptimizeTarget(enum.Enum):
-    COST = 0
-    TIME = 1
 
 
 # For logging purposes.
@@ -107,11 +102,12 @@ class Optimizer:
 
     @staticmethod
     @timeline.event
+    @usage_lib.entrypoint('sky.optimizer.optimize')
     def optimize(dag: 'dag_lib.Dag',
-                 minimize: OptimizeTarget = OptimizeTarget.COST,
+                 minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
-                 quiet: bool = False):
+                 quiet: bool = False) -> 'dag_lib.Dag':
         """Find the best execution plan for the given DAG.
 
         Args:
@@ -127,14 +123,13 @@ class Optimizer:
         """
         with rich_utils.safe_status(ux_utils.spinner_message('Optimizing')):
             _check_specified_clouds(dag)
-
             # This function is effectful: mutates every node in 'dag' by setting
             # node.best_resources if it is None.
             Optimizer._add_dummy_source_sink_nodes(dag)
             try:
                 unused_best_plan = Optimizer._optimize_dag(
                     dag=dag,
-                    minimize_cost=minimize == OptimizeTarget.COST,
+                    minimize_cost=minimize == common.OptimizeTarget.COST,
                     blocked_resources=blocked_resources,
                     quiet=quiet)
             finally:
@@ -1283,6 +1278,9 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
+        # Validate the resources first which may fill in missing fields
+        # automatically for the resources.
+        resources.validate()
         if (resources.cloud is not None and
                 not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
             # Skip the resources that are on a cloud that is not enabled. The

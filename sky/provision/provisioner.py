@@ -17,7 +17,6 @@ from sky import clouds
 from sky import exceptions
 from sky import provision
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_common
@@ -26,8 +25,10 @@ from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -537,7 +538,7 @@ def _post_provision_setup(
                 stream_logs=False,
                 require_outputs=True)
             if not returncode:
-                ray_port = common_utils.decode_payload(stdout)['ray_port']
+                ray_port = message_utils.decode_payload(stdout)['ray_port']
                 logger.debug(f'Ray cluster on head is up with port {ray_port}.')
 
             head_ray_needs_restart = bool(returncode)

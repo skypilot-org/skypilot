@@ -23,14 +23,15 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
-from sky.serve import serve_utils
 from sky.setup_files import dependencies
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -61,9 +62,7 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    # Use a list of strings to support fallback to old names. The list is in the
-    # fallback order.
-    candidate_cluster_names: List[str]
+    cluster_name: str
     in_progress_hint: str
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
@@ -72,15 +71,6 @@ class _ControllerSpec:
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
-
-    @property
-    def cluster_name(self) -> str:
-        """The name in candidate_cluster_names that exists, else the first."""
-        for candidate_name in self.candidate_cluster_names:
-            record = global_user_state.get_cluster_from_name(candidate_name)
-            if record is not None:
-                return candidate_name
-        return self.candidate_cluster_names[0]
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -93,6 +83,7 @@ class _ControllerSpec:
             cluster_name=self.cluster_name)
 
 
+# TODO: refactor controller class to not be an enum.
 class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
@@ -100,10 +91,11 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        candidate_cluster_names=[
-            managed_job_utils.JOB_CONTROLLER_NAME,
-            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
-        ],
+        # Default cluster name is the current user's controller cluster unless
+        # caller initiate with a different controller name.
+        # TODO(zhwu): by having the controller name loaded in common, it
+        # will not respect the latest updated user hash.
+        cluster_name=common.JOB_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
@@ -133,7 +125,7 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
+        cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
             f'sky serve status -a{colorama.Style.RESET_ALL}'),
@@ -169,10 +161,18 @@ class Controllers(enum.Enum):
             The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
-        for controller in cls:
-            if name in controller.value.candidate_cluster_names:
-                return controller
-        return None
+        if name is None:
+            return None
+        controller = None
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
+            controller = cls.SKY_SERVE_CONTROLLER
+        elif name.startswith(common.JOB_CONTROLLER_PREFIX):
+            controller = cls.JOBS_CONTROLLER
+        if controller is not None and name != controller.value.cluster_name:
+            # Input name is not the current user's controller name,
+            # so need to set the controller's cluster name to the input name.
+            controller.value.cluster_name = name
+        return controller
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
@@ -323,7 +323,7 @@ def download_and_stream_latest_job_log(
 
     If the log cannot be fetched for any reason, return None.
     """
-    os.makedirs(local_dir, exist_ok=True)
+    os.makedirs(os.path.expanduser(local_dir), exist_ok=True)
     log_file = None
     try:
         log_dirs = backend.sync_down_logs(
@@ -572,7 +572,7 @@ def get_controller_resources(
             # Create combinations of cloud, region, and zone.
             for zone in filtered_zones:
                 resource_copy = controller_resources_to_use.copy(
-                    cloud=clouds.CLOUD_REGISTRY.from_str(cloud_name),
+                    cloud=registry.CLOUD_REGISTRY.from_str(cloud_name),
                     region=region,
                     zone=zone)
                 result.add(resource_copy)
@@ -584,7 +584,7 @@ def get_controller_resources(
 
 def _setup_proxy_command_on_controller(
         controller_launched_cloud: 'clouds.Cloud',
-        user_config: Dict[str, Any]) -> skypilot_config.Config:
+        user_config: Dict[str, Any]) -> config_utils.Config:
     """Sets up proxy command on the controller.
 
     This function should be called on the controller (remote cluster), which
@@ -618,7 +618,7 @@ def _setup_proxy_command_on_controller(
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    config = skypilot_config.Config.from_dict(user_config)
+    config = config_utils.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
     ssh_proxy_command = config.get_nested(proxy_command_key, None)
@@ -689,17 +689,6 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             return path
         return os.path.join(sub_path, path).strip('/')
 
-    def assert_no_bucket_creation(store: storage_lib.AbstractStore) -> None:
-        if store.is_sky_managed:
-            # Bucket was created, this should not happen since use configured
-            # the bucket and we assumed it already exists.
-            store.delete()
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.StorageBucketCreateError(
-                    f'{task_type.capitalize()} bucket {store.name!r} does not '
-                    f'exist. Please check {task_type}.bucket configuration in '
-                    'your SkyPilot config.')
-
     # We use uuid to generate a unique run id for the job, so that the bucket/
     # subdirectory name is unique across different jobs/services.
     # We should not use common_utils.get_usage_run_id() here, because when
@@ -737,16 +726,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     bucket_wth_prefix = skypilot_config.get_nested((task_type, 'bucket'), None)
     store_kwargs: Dict[str, Any] = {}
     if bucket_wth_prefix is None:
-        store_type = store_cls = sub_path = None
+        store_type = sub_path = None
         storage_account_name = region = None
         bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
             username=common_utils.get_cleaned_username(),
             user_hash=user_hash,
             id=run_id)
     else:
-        store_type, store_cls, bucket_name, sub_path, storage_account_name, \
-            region = storage_lib.StoreType.get_fields_from_store_url(
-                bucket_wth_prefix)
+        (store_type, bucket_name, sub_path, storage_account_name, region) = (
+            storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
         if storage_account_name is not None:
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
@@ -767,22 +755,19 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id))
         stores = None
         if store_type is not None:
-            assert store_cls is not None
-            with sky_logging.silent():
-                stores = {
-                    store_type: store_cls(name=bucket_name,
-                                          source=workdir,
-                                          _bucket_sub_path=bucket_sub_path,
-                                          **store_kwargs)
-                }
-                assert_no_bucket_creation(stores[store_type])
+            stores = [store_type]
 
-        storage_obj = storage_lib.Storage(name=bucket_name,
-                                          source=workdir,
-                                          persistent=False,
-                                          mode=storage_lib.StorageMode.COPY,
-                                          stores=stores,
-                                          _bucket_sub_path=bucket_sub_path)
+        storage_obj = storage_lib.Storage(
+            name=bucket_name,
+            source=workdir,
+            persistent=False,
+            mode=storage_lib.StorageMode.COPY,
+            stores=stores,
+            # Set `_is_sky_managed` to False when `bucket_with_prefix` is
+            # specified, so that the storage is not deleted when job finishes,
+            # but only the sub path is deleted.
+            _is_sky_managed=bucket_wth_prefix is None,
+            _bucket_sub_path=bucket_sub_path)
         new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
@@ -805,20 +790,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             sub_path, constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
         stores = None
         if store_type is not None:
-            assert store_cls is not None
-            with sky_logging.silent():
-                store = store_cls(name=bucket_name,
-                                  source=src,
-                                  _bucket_sub_path=bucket_sub_path,
-                                  **store_kwargs)
-
-                stores = {store_type: store}
-                assert_no_bucket_creation(stores[store_type])
+            stores = [store_type]
         storage_obj = storage_lib.Storage(name=bucket_name,
                                           source=src,
                                           persistent=False,
                                           mode=storage_lib.StorageMode.COPY,
                                           stores=stores,
+                                          _is_sky_managed=not bucket_wth_prefix,
                                           _bucket_sub_path=bucket_sub_path)
         new_storage_mounts[dst] = storage_obj
         logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
@@ -828,88 +806,87 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # Hard link the files in src to a temporary directory, and upload folder.
     file_mounts_tmp_subpath = _sub_path_join(
         sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
-    local_fm_path = os.path.join(
-        tempfile.gettempdir(),
-        constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
-    os.makedirs(local_fm_path, exist_ok=True)
-    file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
-        task_type)
-    if copy_mounts_with_file_in_src:
-        src_to_file_id = {}
-        for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
-            src_to_file_id[src] = i
-            os.link(os.path.abspath(os.path.expanduser(src)),
-                    os.path.join(local_fm_path, f'file-{i}'))
-        stores = None
-        if store_type is not None:
-            assert store_cls is not None
-            with sky_logging.silent():
-                stores = {
-                    store_type: store_cls(
-                        name=bucket_name,
-                        source=local_fm_path,
-                        _bucket_sub_path=file_mounts_tmp_subpath,
-                        **store_kwargs)
-                }
-                assert_no_bucket_creation(stores[store_type])
-        storage_obj = storage_lib.Storage(
-            name=bucket_name,
-            source=local_fm_path,
-            persistent=False,
-            mode=storage_lib.StorageMode.MOUNT,
-            stores=stores,
-            _bucket_sub_path=file_mounts_tmp_subpath)
+    base_tmp_dir = os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
+    os.makedirs(base_tmp_dir, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
+        local_fm_path = os.path.join(
+            temp_path, constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
+        os.makedirs(local_fm_path, exist_ok=True)
+        file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
+            task_type)
+        if copy_mounts_with_file_in_src:
+            src_to_file_id = {}
+            for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
+                src_to_file_id[src] = i
+                os.link(os.path.abspath(os.path.expanduser(src)),
+                        os.path.join(local_fm_path, f'file-{i}'))
+            stores = None
+            if store_type is not None:
+                stores = [store_type]
+            storage_obj = storage_lib.Storage(
+                name=bucket_name,
+                source=local_fm_path,
+                persistent=False,
+                mode=storage_lib.StorageMode.MOUNT,
+                stores=stores,
+                _is_sky_managed=not bucket_wth_prefix,
+                _bucket_sub_path=file_mounts_tmp_subpath)
 
-        new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
-        if file_mount_remote_tmp_dir in original_storage_mounts:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Failed to translate file mounts, due to the default '
-                    f'destination {file_mount_remote_tmp_dir} '
-                    'being taken.')
-        sources = list(src_to_file_id.keys())
-        sources_str = '\n    '.join(sources)
-        logger.info(f'  {colorama.Style.DIM}Files (listed below) '
-                    f' -> storage: {bucket_name}:'
-                    f'\n    {sources_str}{colorama.Style.RESET_ALL}')
+            new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+            if file_mount_remote_tmp_dir in original_storage_mounts:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Failed to translate file mounts, due to the default '
+                        f'destination {file_mount_remote_tmp_dir} '
+                        'being taken.')
+            sources = list(src_to_file_id.keys())
+            sources_str = '\n    '.join(sources)
+            logger.info(f'  {colorama.Style.DIM}Files (listed below) '
+                        f' -> storage: {bucket_name}:'
+                        f'\n    {sources_str}{colorama.Style.RESET_ALL}')
 
-    rich_utils.force_update_status(
-        ux_utils.spinner_message('Uploading translated local files/folders'))
-    task.update_storage_mounts(new_storage_mounts)
-
-    # Step 4: Upload storage from sources
-    # Upload the local source to a bucket. The task will not be executed
-    # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote jobs controller.
-    if task.storage_mounts:
-        # There may be existing (non-translated) storage mounts, so log this
-        # whenever task.storage_mounts is non-empty.
         rich_utils.force_update_status(
-            ux_utils.spinner_message('Uploading local sources to storage[/]  '
-                                     '[dim]View storages: sky storage ls'))
-    try:
-        task.sync_storage_mounts(force_sync=bucket_wth_prefix is not None)
-    except (ValueError, exceptions.NoCloudAccessError) as e:
-        if 'No enabled cloud for storage' in str(e) or isinstance(
-                e, exceptions.NoCloudAccessError):
-            data_src = None
-            if has_local_source_paths_file_mounts:
-                data_src = 'file_mounts'
-            if has_local_source_paths_workdir:
-                if data_src:
-                    data_src += ' and workdir'
-                else:
-                    data_src = 'workdir'
-            store_enabled_clouds = ', '.join(storage_lib.STORE_ENABLED_CLOUDS)
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(
-                    f'Unable to use {data_src} - no cloud with object store '
-                    'is enabled. Please enable at least one cloud with '
-                    f'object store support ({store_enabled_clouds}) by running '
-                    f'`sky check`, or remove {data_src} from your task.'
-                    '\nHint: If you do not have any cloud access, you may still'
-                    ' download data and code over the network using curl or '
-                    'other tools in the `setup` section of the task.') from None
+            ux_utils.spinner_message(
+                'Uploading translated local files/folders'))
+        task.update_storage_mounts(new_storage_mounts)
+
+        # Step 4: Upload storage from sources
+        # Upload the local source to a bucket. The task will not be executed
+        # locally, so we need to upload the files/folders to the bucket manually
+        # here before sending the task to the remote jobs controller.
+        if task.storage_mounts:
+            # There may be existing (non-translated) storage mounts, so log this
+            # whenever task.storage_mounts is non-empty.
+            rich_utils.force_update_status(
+                ux_utils.spinner_message(
+                    'Uploading local sources to storage[/]  '
+                    '[dim]View storages: sky storage ls'))
+        try:
+            task.sync_storage_mounts()
+        except (ValueError, exceptions.NoCloudAccessError) as e:
+            if 'No enabled cloud for storage' in str(e) or isinstance(
+                    e, exceptions.NoCloudAccessError):
+                data_src = None
+                if has_local_source_paths_file_mounts:
+                    data_src = 'file_mounts'
+                if has_local_source_paths_workdir:
+                    if data_src:
+                        data_src += ' and workdir'
+                    else:
+                        data_src = 'workdir'
+                store_enabled_clouds = ', '.join(
+                    storage_lib.STORE_ENABLED_CLOUDS)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        f'Unable to use {data_src} - no cloud with object '
+                        'store support is enabled. Please enable at least one '
+                        'cloud with object store support '
+                        f'({store_enabled_clouds}) by running `sky check`, or '
+                        f'remove {data_src} from your task.'
+                        '\nHint: If you do not have any cloud access, you may '
+                        'still download data and code over the network using '
+                        'curl or other tools in the `setup` section of the '
+                        'task.') from None
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
@@ -920,6 +897,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
         curr_store_type = list(storage_obj.stores.keys())[0]
         store_object = storage_obj.stores[curr_store_type]
+        assert store_object is not None
         bucket_url = storage_lib.StoreType.get_endpoint_url(
             store_object, bucket_name)
         bucket_url += f'/{file_mounts_tmp_subpath}'
@@ -941,6 +919,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'We only support one store type for now.', storage_obj.stores)
             curr_store_type = store_types[0]
             store_object = storage_obj.stores[curr_store_type]
+            assert store_object is not None and storage_obj.name is not None, (
+                store_object, storage_obj.name)
             storage_obj.source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             storage_obj.force_delete = True
@@ -959,7 +939,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 'We only support one store type for now.', storage_obj.stores)
             curr_store_type = store_types[0]
             store_object = storage_obj.stores[curr_store_type]
+            assert store_object is not None and storage_obj.name is not None, (
+                store_object, storage_obj.name)
             source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
+            assert store_object is not None and storage_obj.name is not None, (
                 store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,

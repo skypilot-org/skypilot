@@ -1,18 +1,21 @@
 """SDK functions for managed jobs."""
 import os
+import signal
+import subprocess
 import tempfile
+import time
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
 
-import sky
 from sky import backends
+from sky import core
 from sky import exceptions
+from sky import execution
 from sky import provision as provision_lib
 from sky import sky_logging
-from sky import status_lib
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -26,12 +29,16 @@ from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import sky
     from sky.backends import cloud_vm_ray_backend
+
+logger = sky_logging.init_logger(__name__)
 
 
 @timeline.event
@@ -40,10 +47,9 @@ def launch(
     task: Union['sky.Task', 'sky.Dag'],
     name: Optional[str] = None,
     stream_logs: bool = True,
-    detach_run: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a managed job.
+    """Launches a managed job.
 
     Please refer to sky.cli.job_launch for documentation.
 
@@ -51,7 +57,6 @@ def launch(
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch as a
           managed job.
         name: Name of the managed job.
-        detach_run: Whether to detach the run.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -77,7 +82,7 @@ def launch(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Only single-task or chain DAG is '
                              f'allowed for job_launch. Dag: {dag}')
-
+    dag.validate()
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
 
     task_names = set()
@@ -120,6 +125,7 @@ def launch(
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -143,15 +149,14 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        return sky.launch(task=controller_task,
-                          stream_logs=stream_logs,
-                          cluster_name=controller_name,
-                          detach_run=detach_run,
-                          idle_minutes_to_autostop=skylet_constants.
-                          CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                          retry_until_up=True,
-                          fast=True,
-                          _disable_controller_check=True)
+        return execution.launch(task=controller_task,
+                                cluster_name=controller_name,
+                                stream_logs=stream_logs,
+                                idle_minutes_to_autostop=skylet_constants.
+                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                retry_until_up=True,
+                                fast=True,
+                                _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -256,7 +261,20 @@ def _maybe_restart_controller(
     rich_utils.force_update_status(
         ux_utils.spinner_message(f'{spinner_message} - restarting '
                                  'controller'))
-    handle = sky.start(jobs_controller_type.value.cluster_name)
+    handle = core.start(cluster_name=jobs_controller_type.value.cluster_name)
+    # Make sure the dashboard is running when the controller is restarted.
+    # We should not directly use execution.launch() and have the dashboard cmd
+    # in the task setup because since we are using detached_setup, it will
+    # become a job on controller which messes up the job IDs (we assume the
+    # job ID in controller's job queue is consistent with managed job IDs).
+    logger.info('Starting dashboard...')
+    runner = handle.get_command_runners()[0]
+    runner.run(
+        f'export '
+        f'{skylet_constants.USER_ID_ENV_VAR}={common_utils.get_user_hash()!r}; '
+        f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
+        stream_logs=True,
+    )
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
 
@@ -267,7 +285,7 @@ def _maybe_restart_controller(
 @usage_lib.entrypoint
 def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get statuses of managed jobs.
+    """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
 
@@ -307,14 +325,10 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         stream_logs=False,
         separate_stderr=True)
 
-    try:
-        subprocess_utils.handle_returncode(returncode,
-                                           code,
-                                           'Failed to fetch managed jobs',
-                                           job_table_payload + stderr,
-                                           stream_logs=False)
-    except exceptions.CommandError as e:
-        raise RuntimeError(str(e)) from e
+    if returncode != 0:
+        logger.error(job_table_payload + stderr)
+        raise RuntimeError('Failed to fetch managed jobs with returncode: '
+                           f'{returncode}')
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
     if skip_finished:
@@ -334,7 +348,7 @@ def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
            all: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel managed jobs.
+    """Cancels managed jobs.
 
     Please refer to sky.cli.job_cancel for documentation.
 
@@ -428,22 +442,73 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                   controller=controller)
 
 
+def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
+    """Opens a dashboard for managed jobs (needs controller to be UP)."""
+    # TODO(SKY-1212): ideally, the controller/dashboard server should expose the
+    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
+    # see if the controller is UP first, which is slow; (2) not have to run SSH
+    # port forwarding first (we'd just launch a local dashboard which would make
+    # REST API calls to the controller dashboard server).
+    logger.info('Starting dashboard')
+    hint = ('Dashboard is not available if jobs controller is not up. Run '
+            'a managed job first or run: sky jobs queue --refresh')
+    handle = _maybe_restart_controller(
+        refresh=refresh,
+        stopped_message=hint,
+        spinner_message='Checking jobs controller')
+
+    # SSH forward a free local port to remote's dashboard port.
+    remote_port = skylet_constants.SPOT_DASHBOARD_REMOTE_PORT
+    free_port = common_utils.find_free_port(remote_port)
+    runner = handle.get_command_runners()[0]
+    port_forward_command = ' '.join(
+        runner.port_forward_command(port_forward=[(free_port, remote_port)],
+                                    connect_timeout=1))
+    port_forward_command = (
+        f'{port_forward_command} '
+        f'> ~/sky_logs/api_server/dashboard-{common_utils.get_user_hash()}.log '
+        '2>&1')
+    logger.info(f'Forwarding port: {colorama.Style.DIM}{port_forward_command}'
+                f'{colorama.Style.RESET_ALL}')
+
+    ssh_process = subprocess.Popen(port_forward_command,
+                                   shell=True,
+                                   start_new_session=True)
+    time.sleep(3)  # Added delay for ssh_command to initialize.
+    logger.info(f'{colorama.Fore.GREEN}Dashboard is now available at: '
+                f'http://127.0.0.1:{free_port}{colorama.Style.RESET_ALL}')
+
+    return free_port, ssh_process.pid
+
+
+def stop_dashboard_forwarding(pid: int) -> None:
+    # Exit the ssh command when the context manager is closed.
+    try:
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
+    except ProcessLookupError:
+        # This happens if jobs controller is auto-stopped.
+        pass
+    logger.info('Forwarding port closed. Exiting.')
+
+
 @usage_lib.entrypoint
-def sync_down_logs(
+def download_logs(
         name: Optional[str],
         job_id: Optional[int],
         refresh: bool,
         controller: bool,
-        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
+        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     """Sync down logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
+
+    Returns:
+        A dictionary mapping job ID to the local path.
 
     Raises:
         ValueError: invalid arguments.
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
-    # TODO(zhwu): Automatically restart the jobs controller
     if name is not None and job_id is not None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Cannot specify both name and job_id.')
@@ -467,8 +532,8 @@ def sync_down_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    backend.sync_down_managed_job_logs(handle,
-                                       job_id=job_id,
-                                       job_name=name,
-                                       controller=controller,
-                                       local_dir=local_dir)
+    return backend.sync_down_managed_job_logs(handle,
+                                              job_id=job_id,
+                                              job_name=name,
+                                              controller=controller,
+                                              local_dir=local_dir)

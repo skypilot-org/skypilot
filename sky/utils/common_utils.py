@@ -5,7 +5,7 @@ import functools
 import getpass
 import hashlib
 import inspect
-import json
+import io
 import os
 import platform
 import random
@@ -23,6 +23,8 @@ import yaml
 from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
+from sky.usage import constants as usage_constants
+from sky.utils import annotations
 from sky.utils import ux_utils
 from sky.utils import validator
 
@@ -37,16 +39,12 @@ CLUSTER_NAME_HASH_LENGTH = 2
 
 _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 
-_PAYLOAD_PATTERN = re.compile(r'<sky-payload>(.*)</sky-payload>')
-_PAYLOAD_STR = '<sky-payload>{}</sky-payload>'
-
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
 
-_usage_run_id = None
 
-
+@annotations.lru_cache(scope='request')
 def get_usage_run_id() -> str:
     """Returns a unique run id for each 'run'.
 
@@ -54,42 +52,44 @@ def get_usage_run_id() -> str:
     and has called its CLI or programmatic APIs. For example, two successive
     `sky launch` are two runs.
     """
-    global _usage_run_id
-    if _usage_run_id is None:
-        _usage_run_id = str(uuid.uuid4())
-    return _usage_run_id
+    usage_run_id = os.getenv(usage_constants.USAGE_RUN_ID_ENV_VAR)
+    if usage_run_id is not None:
+        return usage_run_id
+    return str(uuid.uuid4())
 
 
-def get_user_hash(force_fresh_hash: bool = False) -> str:
+def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
+    if user_hash is None:
+        return False
+    try:
+        int(user_hash, 16)
+    except (TypeError, ValueError):
+        return False
+    return len(user_hash) == USER_HASH_LENGTH
+
+
+def generate_user_hash() -> str:
+    """Generates a unique user-machine specific hash."""
+    hash_str = user_and_hostname_hash()
+    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
+    if not _is_valid_user_hash(user_hash):
+        # A fallback in case the hash is invalid.
+        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
+    return user_hash
+
+
+def get_user_hash() -> str:
     """Returns a unique user-machine specific hash as a user id.
 
     We cache the user hash in a file to avoid potential user_name or
     hostname changes causing a new user hash to be generated.
-
-    Args:
-        force_fresh_hash: Bypasses the cached hash in USER_HASH_FILE and the
-            hash in the USER_ID_ENV_VAR and forces a fresh user-machine hash
-            to be generated. Used by `kubernetes.ssh_key_secret_field_name` to
-            avoid controllers sharing the same ssh key field name as the
-            local client.
     """
+    user_hash = os.getenv(constants.USER_ID_ENV_VAR)
+    if _is_valid_user_hash(user_hash):
+        assert user_hash is not None
+        return user_hash
 
-    def _is_valid_user_hash(user_hash: Optional[str]) -> bool:
-        if user_hash is None:
-            return False
-        try:
-            int(user_hash, 16)
-        except (TypeError, ValueError):
-            return False
-        return len(user_hash) == USER_HASH_LENGTH
-
-    if not force_fresh_hash:
-        user_hash = os.getenv(constants.USER_ID_ENV_VAR)
-        if _is_valid_user_hash(user_hash):
-            assert user_hash is not None
-            return user_hash
-
-    if not force_fresh_hash and os.path.exists(_USER_HASH_FILE):
+    if os.path.exists(_USER_HASH_FILE):
         # Read from cached user hash file.
         with open(_USER_HASH_FILE, 'r', encoding='utf-8') as f:
             # Remove invalid characters.
@@ -97,19 +97,10 @@ def get_user_hash(force_fresh_hash: bool = False) -> str:
         if _is_valid_user_hash(user_hash):
             return user_hash
 
-    hash_str = user_and_hostname_hash()
-    user_hash = hashlib.md5(hash_str.encode()).hexdigest()[:USER_HASH_LENGTH]
-    if not _is_valid_user_hash(user_hash):
-        # A fallback in case the hash is invalid.
-        user_hash = uuid.uuid4().hex[:USER_HASH_LENGTH]
+    user_hash = generate_user_hash()
     os.makedirs(os.path.dirname(_USER_HASH_FILE), exist_ok=True)
-    if not force_fresh_hash:
-        # Do not cache to file if force_fresh_hash is True since the file may
-        # be intentionally using a different hash, e.g. we want to keep the
-        # user_hash for usage collection the same on the jobs/serve controller
-        # as users' local client.
-        with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
-            f.write(user_hash)
+    with open(_USER_HASH_FILE, 'w', encoding='utf-8') as f:
+        f.write(user_hash)
     return user_hash
 
 
@@ -254,7 +245,46 @@ class Backoff:
         return self._backoff
 
 
-def get_pretty_entry_point() -> str:
+_current_command: Optional[str] = None
+_current_client_entrypoint: Optional[str] = None
+
+
+def set_client_entrypoint_and_command(client_entrypoint: Optional[str],
+                                      client_command: Optional[str]):
+    """Override the current client entrypoint and command.
+
+    This is useful when we are on the SkyPilot API server side and we have a
+    client entrypoint and command from the client.
+    """
+    global _current_command, _current_client_entrypoint
+    _current_command = client_command
+    _current_client_entrypoint = client_entrypoint
+
+
+def get_current_command() -> str:
+    """Returns the command related to this operation.
+
+    Normally uses get_pretty_entry_point(), but will use the client command on
+    the server side.
+    """
+    if _current_command is not None:
+        return _current_command
+
+    return get_pretty_entrypoint_cmd()
+
+
+def get_current_client_entrypoint(server_entrypoint: str) -> str:
+    """Returns the current client entrypoint.
+
+    Gets the client entrypoint from the context, if it is not set, returns the
+    server entrypoint.
+    """
+    if _current_client_entrypoint is not None:
+        return _current_client_entrypoint
+    return server_entrypoint
+
+
+def get_pretty_entrypoint_cmd() -> str:
     """Returns the prettified entry point of this process (sys.argv).
 
     Example return values:
@@ -299,29 +329,51 @@ def user_and_hostname_hash() -> str:
     return f'{getpass.getuser()}-{hostname_hash}'
 
 
-def read_yaml(path: str) -> Dict[str, Any]:
+def read_yaml(path: Optional[str]) -> Dict[str, Any]:
+    if path is None:
+        raise ValueError('Attempted to read a None YAML.')
     with open(path, 'r', encoding='utf-8') as f:
         config = yaml.safe_load(f)
     return config
 
 
+def read_yaml_all_str(yaml_str: str) -> List[Dict[str, Any]]:
+    stream = io.StringIO(yaml_str)
+    config = yaml.safe_load_all(stream)
+    configs = list(config)
+    if not configs:
+        # Empty YAML file.
+        return [{}]
+    return configs
+
+
 def read_yaml_all(path: str) -> List[Dict[str, Any]]:
     with open(path, 'r', encoding='utf-8') as f:
-        config = yaml.safe_load_all(f)
-        configs = list(config)
-        if not configs:
-            # Empty YAML file.
-            return [{}]
-        return configs
+        return read_yaml_all_str(f.read())
 
 
 def dump_yaml(path: str, config: Union[List[Dict[str, Any]],
                                        Dict[str, Any]]) -> None:
+    """Dumps a YAML file.
+
+    Args:
+        path: the path to the YAML file.
+        config: the configuration to dump.
+    """
     with open(path, 'w', encoding='utf-8') as f:
         f.write(dump_yaml_str(config))
 
 
 def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
+    """Dumps a YAML string.
+
+    Args:
+        config: the configuration to dump.
+
+    Returns:
+        The YAML string.
+    """
+
     # https://github.com/yaml/pyyaml/issues/127
     class LineBreakDumper(yaml.SafeDumper):
 
@@ -409,43 +461,6 @@ def retry(method, max_retries=3, initial_backoff=1):
     return method_with_retries
 
 
-def encode_payload(payload: Any) -> str:
-    """Encode a payload to make it more robust for parsing.
-
-    This makes message transfer more robust to any additional strings added to
-    the message during transfer.
-
-    An example message that is polluted by the system warning:
-    "LC_ALL: cannot change locale (en_US.UTF-8)\n<sky-payload>hello, world</sky-payload>" # pylint: disable=line-too-long
-
-    Args:
-        payload: A str, dict or list to be encoded.
-
-    Returns:
-        A string that is encoded from the payload.
-    """
-    payload_str = json.dumps(payload)
-    payload_str = _PAYLOAD_STR.format(payload_str)
-    return payload_str
-
-
-def decode_payload(payload_str: str) -> Any:
-    """Decode a payload string.
-
-    Args:
-        payload_str: A string that is encoded from a payload.
-
-    Returns:
-        A str, dict or list that is decoded from the payload string.
-    """
-    matched = _PAYLOAD_PATTERN.findall(payload_str)
-    if not matched:
-        raise ValueError(f'Invalid payload string: \n{payload_str}')
-    payload_str = matched[0]
-    payload = json.loads(payload_str)
-    return payload
-
-
 def class_fullname(cls, skip_builtins: bool = True):
     """Get the full name of a class.
 
@@ -493,12 +508,14 @@ def remove_color(s: str):
     return _COLOR_PATTERN.sub('', s)
 
 
-def remove_file_if_exists(path: str):
+def remove_file_if_exists(path: Optional[str]):
     """Delete a file if it exists.
 
     Args:
         path: The path to the file.
     """
+    if path is None:
+        return
     try:
         os.remove(path)
     except FileNotFoundError:
@@ -601,7 +618,7 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
 
     if err_msg:
         with ux_utils.print_exception_no_traceback():
-            raise ValueError(err_msg)
+            raise exceptions.InvalidSkyPilotConfigError(err_msg)
 
 
 def get_cleaned_username(username: str = '') -> str:

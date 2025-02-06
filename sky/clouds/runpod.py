@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -15,7 +16,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class RunPod(clouds.Cloud):
     """ RunPod GPU Cloud
 

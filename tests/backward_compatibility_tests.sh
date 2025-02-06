@@ -24,13 +24,14 @@ source $(conda info --base 2> /dev/null)/etc/profile.d/conda.sh
 CLOUD="aws"
 
 git clone https://github.com/skypilot-org/skypilot.git ../sky-master || true
-
+~/.local/bin/uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh
+UV=~/.local/bin/uv
 
 # Create environment for compatibility tests
 conda env list | grep sky-back-compat-master || conda create -n sky-back-compat-master -y python=3.9
 
 conda activate sky-back-compat-master
-conda install -c conda-forge google-cloud-sdk -y
+gcloud --version || conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 cd ../sky-master
 git pull origin master
@@ -42,7 +43,7 @@ cd -
 
 conda env list | grep sky-back-compat-current || conda create -n sky-back-compat-current -y python=3.9
 conda activate sky-back-compat-current
-conda install -c conda-forge google-cloud-sdk -y
+gcloud --version || conda install -c conda-forge google-cloud-sdk -y
 rm -r  ~/.sky/wheels || true
 pip uninstall -y skypilot
 pip install uv
@@ -70,6 +71,8 @@ sky autostop -i 10 -y ${CLUSTER_NAME}
 sky exec -d --cloud ${CLOUD} --num-nodes 2 ${CLUSTER_NAME} sleep 100
 
 conda activate sky-back-compat-current
+# The original cluster should exist in the status output
+sky status ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
@@ -77,17 +80,17 @@ if [ "$need_launch" -eq "1" ]; then
 fi
 # Job 3
 sky exec -d --cloud ${CLOUD} ${CLUSTER_NAME} sleep 50
-q=$(sky queue ${CLUSTER_NAME})
+q=$(sky queue -u ${CLUSTER_NAME})
 echo "$q"
 echo "$q" | grep "RUNNING" | wc -l | grep 2 || exit 1
 # Job 4
 s=$(sky launch --cloud ${CLOUD} -d -c ${CLUSTER_NAME} examples/minimal.yaml)
-sky logs ${CLUSTER_NAME} 2 --status | grep RUNNING || exit 1
+sky logs ${CLUSTER_NAME} 2 --status | grep "RUNNING\|SUCCEEDED" || exit 1
 # remove color and find the job id
 echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4" || exit 1
 # wait for ready
 sky logs ${CLUSTER_NAME} 2
-q=$(sky queue ${CLUSTER_NAME})
+q=$(sky queue -u ${CLUSTER_NAME})
 echo "$q"
 echo "$q" | grep "SUCCEEDED" | wc -l | grep 4 || exit 1
 fi
@@ -103,7 +106,7 @@ sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
 s=$(sky exec --cloud ${CLOUD} -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
 echo "$s"
-echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 2" || exit 1
+echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2" || exit 1
 fi
 
 # `sky autostop` + `sky status -r`
@@ -115,7 +118,7 @@ conda activate sky-back-compat-current
 rm -r  ~/.sky/wheels || true
 sky autostop -y -i0 ${CLUSTER_NAME}-3
 sleep 120
-sky status -r | grep ${CLUSTER_NAME}-3 | grep STOPPED || exit 1
+sky status -r ${CLUSTER_NAME}-3 | grep STOPPED || exit 1
 fi
 
 

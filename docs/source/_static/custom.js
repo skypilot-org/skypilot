@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
         { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
+        { selector: '.toctree-l1 > a', text: 'SkyPilot API Server' },
         { selector: '.toctree-l2 > a', text: 'Multiple Kubernetes Clusters' },
         { selector: '.toctree-l1 > a', text: 'HTTPS Encryption' },
     ];

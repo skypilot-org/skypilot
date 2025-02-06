@@ -15,3 +15,6 @@ USAGE_POLICY_MESSAGE = (
 
 USAGE_MESSAGE_REDACT_KEYS = ['setup', 'run', 'envs']
 USAGE_MESSAGE_REDACT_TYPES = {str, dict}
+
+# Environment variable that stores the usage run id.
+USAGE_RUN_ID_ENV_VAR = 'SKYPILOT_USAGE_RUN_ID'

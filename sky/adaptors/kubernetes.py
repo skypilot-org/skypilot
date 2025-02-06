@@ -1,11 +1,11 @@
 """Kubernetes adaptors"""
-import functools
 import logging
 import os
 from typing import Any, Callable, Optional, Set
 
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
+from sky.utils import annotations
 from sky.utils import env_options
 from sky.utils import ux_utils
 
@@ -106,49 +106,49 @@ def _load_config(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def auth_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.RbacAuthorizationV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def networking_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NetworkingV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def custom_objects_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def node_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NodeV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def api_client(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.ApiClient()

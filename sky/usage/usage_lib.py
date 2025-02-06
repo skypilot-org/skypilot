@@ -26,8 +26,8 @@ if typing.TYPE_CHECKING:
     import requests
 
     from sky import resources as resources_lib
-    from sky import status_lib
     from sky import task as task_lib
+    from sky.utils import status_lib
 else:
     # requests and inspect cost ~100ms to load, which can be postponed to
     # collection phase or skipped if user specifies no collection
@@ -83,7 +83,12 @@ class UsageMessageToReport(MessageToReport):
         self.sky_commit: str = sky.__commit__
 
         # Entry
-        self.cmd: str = common_utils.get_pretty_entry_point()
+        self.cmd: Optional[str] = common_utils.get_current_command()
+        # The entrypoint on the client side.
+        self.client_entrypoint: Optional[str] = None
+        # The entrypoint on the server side, where each request has a entrypoint
+        # and a single client_entrypoint can have multiple server-side
+        # entrypoints.
         self.entrypoint: Optional[str] = None  # entrypoint_context
         #: Whether entrypoint is called by sky internal code.
         self.internal: bool = False  # set_internal
@@ -165,6 +170,9 @@ class UsageMessageToReport(MessageToReport):
         return json.dumps(d)
 
     def update_entrypoint(self, msg: str):
+        if self.client_entrypoint is None:
+            self.client_entrypoint = common_utils.get_current_client_entrypoint(
+                msg)
         self.entrypoint = msg
 
     def set_internal(self):
@@ -402,6 +410,19 @@ def _send_local_messages():
                              f'exception caught: {type(e)}({e})')
 
 
+def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
+    with ux_utils.enable_traceback():
+        if hasattr(e, 'stacktrace') and e.stacktrace is not None:
+            messages.usage.stacktrace = e.stacktrace
+        else:
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+        if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
+            messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+        messages.usage.exception = common_utils.remove_color(
+            common_utils.format_exception(e))
+
+
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):
     """Context manager for entrypoint.
@@ -437,14 +458,7 @@ def entrypoint_context(name: str, fallback: bool = False):
     try:
         yield
     except (Exception, SystemExit, KeyboardInterrupt) as e:
-        with ux_utils.enable_traceback():
-            trace = traceback.format_exc()
-            messages.usage.stacktrace = trace
-            detailed_reason = getattr(e, 'detailed_reason', None)
-            if detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + detailed_reason
-            messages.usage.exception = common_utils.remove_color(
-                common_utils.format_exception(e))
+        store_exception(e)
         raise
     finally:
         if fallback:
@@ -452,7 +466,27 @@ def entrypoint_context(name: str, fallback: bool = False):
         _send_local_messages()
 
 
-def entrypoint(name_or_fn: Union[str, Callable], fallback: bool = False):
+T = typing.TypeVar('T')
+
+
+@typing.overload
+def entrypoint(
+        name_or_fn: str,
+        fallback: bool = False
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def entrypoint(name_or_fn: Callable[..., T],
+               fallback: bool = False) -> Callable[..., T]:
+    ...
+
+
+def entrypoint(
+    name_or_fn: Union[str, Callable[..., T]],
+    fallback: bool = False
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

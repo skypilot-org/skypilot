@@ -1,6 +1,5 @@
 """Resources: compute requirements of Tasks."""
 import dataclasses
-import functools
 import textwrap
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
@@ -9,7 +8,6 @@ import colorama
 from sky import check as sky_check
 from sky import clouds
 from sky import exceptions
-from sky import jobs as managed_jobs
 from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -17,8 +15,10 @@ from sky.provision import docker_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import accelerator_registry
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
@@ -33,7 +33,7 @@ class Resources:
 
     This class is immutable once created (to ensure some validations are done
     whenever properties change). To update the property of an instance of
-    Resources, use `resources.copy(**new_properties)`.
+    Resources, use ``resources.copy(**new_properties)``.
 
     Used:
 
@@ -45,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 20
+    _VERSION = 21
 
     def __init__(
         self,
@@ -160,9 +160,8 @@ class Resources:
         """
         self._version = self._VERSION
         self._cloud = cloud
-        self._region: Optional[str] = None
-        self._zone: Optional[str] = None
-        self._validate_and_set_region_zone(region, zone)
+        self._region: Optional[str] = region
+        self._zone: Optional[str] = zone
 
         self._instance_type = instance_type
 
@@ -192,8 +191,6 @@ class Resources:
         else:
             self._disk_size = _DEFAULT_DISK_SIZE_GB
 
-        # self._image_id is a dict of {region: image_id}.
-        # The key is None if the same image_id applies for all regions.
         self._image_id = image_id
         if isinstance(image_id, str):
             self._image_id = {self._region: image_id.strip()}
@@ -237,12 +234,15 @@ class Resources:
         self._requires_fuse = _requires_fuse
 
         self._cluster_config_overrides = _cluster_config_overrides
+        self._cached_repr = None
 
         self._set_cpus(cpus)
         self._set_memory(memory)
         self._set_accelerators(accelerators, accelerator_args)
 
-        # TODO: move these out of init to prevent repeated calls.
+    def validate(self):
+        self._try_canonicalize_accelerators()
+        self._try_validate_and_set_region_zone()
         self._try_validate_instance_type()
         self._try_validate_cpus_mem()
         self._try_validate_managed_job_attributes()
@@ -281,6 +281,8 @@ class Resources:
             >>> sky.Resources(disk_size=100)
             <Cloud>(disk_size=100)
         """
+        if self._cached_repr is not None:
+            return self._cached_repr
         accelerators = ''
         accelerator_args = ''
         if self.accelerators is not None:
@@ -340,7 +342,8 @@ class Resources:
         if self.cloud is not None:
             cloud_str = f'{self.cloud}'
 
-        return f'{cloud_str}({hardware_str})'
+        self._cached_repr = f'{cloud_str}({hardware_str})'
+        return self._cached_repr
 
     @property
     def repr_with_region_zone(self) -> str:
@@ -374,7 +377,7 @@ class Resources:
         return self._instance_type
 
     @property
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def cpus(self) -> Optional[str]:
         """Returns the number of vCPUs that each instance must have.
 
@@ -408,7 +411,7 @@ class Resources:
         return self._memory
 
     @property
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def accelerators(self) -> Optional[Dict[str, Union[int, float]]]:
         """Returns the accelerators field directly or by inferring.
 
@@ -573,13 +576,6 @@ class Resources:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(parse_error) from None
 
-            # Canonicalize the accelerator names.
-            accelerators = {
-                accelerator_registry.canonicalize_accelerator_name(
-                    acc, self._cloud): acc_count
-                for acc, acc_count in accelerators.items()
-            }
-
             acc, _ = list(accelerators.items())[0]
             if 'tpu' in acc.lower():
                 if self.cloud is None:
@@ -635,15 +631,30 @@ class Resources:
         assert self.is_launchable(), self
         return self.cloud.need_cleanup_after_preemption_or_failure(self)
 
-    def _validate_and_set_region_zone(self, region: Optional[str],
-                                      zone: Optional[str]) -> None:
+    def _try_canonicalize_accelerators(self) -> None:
+        """Try to canonicalize the accelerators attribute.
+
+        We don't canonicalize accelerators during creation of Resources object
+        because it may check Kubernetes accelerators online. It requires
+        Kubernetes credentias which may not be available locally when a remote
+        API server is used.
+        """
+        if self._accelerators is None:
+            return
+        self._accelerators = {
+            accelerator_registry.canonicalize_accelerator_name(
+                acc, self._cloud): acc_count
+            for acc, acc_count in self._accelerators.items()
+        }
+
+    def _try_validate_and_set_region_zone(self) -> None:
         """Try to validate and set the region and zone attribute.
 
         Raises:
             ValueError: if the attributes are invalid.
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
-        if region is None and zone is None:
+        if self._region is None and self._zone is None:
             return
 
         if self._cloud is None:
@@ -655,7 +666,7 @@ class Resources:
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
-                    cloud.validate_region_zone(region, zone)
+                    cloud.validate_region_zone(self._region, self._zone)
                 except ValueError as e:
                     cloud_to_errors[repr(cloud)] = e
                     continue
@@ -679,23 +690,24 @@ class Resources:
                             table.add_row([str(cloud), reason_str])
                         hint = table.get_string()
                     raise ValueError(
-                        f'Invalid (region {region!r}, zone {zone!r}) '
-                        f'{cloud_str}. Details:\n{hint}')
+                        f'Invalid (region {self._region!r}, zone '
+                        f'{self._zone!r}) {cloud_str}. Details:\n{hint}')
             elif len(valid_clouds) > 1:
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        f'Cannot infer cloud from (region {region!r}, zone '
-                        f'{zone!r}). Multiple enabled clouds have region/zone '
-                        f'of the same names: {valid_clouds}. '
+                        f'Cannot infer cloud from (region {self._region!r}, '
+                        f'zone {self._zone!r}). Multiple enabled clouds '
+                        f'have region/zone of the same names: {valid_clouds}. '
                         f'To fix: explicitly specify `cloud`.')
             logger.debug(f'Cloud is not specified, using {valid_clouds[0]} '
-                         f'inferred from region {region!r} and zone {zone!r}')
+                         f'inferred from region {self._region!r} and zone '
+                         f'{self._zone!r}')
             self._cloud = valid_clouds[0]
 
         # Validate if region and zone exist in the catalog, and set the region
         # if zone is specified.
         self._region, self._zone = self._cloud.validate_region_zone(
-            region, zone)
+            self._region, self._zone)
 
     def get_valid_regions_for_launchable(self) -> List[clouds.Region]:
         """Returns a set of `Region`s that can provision this Resources.
@@ -846,13 +858,9 @@ class Resources:
         """
         if self._job_recovery is None or self._job_recovery['strategy'] is None:
             return
-        if (self._job_recovery['strategy']
-                not in managed_jobs.RECOVERY_STRATEGIES):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Spot recovery strategy {self._job_recovery["strategy"]} '
-                    'is not supported. The strategy should be among '
-                    f'{list(managed_jobs.RECOVERY_STRATEGIES.keys())}')
+        # Validate the job recovery strategy
+        registry.JOBS_RECOVERY_STRATEGY_REGISTRY.from_str(
+            self._job_recovery['strategy'])
 
     def extract_docker_image(self) -> Optional[str]:
         if self.image_id is None:
@@ -1411,7 +1419,7 @@ class Resources:
     def _from_yaml_config_single(cls, config: Dict[str, str]) -> 'Resources':
 
         resources_fields = {}
-        resources_fields['cloud'] = clouds.CLOUD_REGISTRY.from_str(
+        resources_fields['cloud'] = registry.CLOUD_REGISTRY.from_str(
             config.pop('cloud', None))
         resources_fields['instance_type'] = config.pop('instance_type', None)
         resources_fields['cpus'] = config.pop('cpus', None)
@@ -1469,7 +1477,7 @@ class Resources:
         add_if_not_none('instance_type', self.instance_type)
         add_if_not_none('cpus', self._cpus)
         add_if_not_none('memory', self.memory)
-        add_if_not_none('accelerators', self.accelerators)
+        add_if_not_none('accelerators', self._accelerators)
         add_if_not_none('accelerator_args', self.accelerator_args)
 
         if self._use_spot_specified:
@@ -1627,5 +1635,8 @@ class Resources:
                         state['_image_id'][current_context] = (
                             state['_image_id'][legacy_region])
                         del state['_image_id'][legacy_region]
+
+        if version < 21:
+            self._cached_repr = None
 
         self.__dict__.update(state)

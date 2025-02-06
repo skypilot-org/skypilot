@@ -20,7 +20,6 @@ import filelock
 import psutil
 from typing_extensions import Literal
 
-import sky
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
@@ -35,21 +34,17 @@ from sky.skylet import log_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import sky
     from sky import dag as dag_lib
 
 logger = sky_logging.init_logger(__name__)
 
-# Add user hash so that two users don't have the same controller VM on
-# shared-account clouds such as GCP.
-JOB_CONTROLLER_NAME: str = (
-    f'sky-jobs-controller-{common_utils.get_user_hash()}')
-LEGACY_JOB_CONTROLLER_NAME: str = (
-    f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
@@ -86,6 +81,7 @@ class UserSignal(enum.Enum):
 # ====== internal functions ======
 def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
     """Terminate the cluster."""
+    from sky import core  # pylint: disable=import-outside-toplevel
     retry_cnt = 0
     # In some cases, e.g. botocore.exceptions.NoCredentialsError due to AWS
     # metadata service throttling, the failed sky.down attempt can take 10-11
@@ -102,7 +98,7 @@ def terminate_cluster(cluster_name: str, max_retry: int = 6) -> None:
     while True:
         try:
             usage_lib.messages.usage.set_internal()
-            sky.down(cluster_name)
+            core.down(cluster_name)
             return
         except exceptions.ClusterDoesNotExist:
             # The cluster is already down.
@@ -349,7 +345,7 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     subprocess_utils.handle_returncode(returncode, code,
                                        'Failed to get job time.',
                                        stdout + stderr)
-    stdout = common_utils.decode_payload(stdout)
+    stdout = message_utils.decode_payload(stdout)
     return float(stdout)
 
 
@@ -512,7 +508,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                            f'{managed_job_state.get_failure_reason(job_id)}')
             log_file = managed_job_state.get_local_log_file(job_id, None)
             if log_file is not None:
-                with open(log_file, 'r', encoding='utf-8') as f:
+                with open(os.path.expanduser(log_file), 'r',
+                          encoding='utf-8') as f:
                     # Stream the logs to the console without reading the whole
                     # file into memory.
                     start_streaming = False
@@ -859,12 +856,12 @@ def dump_managed_job_queue() -> str:
             job['cluster_resources'] = '-'
             job['region'] = '-'
 
-    return common_utils.encode_payload(jobs)
+    return message_utils.encode_payload(jobs)
 
 
 def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     """Load job queue from json string."""
-    jobs = common_utils.decode_payload(payload)
+    jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
     return jobs
@@ -1140,9 +1137,9 @@ class ManagedJobCodeGen:
     @classmethod
     def get_all_job_ids_by_name(cls, job_name: Optional[str]) -> str:
         code = textwrap.dedent(f"""\
-        from sky.utils import common_utils
+        from sky.utils import message_utils
         job_id = managed_job_state.get_all_job_ids_by_name({job_name!r})
-        print(common_utils.encode_payload(job_id), end="", flush=True)
+        print(message_utils.encode_payload(job_id), end="", flush=True)
         """)
         return cls._build(code)
 
@@ -1178,5 +1175,9 @@ class ManagedJobCodeGen:
     @classmethod
     def _build(cls, code: str) -> str:
         generated_code = cls._PREFIX + '\n' + code
-
-        return f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}'
+        # Use the local user id to make sure the operation goes to the correct
+        # user.
+        return (
+            f'export {constants.USER_ID_ENV_VAR}='
+            f'"{common_utils.get_user_hash()}"; '
+            f'{constants.SKY_PYTHON_CMD} -u -c {shlex.quote(generated_code)}')
