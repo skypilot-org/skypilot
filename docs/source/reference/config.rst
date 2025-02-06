@@ -923,54 +923,6 @@ Example:
 Advanced OCI configurations (optional).
 
 ``oci_config_profile``
-    kubernetes:
-        networking: portforward
-        ports: loadbalancer
-        remote_identity: my-k8s-service-account
-        allowed_contexts:
-            - context1
-            - context2
-        custom_metadata:
-            labels:
-                mylabel: myvalue
-            annotations:
-                myannotation: myvalue
-        provision_timeout: 10
-        autoscaler: gke
-        pod_config:
-            metadata:
-                labels:
-                    my-label: my-value
-            spec:
-                runtimeClassName: nvidia
-                imagePullSecrets:
-                    - name: my-secret
-                containers:
-                    - env:
-                        - name: HTTP_PROXY
-                          value: http://proxy-host:3128
-                      volumeMounts:
-                        - mountPath: /foo
-                          name: example-volume
-                          readOnly: true
-                volumes:
-                    - name: example-volume
-                      hostPath:
-                          path: /tmp
-                          type: Directory
-                    - name: dshm
-                      emptyDir:
-                          medium: Memory
-                          sizeLimit: 3Gi
-
-.. _config-yaml-oci:
-
-``oci``
-~~~~~~~
-
-Advanced OCI configurations (optional).
-
-``oci_config_profile``
     The profile name in ~/.oci/config to use for launching instances.
     Default: ``DEFAULT``
 
