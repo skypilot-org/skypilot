@@ -169,6 +169,7 @@ Read the research:
    ../serving/sky-serve
    ../serving/user-guides
    ../serving/service-yaml-spec
+   ../serving/https
 
 .. toctree::
    :hidden:
