@@ -1097,10 +1097,7 @@ class ManagedJobCodeGen:
     """
     _PREFIX = textwrap.dedent("""\
         from sky.jobs import utils
-        from sky.jobs import constants as managed_job_constants
         from sky.jobs import state as managed_job_state
-
-        managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
         """)
 
     @classmethod
