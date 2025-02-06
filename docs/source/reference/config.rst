@@ -101,7 +101,7 @@ Syntax
       oci_config_profile: SKY_PROVISION_PROFILE
       compartment_ocid: ocid1.compartment.oc1..aaaaaaaahr7aicqtodxmcfor6pbqn3hvsngpftozyxzqw36gj4kh3w3kkj4q
       image_tag_general: skypilot:cpu-oraclelinux8
-      #image_tag_gpu: skypilot:gpu-oraclelinux8
+      image_tag_gpu: skypilot:gpu-oraclelinux8
     :ref:`ap-seoul-1 <config-yaml-oci>`:
       vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
       vcn_subnet: ocid1.subnet.oc1.ap-seoul-1.aaaaaaaa5c6wndifsij6yfyfehmi3tazn6mvhhiewqmajzcrlryurnl7nuja
