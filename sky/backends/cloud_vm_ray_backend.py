@@ -3415,13 +3415,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
             # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, when there are
-            # already 2x vCPU controller processes running on the controller VM,
-            # e.g., 16 controller processes running on a controller with 8
-            # vCPUs.
-            # We cannot set the managed job to PENDING state in the codegen for
-            # the controller process job, as it will stay in the job pending
-            # table and not be executed until there is an empty slot.
+            # managed job appears in the `sky jobs queue`, even if it needs to
+            # wait to be submitted.
+            # We cannot set the managed job to PENDING state in the job template
+            # (jobs-controller.yaml.j2), as it may need to wait for the run
+            # commands to be scheduled on the job controller in high-load cases.
             job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
