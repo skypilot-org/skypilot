@@ -121,7 +121,7 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
-Ref: managed-jobs.html#managed-jobs
+For more information about managed jobs, see :ref:`managed-jobs <managed-jobs>`
 
 .. _config-yaml-jobs-bucket:
 
@@ -129,6 +129,7 @@ Ref: managed-jobs.html#managed-jobs
 ~~~~~~~~~~~~~~~
 
 Bucket to store managed jobs mount files and tmp files. Bucket must already exist.
+
 Optional. If not set, SkyPilot will create a new bucket for each managed job launch.
 
 Supported bucket types:
@@ -173,7 +174,7 @@ when running ``sky check``. Any cloud already enabled but not specified here
 will be disabled on the next ``sky check`` run.
 If this field is not set, SkyPilot will check and use all supported clouds.
 
-Default: null (use all supported clouds).
+Default: ``null`` (use all supported clouds).
 
 .. _config-yaml-docker:
 
@@ -182,17 +183,18 @@ Default: null (use all supported clouds).
 
 Additional Docker run options (optional).
 
-When image_id: docker:<docker_image> is used in a task YAML, additional
+When ``image_id: docker:<docker_image>`` is used in a task YAML, additional
 run options for starting the Docker container can be specified here.
 These options will be passed directly as command line args to ``docker run``,
 see: https://docs.docker.com/reference/cli/docker/container/run/
 
 The following run options are applied by default and cannot be overridden:
-  --net=host
-  --cap-add=SYS_ADMIN
-  --device=/dev/fuse
-  --security-opt=apparmor:unconfined
-  --runtime=nvidia  # Applied if nvidia GPUs are detected on the host
+
+- ``--net=host``
+- ``--cap-add=SYS_ADMIN``
+- ``--device=/dev/fuse``
+- ``--security-opt=apparmor:unconfined``
+- ``--runtime=nvidia``  # Applied if nvidia GPUs are detected on the host
 
 .. _config-yaml-docker-run-options:
 
@@ -235,9 +237,9 @@ RunPod has ECC disabled by default.
 Note: this setting will cause a reboot during the first provisioning of
 the cluster, which may take a few minutes.
 
-Reference: https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
+Reference: `portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW <https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW>`_
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-admin-policy:
 
@@ -260,6 +262,7 @@ The policy class should implement the sky.AdminPolicy interface.
 ~~~~~~~
 
 Advanced AWS configurations (optional).
+
 Apply to all new instances but not existing ones.
 
 .. _config-yaml-aws-labels:
@@ -306,7 +309,7 @@ If this is set, SkyPilot will only provision in regions that contain a VPC
 with this name (provisioner automatically looks for such regions).
 Regions without a VPC with this name will not be used to launch nodes.
 
-Default: null (use the default VPC in each region).
+Default: ``null`` (use the default VPC in each region).
 
 .. _config-yaml-aws-use-internal-ips:
 
@@ -324,12 +327,12 @@ Private subnets are defined as those satisfying both of these properties:
   1. Subnets whose route tables have no routes to an internet gateway (IGW);
 
   2. Subnets that are configured to not assign public IPs by default
-     (the ``map_public_ip_on_launch`` attribute is False).
+     (the ``map_public_ip_on_launch`` attribute is ``false``).
 
 This flag is typically set together with ``vpc_name`` above and
 ``ssh_proxy_command`` below.
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-aws-ssh-proxy-command:
 
@@ -347,7 +350,7 @@ connections (including rsync) used to communicate between the local client
 and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
 since they are behind the proxy / may not have such a proxy set up.)
 
-Optional; default: null.
+Optional; default: ``null``.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -377,7 +380,8 @@ Example:
 Security group (optional).
 
 Security group name to use for AWS instances. If not specified,
-SkyPilot will use the default name for the security group: sky-sg-<hash>
+SkyPilot will use the default name for the security group: ``sky-sg-<hash>``
+
 Note: please ensure the security group name specified exists in the
 regions the instances are going to be launched or the AWS account has the
 permission to create a security group.
@@ -418,7 +422,7 @@ Encrypted boot disk (optional).
 Set to true to encrypt the boot disk of all AWS instances launched by
 SkyPilot. This is useful for compliance with data protection regulations.
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-aws-prioritize-reservations:
 
@@ -440,7 +444,7 @@ matching reservation exists, AWS will still consume the reservation).
 Note: this setting is default to false for performance reasons, as it can
 take half a minute to retrieve the reservations from AWS when set to true.
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-aws-specific-reservations:
 
@@ -538,6 +542,7 @@ Supported values:
 ~~~~~~~
 
 Advanced GCP configurations (optional).
+
 Apply to all new instances but not existing ones.
 
 .. _config-yaml-gcp-labels:
@@ -596,7 +601,7 @@ any SkyPilot nodes. This requires the networking stack be properly set up.
 This flag is typically set together with ``vpc_name`` above and
 ``ssh_proxy_command`` below.
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-gcp-force-enable-external-ips:
 
@@ -609,7 +614,7 @@ have an external IP? (optional)
 Set to true to force VMs to be assigned an exteral IP even when vpc_name
 and use_internal_ips are set.
 
-Default: false
+Default: ``false``.
 
 .. _config-yaml-gcp-ssh-proxy-command:
 
@@ -709,7 +714,7 @@ group to create the requested resources before giving up, deleting the MIG
 and failing over to other locations. Larger timeouts may increase the chance
 for getting a resource, but will block failover to go to other zones/regions/clouds.
 
-Default: 900
+Default: ``900``.
 
 Example:
 
@@ -741,7 +746,7 @@ Enable gVNIC network interface (optional).
 Set to true to enable gVNIC network interface for all GCP instances
 launched by SkyPilot. This is useful for improving network performance.
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-azure:
 
@@ -797,7 +802,7 @@ Can be one of:
 - hostnetwork: Use host network to access the pods
 - weave: Use Weave CNI for networking
 
-Default: "portforward"
+Default: ``portforward``.
 
 .. _config-yaml-kubernetes-ports:
 
@@ -810,7 +815,7 @@ Can be one of:
 - loadbalancer: Use LoadBalancer service to expose ports
 - nodeport: Use NodePort service to expose ports
 
-Default: "loadbalancer"
+Default: ``loadbalancer``.
 
 .. _config-yaml-kubernetes-remote-identity:
 
@@ -848,7 +853,7 @@ Timeout for resource provisioning (optional).
 
 Timeout in minutes for resource provisioning.
 
-Default: 10
+Default: ``10``.
 
 .. _config-yaml-kubernetes-autoscaler:
 
@@ -858,9 +863,10 @@ Default: 10
 Autoscaler type (optional).
 
 Type of autoscaler to use. Can be one of:
-- gke: Google Kubernetes Engine Autopilot
-- eks: Amazon EKS
-- aks: Azure Kubernetes Service
+
+- ``gke``: Google Kubernetes Engine Autopilot
+- ``eks``: Amazon EKS
+- ``aks``: Azure Kubernetes Service
 
 .. _config-yaml-kubernetes-pod-config:
 
