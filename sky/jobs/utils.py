@@ -965,7 +965,8 @@ def format_job_table(
         'STATUS',
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'DESCRIPTION']
+        # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'SCHED. STATE', 'DETAILS']
     if tasks_have_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -984,20 +985,10 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    def generate_description(failure_reason: Optional[str],
-                             schedule_state: Optional[str]) -> str:
-        description = ''
-        if schedule_state is not None:
-            description += f'Scheduler: {schedule_state}'
-            if failure_reason is not None:
-                description += ', '
+    def generate_details(failure_reason: Optional[str]) -> str:
         if failure_reason is not None:
-            description += f'Failure: {failure_reason}'
-
-        if description == '':
-            return '-'
-
-        return description
+            return f'Failure: {failure_reason}'
+        return '-'
 
     for job_hash, job_tasks in jobs.items():
         if show_all:
@@ -1050,13 +1041,13 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
-                schedule_state = job_tasks[0]['schedule_state']
                 failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
-                    generate_description(failure_reason, schedule_state),
+                    job_tasks[0]['schedule_state'],
+                    generate_details(failure_reason),
                 ])
             if tasks_have_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1087,14 +1078,14 @@ def format_job_table(
                 # schedule_state is only set at the job level, so if we have
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
-                                  if len(job_tasks) == 1 else None)
+                                  if len(job_tasks) == 1 else '-')
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
                     task['cluster_resources'],
                     task['region'],
-                    generate_description(task['failure_reason'],
-                                         schedule_state),
+                    schedule_state,
+                    generate_details(task['failure_reason']),
                 ])
             if tasks_have_user:
                 values.insert(0, task.get('user', '-'))
