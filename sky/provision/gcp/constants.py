@@ -155,6 +155,8 @@ VM_MINIMAL_PERMISSIONS = [
     'compute.instances.setServiceAccount',
     'compute.instances.start',
     'compute.instances.stop',
+    'compute.instanceGroupManagers.get',
+    'compute.instanceGroupManagers.update',
     'compute.networks.get',
     'compute.networks.list',
     'compute.networks.getEffectiveFirewalls',
