@@ -38,7 +38,7 @@ _FIREWALL_RESOURCE_NOT_FOUND_PATTERN = re.compile(
     r'The resource \'projects/.*/global/firewalls/.*\' was not found')
 
 
-def _retry_on_http_exception(
+def _retry_on_gcp_http_exception(
     regex: Optional[str] = None,
     max_retries: int = GCP_MAX_RETRIES,
     retry_interval_s: int = GCP_RETRY_INTERVAL_SECONDS,
@@ -49,17 +49,18 @@ def _retry_on_http_exception(
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            exception_type = gcp.http_error_exception()
 
             def try_catch_exc():
                 try:
                     value = func(*args, **kwargs)
                     return value
                 except Exception as e:  # pylint: disable=broad-except
-                    if not isinstance(e, exception_type) or (
-                            regex and not re.search(regex, str(e))):
-                        raise
-                    return e
+                    if (isinstance(e, gcp.http_error_exception()) and
+                        (regex is None or re.search(regex, str(e)))):
+                        logger.error(
+                            f'Retrying for gcp.http_error_exception: {e}')
+                        return e
+                    raise
 
             for _ in range(max_retries):
                 ret = try_catch_exc()
@@ -431,7 +432,7 @@ class GCPComputeInstance(GCPInstance):
         logger.debug(
             f'Waiting GCP operation {operation["name"]} to be ready ...')
 
-        @_retry_on_http_exception(
+        @_retry_on_gcp_http_exception(
             f'Failed to wait for operation {operation["name"]}')
         def call_operation(fn, timeout: int):
             request = fn(
@@ -613,6 +614,11 @@ class GCPComputeInstance(GCPInstance):
         return operation
 
     @classmethod
+    # When there is a cloud function running in parallel to set labels for
+    # newly created instances, it may fail with the following error:
+    #   "Labels fingerprint either invalid or resource labels have changed"
+    # We should retry until the labels are set successfully.
+    @_retry_on_gcp_http_exception('Labels fingerprint either invalid')
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
                    labels: dict) -> None:
         node = cls.load_resource().instances().get(
@@ -1211,7 +1217,7 @@ class GCPTPUVMInstance(GCPInstance):
         """Poll for TPU operation until finished."""
         del project_id, region, zone  # unused
 
-        @_retry_on_http_exception(
+        @_retry_on_gcp_http_exception(
             f'Failed to wait for operation {operation["name"]}')
         def call_operation(fn, timeout: int):
             request = fn(name=operation['name'])
@@ -1379,7 +1385,7 @@ class GCPTPUVMInstance(GCPInstance):
                     f'Failed to get VPC name for instance {instance}') from e
 
     @classmethod
-    @_retry_on_http_exception('unable to queue the operation')
+    @_retry_on_gcp_http_exception('unable to queue the operation')
     def set_labels(cls, project_id: str, availability_zone: str, node_id: str,
                    labels: dict) -> None:
         while True:
