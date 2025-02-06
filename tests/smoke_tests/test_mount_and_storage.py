@@ -47,6 +47,7 @@ from sky.data.data_utils import Rclone
 
 
 # ---------- file_mounts ----------
+@pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -104,6 +105,7 @@ def test_oci_mounts():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -220,9 +222,8 @@ def test_azure_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
     cloud = 'azure'
     storage_name = f'sky-test-{int(time.time())}'
-    default_region = 'eastus'
-    storage_account_name = (storage_lib.AzureBlobStore.
-                            get_default_storage_account_name(default_region))
+    storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+    )
     storage_account_key = data_utils.get_az_storage_account_key(
         storage_account_name)
     # if the file does not exist, az storage blob list returns '[]'
@@ -319,6 +320,7 @@ def test_kubernetes_context_switch():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires AWS
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -587,6 +589,18 @@ class TestStorageWithCredentials:
     }
 
     @staticmethod
+    def get_az_storage_account_name(default_region: str = 'centralus'):
+        config_storage_account = skypilot_config.get_nested(
+            ('azure', 'storage_account'), None)
+        if config_storage_account is not None:
+            storage_account_name = config_storage_account
+        else:
+            storage_account_name = (
+                storage_lib.AzureBlobStore.get_default_storage_account_name(
+                    default_region))
+        return storage_account_name
+
+    @staticmethod
     def create_dir_structure(base_path, structure):
         # creates a given file STRUCTURE in BASE_PATH
         for name, substructure in structure.items():
@@ -612,10 +626,8 @@ class TestStorageWithCredentials:
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             return f'{alias_gen}; {gsutil_alias} rm -r {url}'
         if store_type == storage_lib.StoreType.AZURE:
-            default_region = 'eastus'
-            storage_account_name = (
-                storage_lib.AzureBlobStore.get_default_storage_account_name(
-                    default_region))
+            storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+            )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage container delete '
@@ -694,13 +706,8 @@ class TestStorageWithCredentials:
             return f'gsutil ls {url}'
         if store_type == storage_lib.StoreType.AZURE:
             # azure isrecursive by default
-            default_region = 'eastus'
-            config_storage_account = skypilot_config.get_nested(
-                ('azure', 'storage_account'), None)
-            storage_account_name = config_storage_account if (
-                config_storage_account is not None) else (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+            storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+            )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             list_cmd = ('az storage blob list '
@@ -762,10 +769,8 @@ class TestStorageWithCredentials:
                 return f'gsutil ls -r gs://{bucket_name} | grep "{file_name}" | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
             if storage_account_name is None:
-                default_region = 'eastus'
-                storage_account_name = (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+                storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+                )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -789,10 +794,8 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.GCS:
             return f'gsutil ls -r gs://{bucket_name}/** | wc -l'
         elif store_type == storage_lib.StoreType.AZURE:
-            default_region = 'eastus'
-            storage_account_name = (
-                storage_lib.AzureBlobStore.get_default_storage_account_name(
-                    default_region))
+            storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+            )
             storage_account_key = data_utils.get_az_storage_account_key(
                 storage_account_name)
             return ('az storage blob list '
@@ -1009,10 +1012,8 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_az_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using gsutil
-        default_region = 'eastus'
-        storage_account_name = (
-            storage_lib.AzureBlobStore.get_default_storage_account_name(
-                default_region))
+        storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+        )
         storage_account_key = data_utils.get_az_storage_account_key(
             storage_account_name)
         bucket_uri = data_utils.AZURE_CONTAINER_URL.format(
@@ -1058,6 +1059,7 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1083,6 +1085,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         pytest.param(storage_lib.StoreType.S3, marks=pytest.mark.aws),
@@ -1136,6 +1139,7 @@ class TestStorageWithCredentials:
         assert tmp_local_storage_obj_with_sub_path.name not in out.decode(
             'utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
@@ -1178,6 +1182,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item not in out for item in storage_obj_name])
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1204,6 +1209,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item in out for item in storage_obj_names])
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1235,6 +1241,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1254,6 +1261,7 @@ class TestStorageWithCredentials:
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
@@ -1274,6 +1282,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
@@ -1299,10 +1308,8 @@ class TestStorageWithCredentials:
                 command = f'gsutil ls {nonexist_bucket_url.format(random_name=nonexist_bucket_name)}'
                 expected_output = 'BucketNotFoundException'
             elif nonexist_bucket_url.startswith('https'):
-                default_region = 'eastus'
-                storage_account_name = (
-                    storage_lib.AzureBlobStore.get_default_storage_account_name(
-                        default_region))
+                storage_account_name = TestStorageWithCredentials.get_az_storage_account_name(
+                )
                 storage_account_key = data_utils.get_az_storage_account_key(
                     storage_account_name)
                 command = f'az storage container exists --account-name {storage_account_name} --account-key {storage_account_key} --name {nonexist_bucket_name}'
@@ -1357,6 +1364,7 @@ class TestStorageWithCredentials:
                     source=nonexist_bucket_url.format(
                         random_name=nonexist_bucket_name))
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'private_bucket',
@@ -1383,6 +1391,7 @@ class TestStorageWithCredentials:
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
@@ -1424,6 +1433,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
@@ -1436,6 +1446,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1464,6 +1475,7 @@ class TestStorageWithCredentials:
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
@@ -1485,6 +1497,7 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
@@ -1499,9 +1512,7 @@ class TestStorageWithCredentials:
                                                      tmp_gitignore_storage_obj):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
-
         tmp_gitignore_storage_obj.add_store(store_type)
-
         upload_file_name = 'included'
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
@@ -1510,7 +1521,6 @@ class TestStorageWithCredentials:
             tmp_gitignore_storage_obj.name, file_name='.git')
         cnt_num_file_cmd = self.cli_count_file_in_bucket(
             store_type, tmp_gitignore_storage_obj.name)
-
         up_output = subprocess.check_output(up_cmd, shell=True)
         git_exclude_output = subprocess.check_output(git_exclude_cmd,
                                                      shell=True)
@@ -1525,6 +1535,7 @@ class TestStorageWithCredentials:
         assert '4' in cnt_output.decode('utf-8'), \
                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -1563,6 +1574,7 @@ class TestStorageWithCredentials:
         if handle:
             storage_obj.delete()
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('region', [
         'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-south-1',
@@ -1595,6 +1607,7 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in output, (
             f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('region', [
         'northamerica-northeast1', 'northamerica-northeast2', 'us-central1',
@@ -1605,8 +1618,8 @@ class TestStorageWithCredentials:
         'europe-west8', 'europe-west9', 'europe-west10', 'europe-west12',
         'asia-east1', 'asia-east2', 'asia-northeast1', 'asia-northeast2',
         'asia-northeast3', 'asia-southeast1', 'asia-south1', 'asia-south2',
-        'asia-southeast2', 'me-central1', 'me-central2', 'me-west1',
-        'australia-southeast1', 'australia-southeast2', 'africa-south1'
+        'asia-southeast2', 'me-central1', 'me-west1', 'australia-southeast1',
+        'australia-southeast2', 'africa-south1'
     ])
     def test_gcs_regions(self, tmp_local_storage_obj, region):
         # This tests creation and upload to bucket in all GCS regions

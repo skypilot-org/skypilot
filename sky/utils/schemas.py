@@ -388,6 +388,9 @@ def get_service_schema():
                     },
                 }
             },
+            'ports': {
+                'type': 'integer',
+            },
             'replicas': {
                 'type': 'integer',
             },
@@ -395,6 +398,19 @@ def get_service_schema():
                 'type': 'string',
                 'case_insensitive_enum': list(
                     load_balancing_policies.LB_POLICIES.keys())
+            },
+            'tls': {
+                'type': 'object',
+                'required': ['keyfile', 'certfile'],
+                'additionalProperties': False,
+                'properties': {
+                    'keyfile': {
+                        'type': 'string',
+                    },
+                    'certfile': {
+                        'type': 'string',
+                    },
+                },
             },
         }
     }
@@ -884,6 +900,9 @@ def get_config_schema():
                         'type': 'string',
                     },
                     'image_tag_gpu': {
+                        'type': 'string',
+                    },
+                    'vcn_ocid': {
                         'type': 'string',
                     },
                     'vcn_subnet': {

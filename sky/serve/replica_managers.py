@@ -171,13 +171,11 @@ def terminate_cluster(cluster_name: str,
 def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
-    # Already checked all ports are the same in sky.serve.core.up
+    # Already checked all ports are valid in sky.serve.core.up
     assert task.resources, task
-    task_resources: 'resources.Resources' = list(task.resources)[0]
-    # Already checked the resources have and only have one port
-    # before upload the task yaml.
-    assert task_resources.ports is not None
-    return task_resources.ports[0]
+    assert task.service is not None, task
+    assert task.service.ports is not None, task
+    return task.service.ports
 
 
 def _should_use_spot(task_yaml: str,
@@ -998,9 +996,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Re-raise the exception if it is not preempted.
                 raise
             job_status = list(job_statuses.values())[0]
-            if job_status in [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-            ]:
+            if job_status in job_lib.JobStatus.user_code_failure_states():
                 info.status_property.user_app_failed = True
                 serve_state.add_or_update_replica(self._service_name,
                                                   info.replica_id, info)

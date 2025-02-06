@@ -7,6 +7,7 @@ import os
 import re
 import shutil
 import subprocess
+import time
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
@@ -105,6 +106,75 @@ ANNOTATIONS_POD_NOT_FOUND_ERROR_MSG = ('Pod {pod_name} not found in namespace '
 
 logger = sky_logging.init_logger(__name__)
 
+# Default retry settings for Kubernetes API calls
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_RETRY_INTERVAL_SECONDS = 1
+
+
+def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
+                    retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
+                    resource_type: Optional[str] = None):
+    """Decorator to retry Kubernetes API calls on transient failures.
+
+    Args:
+        max_retries: Maximum number of retry attempts
+        retry_interval: Initial seconds to wait between retries
+        resource_type: Type of resource being accessed (e.g. 'node', 'pod').
+            Used to provide more specific error messages.
+    """
+
+    def decorator(func):
+
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            last_exception = None
+            backoff = common_utils.Backoff(initial_backoff=retry_interval,
+                                           max_backoff_factor=3)
+
+            for attempt in range(max_retries):
+                try:
+                    return func(*args, **kwargs)
+                except (kubernetes.max_retry_error(),
+                        kubernetes.api_exception(),
+                        kubernetes.config_exception()) as e:
+                    last_exception = e
+                    # Don't retry on permanent errors like 401 (Unauthorized)
+                    # or 403 (Forbidden)
+                    if (isinstance(e, kubernetes.api_exception()) and
+                            e.status in (401, 403)):
+                        raise
+                    if attempt < max_retries - 1:
+                        sleep_time = backoff.current_backoff()
+                        logger.debug(f'Kubernetes API call {func.__name__} '
+                                     f'failed with {str(e)}. Retrying in '
+                                     f'{sleep_time:.1f}s...')
+                        time.sleep(sleep_time)
+                        continue
+
+            # Format error message based on the type of exception
+            resource_msg = f' when trying to get {resource_type} info' \
+                if resource_type else ''
+            debug_cmd = f' To debug, run: kubectl get {resource_type}s' \
+                if resource_type else ''
+
+            if isinstance(last_exception, kubernetes.max_retry_error()):
+                error_msg = f'Timed out{resource_msg} from Kubernetes cluster.'
+            elif isinstance(last_exception, kubernetes.api_exception()):
+                error_msg = (f'Kubernetes API error{resource_msg}: '
+                             f'{str(last_exception)}')
+            else:
+                error_msg = (f'Kubernetes configuration error{resource_msg}: '
+                             f'{str(last_exception)}')
+
+            raise exceptions.ResourcesUnavailableError(
+                f'{error_msg}'
+                f' Please check if the cluster is healthy and retry.'
+                f'{debug_cmd}') from last_exception
+
+        return wrapper
+
+    return decorator
+
 
 class GPULabelFormatter:
     """Base class to define a GPU label formatter for a Kubernetes cluster
@@ -113,6 +183,22 @@ class GPULabelFormatter:
     a Kubernetes cluster. It is used by the Kubernetes cloud class to pick the
     key:value pair to use as node selector for GPU nodes.
     """
+
+    @classmethod
+    def get_tpu_topology_label_key(cls) -> str:
+        """Returns the label for TPU topology used by the Kubernetes cluster.
+
+        Only implemented by formatters that support TPUs.
+        """
+        raise NotImplementedError
+
+    @classmethod
+    def get_tpu_topology_label_value(cls, acc_type: str, acc_count: int) -> str:
+        """Returns the TPU topology value for the given TPU type and count.
+
+        Only implemented by formatters that support TPUs.
+        """
+        raise NotImplementedError
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
@@ -250,11 +336,31 @@ class GKELabelFormatter(GPULabelFormatter):
     GKE nodes by default are populated with `cloud.google.com/gke-accelerator`
     label, which is used to identify the GPU type.
     """
-
     GPU_LABEL_KEY = 'cloud.google.com/gke-accelerator'
     TPU_LABEL_KEY = 'cloud.google.com/gke-tpu-accelerator'
     ACCELERATOR_COUNT_LABEL_KEY = 'cloud.google.com/gke-accelerator-count'
     TPU_TOPOLOGY_LABEL_KEY = 'cloud.google.com/gke-tpu-topology'
+
+    # Mapping from TPU type to {count: topologies}. Used to determine topology
+    # label to use in an autoscaling environment. For list of topologies, see:
+    # tpu v5e: https://cloud.google.com/tpu/docs/tpus-in-gke
+    # tpu v5p: https://cloud.google.com/tpu/docs/v5p
+    # TODO(romilb): Add support for TPU v4 and v6.
+    GKE_TPU_TOPOLOGIES = {
+        'tpu-v5-lite-podslice': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        },
+        'tpu-v5-lite-device': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        },
+        'tpu-v5p-slice': {
+            4: '2x2x1'
+        },
+    }
 
     @classmethod
     def get_label_key(cls, accelerator: Optional[str] = None) -> str:
@@ -273,6 +379,24 @@ class GKELabelFormatter(GPULabelFormatter):
     @classmethod
     def get_tpu_topology_label_key(cls) -> str:
         return cls.TPU_TOPOLOGY_LABEL_KEY
+
+    @classmethod
+    def get_tpu_topology_label_value(cls, acc_type: str, acc_count: int) -> str:
+        """Returns the TPU topology label value for the given TPU count.
+
+        e.g. tpu-v5-lite-podslice:8 -> '2x4'
+        """
+        count_to_topology = cls.GKE_TPU_TOPOLOGIES.get(acc_type,
+                                                       {}).get(acc_count, None)
+        if count_to_topology is None:
+            supported_tpus = {
+                tpu: list(topologies.values())
+                for tpu, topologies in cls.GKE_TPU_TOPOLOGIES.items()
+            }
+            raise ValueError(
+                f'No TPU topology found for {acc_type} with count {acc_count}. '
+                f'Supported TPU types and counts: {supported_tpus}')
+        return count_to_topology
 
     @classmethod
     def get_label_value(cls, accelerator: str) -> str:
@@ -446,6 +570,7 @@ def detect_accelerator_resource(
 
 
 @functools.lru_cache(maxsize=10)
+@_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
 
@@ -454,17 +579,12 @@ def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     if context is None:
         context = get_current_kube_config_context_name()
 
-    try:
-        nodes = kubernetes.core_api(context).list_node(
-            _request_timeout=kubernetes.API_TIMEOUT).items
-    except kubernetes.max_retry_error():
-        raise exceptions.ResourcesUnavailableError(
-            'Timed out when trying to get node info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get nodes') from None
+    nodes = kubernetes.core_api(context).list_node(
+        _request_timeout=kubernetes.API_TIMEOUT).items
     return nodes
 
 
+@_retry_on_error(resource_type='pod')
 def get_all_pods_in_kubernetes_cluster(
         context: Optional[str] = None) -> List[Any]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
@@ -474,14 +594,8 @@ def get_all_pods_in_kubernetes_cluster(
     if context is None:
         context = get_current_kube_config_context_name()
 
-    try:
-        pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
-            _request_timeout=kubernetes.API_TIMEOUT).items
-    except kubernetes.max_retry_error():
-        raise exceptions.ResourcesUnavailableError(
-            'Timed out when trying to get pod info from Kubernetes cluster. '
-            'Please check if the cluster is healthy and retry. To debug, run: '
-            'kubectl get pods') from None
+    pods = kubernetes.core_api(context).list_pod_for_all_namespaces(
+        _request_timeout=kubernetes.API_TIMEOUT).items
     return pods
 
 
@@ -573,6 +687,7 @@ def check_instance_fits(context: Optional[str],
         # If GPU/TPUs are requested, check if GPU/TPU type is available, and
         # if so, check if CPU and memory requirements on the specific node are
         # met.
+        assert acc_count is not None, (acc_type, acc_count)
         try:
             gpu_label_key, gpu_label_val, _, _ = (
                 get_accelerator_label_key_value(context, acc_type, acc_count))
@@ -617,7 +732,7 @@ def check_instance_fits(context: Optional[str],
 def get_accelerator_label_key_value(
     context: Optional[str],
     acc_type: str,
-    acc_count: Optional[int],
+    acc_count: int,
     check_mode=False
 ) -> Tuple[Optional[str], Optional[str], Optional[str], Optional[str]]:
     """Returns the label key and value for the given GPU/TPU type.
@@ -663,8 +778,15 @@ def get_accelerator_label_key_value(
         formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
         assert formatter is not None, ('Unsupported autoscaler type:'
                                        f' {autoscaler_type}')
+        tpu_topology_label_key = None
+        tpu_topology_label_value = None
+        if is_tpu_on_gke(acc_type):
+            assert formatter == GKELabelFormatter, formatter
+            tpu_topology_label_key = formatter.get_tpu_topology_label_key()
+            tpu_topology_label_value = formatter.get_tpu_topology_label_value(
+                acc_type, acc_count)
         return formatter.get_label_key(acc_type), formatter.get_label_value(
-            acc_type), None, None
+            acc_type), tpu_topology_label_key, tpu_topology_label_value
 
     has_gpus, cluster_resources = detect_accelerator_resource(context)
     if has_gpus:
@@ -727,7 +849,12 @@ def get_accelerator_label_key_value(
                             if node_metadata_labels.get(
                                     label_formatter.TPU_LABEL_KEY) == acc_type:
                                 topology_label_key = (
-                                    label_formatter.TPU_TOPOLOGY_LABEL_KEY)
+                                    label_formatter.get_tpu_topology_label_key(
+                                    ))
+                                # Instead of using get_tpu_topology_label_value,
+                                # we use the node's label value to determine the
+                                # topology. This is to make sure the node's
+                                # available topology matches our request.
                                 topology_value = node_metadata_labels.get(
                                     topology_label_key)
                                 assert topology_value is not None
@@ -891,6 +1018,52 @@ def check_credentials(context: Optional[str],
         return True, exec_msg
     else:
         return True, None
+
+
+def check_pod_config(pod_config: dict) \
+    -> Tuple[bool, Optional[str]]:
+    """Check if the pod_config is a valid pod config
+
+    Using deserialize api to check the pod_config is valid or not.
+
+    Returns:
+        bool: True if pod_config is valid.
+        str: Error message about why the pod_config is invalid, None otherwise.
+    """
+    errors = []
+    # This api_client won't be used to send any requests, so there is no need to
+    # load kubeconfig
+    api_client = kubernetes.kubernetes.client.ApiClient()
+
+    # Used for kubernetes api_client deserialize function, the function will use
+    # data attr, the detail ref:
+    # https://github.com/kubernetes-client/python/blob/master/kubernetes/client/api_client.py#L244
+    class InnerResponse():
+
+        def __init__(self, data: dict):
+            self.data = json.dumps(data)
+
+    try:
+        # Validate metadata if present
+        if 'metadata' in pod_config:
+            try:
+                value = InnerResponse(pod_config['metadata'])
+                api_client.deserialize(
+                    value, kubernetes.kubernetes.client.V1ObjectMeta)
+            except ValueError as e:
+                errors.append(f'Invalid metadata: {str(e)}')
+        # Validate spec if present
+        if 'spec' in pod_config:
+            try:
+                value = InnerResponse(pod_config['spec'])
+                api_client.deserialize(value,
+                                       kubernetes.kubernetes.client.V1PodSpec)
+            except ValueError as e:
+                errors.append(f'Invalid spec: {str(e)}')
+        return len(errors) == 0, '.'.join(errors)
+    except Exception as e:  # pylint: disable=broad-except
+        errors.append(f'Validation error: {str(e)}')
+        return False, '.'.join(errors)
 
 
 def is_kubeconfig_exec_auth(
@@ -1712,8 +1885,6 @@ def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
             else:
                 destination[key].extend(value)
         else:
-            if destination is None:
-                destination = {}
             destination[key] = value
 
 
@@ -2236,7 +2407,7 @@ def get_skypilot_pods(context: Optional[str] = None) -> List[Any]:
 
 
 def is_tpu_on_gke(accelerator: str) -> bool:
-    """Determins if the given accelerator is a TPU supported on GKE."""
+    """Determines if the given accelerator is a TPU supported on GKE."""
     return accelerator in GKE_TPU_ACCELERATOR_TO_GENERATION
 
 
