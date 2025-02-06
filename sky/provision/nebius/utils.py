@@ -45,7 +45,7 @@ def get_project_by_region(region: str) -> str:
     # e00 - id of region 'eu-north1'
     # e01 - id of region 'eu-west1'
     # TODO(SalikovAlex): fix when info about region will be in projects list
-    # https://docs.nebius.com/overview/regions
+    # Currently, Nebius cloud supports 2 regions. We manually enumerate them here. Reference: https://docs.nebius.com/overview/regions
     for project in projects.items:
         if region == 'eu-north1' and project.metadata.id[8:11] == 'e00':
             return project.metadata.id
