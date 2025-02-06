@@ -1152,6 +1152,24 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
+    def get_clusters_on_controller(cls) -> str:
+        """Returns code for getting clusters on the controller.
+
+        Returns a list of tuples of (cluster_name, status) for each cluster.
+        """
+        code = textwrap.dedent("""\
+        from sky.backends import backend_utils
+        from sky.utils import common_utils
+
+        # Get all clusters launched by the controller
+        clusters = backend_utils.get_clusters(include_controller=True, refresh=False)
+        # Return tuples of (name, status) for each cluster
+        cluster_info = [(c['name'], c['status'].value) for c in clusters]
+        print(common_utils.encode_payload(cluster_info), flush=True)
+        """)
+        return cls._build(code)
+
+    @classmethod
     def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
         code = textwrap.dedent(f"""\
         msg = utils.cancel_jobs_by_id({job_ids})

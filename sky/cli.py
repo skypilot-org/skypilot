@@ -63,6 +63,7 @@ from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.jobs import utils as managed_job_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
@@ -2675,25 +2676,26 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
+    try:
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Checking controller status')):
+            handle = backend_utils.is_controller_accessible(controller,
+                                                            stopped_message='')
+    except exceptions.ClusterNotUpError as e:
+        if e.cluster_status is None:
+            click.echo('Controller has already been torn down.')
+            sys.exit(0)
+
+        spinner_msg = (f'Controller is {e.cluster_status.value} - restarting '
+                       'to check that it\'s safe to terminate.')
+        with rich_utils.safe_status(ux_utils.spinner_message(spinner_msg)):
+            with sky_logging.silent():
+                handle = sky.start(controller_name)
+
+    # Check #1: in-progress managed jobs
     with rich_utils.safe_status(
             ux_utils.spinner_message('Checking for in-progress managed jobs')):
-        try:
-            managed_jobs_ = managed_jobs.queue(refresh=False,
-                                               skip_finished=True)
-        except exceptions.ClusterNotUpError as e:
-            if controller.value.connection_error_hint in str(e):
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.NotSupportedError(
-                        controller.value.
-                        decline_down_when_failed_to_fetch_status_hint)
-            if e.cluster_status is None:
-                click.echo(
-                    'Managed jobs controller has already been torn down.')
-                sys.exit(0)
-            # At this point, the managed jobs are failed to be fetched due to
-            # the controller being STOPPED or being firstly launched, i.e.,
-            # there is no in-prgress managed jobs.
-            managed_jobs_ = []
+        managed_jobs_ = managed_jobs.queue(refresh=False, skip_finished=True)
 
     msg = (f'{colorama.Fore.YELLOW}WARNING: Tearing down the managed '
            'jobs controller. Please be aware of the following:'
@@ -2702,16 +2704,57 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = managed_jobs.format_job_table(managed_jobs_, show_all=False)
         msg = controller.value.decline_down_for_dirty_controller_hint
-        # Add prefix to each line to align with the bullet point.
-        msg += '\n'.join(
-            ['   ' + line for line in job_table.split('\n') if line != ''])
+        msg += managed_jobs.format_job_table(managed_jobs_, show_all=False)
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(msg)
-    else:
-        click.echo(' * No in-progress managed jobs found. It should be safe to '
-                   'terminate (see caveats above).')
+    click.echo(' * No in-progress managed jobs found.')
+
+    # Check #2: clusters on the jobs controller
+    with rich_utils.safe_status(
+            ux_utils.spinner_message(
+                'Checking for clusters on jobs controller')):
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+        code = managed_job_utils.ManagedJobCodeGen.get_clusters_on_controller()
+        returncode, clusters_payload, stderr = backend.run_on_head(
+            handle,
+            code,
+            require_outputs=True,
+            stream_logs=False,
+            separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(
+                returncode, code, 'Failed to get clusters on jobs controller',
+                clusters_payload + stderr)
+        except exceptions.CommandError as e:
+            if controller.value.connection_error_hint in str(e):
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        controller.value.
+                        decline_down_when_failed_to_fetch_status_hint)
+            raise RuntimeError(str(e)) from e
+
+        cluster_names = common_utils.decode_payload(clusters_payload)
+
+    if cluster_names:
+        # cluster_names is now a list of (name, status) tuples
+        clusters_str = '\n'.join(
+            [f'  - {name} ({status})' for name, status in cluster_names])
+        msg = (f'{colorama.Fore.RED}Cannot tear down the jobs controller while '
+               f'there are clusters running on it:{colorama.Style.RESET_ALL}\n'
+               f'{clusters_str}\n'
+               f'{colorama.Fore.YELLOW}Please wait for the clusters to finish '
+               f'or terminate them by running:{colorama.Style.RESET_ALL}\n'
+               f'ssh {controller_name} '
+               'source skypilot-runtime/bin/activate\\; sky down -a\n'
+               f'{colorama.Style.DIM}If this doesn\'t automatically '
+               'resolve itself, please report the bug to the SkyPilot team.'
+               f'{colorama.Style.RESET_ALL}')
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(msg)
+    click.echo(' * No clusters found on jobs controller. It should be safe to '
+               'terminate (see caveats above).')
 
 
 def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
