@@ -1,13 +1,12 @@
 """The database for services information."""
 import collections
-from collections.abc import Sequence
 import enum
 import json
 import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union, Sequence
 
 import colorama
 
