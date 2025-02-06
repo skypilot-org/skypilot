@@ -50,9 +50,10 @@ pytest tests/test_smoke.py --generic-cloud azure
 
 For profiling code, use:
 ```
-pip install tuna # Tuna is used for visualization of profiling data.
-python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
-tuna sky.prof
+pip install py-spy # py-spy is a sampling profiler for Python programs
+py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
+py-spy top -- python -m sky.cli status # Get a live top view
+py-spy -h # For more options
 ```
 
 #### Testing in a container

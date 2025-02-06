@@ -8,10 +8,10 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
-from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -115,10 +115,28 @@ def _list_accelerators(
 
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
+
+    Returns:
+        A tuple of three dictionaries:
+        - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo
+            objects with quantity information.
+        - total_accelerators_capacity: Dict mapping accelerator names to their
+            total capacity in the cluster.
+        - total_accelerators_available: Dict mapping accelerator names to their
+            current availability. Returns -1 for each accelerator if
+            realtime=False or if insufficient permissions.
     """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
+
+    # First check if Kubernetes is enabled. This ensures k8s python client is
+    # installed. Do not put any k8s-specific logic before this check.
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(),
+                                        enabled_clouds):
+        return {}, {}, {}
+
     # TODO(zhwu): this should return all accelerators in multiple kubernetes
     # clusters defined by allowed_contexts.
     if region_filter is None:
@@ -132,11 +150,8 @@ def _list_accelerators(
     if context is None:
         return {}, {}, {}
 
-    k8s_cloud = Kubernetes()
-    if not any(
-            map(k8s_cloud.is_same_cloud,
-                sky_check.get_cached_enabled_clouds_or_refresh())
-    ) or not kubernetes_utils.check_credentials(context)[0]:
+    # Verify that the credentials are still valid.
+    if not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_accelerator_resource(context)
@@ -242,6 +257,10 @@ def _list_accelerators(
                                         container.resources.requests))
 
                 accelerators_available = accelerator_count - allocated_qty
+
+                # Initialize the entry if it doesn't exist yet
+                if accelerator_name not in total_accelerators_available:
+                    total_accelerators_available[accelerator_name] = 0
 
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (

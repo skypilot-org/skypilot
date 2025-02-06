@@ -8,6 +8,7 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
+from packaging import version as pversion
 
 from sky import clouds
 from sky import exceptions
@@ -198,6 +199,18 @@ class Azure(clouds.Cloud):
             # not the image location. Marketplace image is globally available.
             region = 'eastus'
         publisher, offer, sku, version = image_id.split(':')
+        # Since the Azure SDK requires explicitly specifying the image version number,
+        # when the version is "latest," we need to manually query the current latest version.
+        # By querying the image size through a precise image version, while directly using the latest image version when creating a VM,
+        # there might be a difference in image information, and the probability of this occurring is very small.
+        if version == 'latest':
+            versions = compute_client.virtual_machine_images.list(
+                location=region,
+                publisher_name=publisher,
+                offer=offer,
+                skus=sku)
+            latest_version = max(versions, key=lambda x: pversion.parse(x.name))
+            version = latest_version.name
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)

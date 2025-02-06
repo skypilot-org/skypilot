@@ -203,11 +203,6 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
-# After the timeout, the cluster will stop if autostop is set, and our check
-# should be more than the timeout. To address this, we extend the timeout by
-# _BUMP_UP_SECONDS before exiting.
-BUMP_UP_SECONDS = 35
-
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
@@ -276,7 +271,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         write = log_file.write
         flush = log_file.flush
         subprocess_out = log_file
-        test.echo(f'Test started. Log: less {log_file.name}')
+        test.echo(f'Test started. Log: less -r {log_file.name}')
 
     env_dict = os.environ.copy()
     if test.env:
@@ -310,7 +305,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
     msg = (f'{outcome}.'
@@ -318,7 +313,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     if log_to_stdout:
         test.echo(msg)
     else:
-        msg += f'\nLog: less {log_file.name}\n'
+        msg += f'\nLog: less -r {log_file.name}\n'
         test.echo(msg)
         write(msg)
 
@@ -336,7 +331,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         if log_to_stdout:
             raise Exception(f'test failed')
         else:
-            raise Exception(f'test failed: less {log_file.name}')
+            raise Exception(f'test failed: less -r {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
@@ -423,7 +418,7 @@ VALIDATE_LAUNCH_OUTPUT = (
     # └── To teardown the cluster:    sky down test
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-    'echo "$s" && echo "==Validating setup output==" && '
+    'echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '

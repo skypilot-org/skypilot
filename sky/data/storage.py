@@ -1083,18 +1083,16 @@ class Storage(object):
         if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
             global_user_state.remove_storage(self.name)
-        if store_type:
+        if store_type is not None:
             store = self.stores[store_type]
-            is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
-            if is_sky_managed:
+            if store.is_sky_managed:
                 self.handle.remove_store(store)
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
-                delete = all(
-                    s.is_sky_managed is False for s in self.stores.values())
+                delete = all(not s.is_sky_managed for s in self.stores.values())
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
@@ -1689,6 +1687,9 @@ class S3Store(AbstractStore):
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
         """
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
@@ -2179,6 +2180,11 @@ class GcsStore(AbstractStore):
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
+            PermissionError: If the bucket is external and the user is not
+                allowed to delete it.
         """
         if _bucket_sub_path is not None:
             command_suffix = f'/{_bucket_sub_path}'
@@ -3478,6 +3484,9 @@ class R2Store(AbstractStore):
 
         Returns:
          bool; True if bucket was deleted, False if it was deleted externally.
+
+        Raises:
+            StorageBucketDeleteError: If deleting the bucket fails.
         """
         # Deleting objects is very slow programatically
         # (i.e. bucket.objects.all().delete() is slow).
@@ -3932,7 +3941,7 @@ class IBMCosStore(AbstractStore):
 
     def _delete_cos_bucket_objects(self,
                                    bucket: Any,
-                                   prefix: Optional[str] = None):
+                                   prefix: Optional[str] = None) -> None:
         bucket_versioning = self.s3_resource.BucketVersioning(bucket.name)
         if bucket_versioning.status == 'Enabled':
             if prefix is not None:
@@ -3947,7 +3956,7 @@ class IBMCosStore(AbstractStore):
                 res = list(bucket.objects.delete())
         logger.debug(f'Deleted bucket\'s content:\n{res}, prefix: {prefix}')
 
-    def _delete_cos_bucket(self):
+    def _delete_cos_bucket(self) -> None:
         bucket = self.s3_resource.Bucket(self.name)
         try:
             self._delete_cos_bucket_objects(bucket)
@@ -3968,7 +3977,7 @@ class OciStore(AbstractStore):
 
     def __init__(self,
                  name: str,
-                 source: str,
+                 source: Optional[SourceType],
                  region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: Optional[bool] = True,
@@ -3980,12 +3989,52 @@ class OciStore(AbstractStore):
         self.compartment: str
         self.namespace: str
 
-        # Bucket region should be consistence with the OCI config file
-        region = oci.get_oci_config()['region']
+        # Region is from the specified name in <bucket>@<region> format.
+        # Another case is name can also be set by the source, for example:
+        #   /datasets-storage:
+        #       source: oci://RAGData@us-sanjose-1
+        # The name in above mount will be set to RAGData@us-sanjose-1
+        region_in_name = None
+        if name is not None and '@' in name:
+            self._validate_bucket_expr(name)
+            name, region_in_name = name.split('@')
+
+        # Region is from the specified source in oci://<bucket>@<region> format
+        region_in_source = None
+        if isinstance(source,
+                      str) and source.startswith('oci://') and '@' in source:
+            self._validate_bucket_expr(source)
+            source, region_in_source = source.split('@')
+
+        if region_in_name is not None and region_in_source is not None:
+            # This should never happen because name and source will never be
+            # the remote bucket at the same time.
+            assert region_in_name == region_in_source, (
+                f'Mismatch region specified. Region in name {region_in_name}, '
+                f'but region in source is {region_in_source}')
+
+        if region_in_name is not None:
+            region = region_in_name
+        elif region_in_source is not None:
+            region = region_in_source
+
+        # Default region set to what specified in oci config.
+        if region is None:
+            region = oci.get_oci_config()['region']
+
+        # So far from now on, the name and source are canonical, means there
+        # is no region (@<region> suffix) associated with them anymore.
 
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
         # TODO(zpoint): add _bucket_sub_path to the sync/mount/delete commands
+
+    def _validate_bucket_expr(self, bucket_expr: str):
+        pattern = r'^(\w+://)?[A-Za-z0-9-._]+(@\w{2}-\w+-\d{1})$'
+        if not re.match(pattern, bucket_expr):
+            raise ValueError(
+                'The format for the bucket portion is <bucket>@<region> '
+                'when specify a region with a bucket.')
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -4137,7 +4186,8 @@ class OciStore(AbstractStore):
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--src-dir "{base_dir_path}" {includes}')
+                f'--region {self.region} --src-dir "{base_dir_path}" '
+                f'{includes}')
 
             return sync_command
 
@@ -4157,8 +4207,8 @@ class OciStore(AbstractStore):
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--object-prefix "{dest_dir_name}" --src-dir "{src_dir_path}" '
-                f'{excludes} ')
+                f'--region {self.region} --object-prefix "{dest_dir_name}" '
+                f'--src-dir "{src_dir_path}" {excludes}')
 
             return sync_command
 
@@ -4289,7 +4339,8 @@ class OciStore(AbstractStore):
         def get_file_download_command(remote_path, local_path):
             download_command = (f'oci os object get --bucket-name {self.name} '
                                 f'--namespace-name {self.namespace} '
-                                f'--name {remote_path} --file {local_path}')
+                                f'--region {self.region} --name {remote_path} '
+                                f'--file {local_path}')
 
             return download_command
 
@@ -4346,6 +4397,7 @@ class OciStore(AbstractStore):
         @oci.with_oci_env
         def get_bucket_delete_command(bucket_name):
             remove_command = (f'oci os bucket delete --bucket-name '
+                              f'--region {self.region} '
                               f'{bucket_name} --empty --force')
 
             return remove_command
