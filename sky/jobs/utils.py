@@ -6,11 +6,9 @@ ManagedJobCodeGen.
 """
 import collections
 import enum
-import inspect
 import os
 import pathlib
 import shlex
-import shutil
 import textwrap
 import time
 import traceback
@@ -53,7 +51,6 @@ JOB_CONTROLLER_NAME: str = (
 LEGACY_JOB_CONTROLLER_NAME: str = (
     f'sky-spot-controller-{common_utils.get_user_hash()}')
 SIGNAL_FILE_PREFIX = '/tmp/sky_jobs_controller_signal_{}'
-LEGACY_SIGNAL_FILE_PREFIX = '/tmp/sky_spot_controller_signal_{}'
 # Controller checks its job's status every this many seconds.
 JOB_STATUS_CHECK_GAP_SECONDS = 20
 
@@ -458,17 +455,12 @@ def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
 
         # Send the signal to the jobs controller.
         signal_file = pathlib.Path(SIGNAL_FILE_PREFIX.format(job_id))
-        legacy_signal_file = pathlib.Path(
-            LEGACY_SIGNAL_FILE_PREFIX.format(job_id))
         # Filelock is needed to prevent race condition between signal
         # check/removal and signal writing.
         with filelock.FileLock(str(signal_file) + '.lock'):
             with signal_file.open('w', encoding='utf-8') as f:
                 f.write(UserSignal.CANCEL.value)
                 f.flush()
-            # Backward compatibility for managed jobs launched before #3419. It
-            # can be removed in the future 0.8.0 release.
-            shutil.copy(str(signal_file), str(legacy_signal_file))
         cancelled_job_ids.append(job_id)
 
     if not cancelled_job_ids:
@@ -965,7 +957,8 @@ def format_job_table(
         'STATUS',
     ]
     if show_all:
-        columns += ['STARTED', 'CLUSTER', 'REGION', 'DESCRIPTION']
+        # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
+        columns += ['STARTED', 'CLUSTER', 'REGION', 'SCHED. STATE', 'DETAILS']
     if tasks_have_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
@@ -984,20 +977,10 @@ def format_job_table(
         # by the task_id.
         jobs[get_hash(task)].append(task)
 
-    def generate_description(failure_reason: Optional[str],
-                             schedule_state: Optional[str]) -> str:
-        description = ''
-        if schedule_state is not None:
-            description += f'Scheduler: {schedule_state}'
-            if failure_reason is not None:
-                description += ', '
+    def generate_details(failure_reason: Optional[str]) -> str:
         if failure_reason is not None:
-            description += f'Failure: {failure_reason}'
-
-        if description == '':
-            return '-'
-
-        return description
+            return f'Failure: {failure_reason}'
+        return '-'
 
     for job_hash, job_tasks in jobs.items():
         if show_all:
@@ -1050,13 +1033,13 @@ def format_job_table(
                 status_str,
             ]
             if show_all:
-                schedule_state = job_tasks[0]['schedule_state']
                 failure_reason = job_tasks[current_task_id]['failure_reason']
                 job_values.extend([
                     '-',
                     '-',
                     '-',
-                    generate_description(failure_reason, schedule_state),
+                    job_tasks[0]['schedule_state'],
+                    generate_details(failure_reason),
                 ])
             if tasks_have_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
@@ -1087,14 +1070,14 @@ def format_job_table(
                 # schedule_state is only set at the job level, so if we have
                 # more than one task, only display on the aggregated row.
                 schedule_state = (task['schedule_state']
-                                  if len(job_tasks) == 1 else None)
+                                  if len(job_tasks) == 1 else '-')
                 values.extend([
                     # STARTED
                     log_utils.readable_time_duration(task['start_at']),
                     task['cluster_resources'],
                     task['region'],
-                    generate_description(task['failure_reason'],
-                                         schedule_state),
+                    schedule_state,
+                    generate_details(task['failure_reason']),
                 ])
             if tasks_have_user:
                 values.insert(0, task.get('user', '-'))
@@ -1125,28 +1108,15 @@ class ManagedJobCodeGen:
 
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
-    # TODO: the try..except.. block is for backward compatibility. Remove it in
-    # v0.8.0.
     _PREFIX = textwrap.dedent("""\
-        managed_job_version = 0
-        try:
-            from sky.jobs import utils
-            from sky.jobs import constants as managed_job_constants
-            from sky.jobs import state as managed_job_state
-
-            managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
-        except ImportError:
-            from sky.spot import spot_state as managed_job_state
-            from sky.spot import spot_utils as utils
+        from sky.jobs import utils
+        from sky.jobs import state as managed_job_state
         """)
 
     @classmethod
     def get_job_table(cls) -> str:
         code = textwrap.dedent("""\
-        if managed_job_version < 1:
-            job_table = utils.dump_spot_job_queue()
-        else:
-            job_table = utils.dump_managed_job_queue()
+        job_table = utils.dump_managed_job_queue()
         print(job_table, flush=True)
         """)
         return cls._build(code)
@@ -1182,29 +1152,9 @@ class ManagedJobCodeGen:
                     job_id: Optional[int],
                     follow: bool = True,
                     controller: bool = False) -> str:
-        # We inspect the source code of the function here for backward
-        # compatibility.
-        # TODO: change to utils.stream_logs(job_id, job_name, follow) in v0.8.0.
-        # Import libraries required by `stream_logs`. The try...except... block
-        # should be removed in v0.8.0.
-        code = textwrap.dedent("""\
-        import os
-        import time
-
-        from sky.skylet import job_lib, log_lib
-        from sky.skylet import constants
-        from sky.utils import ux_utils
-        try:
-            from sky.jobs.utils import stream_logs_by_id
-        except ImportError:
-            from sky.spot.spot_utils import stream_logs_by_id
-        from typing import Optional
-        """)
-        code += inspect.getsource(stream_logs)
-        code += textwrap.dedent(f"""\
-
-        msg = stream_logs({job_id!r}, {job_name!r},
-                           follow={follow}, controller={controller})
+        code = textwrap.dedent(f"""\
+        msg = utils.stream_logs({job_id!r}, {job_name!r},
+                                follow={follow}, controller={controller})
         print(msg, flush=True)
         """)
         return cls._build(code)
