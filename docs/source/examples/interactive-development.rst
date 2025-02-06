@@ -6,7 +6,7 @@ Start a Development Cluster
 
 SkyPilot makes interactive development easy on Kubernetes or cloud VMs. It helps you:
 
-#. :ref:`Launch <dev-launch>`: Quickly get a cluster with GPU or other resource requirement with a single command.
+#. :ref:`Launch <dev-launch>`: Quickly get a cluster with GPUs or other resources with a single command.
 #. :ref:`Autostop <dev-autostop>`: Automatically stop the cluster after some idle time for cost savings.
 #. :ref:`Connect <dev-connect>`: Easily connect to the cluster using the cluster name:
 
@@ -25,7 +25,7 @@ To launch a cluster with a cheap GPU for development:
 
   # Launch a cluster with 1 NVIDIA GPU and sync the local working directory to the
   # cluster.
-  sky launch -c dev --gpus T4 --workdir .
+  sky launch -c dev --gpus L4 --workdir .
 
 This can be launched as a pod in your Kubernetes cluster or a VM on any cloud.
 
@@ -70,7 +70,7 @@ Or add an additional flag :code:`-i` during the launch:
 .. code-block:: bash
 
   # Launch a cluster with auto stop after 5 hours
-  sky launch -c dev --gpus T4 --workdir . -i 300
+  sky launch -c dev --gpus L4 --workdir . -i 300
 
 For more details of auto stopping, check out: :ref:`auto-stop`. This feature is designed
 to prevent idle clusters from incurring unnecessary costs, ensuring your cluster
@@ -170,7 +170,7 @@ The following :code:`jupyter.yaml` is an example of a task specification that ca
   name: jupyter
 
   resources:
-    accelerators: T4:1
+    accelerators: L4:1
 
   file_mounts:
     /covid:
@@ -209,3 +209,8 @@ You can verify that this notebook has access to the mounted storage bucket.
 
 
 
+
+Working with Clusters
+---------------------
+
+To see a typical workflow of working with clusters, you can refer to :ref:`quickstart`.
