@@ -1,13 +1,14 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 20
+    initial_delay_seconds: 60
   replicas: 2
 
 resources:
   ports: 8081
   cpus: 2+
 
-workdir: examples/serve/http_server
+setup: |
+  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
 
 run: python3 server.py --port 8081

@@ -56,30 +56,35 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         PRIMARY KEY (service_name, replica_id))""")
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS version_specs (
-        version INTEGER, 
+        version INTEGER,
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
     conn.commit()
 
+    # Backward compatibility.
+    db_utils.add_column_to_table(cursor, conn, 'services',
+                                 'requested_resources_str', 'TEXT')
+    # Deprecated: switched to `active_versions` below for the version
+    # considered active by the load balancer. The
+    # authscaler/replica_manager version can be found in the
+    # version_specs table.
+    db_utils.add_column_to_table(
+        cursor, conn, 'services', 'current_version',
+        f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
+    # The versions that is activated for the service. This is a list
+    # of integers in json format.
+    db_utils.add_column_to_table(cursor, conn, 'services', 'active_versions',
+                                 f'TEXT DEFAULT {json.dumps([])!r}')
+    db_utils.add_column_to_table(cursor, conn, 'services',
+                                 'load_balancing_policy', 'TEXT DEFAULT NULL')
+    # Whether the service's load balancer is encrypted with TLS.
+    db_utils.add_column_to_table(cursor, conn, 'services', 'tls_encrypted',
+                                 'INTEGER DEFAULT 0')
+    conn.commit()
 
-_DB = db_utils.SQLiteConn(_DB_PATH, create_table)
-# Backward compatibility.
-db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
-                             'requested_resources_str', 'TEXT')
-# Deprecated: switched to `active_versions` below for the version considered
-# active by the load balancer. The authscaler/replica_manager version can be
-# found in the version_specs table.
-db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
-                             'current_version',
-                             f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
-# The versions that is activated for the service. This is a list of integers in
-# json format.
-db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
-                             'active_versions',
-                             f'TEXT DEFAULT {json.dumps([])!r}')
-db_utils.add_column_to_table(_DB.cursor, _DB.conn, 'services',
-                             'load_balancing_policy', 'TEXT DEFAULT NULL')
+
+db_utils.SQLiteConn(_DB_PATH, create_table)
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
 
@@ -246,7 +251,7 @@ _SERVICE_STATUS_TO_COLOR = {
 
 def add_service(name: str, controller_job_id: int, policy: str,
                 requested_resources_str: str, load_balancing_policy: str,
-                status: ServiceStatus) -> bool:
+                status: ServiceStatus, tls_encrypted: bool) -> bool:
     """Add a service in the database.
 
     Returns:
@@ -259,10 +264,11 @@ def add_service(name: str, controller_job_id: int, policy: str,
                 """\
                 INSERT INTO services
                 (name, controller_job_id, status, policy,
-                requested_resources_str, load_balancing_policy)
-                VALUES (?, ?, ?, ?, ?, ?)""",
+                requested_resources_str, load_balancing_policy, tls_encrypted)
+                VALUES (?, ?, ?, ?, ?, ?, ?)""",
                 (name, controller_job_id, status.value, policy,
-                 requested_resources_str, load_balancing_policy))
+                 requested_resources_str, load_balancing_policy,
+                 int(tls_encrypted)))
 
     except sqlite3.IntegrityError as e:
         if str(e) != _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG:
@@ -329,7 +335,7 @@ def set_service_load_balancer_port(service_name: str,
 def _get_service_from_row(row) -> Dict[str, Any]:
     (current_version, name, controller_job_id, controller_port,
      load_balancer_port, status, uptime, policy, _, _, requested_resources_str,
-     _, active_versions, load_balancing_policy) = row[:14]
+     _, active_versions, load_balancing_policy, tls_encrypted) = row[:15]
     if load_balancing_policy is None:
         # This entry in database was added in #4439, and it will always be set
         # to a str value. If it is None, it means it is an legacy entry and is
@@ -352,6 +358,7 @@ def _get_service_from_row(row) -> Dict[str, Any]:
         'active_versions': json.loads(active_versions),
         'requested_resources_str': requested_resources_str,
         'load_balancing_policy': load_balancing_policy,
+        'tls_encrypted': bool(tls_encrypted),
     }
 
 

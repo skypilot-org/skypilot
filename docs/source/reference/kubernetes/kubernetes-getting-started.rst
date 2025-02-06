@@ -340,7 +340,7 @@ FAQs
       # ~/.sky/config.yaml
       kubernetes:
         provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
-        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs in scale-to-zero setting
+        autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs/TPUs in scale-to-zero setting
 
 * **Can SkyPilot provision a Kubernetes cluster for me? Will SkyPilot add more nodes to my Kubernetes clusters?**
 
@@ -353,6 +353,15 @@ FAQs
 * **How do I view the pods created by SkyPilot on my Kubernetes cluster?**
 
   You can use your existing observability tools to filter resources with the label :code:`parent=skypilot` (:code:`kubectl get pods -l 'parent=skypilot'`). As an example, follow the instructions :ref:`here <kubernetes-observability>` to deploy the Kubernetes Dashboard on your cluster.
+
+* **Does SkyPilot support TPUs on GKE?**
+
+  SkyPilot supports single-host TPU topologies on GKE (e.g., 1x1, 2x2, 2x4). To use TPUs, add it to the accelerator field in your task YAML:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerators: tpu-v5-lite-podslice:1  # or tpu-v5-lite-device, tpu-v5p-slice
 
 * **I am using a custom image. How can I speed up the pod startup time?**
 

@@ -775,7 +775,8 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
 
     # Create pods in parallel
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
-                                            range(to_start_count), _NUM_THREADS)
+                                            list(range(to_start_count)),
+                                            _NUM_THREADS)
 
     if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
         deployments = copy.deepcopy(pods)
@@ -952,7 +953,7 @@ def terminate_instances(
         _terminate_node(namespace, context, pod_name)
 
     # Run pod termination in parallel
-    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(),
+    subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
                                      _NUM_THREADS)
 
 
