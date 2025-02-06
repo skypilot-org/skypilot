@@ -965,6 +965,7 @@ def format_job_table(
         'STATUS',
     ]
     if show_all:
+        # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
         columns += ['STARTED', 'CLUSTER', 'REGION', 'SCHED. STATE', 'DETAILS']
     if tasks_have_user:
         columns.insert(0, 'USER')
