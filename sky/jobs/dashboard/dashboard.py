@@ -94,7 +94,7 @@ JOB_TABLE_COLUMNS = [
 
 def _extract_launch_history(log_content: str) -> str:
     """Extract launch history from log content.
-    
+
     Args:
         log_content: Content of the log file.
     Returns:
