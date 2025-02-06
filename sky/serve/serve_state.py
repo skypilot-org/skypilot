@@ -6,7 +6,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple, Union
 
 import colorama
 
