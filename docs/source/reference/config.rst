@@ -16,6 +16,11 @@ Syntax
 
 .. parsed-literal::
 
+  :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
+    - aws
+    - gcp
+    - kubernetes
+
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
     :ref:`controller <config-yaml-jobs-controller>`:
@@ -24,11 +29,6 @@ Syntax
         region: us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
-
-  :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
-    - aws
-    - gcp
-    - kubernetes
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -39,6 +39,27 @@ Syntax
     :ref:`disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`: false
 
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
+
+  :ref:`kubernetes <config-yaml-kubernetes>`:
+    :ref:`networking <config-yaml-kubernetes-networking>`: portforward
+    :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
+    :ref:`remote_identity <config-yaml-kubernetes-remote-identity>`: my-k8s-service-account
+    :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
+      - context1
+      - context2
+    :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
+      labels:
+        mylabel: myvalue
+      annotations:
+        myannotation: myvalue
+    :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
+    :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
+    :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
+      metadata:
+        labels:
+          my-label: my-value
+      spec:
+        runtimeClassName: nvidia
 
   :ref:`aws <config-yaml-aws>`:
     :ref:`labels <config-yaml-aws-labels>`:
@@ -74,27 +95,6 @@ Syntax
   :ref:`azure <config-yaml-azure>`:
     :ref:`resource_group_vm <config-yaml-azure-resource-group-vm>`: user-resource-group-name
     :ref:`storage_account <config-yaml-azure-storage-account>`: user-storage-account-name
-
-  :ref:`kubernetes <config-yaml-kubernetes>`:
-    :ref:`networking <config-yaml-kubernetes-networking>`: portforward
-    :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
-    :ref:`remote_identity <config-yaml-kubernetes-remote-identity>`: my-k8s-service-account
-    :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
-      - context1
-      - context2
-    :ref:`custom_metadata <config-yaml-kubernetes-custom-metadata>`:
-      labels:
-        mylabel: myvalue
-      annotations:
-        myannotation: myvalue
-    :ref:`provision_timeout <config-yaml-kubernetes-provision-timeout>`: 10
-    :ref:`autoscaler <config-yaml-kubernetes-autoscaler>`: gke
-    :ref:`pod_config <config-yaml-kubernetes-pod-config>`:
-      metadata:
-        labels:
-          my-label: my-value
-      spec:
-        runtimeClassName: nvidia
 
   :ref:`oci <config-yaml-oci>`:
     :ref:`default <config-yaml-oci>`:
