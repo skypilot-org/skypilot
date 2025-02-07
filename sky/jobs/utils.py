@@ -241,16 +241,35 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
         schedule_state = tasks[0]['schedule_state']
 
         # Backwards compatibility: this job was submitted when ray was still
-        # used for managing the parallelism of job controllers.
+        # used for managing the parallelism of job controllers, before #4485.
         # TODO(cooperc): Remove before 0.11.0.
         if (schedule_state is
                 managed_job_state.ManagedJobScheduleState.INVALID):
             _handle_legacy_job(job_id)
             continue
 
-        # For jobs with schedule state:
+        # Handle jobs with schedule state (non-legacy jobs):
         pid = tasks[0]['controller_pid']
-        if pid is None:
+        if schedule_state == managed_job_state.ManagedJobScheduleState.DONE:
+            # There are two cases where we could get a job that is DONE.
+            # 1. At query time (get_jobs_to_check_status), the job was not yet
+            #    DONE, but since then (before get_managed_jobs is called) it has
+            #    hit a terminal status, marked itself done, and exited. This is
+            #    fine.
+            # 2. The job is DONE, but in a non-terminal status. This is
+            #    unexpected. For instance, the task status is RUNNING, but the
+            #    job schedule_state is DONE.
+            if all(task['status'].is_terminal() for task in tasks):
+                # Turns out this job is fine, even though it got pulled by
+                # get_jobs_to_check_status. Probably case #1 above.
+                continue
+
+            logger.error(f'Job {job_id} has DONE schedule state, but some '
+                         f'tasks are not terminal. Task statuses: '
+                         f'{", ".join(task["status"].value for task in tasks)}')
+            failure_reason = ('Inconsistent internal job state. This is a bug.')
+        elif pid is None:
+            # Non-legacy job and controller process has not yet started.
             if schedule_state in (
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
                     managed_job_state.ManagedJobScheduleState.WAITING):
