@@ -2044,10 +2044,6 @@ class RetryingVmProvisioner(object):
                     requested_features.remove(
                         clouds.CloudImplementationFeatures.STOP)
 
-                if isinstance(to_provision.cloud, clouds.Kubernetes):
-                    # TODO(andyl): a proper way to pass task.run
-                    setattr(to_provision, 'task', task)
-
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
                     to_provision, requested_features)

@@ -867,7 +867,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         the fly. If any of them finished, it will update the status of the
         corresponding replica.
         """
-        for replica_id, p in self._launch_process_pool.items():
+        # To avoid `dictionary changed size during iteration` error.
+        launch_process_pool_snapshot = list(self._launch_process_pool.items())
+        for replica_id, p in launch_process_pool_snapshot:
             if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
@@ -909,7 +911,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-        for replica_id, p in self._down_process_pool.items():
+        down_process_pool_snapshot = list(self._down_process_pool.items())
+        for replica_id, p in down_process_pool_snapshot:
             if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')

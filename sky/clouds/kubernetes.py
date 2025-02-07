@@ -335,7 +335,7 @@ class Kubernetes(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun  # Unused.
+        del cluster_name, zones, dryrun  # Unused.
         if region is None:
             context = kubernetes_utils.get_current_kube_config_context_name()
         else:
