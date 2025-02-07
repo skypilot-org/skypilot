@@ -1,0 +1,10 @@
+{{- if .Values.apiService.config }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: skypilot-config
+  namespace: {{ .Values.namespace }}
+data:
+  config.yaml: |
+{{ .Values.apiService.config | indent 4 }} 
+{{- end }} 

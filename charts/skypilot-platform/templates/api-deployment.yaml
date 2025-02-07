@@ -1,0 +1,191 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: skypilot-api-service
+  namespace: {{ .Values.namespace }}
+spec:
+  replicas: {{ .Values.apiService.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: skypilot-api
+  template:
+    metadata:
+      labels:
+        app: skypilot-api
+    spec:
+      automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
+      serviceAccountName: skypilot-api-sa
+      containers:
+      - name: skypilot-api
+        image: {{ .Values.apiService.image }}
+        imagePullPolicy: Always
+        resources:
+          {{- if .Values.apiService.cpuCoresLimit }}
+          limits:
+            cpu: {{ .Values.apiService.cpuCoresLimit }}
+          {{- end }}
+          {{- if .Values.apiService.memoryGBLimit }}
+            memory: {{ .Values.apiService.memoryGBLimit }}G
+          {{- end }}
+        env:
+        - name: SKYPILOT_DEV
+          value: {{ .Values.apiService.skypilotDev | quote }}          
+        {{- if .Values.apiService.cpuCoresLimit }}
+        - name: SKYPILOT_POD_CPU_CORES_LIMIT
+          value: {{ .Values.apiService.cpuCoresLimit | quote }}
+        {{- end }}
+        {{- if .Values.apiService.memoryGBLimit }}
+        - name: SKYPILOT_POD_MEMORY_GB_LIMIT
+          value: {{ .Values.apiService.memoryGBLimit | quote }}
+        {{- end }}
+        {{- if .Values.gcpCredentials.enabled }}
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /root/gcp-cred.json
+        {{- end }}
+        {{- if .Values.kubernetesCredentials.inclusterNamespace }}
+        - name: SKYPILOT_IN_CLUSTER_NAMESPACE
+          value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
+        {{- end }}
+        # Start api service and tail logs
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          set -e
+          {{- if .Values.apiService.preDeployHook }}
+          {{ .Values.apiService.preDeployHook | nindent 10 }}
+          {{- end }}
+          {{- if .Values.apiService.config }}
+          mkdir -p /root/.sky
+          echo "Copying config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
+          # The configmap serves as the ground truth for the config.yaml file.
+          # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
+          cp /tmp/config.yaml /root/.sky/config.yaml
+          {{- end }}
+          sky api start --deploy && tail -f /root/.sky/api_server/server.log
+        ports:
+        - containerPort: 46580
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 46580
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 46580
+          periodSeconds: 30
+        volumeMounts:
+        {{- if .Values.storage.enabled }}
+        - name: state-volume
+          mountPath: /root/.sky
+          subPath: .sky
+        - name: state-volume
+          mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
+          subPath: .ssh
+        {{- end }}
+        {{- if .Values.apiService.config }}
+        - name: skypilot-config
+          mountPath: /tmp/config.yaml
+          subPath: config.yaml
+        {{- end }}
+        {{- if .Values.awsCredentials.enabled }}
+        - name: aws-config
+          mountPath: /root/.aws
+          readOnly: true
+        {{- end }}
+        {{- if .Values.gcpCredentials.enabled }}
+        - name: gcp-config
+          mountPath: /root/.config/gcloud
+        - name: gcp-credentials
+          mountPath: /root/gcp-cred.json
+          subPath: gcp-cred.json
+        {{- end }}
+        {{- if .Values.kubernetesCredentials.useKubeconfig }}
+        - name: kube-config
+          mountPath: /root/.kube
+        {{- end }}
+      initContainers:
+      {{- if .Values.awsCredentials.enabled }}
+      - name: create-aws-credentials
+        image: busybox
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Debugging AWS credentials setup:"
+          if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "AWS credentials found in environment variables."
+            mkdir -p /root/.aws
+            echo "[default]" > /root/.aws/credentials
+            echo "aws_access_key_id=$AWS_ACCESS_KEY_ID" >> /root/.aws/credentials
+            echo "aws_secret_access_key=$AWS_SECRET_ACCESS_KEY" >> /root/.aws/credentials
+            echo "Credentials file created successfully."
+          else
+            echo "AWS credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws_access_key_id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws_secret_access_key
+        volumeMounts:
+        - name: aws-config
+          mountPath: /root/.aws
+      {{- end }}
+      {{- if .Values.gcpCredentials.enabled }}
+      - name: setup-gcp-credentials
+        image: google/cloud-sdk:latest
+        command: ["/bin/sh", "-c"]
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /root/gcp-cred.json
+        args:
+        - |
+          gcloud auth activate-service-account --key-file=/root/gcp-cred.json
+          gcloud config set project {{ .Values.gcpCredentials.projectId }}
+        volumeMounts:
+        - name: gcp-credentials
+          mountPath: /root/gcp-cred.json
+          subPath: gcp-cred.json
+        - name: gcp-config
+          mountPath: /root/.config/gcloud
+      {{- end }}
+      volumes:
+      {{- if .Values.storage.enabled }}
+      - name: state-volume
+        persistentVolumeClaim:
+          claimName: skyplatform-state
+      {{- else }}
+      - name: state-volume
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.awsCredentials.enabled }}
+      - name: aws-config
+        emptyDir: {}
+      {{- end }}
+
+      {{- if .Values.gcpCredentials.enabled }}
+      - name: gcp-credentials
+        secret:
+          secretName: gcp-credentials
+      - name: gcp-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.kubernetesCredentials.useKubeconfig }}
+      - name: kube-config
+        secret:
+          secretName: kube-credentials
+      {{- end }}
+      {{- if .Values.apiService.config }}
+      - name: skypilot-config
+        configMap:
+          name: skypilot-config
+      {{- end }}
