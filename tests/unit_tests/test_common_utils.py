@@ -50,3 +50,5 @@ class TestMakeClusterNameOnCloud:
         mock_get_user_hash.return_value = MOCKED_USER_HASH
         assert "cud-73-ab12cd34" == common_utils.make_cluster_name_on_cloud(
             "Cuda_11.8")
+        assert "cuda-11-8-ab12cd34" == common_utils.make_cluster_name_on_cloud(
+            "Cuda_11.8", max_length=20)
