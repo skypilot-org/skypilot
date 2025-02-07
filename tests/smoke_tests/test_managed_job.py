@@ -821,7 +821,7 @@ def test_managed_jobs_intermediate_storage(generic_cloud: str):
                     *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
                     # Verify command fails with correct error - run only once
                     f'err=$(sky jobs launch -n {name} --cloud {generic_cloud} {file_path} -y 2>&1); '
-                    f'ret=$?; echo "$err"; if echo "$err" | grep -q "StorageBucketCreateError: '
+                    f'ret=$?; if [ $ret -ne 0 ] && echo "$err" | grep -q "StorageBucketCreateError: '
                     f'Jobs bucket \'{intermediate_storage_name}\' does not exist."; then exit 0; '
                     f'else exit 1; fi',
                     f'aws s3api create-bucket --bucket {intermediate_storage_name}',
