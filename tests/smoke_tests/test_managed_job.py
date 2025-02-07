@@ -104,7 +104,7 @@ def test_job_pipeline(generic_cloud: str):
             f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml --cloud {generic_cloud} -y -d',
             # Need to wait for setup and job initialization.
             'sleep 30',
-            f'{smoke_tests_utils.GET_JOB_QUEUE}| grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
             # after it, i.e. the 4 tasks within the job.
             # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
@@ -299,7 +299,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
         'managed_jobs_pipeline_recovery_aws',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -361,7 +361,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
         'managed_jobs_pipeline_recovery_gcp',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
