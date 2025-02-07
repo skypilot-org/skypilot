@@ -292,7 +292,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                 # It is expected that the controller hasn't been started yet.
                 continue
             elif (schedule_state ==
-                    managed_job_state.ManagedJobScheduleState.LAUNCHING):
+                  managed_job_state.ManagedJobScheduleState.LAUNCHING):
                 # This is unlikely but technically possible. There's a brief
                 # period between marking job as scheduled (LAUNCHING) and
                 # actually launching the controller process and writing the pid

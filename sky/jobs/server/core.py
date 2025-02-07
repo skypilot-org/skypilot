@@ -267,8 +267,8 @@ def _maybe_restart_controller(
     # in the task setup because since we are using detached_setup, it will
     # become a job on controller which messes up the job IDs (we assume the
     # job ID in controller's job queue is consistent with managed job IDs).
-    with rich_utils.force_update_status(ux_utils.spinner_message(
-            'Starting dashboard...')):
+    with rich_utils.force_update_status(
+            ux_utils.spinner_message('Starting dashboard...')):
         runner = handle.get_command_runners()[0]
         user_hash = common_utils.get_user_hash()
         runner.run(
