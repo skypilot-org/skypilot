@@ -217,7 +217,9 @@ class SkyServeController:
         async def validation_exception_handler(
                 request: fastapi.Request, exc: Exception) -> fastapi.Response:
             with ux_utils.enable_traceback():
-                logger.error(f'Error in controller: {exc!r}')
+                logger.error(
+                    f'Error in controller: {exc!r}, request: {request}')
+                logger.error(f'  Traceback: {traceback.format_exc()}')
             return responses.JSONResponse(
                 status_code=500,
                 content={
