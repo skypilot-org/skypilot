@@ -159,52 +159,65 @@ If you are using AWS credentials configured in the previous step, you can enable
 Step 4: Get the API server URL
 ------------------------------
 
-Once the API server is deployed, we can fetch the API server URL.
+Once the API server is deployed, we can fetch the API server URL. We use nginx ingress to expose the API server.
 
-We use nginx ingress to expose the API server. We also setup an additional NodePort service to expose the ingress controller.
+Our default of using a NodePort service is the recommended way to expose the API server because some cloud load balancers (e.g., GKE) do not work with websocket connections, which are required for our Kubernetes SSH tunneling.
 
-.. note::
+.. tab-set::
 
-    Using NodePort is required because many cloud load balancers (e.g., GKE) do not work with websocket connections, which are required for our Kubernetes SSH tunneling. 
+    .. tab-item:: NodePort (Default)
+        :sync: nodeport-tab
 
-    If you do not need SSH tunneling, you can use a :ref:`LoadBalancer service <sky-api-server-loadbalancer>` to expose the API server.
+        1. Make sure ports 30050 and 30051 are open on your nodes.
 
-1. Make sure ports 30050 and 30051 are open on your nodes.
+        2. Fetch the ingress controller URL with:
 
-2. Fetch the ingress controller URL with:
+        .. code-block:: console
 
-.. code-block:: console
+            $ NODE_PORT=$(kubectl get svc nginx-ingress-controller-np -n skypilot -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
+            $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
+            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
+            $ echo $ENDPOINT
+            http://skypilot:yourpassword@1.1.1.1:30050
 
-    $ NODE_PORT=$(kubectl get svc nginx-ingress-controller-np -n skypilot -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
-    $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
-    $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
-    $ echo $ENDPOINT
-    http://skypilot:yourpassword@1.1.1.1:30050
+        .. tip::
+            
+            You can customize the node ports with ``--set ingress.httpNodePort=<port> --set ingress.httpsNodePort=<port>`` to the helm upgrade command. 
+            
+            If set to null, Kubernetes will assign random ports in the NodePort range (default 30000-32767). Make sure to open these ports on your nodes.
+
+        .. tip::
+
+            To avoid frequent IP address changes on nodes by your cloud provider, you can attach a static IP address to your nodes (`instructions for GKE <https://cloud.google.com/compute/docs/ip-addresses/configure-static-external-ip-address>`_) and use it as the ``NODE_IP`` in the command above.
+
+    .. tab-item:: LoadBalancer
+        :sync: loadbalancer-tab
+
+        .. warning::
+
+            Using LoadBalancer service type may not support SSH access to SkyPilot clusters. Only use this option if you do not need SSH access.
 
 
-.. tip::
-    
-    You can customize the node ports with ``--set ingress.httpNodePort=<port> --set ingress.httpsNodePort=<port>`` to the helm upgrade command. 
-    
-    If set to null, Kubernetes will assign random ports in the NodePort range (default 30000-32767). Make sure to open these ports on your nodes.
+        1. Deploy the API server with LoadBalancer configuration:
+
+        .. code-block:: console
+
+            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+            --set ingress.httpNodePort=null \
+            --set ingress.httpsNodePort=null \
+            --set ingress-nginx.controller.service.type=LoadBalancer
+
+        2. Fetch the ingress controller URL:
+
+        .. code-block:: console
+
+            $ ENDPOINT=$(kubectl get svc skypilot-platform-ingress-nginx-controller -n skypilot -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
+            $ echo $ENDPOINT
+            http://1.1.1.1
 
 
-.. _sky-api-server-loadbalancer:
-
-.. tip::
-
-    If you cannot use NodePort services, you may use the ingress LoadBalancer service directly exposed by the nginx Helm chart using ``--set ingress.httpNodePort=null --set ingress.httpsNodePort=null --set ingress-nginx.controller.service.type=LoadBalancer``.
-    
-    Then you can fetch the ingress controller URL with:
-
-    .. code-block:: console
-
-        $ ENDPOINT=$(kubectl get svc skypilot-platform-ingress-nginx-controller -n skypilot -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
-        $ echo $ENDPOINT
-        http://1.1.1.1
-
-    You will not be able to use SSH to access SkyPilot clusters on Kubernetes when using LoadBalancer services.
-
+Step 5: Test the API server
+---------------------------
 
 Test the API server by curling the health endpoint:
 
@@ -285,7 +298,7 @@ Additional setup for EKS
 
 To support persistent storage for the API server's state, we need a storage class that supports persistent volumes. If you already have a storage class that supports persistent volumes, you can skip the following steps.
 
-In this example, we will use the `Amazon EBS CSI driver <https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html>`_ to create a storage class that supports persistent volumes backed by Amazon EBS. You can also use other storage classes that support persistent volumes, such as `EFS <https://docs.aws.amazon.com/eks/latest/userguide/efs-csi.html>`_.
+We will use the `Amazon EBS CSI driver <https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html>`_ to create a storage class that supports persistent volumes backed by Amazon EBS. You can also use other storage classes that support persistent volumes, such as `EFS <https://docs.aws.amazon.com/eks/latest/userguide/efs-csi.html>`_.
 
 The steps below are based on the `official documentation <https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html>`_. Please follow the official documentation to adapt the steps to your cluster.
 
@@ -296,7 +309,6 @@ The steps below are based on the `official documentation <https://docs.aws.amazo
 2. Install the `Amazon EBS CSI driver <https://docs.aws.amazon.com/eks/latest/userguide/ebs-csi.html>`_. The recommended method is through creating an EKS add-on.
 
 Once the EBS CSI driver is installed, the default ``gp2`` storage class will be backed by EBS volumes.
-
 
 .. _sky-api-server-config:
 
