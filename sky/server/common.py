@@ -157,10 +157,10 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
     avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
     if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
         logger.warning(
-            f'{colorama.Fore.YELLOW} Your SkyPilot API server machine only has '
-            f'{avail_mem_size_gb:.1f} GB of memory available. '
-            f'Recommend at least {server_constants.MIN_AVAIL_MEM_GB} GB to run '
-            f'heavier loads on SkyPilot and enjoy better performance.'
+            f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only has '
+            f'{avail_mem_size_gb:.1f}GB memory available. '
+            f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is recommended to '
+            f'support higher load with better performance.'
             f'{colorama.Style.RESET_ALL}')
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
