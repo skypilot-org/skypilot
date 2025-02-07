@@ -563,7 +563,15 @@ def terminate_instances(
                 else:
                     logger.warning(f'Instance {instance} does not exist. '
                                    'Skip terminating it.')
-    _wait_for_operations(operations, project_id, zone)
+    try:
+        _wait_for_operations(operations, project_id, zone)
+    except common.ProvisionerError as e:
+        # Ignore the error if the instance had already terminated,
+        # Otherwise raise the error.
+        if _INSTANCE_RESOURCE_NOT_FOUND_PATTERN.search(
+                getattr(e, 'detailed_reason', '')) is None:
+            raise e
+
     if errs:
         raise RuntimeError(f'Failed to terminate instances: {errs}')
     # We don't wait for the instances to be terminated, as it can take a long
