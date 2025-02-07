@@ -77,7 +77,7 @@ def test_managed_jobs_basic(generic_cloud: str):
             # Test the functionality for logging.
             f's=$(sky jobs logs -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "start counting"',
             f's=$(sky jobs logs --controller -n {name}-2 --no-follow); echo "$s"; echo "$s" | grep "Cluster launched:"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-2 | head -n1 | grep "RUNNING\|SUCCEEDED"',
         ],
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
@@ -105,19 +105,19 @@ def test_job_pipeline(generic_cloud: str):
         [
             f'sky jobs launch -n {name} tests/test_yamls/pipeline.yaml --cloud {generic_cloud} -y -d',
             'sleep 5',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "STARTING\|RUNNING"',
             # `grep -A 4 {name}` finds the job with {name} and the 4 lines
             # after it, i.e. the 4 tasks within the job.
             # `sed -n 2p` gets the second line of the 4 lines, i.e. the first
             # task within the job.
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "STARTING\|RUNNING"',
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "PENDING"',
             f'sky jobs cancel -y -n {name}',
             'sleep 5',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLING\|CANCELLED"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLING\|CANCELLED"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 4p | grep "CANCELLING\|CANCELLED"',
+            rf'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLING\|CANCELLED"',
             'sleep 200',
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 2p | grep "CANCELLED"',
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 3p | grep "CANCELLED"',
@@ -212,7 +212,7 @@ def test_managed_jobs_recovery_aws(aws_config_region):
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_aws',
         [
-            f'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            rf'sky jobs launch --cloud aws --region {region} --use-spot -n {name} "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -258,7 +258,7 @@ def test_managed_jobs_recovery_gcp():
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_gcp',
         [
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --cpus 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -288,14 +288,13 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
     """Test managed job recovery for a pipeline."""
     name = smoke_tests_utils.get_cluster_name()
     user_hash = common_utils.get_user_hash()
-    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     region = aws_config_region
     if region != 'us-east-2':
         pytest.skip('Only run spot pipeline recovery test in us-east-2')
     test = smoke_tests_utils.Test(
         'managed_jobs_pipeline_recovery_aws',
         [
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml  -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline_aws.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -342,7 +341,6 @@ def test_managed_jobs_pipeline_recovery_gcp():
     name = smoke_tests_utils.get_cluster_name()
     zone = 'us-east4-b'
     user_hash = common_utils.get_user_hash()
-    user_hash = user_hash[:common_utils.USER_HASH_LENGTH_IN_CLUSTER_NAME]
     query_cmd = (
         'gcloud compute instances list --filter='
         f'"(labels.ray-cluster-name:*-${{MANAGED_JOB_ID}}-{user_hash})" '
@@ -352,7 +350,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
     test = smoke_tests_utils.Test(
         'managed_jobs_pipeline_recovery_gcp',
         [
-            f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml  -y -d',
+            f'sky jobs launch -n {name} tests/test_yamls/pipeline_gcp.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -426,7 +424,7 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_multi_node_aws',
         [
-            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            rf'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -473,7 +471,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
     test = smoke_tests_utils.Test(
         'managed_jobs_recovery_multi_node_gcp',
         [
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800"  -y -d',
+            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -512,7 +510,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
         'managed_jobs_cancellation_aws',
         [
             # Test cancellation during spot cluster being launched.
-            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -532,7 +530,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -551,7 +549,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
              '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
             ),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000" -y -d',
             # The job is running in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -605,7 +603,7 @@ def test_managed_jobs_cancellation_gcp():
         'managed_jobs_cancellation_gcp',
         [
             # Test cancellation during spot cluster being launched.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
@@ -618,7 +616,7 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancelling the spot cluster during spot job being setup.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
             # The job is set up in the cluster, will shown as RUNNING.
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -632,7 +630,7 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000"  -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-3',
@@ -888,7 +886,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'test-managed-jobs-inline-env',
         [
-            f'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "echo "\\$TEST_ENV"; ([[ ! -z \\"\$TEST_ENV\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_IPS}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NODE_RANK}\\" ]] && [[ ! -z \\"\${constants.SKYPILOT_NUM_NODES}\\" ]]) || exit 1"',
+            rf'sky jobs launch -n {name} -y --cloud {generic_cloud} --env TEST_ENV="hello world" -- "echo "\$TEST_ENV"; ([[ ! -z \"\$TEST_ENV\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_IPS}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NODE_RANK}\" ]] && [[ ! -z \"\${constants.SKYPILOT_NUM_NODES}\" ]]) || exit 1"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,

@@ -168,7 +168,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
             use_internal_ips: true
             vpc_name: abc
 
-        spot:
+        jobs:
             controller:
                 resources:
                     disk_size: 256
@@ -201,7 +201,7 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / 'invalid.yaml'
     config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
-        spot:
+        jobs:
             controller:
                 resources:
                 cloud: gcp
@@ -221,7 +221,7 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / 'invalid.yaml'
     config_path.open('w', encoding='utf-8').write(
         textwrap.dedent(f"""\
-        spot:
+        jobs:
             controller:
                 resources:
                     cloud: notacloud

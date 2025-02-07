@@ -992,7 +992,7 @@ def write_cluster_config(
 
     # Read the cluster name from the tmp yaml file, to take the backward
     # compatbility restortion above into account.
-    # TODO: remove this after 2 minor releases, 0.8.0.
+    # TODO: remove this after 2 minor releases, 0.10.0.
     yaml_config = common_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
