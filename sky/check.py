@@ -261,6 +261,6 @@ def _format_enabled_cloud(cloud_name: str) -> str:
             context_info = f'Active context: {existing_contexts[0]}'
 
         return (f'{_green_color(cloud_name)}\n'
-                f'    {colorama.Style.DIM}{context_info}'
+                f'  {colorama.Style.DIM}{context_info}'
                 f'{colorama.Style.RESET_ALL}')
     return _green_color(cloud_name)

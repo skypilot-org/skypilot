@@ -120,11 +120,6 @@ async def dashboard(request: fastapi.Request,
                                          client_command=None)
     logger.info(f'Starting dashboard for user hash: {user_hash}')
 
-    body = payloads.RequestBody()
-    body.env_vars[constants.USER_ID_ENV_VAR] = user_hash
-    body.entrypoint_command = 'jobs.dashboard'
-    body.override_skypilot_config = {}
-
     with dashboard_utils.get_dashboard_lock_for_user(user_hash):
         max_retries = 3
         for attempt in range(max_retries):

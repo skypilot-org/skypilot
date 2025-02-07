@@ -2793,7 +2793,8 @@ def down(
                            async_call=async_call)
 
 
-def _hint_or_raise_for_down_jobs_controller(controller_name: str) -> None:
+def _hint_or_raise_for_down_jobs_controller(controller_name: str,
+                                            purge: bool) -> None:
     """Helper function to check job controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
@@ -2845,14 +2846,19 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str) -> None:
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
             ['   ' + line for line in job_table.split('\n') if line != ''])
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress managed '
+                           'jobs. This could cause leaked clusters!')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
     else:
         click.echo(' * No in-progress managed jobs found. It should be safe to '
                    'terminate (see caveats above).')
 
 
-def _hint_or_raise_for_down_sky_serve_controller(controller_name: str) -> None:
+def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
+                                                 purge: bool) -> None:
     """Helper function to check serve controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
@@ -2892,17 +2898,21 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str) -> None:
 
     if services:
         service_names = [service['name'] for service in services]
-        with ux_utils.print_exception_no_traceback():
-            msg = (
-                controller.value.decline_down_for_dirty_controller_hint.format(
-                    service_names=', '.join(service_names)))
-            raise exceptions.NotSupportedError(msg)
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress services. '
+                           'This could cause leaked clusters!')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                msg = (controller.value.decline_down_for_dirty_controller_hint.
+                       format(service_names=', '.join(service_names)))
+                raise exceptions.NotSupportedError(msg)
     # Do nothing for STOPPED state, as it is safe to terminate the cluster.
     click.echo(f'Terminate sky serve controller: {controller_name}.')
 
 
 def _controller_to_hint_or_raise(
-        controller: controller_utils.Controllers) -> Callable[[str], None]:
+        controller: controller_utils.Controllers
+) -> Callable[[str, bool], None]:
     if controller == controller_utils.Controllers.JOBS_CONTROLLER:
         return _hint_or_raise_for_down_jobs_controller
     return _hint_or_raise_for_down_sky_serve_controller
@@ -3003,7 +3013,7 @@ def _down_or_stop_clusters(
                     # `sky serve up` before typing the delete, causing a leaked
                     # managed job or service. We should make this check atomic
                     # with the termination.
-                    hint_or_raise(controller_name)
+                    hint_or_raise(controller_name, purge)
                 except (exceptions.ClusterOwnerIdentityMismatchError,
                         RuntimeError) as e:
                     if purge:

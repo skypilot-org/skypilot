@@ -267,14 +267,16 @@ def _maybe_restart_controller(
     # in the task setup because since we are using detached_setup, it will
     # become a job on controller which messes up the job IDs (we assume the
     # job ID in controller's job queue is consistent with managed job IDs).
-    logger.info('Starting dashboard...')
-    runner = handle.get_command_runners()[0]
-    runner.run(
-        f'export '
-        f'{skylet_constants.USER_ID_ENV_VAR}={common_utils.get_user_hash()!r}; '
-        f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
-        stream_logs=True,
-    )
+    with rich_utils.force_update_status(ux_utils.spinner_message(
+            'Starting dashboard...')):
+        runner = handle.get_command_runners()[0]
+        user_hash = common_utils.get_user_hash()
+        runner.run(
+            f'export '
+            f'{skylet_constants.USER_ID_ENV_VAR}={user_hash!r}; '
+            f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
+            stream_logs=True,
+        )
     controller_status = status_lib.ClusterStatus.UP
     rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
 

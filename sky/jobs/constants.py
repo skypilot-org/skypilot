@@ -34,12 +34,24 @@ JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 # job.utils.ManagedJobCodeGen to handle the version update.
 MANAGED_JOBS_VERSION = 1
 
+# The command for setting up the jobs dashboard on the controller. It firstly
+# checks if the systemd services are available, and if not (e.g., Kubernetes
+# containers may not have systemd), it starts the dashboard manually.
 DASHBOARD_SETUP_CMD = (
-    'ps aux | grep -v nohup | grep -v grep | grep -- "-m sky.spot.dashboard" | '
-    'awk \'{print $2}\' | xargs kill > /dev/null 2>&1 || true; '
-    f'{skylet_constants.SKY_UV_PIP_CMD} list | grep flask  > /dev/null 2>&1 || '
-    f'{skylet_constants.SKY_UV_PIP_CMD} install flask 2>&1 > /dev/null; '
-    '((ps aux | grep -v nohup | grep -v grep | '
-    'grep -q -- "-m sky.jobs.dashboard.dashboard") || '
+    'if command -v systemctl &>/dev/null && systemctl --user show &>/dev/null; '
+    'then '
+    '  systemctl --user daemon-reload; '
+    '  systemctl --user enable --now skypilot-dashboard; '
+    'else '
+    '  echo "Systemd services not found. Starting SkyPilot dashboard '
+    'manually."; '
+    # Kill any old dashboard processes;
+    '  ps aux | grep -v nohup | grep -v grep | '
+    '  grep -- \'-m sky.jobs.dashboard.dashboard\' | awk \'{print $2}\' | '
+    '  xargs kill > /dev/null 2>&1 || true;'
+    # Launch the dashboard in the background if not already running
+    '  (ps aux | grep -v nohup | grep -v grep | '
+    '  grep -q -- \'-m sky.jobs.dashboard.dashboard\') || '
     f'(nohup {skylet_constants.SKY_PYTHON_CMD} -m sky.jobs.dashboard.dashboard '
-    '>> ~/.sky/job-dashboard.log 2>&1 &));')
+    '>> ~/.sky/job-dashboard.log 2>&1 &); '
+    'fi')

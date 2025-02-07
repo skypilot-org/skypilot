@@ -270,11 +270,19 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = ('Inconsistent internal job state. This is a bug.')
         elif pid is None:
             # Non-legacy job and controller process has not yet started.
-            if schedule_state in (
+            controller_status = job_lib.get_status(job_id)
+            if controller_status in [
+                    job_lib.JobStatus.FAILED_SETUP,
+                    job_lib.JobStatus.FAILED_DRIVER, job_lib.JobStatus.FAILED
+            ]:
+                # We should fail the case where the controller status is
+                # failed, as it is likely due to the job for submitting the
+                # managed job to scheduler failed.
+                logger.error('Failed to submit the managed job to scheduler.')
+            elif schedule_state in (
                     managed_job_state.ManagedJobScheduleState.INACTIVE,
                     managed_job_state.ManagedJobScheduleState.WAITING):
-                # For these states, the controller hasn't been started yet.
-                # This is expected.
+                # It is expected that the controller hasn't been started yet.
                 continue
 
             if (schedule_state ==

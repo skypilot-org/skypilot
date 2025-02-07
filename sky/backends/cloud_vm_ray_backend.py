@@ -2609,13 +2609,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     region=context)
 
         if version < 10:
-            # In https://github.com/assemble-org/skypilot/pull/48, we keep the
-            # cluster entry in the database even when it is in the transition
-            # from one region to another during the failover. We allow
-            # `handle.cluster_yaml` to be None to indicate that the cluster
-            # yaml is intentionally removed. Before that PR, the
-            # `handle.cluster_yaml` is always not None, even if it is
+            # In #4660, we keep the cluster entry in the database even when it
+            # is in the transition from one region to another during the
+            # failover. We allow `handle.cluster_yaml` to be None to indicate
+            # that the cluster yaml is intentionally removed. Before that PR,
+            # the `handle.cluster_yaml` is always not None, even if it is
             # intentionally removed.
+            #
             # For backward compatibility, we set the `_cluster_yaml` to None
             # if the file does not exist, assuming all the removal of the
             # _cluster_yaml for existing clusters are intentional by SkyPilot.
