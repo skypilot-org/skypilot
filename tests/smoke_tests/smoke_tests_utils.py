@@ -5,7 +5,7 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set
 import uuid
 
 import colorama
