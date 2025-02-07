@@ -260,6 +260,8 @@ class DO(clouds.Cloud):
         try:
             # attempt to make a CURL request for listing instances
             do_utils.client().droplets.list()
+        except ImportError as err:
+            return False, str(err)
         except do.exceptions().HttpResponseError as err:
             return False, str(err)
         except do_utils.DigitalOceanError as err:
