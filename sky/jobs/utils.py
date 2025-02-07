@@ -270,22 +270,28 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             failure_reason = ('Inconsistent internal job state. This is a bug.')
         elif pid is None:
             # Non-legacy job and controller process has not yet started.
-            controller_status = job_lib.get_status(job_id)
-            if controller_status in [
-                    job_lib.JobStatus.FAILED_SETUP,
-                    job_lib.JobStatus.FAILED_DRIVER, job_lib.JobStatus.FAILED
-            ]:
-                # We should fail the case where the controller status is
-                # failed, as it is likely due to the job for submitting the
-                # managed job to scheduler failed.
-                logger.error('Failed to submit the managed job to scheduler.')
-            elif schedule_state in (
-                    managed_job_state.ManagedJobScheduleState.INACTIVE,
-                    managed_job_state.ManagedJobScheduleState.WAITING):
+            if (schedule_state ==
+                    managed_job_state.ManagedJobScheduleState.INACTIVE):
+                controller_status = job_lib.get_status(job_id)
+                if controller_status in [
+                        job_lib.JobStatus.FAILED_SETUP,
+                        job_lib.JobStatus.FAILED_DRIVER,
+                        job_lib.JobStatus.FAILED
+                ]:
+                    # We should fail the case where the controller status is
+                    # failed, as it is likely due to the job for submitting the
+                    # managed job to scheduler failed.
+                    logger.error(
+                        'Failed to submit the managed job to scheduler.')
+                else:
+                    # Otherwise, it is expected that the controller hasn't been
+                    # started yet.
+                    continue
+            elif (schedule_state ==
+                  managed_job_state.ManagedJobScheduleState.WAITING):
                 # It is expected that the controller hasn't been started yet.
                 continue
-
-            if (schedule_state ==
+            elif (schedule_state ==
                     managed_job_state.ManagedJobScheduleState.LAUNCHING):
                 # This is unlikely but technically possible. There's a brief
                 # period between marking job as scheduled (LAUNCHING) and
