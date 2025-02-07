@@ -106,28 +106,28 @@ def _load_config(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='request')
 def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='request')
 def auth_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.RbacAuthorizationV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='request')
 def networking_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NetworkingV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='request')
 def custom_objects_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
@@ -141,7 +141,7 @@ def node_api(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@annotations.lru_cache(scope='global')
+@annotations.lru_cache(scope='request')
 def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
