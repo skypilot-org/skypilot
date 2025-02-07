@@ -20,13 +20,13 @@ POLL_INTERVAL = 5
 
 _iam_token = None
 _tenant_id = None
-# https://github.com/grpc/grpc/issues/37642 to avoid spam in console
-os.environ['GRPC_VERBOSITY'] = 'NONE'
 
 nebius = common.LazyImport(
     'nebius',
     import_error_message='Failed to import dependencies for Nebius AI Cloud. '
-    'Try running: pip install "skypilot[nebius]"')
+    'Try running: pip install "skypilot[nebius]"',
+    # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
+    set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
 
 
 def request_error():
