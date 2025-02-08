@@ -17,7 +17,7 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     rm kubectl && \
     # Install uv and skypilot
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ~/.local/bin/uv pip install skypilot-nightly[all] --system && \
+    ~/.local/bin/uv pip install --prerelease=allow skypilot-nightly[all] --system && \
     # Cleanup all caches to reduce the image size
     conda clean -afy && \
     rm -rf ~/.cache/pip ~/.cache/uv
