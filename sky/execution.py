@@ -386,7 +386,7 @@ def _execute(
                     task,
                     detach_run,
                     dryrun=dryrun,
-                    is_high_availability_controller=high_availability_specified)
+                    is_high_avail_controller=high_availability_specified)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
