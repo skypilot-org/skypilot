@@ -458,6 +458,7 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
         #   on GKE.
 
+        # TODO(andyl): Maybe we should do the same thing for job controller
         is_serve_controller = kubernetes_utils.is_serve_controller(
             config['cluster_name'])
         if is_serve_controller:

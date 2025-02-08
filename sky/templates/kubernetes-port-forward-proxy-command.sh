@@ -69,12 +69,20 @@ fi
 
 # Get actual pod name if wildcard is used
 if [[ "$POD_PATTERN" == *"*"* ]]; then
-  POD_NAME=$(kubectl "${KUBECTL_ARGS[@]}" get pods --no-headers -o custom-columns=":metadata.name" | grep "^${POD_PATTERN%\*}" | head -n 1)
-  if [ -z "$POD_NAME" ]; then
+  # Get matching pods and ensure exactly one match
+  MATCHING_PODS=$(kubectl "${KUBECTL_ARGS[@]}" get pods --no-headers -o custom-columns=":metadata.name" | grep "^${POD_PATTERN%\*}" || true)
+  if [ -z "$MATCHING_PODS" ]; then
     echo "No pod matching pattern ${POD_PATTERN} found" >&2
     rm -f "${KUBECTL_OUTPUT}"
     exit 1
   fi
+  if [ "$(echo "$MATCHING_PODS" | wc -l)" -gt 1 ]; then
+    echo "Multiple pods matching pattern ${POD_PATTERN} found:" >&2
+    echo "$MATCHING_PODS" >&2
+    rm -f "${KUBECTL_OUTPUT}"
+    exit 1
+  fi
+  POD_NAME="$MATCHING_PODS"
 else
   POD_NAME="$POD_PATTERN"
 fi
