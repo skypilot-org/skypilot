@@ -62,5 +62,5 @@ spec:
       name: https
   selector:
     app.kubernetes.io/component: controller
-    app.kubernetes.io/instance: skypilot-platform
+    app.kubernetes.io/instance: skypilot
     app.kubernetes.io/name: ingress-nginx
