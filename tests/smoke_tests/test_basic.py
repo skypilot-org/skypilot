@@ -333,28 +333,28 @@ def test_scp_logs():
 # ------- Testing the core API --------
 # Most of the core APIs have been tested in the CLI tests.
 # These tests are for testing the return value of the APIs not fully used in CLI.
-
-
-@pytest.mark.gcp
-def test_core_api_sky_launch_exec():
+def test_core_api_sky_launch_exec(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     task = sky.Task(run="whoami")
-    task.set_resources(sky.Resources(cloud=sky.GCP()))
-    job_id, handle = sky.get(sky.launch(task, cluster_name=name))
-    assert job_id == 1
-    assert handle is not None
-    assert handle.cluster_name == name
-    assert handle.launched_resources.cloud.is_same_cloud(sky.GCP())
-    job_id_exec, handle_exec = sky.get(sky.exec(task, cluster_name=name))
-    assert job_id_exec == 2
-    assert handle_exec is not None
-    assert handle_exec.cluster_name == name
-    assert handle_exec.launched_resources.cloud.is_same_cloud(sky.GCP())
-    # For dummy task (i.e. task.run is None), the job won't be submitted.
-    dummy_task = sky.Task()
-    job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
-    assert job_id_dummy is None
-    sky.get(sky.down(name))
+    task.set_resources(sky.Resources(cloud=cloud))
+    try:
+        job_id, handle = sky.get(sky.launch(task, cluster_name=name))
+        assert job_id == 1
+        assert handle is not None
+        assert handle.cluster_name == name
+        assert handle.launched_resources.cloud.is_same_cloud(cloud)
+        job_id_exec, handle_exec = sky.get(sky.exec(task, cluster_name=name))
+        assert job_id_exec == 2
+        assert handle_exec is not None
+        assert handle_exec.cluster_name == name
+        assert handle_exec.launched_resources.cloud.is_same_cloud(cloud)
+        # For dummy task (i.e. task.run is None), the job won't be submitted.
+        dummy_task = sky.Task()
+        job_id_dummy, _ = sky.get(sky.exec(dummy_task, cluster_name=name))
+        assert job_id_dummy is None
+    finally:
+        sky.get(sky.down(name))
 
 
 # The sky launch CLI has some additional checks to make sure the cluster is up/
