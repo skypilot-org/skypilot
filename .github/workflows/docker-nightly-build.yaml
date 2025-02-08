@@ -11,6 +11,9 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
       - name: Find the release version
         id: version
         run: |
@@ -21,21 +24,10 @@ jobs:
           LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
 
-      - name: Setup Dockerfile
+      - name: Update Dockerfile version
         run: |
-          touch Dockerfile
-          cat <<EOF > Dockerfile
-          # Use the latest version with Python 3.10
-          FROM continuumio/miniconda3:23.3.1-0
+          sed -i 's/skypilot-nightly\[all\]/skypilot-nightly[all]==${{ steps.version.outputs.latest_version }}/g' Dockerfile
 
-          # Install dependencies
-          RUN conda install -c conda-forge google-cloud-sdk && \
-              apt update -y && \
-              apt install rsync vim -y && \
-              rm -rf /var/lib/apt/lists/*
-          
-          RUN pip install "skypilot-nightly[all]==${{ steps.version.outputs.latest_version }}" --no-cache-dir
-          EOF
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
       - name: Set up Docker Buildx
