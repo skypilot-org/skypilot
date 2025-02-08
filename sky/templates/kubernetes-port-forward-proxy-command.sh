@@ -34,7 +34,10 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-POD_PATTERN="$1"  # The first positional argument is the pod name pattern
+  exit 1
+fi
+
+POD_NAME="$1"  # The first positional argument is the name of the pod
 
 # Checks if socat is installed
 if ! command -v socat > /dev/null; then
@@ -66,20 +69,6 @@ fi
 if [ -n "$KUBE_NAMESPACE" ]; then
   KUBECTL_ARGS+=("--namespace=$KUBE_NAMESPACE")
 fi
-
-# Get actual pod name if wildcard is used
-if [[ "$POD_PATTERN" == *"*"* ]]; then
-  POD_NAME=$(kubectl "${KUBECTL_ARGS[@]}" get pods --no-headers -o custom-columns=":metadata.name" | grep "^${POD_PATTERN%\*}" | head -n 1)
-  if [ -z "$POD_NAME" ]; then
-    echo "No pod matching pattern ${POD_PATTERN} found" >&2
-    rm -f "${KUBECTL_OUTPUT}"
-    exit 1
-  fi
-else
-  POD_NAME="$POD_PATTERN"
-fi
-
-echo "Using pod: ${POD_NAME}" >&2
 
 kubectl "${KUBECTL_ARGS[@]}" port-forward pod/"${POD_NAME}" :22 > "${KUBECTL_OUTPUT}" 2>&1 &
 
