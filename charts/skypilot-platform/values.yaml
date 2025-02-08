@@ -3,7 +3,7 @@ namespace: skypilot
 apiService:
   cpuCoresLimit: null
   memoryGBLimit: null
-  image: berkeleyskypilot/skypilot-api-test:latest
+  image: berkeleyskypilot/skypilot-nightly:latest
   replicas: 1
   preDeployHook: |-
     # Run commands before deploying the API server, e.g. installing an admin
@@ -62,7 +62,7 @@ awsCredentials:
 gcpCredentials:
   enabled: false
   # TODO(romilb): This can be made optional by using the project in the key json by default.
-  projectId: "sky-dev-465"
+  projectId: null
 
 ingress:
   enabled: true
