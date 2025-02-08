@@ -14,6 +14,7 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
+from sky import skypilot_config
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
@@ -315,10 +316,26 @@ def _execute(
             return None, None
 
         # TODO(andyl): extend to more clouds beyond Kubernetes.
-        is_high_avail_controller = (
-            controller_utils.Controllers.from_name(cluster_name) is not None and
-            isinstance(handle, backends.CloudVmRayResourceHandle) and
-            isinstance(handle.launched_resources.cloud, clouds.Kubernetes))
+        high_availability_specified = False
+        controller = controller_utils.Controllers.from_name(cluster_name)
+        if controller is not None:
+            high_availability_specified = skypilot_config.get_nested(
+                (controller.value.name, 'controller',
+                 'high_availability_controller'), False)
+            if high_availability_specified:
+                unsupported_cloud_name = None
+                if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                    unsupported_cloud_name = type(handle).__name__
+                elif isinstance(handle.launched_resources.cloud,
+                                clouds.Kubernetes):
+                    unsupported_cloud_name = str(
+                        handle.launched_resources.cloud)
+
+                if unsupported_cloud_name is not None:
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'High availability controller is not supported for cloud {unsupported_cloud_name}. '
+                            'Only Kubernetes is supported currently.')
 
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
@@ -341,7 +358,7 @@ def _execute(
             backend.setup(handle,
                           task,
                           detach_setup=detach_setup,
-                          dump_final_script=is_high_avail_controller)
+                          dump_final_script=high_availability_specified)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -359,7 +376,7 @@ def _execute(
                     task,
                     detach_run,
                     dryrun=dryrun,
-                    is_high_avail_controller=is_high_avail_controller)
+                    is_high_availability_controller=high_availability_specified)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
