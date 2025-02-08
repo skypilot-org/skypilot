@@ -61,7 +61,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+            $ helm upgrade --install skypilot skypilot/skypilot \
             --set kubernetesCredentials.useKubeconfig=true \
             --set kubernetesCredentials.useApiServerCluster=true
 
@@ -105,7 +105,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform --set awsCredentials.enabled=true
+            $ helm upgrade --install skypilot skypilot/skypilot --set awsCredentials.enabled=true
     
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -125,7 +125,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+            $ helm upgrade --install skypilot skypilot/skypilot \
             --set gcpCredentials.enabled=true \
             --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
@@ -151,7 +151,7 @@ Install the SkyPilot Helm chart with the following command.
     $ WEB_USERNAME=skypilot
     $ WEB_PASSWORD=yourpassword
     $ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-    $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+    $ helm upgrade --install skypilot skypilot/skypilot \
     --namespace $NAMESPACE \
     --set ingress.auth=$AUTH_STRING
 
@@ -209,7 +209,7 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+            $ helm upgrade --install skypilot skypilot/skypilot \
             --set ingress.httpNodePort=null \
             --set ingress.httpsNodePort=null \
             --set ingress-nginx.controller.service.type=LoadBalancer
@@ -218,7 +218,7 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ ENDPOINT=$(kubectl get svc skypilot-platform-ingress-nginx-controller -n skypilot -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
+            $ ENDPOINT=$(kubectl get svc skypilot-ingress-nginx-controller -n skypilot -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
             $ echo $ENDPOINT
             http://1.1.1.1
 
@@ -247,7 +247,7 @@ To uninstall the API server, run:
 
 .. code-block:: console
 
-    $ helm uninstall skypilot-platform -n skypilot
+    $ helm uninstall skypilot -n skypilot
 
 This will delete the API server and all associated resources.
 
@@ -297,7 +297,7 @@ Apply the configuration using:
 
 .. code-block:: console
 
-    $ helm upgrade --install skypilot-platform skypilot/skypilot-platform -f values.yaml
+    $ helm upgrade --install skypilot skypilot/skypilot -f values.yaml
 
 
 Additional setup for EKS
@@ -348,7 +348,7 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
     EOF
 
     # Install the API server with the config file
-    $ helm upgrade --install skypilot-platform skypilot/skypilot-platform \
+    $ helm upgrade --install skypilot skypilot/skypilot \
     --set-file apiService.config=config.yaml
 
 You can also directly set config values in the ``values.yaml`` file.
@@ -375,7 +375,7 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
 .. code-block:: console
 
-    $ helm upgrade --install skypilot-platform skypilot/skypilot-platform -f values.yaml
+    $ helm upgrade --install skypilot skypilot/skypilot -f values.yaml
 
 
 .. _sky-api-server-cloud-deploy:
