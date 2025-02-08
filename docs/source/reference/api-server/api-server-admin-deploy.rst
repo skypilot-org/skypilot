@@ -130,6 +130,13 @@ Following tabs describe how to configure credentials for different clouds on the
             --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
         Replace ``YOUR_PROJECT_ID`` with your actual GCP project ID.
+    
+    .. tab-item:: Other clouds
+        :sync: other-clouds-tab
+
+        You can manually configure the credentials for other clouds by `kubectl exec` into the API server pod after it is deployed and running the relevant :ref:`installation commands<installation>`.
+
+        Support for configuring other clouds through secrets is coming soon!
 
 
 Step 3: Deploy the API Server Helm Chart
