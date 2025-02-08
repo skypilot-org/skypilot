@@ -251,6 +251,11 @@ def _get_cloud_dependencies_installation_commands(
             if controller != Controllers.JOBS_CONTROLLER:
                 # We only need IBM deps on the jobs controller.
                 cloud_python_dependencies = []
+        elif isinstance(cloud, clouds.Vast):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
+                            'pip list | grep vastai_sdk > /dev/null 2>&1 || '
+                            'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1')
 
         python_packages.update(cloud_python_dependencies)
 
@@ -443,10 +448,6 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
-        elif controller == Controllers.JOBS_CONTROLLER:
-            controller_resources_config_copied.update(
-                skypilot_config.get_nested(('spot', 'controller', 'resources'),
-                                           {}))
 
     try:
         controller_resources = resources.Resources.from_yaml_config(
@@ -923,7 +924,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
             # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the storage mount can work on the spot
+            # name field, so that the storage mount can work on the jobs
             # controller.
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (

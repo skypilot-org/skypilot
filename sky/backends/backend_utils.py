@@ -844,11 +844,6 @@ def write_cluster_config(
 
     # User-supplied global instance tags from ~/.sky/config.yaml.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
-    # Deprecated: instance_tags have been replaced by labels. For backward
-    # compatibility, we support them and the schema allows them only if
-    # `labels` are not specified. This should be removed after 0.8.0.
-    labels = skypilot_config.get_nested((str(cloud).lower(), 'instance_tags'),
-                                        labels)
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py
     assert isinstance(labels, dict), labels
@@ -997,7 +992,7 @@ def write_cluster_config(
 
     # Read the cluster name from the tmp yaml file, to take the backward
     # compatbility restortion above into account.
-    # TODO: remove this after 2 minor releases, 0.8.0.
+    # TODO: remove this after 2 minor releases, 0.10.0.
     yaml_config = common_utils.read_yaml(tmp_yaml_path)
     config_dict['cluster_name_on_cloud'] = yaml_config['cluster_name']
 
@@ -1056,6 +1051,8 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
         config = auth.setup_ibm_authentication(config)
     elif isinstance(cloud, clouds.RunPod):
         config = auth.setup_runpod_authentication(config)
+    elif isinstance(cloud, clouds.Vast):
+        config = auth.setup_vast_authentication(config)
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
     else:
@@ -2135,7 +2132,8 @@ def _update_cluster_status_no_lock(
                 except exceptions.CommandError as e:
                     success = False
                     if e.returncode == 255:
-                        logger.debug(f'The cluster is likely {noun}ed.')
+                        word = 'autostopped' if noun == 'autostop' else 'autodowned'
+                        logger.debug(f'The cluster is likely {word}.')
                         reset_local_autostop = False
                 except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                     success = False

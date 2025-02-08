@@ -263,8 +263,8 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when
-                all prechecks passed but the maximum number of retries is
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
                 due to:
                 1. Any of the underlying failover exceptions is due to resources

@@ -119,7 +119,7 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
   envs:
     LR: 2e-5
     MAX_STEPS: 50
-    
+
   resources:
     accelerators: V100:4
 
@@ -146,7 +146,7 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
       --fp16
 
 .. raw:: html
-    
+
     </details>
 
 You can now use ``--env`` to launch a job with different hyperparameters:
@@ -192,7 +192,7 @@ When running many jobs, it is useful to log the outputs of all jobs. You can use
     LR: 2e-5
     MAX_STEPS: 50
     WANDB_API_KEY: # Empty field means this field is required when launching the job.
-      
+
   resources:
     accelerators: V100:4
 
@@ -344,3 +344,9 @@ To have more customized control over generation of job variants, you can also us
         retry_until_up=True,
       )
       job_idx += 1
+
+
+Best Practices for Scaling
+--------------------------
+
+By default, around 90 jobs can be managed at once. However, with some simple configuration, SkyPilot can reliably support **2000 jobs running in parallel**. See :ref:`the best practices <jobs-controller-sizing>` for more info.
