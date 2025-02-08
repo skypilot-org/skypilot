@@ -887,7 +887,7 @@ class GCP(clouds.Cloud):
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @annotations.lru_cache(scope='global',
+    @annotations.lru_cache(scope='request',
                            maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
