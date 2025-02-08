@@ -89,10 +89,6 @@ aws_dependencies = [
     'colorama < 0.4.5',
 ]
 
-# azure-cli cannot be installed normally by uv, so we need to work around it in
-# a few places.
-AZURE_CLI = 'azure-cli>=2.65.0'
-
 extras_require: Dict[str, List[str]] = {
     'aws': aws_dependencies,
     # TODO(zongheng): azure-cli is huge and takes a long time to install.
@@ -101,7 +97,7 @@ extras_require: Dict[str, List[str]] = {
     # We need azure-identity>=1.13.0 to enable the customization of the
     # timeout of AzureCliCredential.
     'azure': [
-        AZURE_CLI,
+        'azure-cli>=2.65.0',
         'azure-core>=1.31.0',
         'azure-identity>=1.19.0',
         'azure-mgmt-network>=27.0.0',

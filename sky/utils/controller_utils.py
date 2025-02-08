@@ -218,17 +218,7 @@ def _get_cloud_dependencies_installation_commands(
         cloud_python_dependencies: List[str] = copy.deepcopy(
             dependencies.extras_require[cloud.canonical_name()])
 
-        if isinstance(cloud, clouds.Azure):
-            # azure-cli cannot be normally installed by uv.
-            # See comments in sky/skylet/constants.py.
-            cloud_python_dependencies.remove(dependencies.AZURE_CLI)
-
-            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
-            commands.append(
-                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
-                f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
-                f'"{dependencies.AZURE_CLI}" > /dev/null 2>&1')
-        elif isinstance(cloud, clouds.GCP):
+        if isinstance(cloud, clouds.GCP):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
                             f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')

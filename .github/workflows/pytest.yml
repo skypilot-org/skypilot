@@ -44,7 +44,6 @@ jobs:
         run: |
           uv venv --seed ~/test-env
           source ~/test-env/bin/activate
-          uv pip install --prerelease=allow "azure-cli>=2.65.0"
           # Use -e to include examples and tests folder in the path for unit
           # tests to access them.
           uv pip install -e ".[all]"
