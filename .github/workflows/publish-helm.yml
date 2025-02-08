@@ -1,0 +1,116 @@
+name: Publish Helm Charts
+
+# Do not change this
+concurrency: publish-helm
+
+env:
+  HELM_REPO_URL: https://helm.skypilot.co
+
+permissions:
+  contents: write
+  pages: write
+
+on:
+  schedule:
+    # Set the time to be 20 mins after the pypi nightly build
+    - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
+  # TODO: Setup a automatic release workflow for stable releases when our pypi
+  # stable release workflow is automated.
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to set in Chart.yaml"
+        required: false
+        type: string
+      commit_message:
+        description: "Git commit message"
+        required: false
+        type: string
+      docker_image:
+        description: "Docker image tag to set in values.yaml"
+        required: false
+        type: string
+    secrets:
+      DOCKER_USERNAME:
+        required: true
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to set in Chart.yaml"
+        required: false
+        type: string
+      commit_message:
+        description: "Git commit message"
+        required: false
+        type: string
+        default: "Updated from ref: $GITHUB_SHA"
+      docker_image:
+        description: "Docker image tag to set in values.yaml. Defaults to skypilot-nightly:latest"
+        required: false
+        type: string
+    secrets:
+      DOCKER_USERNAME:
+        required: true
+
+jobs:
+  publish-helm:
+    # Skip if triggered by release workflow
+    if: ${{ !contains(github.event.head_commit.message, 'Release version') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: 'src'
+          fetch-depth: 0
+      - name: Checkout
+        uses: actions/checkout@v3
+        with:
+          path: 'dest'
+          ref: 'helm/repo'
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+
+      - name: Update Chart Version
+        if: inputs.version != ''
+        run: |
+          version="${{ inputs.version }}"
+          # Update the version in the Chart.yaml file
+          sed -i "s/^version:.*$/version: ${version}/" src/charts/skypilot/Chart.yaml
+          sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
+
+      - name: Update docker image in charts
+        if: inputs.docker_image != ''
+        run: |
+          # Update the image in values.yaml
+          sed -i "s|image: .*$|image: ${{ secrets.DOCKER_USERNAME }}/${{ inputs.docker_image }}|" src/charts/skypilot/values.yaml
+          # Print the new values.yaml for debugging
+          cat src/charts/skypilot/values.yaml
+
+      - name: Package Helm Charts
+        shell: bash
+        run: |
+          find src/charts/ -type f -name 'Chart.yaml' | sed -r 's|/[^/]+$||' | sort | uniq | xargs -L 1 helm dep up
+          for d in src/charts/*/ ; do
+              echo "$d"
+              helm package "$d" -u -d dest
+          done
+
+      - name: Push New Files
+        shell: bash
+        working-directory: dest
+        run: |
+          helm repo index . --url ${{ env.HELM_REPO_URL }}
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          # Add both untracked files and .tgz files explicitly
+          git add $(git ls-files -o --exclude-standard)
+          git add *.tgz
+          git add index.yaml
+          # Show what's being committed for debugging
+          git status
+          git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
+          git push origin helm/repo
