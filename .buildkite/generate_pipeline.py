@@ -174,7 +174,8 @@ def _extract_marked_tests(
     for function_name, marks in function_name_marks_map.items():
         clouds_to_include = []
         is_serve_test = 'serve' in marks
-        run_on_gke = 'requires_gke' in marks
+        run_on_gke = ('requires_gke' in marks and
+                      'kubernetes' in default_clouds_to_run)
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
                 # This mark does not specify a cloud, so we skip it.
