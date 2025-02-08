@@ -275,6 +275,25 @@ Real-World Examples
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
 
+Managed On-Demand/Reserved Jobs
+-------------------------------
+
+The same ``sky jobs launch`` and YAML interfaces can run jobs on auto-recovering
+on-demand or reserved instances. This is useful to have SkyPilot monitor any underlying
+machine failures and transparently recover the job.
+
+To do so, simply set :code:`use_spot: false` in the :code:`resources` section, or override it with :code:`--use-spot false` in the CLI.
+
+.. code-block:: console
+
+  $ sky jobs launch -n bert-qa bert_qa.yaml --use-spot false
+
+.. tip::
+
+  It is useful to think of ``sky jobs launch`` as a "serverless" managed job
+  interface, while ``sky launch`` is a cluster interface (that you can launch
+  tasks on, albeit not managed).
+
 Either Spot or On-Demand/Reserved
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -509,7 +528,7 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 How It Works: The Jobs Controller
 ---------------------------------
 
-The jobs controller is a small on-demand CPU VM running in the cloud that manages all jobs of a user.
+The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
 It is automatically launched when the first managed job is submitted, and it is autostopped after it has been idle for 10 minutes (i.e., after all managed jobs finish and no new managed job is submitted in that duration).
 Thus, **no user action is needed** to manage its lifecycle.
 
@@ -545,8 +564,11 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
         # Specify the location of the jobs controller.
         cloud: gcp
         region: us-central1
-        # Allow more managed jobs to be run concurrently. (Default: 4+)
+        # Bump cpus to allow more managed jobs to be launched concurrently. (Default: 4+)
         cpus: 8+
+        # Bump memory to allow more managed jobs to be running at once.
+        # By default, it scales with CPU (8x).
+        memory: 64+
         # Specify the disk_size in GB of the jobs controller.
         disk_size: 100
 
@@ -563,16 +585,13 @@ Best Practices for Scaling Up the Jobs Controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
-  For managed jobs, it's highly recommended to use service accounts for cloud authentication. This is so that the jobs controller credentials do not expire.
+  For managed jobs, it's highly recommended to use service accounts for :ref:`cloud authentication <cloud-auth>`. This is so that the jobs controller credentials do not expire.
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 
-- **Actively launching job count**: maxes out at ``4 * vCPU count``
-  - A job counts towards this limit when it is first starting, launching instances, or recovering.
-- **Running job count**: maxes out at ``memory / 350MiB``, up to a max of ``2000`` jobs
-
-.. note::
-  If you have Azure enabled (even if you specify another cloud in your YAML), your /tmp may fill up with nonsense. If you are launching a large number of jobs, we recommend setting your disk size to 500 just in case.
+- **Actively launching job count**: maxes out at ``4 * vCPU count``.
+  A job counts towards this limit when it is first starting, launching instances, or recovering.
+- **Running job count**: maxes out at ``memory / 350MiB``, up to a max of ``2000`` jobs.
 
 For maximum parallelism, the following configuration is recommended:
 
