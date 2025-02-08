@@ -1030,7 +1030,6 @@ class Storage(object):
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
 
-        print('self.stores', self.stores)
         if self.stores.get(store_type) is not None:
             if store_type == StoreType.AZURE:
                 azure_store_obj = self.stores[store_type]
