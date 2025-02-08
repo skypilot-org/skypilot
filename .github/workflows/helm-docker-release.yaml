@@ -1,0 +1,45 @@
+name: Build and Publish Helm Charts
+description: Build and publish docker image and Helm charts for SkyPilot.
+
+on:
+  schedule:
+    # Set the time to be 20 mins after the pypi nightly build
+    - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
+  workflow_dispatch:
+    inputs:
+      package_name:
+        description: 'SkyPilot PyPI package name'
+        required: true
+        type: choice
+        options:
+          - 'skypilot-nightly'
+          - 'skypilot'
+        default: 'skypilot-nightly'
+
+jobs:
+  set-package:
+    runs-on: ubuntu-latest
+    outputs:
+      package_name: ${{ github.event_name == 'workflow_dispatch' && inputs.package_name || 'skypilot-nightly' }}
+    steps:
+      - run: echo "Using package ${{ github.event_name == 'workflow_dispatch' && inputs.package_name || 'skypilot-nightly' }}"
+
+  docker-build:
+    needs: set-package
+    uses: ./.github/workflows/docker-build.yaml
+    with:
+      package_name: ${{ needs.set-package.outputs.package_name }}
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      DOCKER_PASSWORD: ${{ secrets.DOCKER_PASSWORD }}
+
+  publish-helm:
+    needs: [set-package, docker-build]
+    uses: ./.github/workflows/publish-helm.yml
+    with:
+      version: ${{ needs.docker-build.outputs.version }}
+      docker_image: '${{ needs.set-package.outputs.package_name }}:${{ needs.docker-build.outputs.version }}'
+      commit_message: 'Update Helm charts for ${{ needs.set-package.outputs.package_name }} version ${{ needs.docker-build.outputs.version }}'
+      package_name: ${{ needs.set-package.outputs.package_name }}
+    secrets:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}

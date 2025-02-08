@@ -11,11 +11,6 @@ permissions:
   pages: write
 
 on:
-  schedule:
-    # Set the time to be 20 mins after the pypi nightly build
-    - cron: '55 10 * * *' # 10:55am UTC, 2:55am PST, 5:55am EST
-  # TODO: Setup a automatic release workflow for stable releases when our pypi
-  # stable release workflow is automated.
   workflow_call:
     inputs:
       version:
@@ -27,9 +22,14 @@ on:
         required: false
         type: string
       docker_image:
-        description: "Docker image tag to set in values.yaml"
+        description: "Docker image tag to set in values.yaml. Defaults to skypilot-nightly:latest"
         required: false
         type: string
+      package_name:
+        description: "Package name to use as chart name"
+        required: false
+        type: string
+        default: "skypilot-nightly"
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -74,13 +74,14 @@ jobs:
       - name: Install Helm
         uses: azure/setup-helm@v4
 
-      - name: Update Chart Version
+      - name: Update Chart Version and Name
         if: inputs.version != ''
         run: |
           version="${{ inputs.version }}"
-          # Update the version in the Chart.yaml file
+          # Update the version and name in the Chart.yaml file
           sed -i "s/^version:.*$/version: ${version}/" src/charts/skypilot/Chart.yaml
           sed -i "s/^appVersion:.*$/appVersion: ${version}/" src/charts/skypilot/Chart.yaml
+          sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" src/charts/skypilot/Chart.yaml
 
       - name: Update docker image in charts
         if: inputs.docker_image != ''
