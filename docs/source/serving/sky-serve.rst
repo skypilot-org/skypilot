@@ -490,7 +490,7 @@ You can see the controller with :code:`sky status` and refresh its status by usi
 
 .. _customizing-sky-serve-controller-resources:
 
-Customizing SkyServe controller resources
+Customizing SkyServe Controller Resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You may want to customize the resources of the SkyServe controller for several reasons:
@@ -508,6 +508,22 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
     # NOTE: these settings only take effect for a new SkyServe controller, not if
     # you have an existing one.
     controller:
+      # Enable high availability mode for the controller (optional).
+      #
+      # When set to true, the controller will be deployed with high availability
+      # capabilities on Kubernetes using Deployments. This allows the controller
+      # to automatically recover from failures (e.g., node failures, pod crashes)
+      # and maintain service continuity.
+      #
+      # NOTE: This feature is ONLY supported when running on Kubernetes.
+      # When enabled:
+      # - The controller is deployed as a Kubernetes Deployment instead of a Pod
+      # - Controller state and setup/run scripts are persisted to allow recovery
+      # - Automatic pod rescheduling and recovery is handled by Kubernetes
+      #
+      # Default: false.
+      high_availability_controller: true
+
       resources:
         # All configs below are optional.
         # Specify the location of the SkyServe controller.

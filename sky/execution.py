@@ -323,18 +323,28 @@ def _execute(
                 (controller.value.name, 'controller',
                  'high_availability_controller'), False)
             if high_availability_specified:
-                unsupported_cloud_name = None
+                if (controller !=
+                        controller_utils.Controllers.SKY_SERVE_CONTROLLER):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            'High availability controller is only supported '
+                            'for SkyServe controller. It cannot be enabled '
+                            f'for {controller.value.name}.')
+
                 if not isinstance(handle, backends.CloudVmRayResourceHandle):
                     unsupported_cloud_name = type(handle).__name__
-                elif isinstance(handle.launched_resources.cloud,
-                                clouds.Kubernetes):
+                elif not isinstance(handle.launched_resources.cloud,
+                                    clouds.Kubernetes):
                     unsupported_cloud_name = str(
                         handle.launched_resources.cloud)
+                else:
+                    unsupported_cloud_name = None
 
                 if unsupported_cloud_name is not None:
                     with ux_utils.print_exception_no_traceback():
                         raise ValueError(
-                            f'High availability controller is not supported for cloud {unsupported_cloud_name}. '
+                            'High availability controller is not supported for '
+                            f'cloud {unsupported_cloud_name}. '
                             'Only Kubernetes is supported currently.')
 
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
