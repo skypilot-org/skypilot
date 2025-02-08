@@ -269,34 +269,20 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
                          f'{", ".join(task["status"].value for task in tasks)}')
             failure_reason = ('Inconsistent internal job state. This is a bug.')
         elif pid is None:
-            should_fail = False
             # Non-legacy job and controller process has not yet started.
-            if (schedule_state ==
-                    managed_job_state.ManagedJobScheduleState.INACTIVE):
-                controller_status = job_lib.get_status(job_id)
-                if controller_status in [
-                        job_lib.JobStatus.FAILED_SETUP,
-                        job_lib.JobStatus.FAILED_DRIVER,
-                        job_lib.JobStatus.FAILED
-                ]:
-                    # We have to check the schedule state again, as it could be
-                    # updated after the controller status is set.
-                    tasks = managed_job_state.get_managed_jobs(job_id)
-                    schedule_state = tasks[0]['schedule_state']
-                    if (schedule_state ==
-                            managed_job_state.ManagedJobScheduleState.INACTIVE):
-                        # We should fail the case where the controller status is
-                        # failed, as it is likely due to the job for submitting
-                        # the managed job to scheduler failed.
-                        logger.error('Failed to submit the managed job to '
-                                     'scheduler.')
-                        should_fail = True
-                if not should_fail:
-                    # Otherwise, it is expected that the controller hasn't been
-                    # started yet.
-                    continue
-            elif (schedule_state ==
-                  managed_job_state.ManagedJobScheduleState.WAITING):
+            controller_status = job_lib.get_status(job_id)
+            if controller_status == job_lib.JobStatus.FAILED_SETUP:
+                # We should fail the case where the controller status is
+                # FAILED_SETUP, as it is due to the failure of dependency setup
+                # on the controller.
+                # TODO(cooperc): We should also handle the case where controller
+                # status is FAILED_DRIVER or FAILED.
+                logger.error('Failed to setup the cloud dependencies for '
+                             'the managed job.')
+            elif (schedule_state in [
+                    managed_job_state.ManagedJobScheduleState.INACTIVE,
+                    managed_job_state.ManagedJobScheduleState.WAITING,
+            ]):
                 # It is expected that the controller hasn't been started yet.
                 continue
             elif (schedule_state ==
