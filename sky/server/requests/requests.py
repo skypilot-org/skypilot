@@ -23,6 +23,7 @@ from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests.serializers import decoders
 from sky.server.requests.serializers import encoders
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
@@ -306,7 +307,7 @@ def refresh_cluster_status_event():
         # This periodically refresh will hold the lock for the cluster being
         # refreshed, but it is OK because other operations will just wait for
         # the lock and get the just refreshed status without refreshing again.
-        core.status(refresh=True, all_users=True)
+        core.status(refresh=common.StatusRefreshMode.FORCE, all_users=True)
         logger.info(
             'Status refreshed. Sleeping '
             f'{server_constants.CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS}'
