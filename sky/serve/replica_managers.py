@@ -248,14 +248,6 @@ class ReplicaStatusProperty:
     # Whether the replica is purged.
     purged: bool = False
 
-    def remove_terminated_replica(self) -> bool:
-        """Whether to remove the replica record from the replica table.
-
-        If not, the replica will stay in the replica table permanently to
-        notify the user that something is wrong with the user code / setup.
-        """
-        return self.is_scale_down
-
     def unrecoverable_failure(self) -> bool:
         """Whether the replica fails and cannot be recovered.
 
