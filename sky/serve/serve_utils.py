@@ -3,6 +3,7 @@ import base64
 import collections
 import dataclasses
 import enum
+import json
 import os
 import pathlib
 import pickle
@@ -31,14 +32,17 @@ from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
+from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
 
     from sky.serve import replica_managers
+    from sky.utils import command_runner
 
 SKY_SERVE_CONTROLLER_NAME: str = (
     f'sky-serve-controller-{common_utils.get_user_hash()}')
@@ -792,6 +796,149 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
     return ''
 
 
+def sync_down_logs(service_name: str, timestamp: str,
+                   target_str_list: List[str],
+                   replica_id: Optional[int]) -> str:
+    """Gathers logs into the controller's
+      ~/.sky/serve/<service_name>/<timestamp> folder.
+    - If target == 'controller' or 'load_balancer', do local copy.
+    - If target == 'replica' and replica_id is specified, unify that
+      replica's logs only.
+    - If target is not specified, do local copy and unify all replicas' logs.
+
+    Returns a dict string in json format.
+    - Key: 'controller' or 'load_balancer' or 'replica_<replica_id>'
+    - Value: Message indicating the status of the log sync. When success, the
+      message will contains {PATH_PLACEHOLDER} to be replaced by the
+      user laptop's local path later.
+    """
+    record = serve_state.get_service_from_name(service_name)
+    if record is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Service {service_name} not found on controller.')
+
+    messages: Dict[str, str] = {}
+
+    all_targets = set(target_str_list)
+    wants_all = not all_targets
+
+    replicas_targets: List['replica_managers.ReplicaInfo'] = []
+    if wants_all:
+        replica_infos = serve_state.get_replica_infos(service_name)
+        for info in replica_infos:
+            # PREEMPTED or UNKNOWN replicas could be in replica_infos
+            # for a short period of time before _refresh_process_pool
+            # updates the replica infos.
+            if info.status not in [
+                    serve_state.ReplicaStatus.PREEMPTED,
+                    serve_state.ReplicaStatus.UNKNOWN,
+            ]:
+                replicas_targets.append(info)
+    elif replica_id is not None:
+        replica_info = serve_state.get_replica_info_from_id(
+            service_name, replica_id)
+        if replica_info is None or replica_info.status in [
+                serve_state.ReplicaStatus.PREEMPTED,
+                serve_state.ReplicaStatus.UNKNOWN,
+        ]:
+            messages[f'replica_{replica_id}'] = (
+                f'Replica {replica_id} not found or '
+                'has been scaled down for '
+                f'{service_name}.')
+        else:
+            replicas_targets.append(replica_info)
+
+    service_dir = generate_remote_service_dir_name(service_name)
+    local_base = (pathlib.Path(service_dir) / timestamp).expanduser()
+    local_base.mkdir(parents=True, exist_ok=True)
+
+    def _fetch_replica_logs(info: 'replica_managers.ReplicaInfo'):
+        handle = info.handle()
+        replica_id = info.replica_id
+        if handle is None:
+            messages[f'replica_{replica_id}'] = (
+                f'Cannot find cluster {info.cluster_name}. '
+                'Skipping logs.')
+            return
+        assert isinstance(handle, backends.CloudVmRayResourceHandle)
+        job_file = controller_utils.download_and_stream_latest_job_log(
+            backends.CloudVmRayBackend(),
+            handle,
+            str(local_base),
+            stream_logs=False)
+        if job_file is None:
+            # TODO(andyl): We should returns the exact error message.
+            # Current blocker is error message is directly printed by
+            # controller_utils.download_and_stream_latest_job_log.
+            messages[f'replica_{replica_id}'] = (
+                f'Error pulling logs for replica {replica_id}.'
+                'See the controller log for more details.')
+            return
+
+        job_file_path = pathlib.Path(job_file)
+        shutil.move(job_file_path, local_base / f'replica_{replica_id}.log')
+
+        # TODO(andyl): The whole <run-timestamp> including
+        # a run.log and 'tasks' subdir is synced down by
+        # controller_utils.download_and_stream_latest_job_log.
+        # We should not even create it.
+        shutil.rmtree(job_file_path.parent)
+
+        messages[f'replica_{replica_id}'] = (
+            f'Successfully synced replica {replica_id} logs to '
+            f'{{PATH_PLACEHOLDER}}/replica_{replica_id}.log')
+
+    subprocess_utils.run_in_parallel(
+        _fetch_replica_logs,
+        replicas_targets,
+    )
+
+    if (ServiceComponent.CONTROLLER.value in target_str_list or wants_all):
+        controller_file = generate_remote_controller_log_file_name(service_name)
+        shutil.copy(
+            pathlib.Path(controller_file).expanduser(),
+            local_base / 'controller.log')
+        messages['controller'] = (
+            'Successfully synced controller logs to {PATH_PLACEHOLDER}/'
+            'controller.log')
+
+    if (ServiceComponent.LOAD_BALANCER.value in target_str_list or wants_all):
+        load_balancer_file = (
+            generate_remote_load_balancer_log_file_name(service_name))
+        shutil.copy(
+            pathlib.Path(load_balancer_file).expanduser(),
+            local_base / 'load_balancer.log')
+        messages['load_balancer'] = (
+            'Successfully synced load balancer logs to {PATH_PLACEHOLDER}/'
+            'load_balancer.log')
+
+    return json.dumps(messages)
+
+
+def rsync_service_logs_from_controller(
+    runner: 'command_runner.CommandRunner',
+    service_name: str,
+    timestamp: str,
+) -> pathlib.Path:
+    """Rsync logs from the controller's ~/.sky/serve/<service_dir> to local.
+    Returns the parent directory of the downloaded logs.
+    """
+    service_dir = generate_remote_service_dir_name(service_name)
+    base_dir = pathlib.Path(service_dir) / timestamp
+
+    local_base = base_dir.expanduser()
+    local_base.mkdir(parents=True, exist_ok=True)
+
+    runner.rsync(
+        f'{base_dir}/',
+        str(local_base),
+        up=False,
+        stream_logs=False,
+    )
+
+    return base_dir
+
+
 # ================== Table Formatter for `sky serve status` ==================
 
 
@@ -1024,6 +1171,17 @@ class ServeCodeGen:
         code = [
             f'msg = serve_utils.stream_serve_process_logs({service_name!r}, '
             f'{stream_controller}, follow={follow})', 'print(msg, flush=True)'
+        ]
+        return cls._build(code)
+
+    @classmethod
+    def sync_down_logs(cls, service_name: str, timestamp: str,
+                       target_str_list: List[str],
+                       replica_id: Optional[int]) -> str:
+        code = [
+            f'msg = serve_utils.sync_down_logs('
+            f'{service_name!r}, {timestamp!r}, {target_str_list!r}, '
+            f'{replica_id!r})', 'print(msg, end="", flush=True)'
         ]
         return cls._build(code)
 

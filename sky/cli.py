@@ -36,7 +36,7 @@ import sys
 import textwrap
 import time
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import webbrowser
 
 import click
@@ -4579,6 +4579,12 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
               default=False,
               required=False,
               help='Show the load balancer logs of this service.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down logs to the local machine. Can be combined with '
+              '--controller, --load-balancer, or a replica ID to narrow scope.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
@@ -4590,8 +4596,9 @@ def serve_logs(
     controller: bool,
     load_balancer: bool,
     replica_id: Optional[int],
+    sync_down: bool,
 ):
-    """Tail the log of a service.
+    """Tail or sync down logs of a service.
 
     Example:
 
@@ -4605,23 +4612,49 @@ def serve_logs(
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
+        \b
+        # Sync down all logs of the service
+        sky serve logs [SERVICE_NAME] --sync-down
+        \b
+        # Sync down controller logs of the service
+        sky serve logs [SERVICE_NAME] --controller --sync-down
     """
     have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
-    if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
+    num_flags = controller + load_balancer + have_replica_id
+
+    # For sync-down, no extra flags means all logs.
+    if not sync_down and num_flags == 0:
         raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified.')
+                               '[REPLICA_ID] must be specified if not '
+                               'using --sync-down.')
+
+    chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
-        target_component = serve_lib.ServiceComponent.CONTROLLER
-    elif load_balancer:
-        target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    else:
-        # Already checked that num_flags == 1.
-        assert replica_id is not None
-        target_component = serve_lib.ServiceComponent.REPLICA
+        chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
+    if load_balancer:
+        chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
+    if replica_id is not None:
+        chosen_components.add(serve_lib.ServiceComponent.REPLICA)
+
+    if sync_down:
+        try:
+            local_base = serve_lib.sync_down_logs(service_name,
+                                                  targets=chosen_components,
+                                                  replica_id=replica_id)
+        except (exceptions.ClusterNotUpError, ValueError, RuntimeError):
+            with ux_utils.print_exception_no_traceback():
+                raise
+
+        return
+
+    if num_flags > 1:
+        raise click.UsageError('Can only tail one target, i.e. '
+                               'one of --controller, --load-balancer, or '
+                               '[REPLICA_ID] at a time. '
+                               'Use --sync-down to download multiple.')
+
+    assert len(chosen_components) == 1
+    target_component = chosen_components.pop()
     try:
         serve_lib.tail_logs(service_name,
                             target=target_component,

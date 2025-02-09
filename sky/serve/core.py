@@ -1,4 +1,6 @@
 """SkyServe core APIs."""
+import json
+import pathlib
 import re
 import signal
 import subprocess
@@ -727,11 +729,14 @@ def status(
     return serve_utils.load_service_status(serve_status_payload)
 
 
+ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]
+
+
 @usage_lib.entrypoint
 def tail_logs(
     service_name: str,
     *,
-    target: Union[str, serve_utils.ServiceComponent],
+    target: ServiceComponentOrStr,
     replica_id: Optional[int] = None,
     follow: bool = True,
 ) -> None:
@@ -770,10 +775,6 @@ def tail_logs(
     """
     if isinstance(target, str):
         target = serve_utils.ServiceComponent(target)
-    if not isinstance(target, serve_utils.ServiceComponent):
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'`target` must be a string or '
-                             f'sky.serve.ServiceComponent, got {type(target)}.')
 
     if target == serve_utils.ServiceComponent.REPLICA:
         if replica_id is None:
@@ -785,10 +786,11 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
+
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                         value.default_hint_if_non_existent))
+        controller=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
@@ -818,3 +820,125 @@ def tail_logs(
                         process_stream=False,
                         ssh_mode=command_runner.SshMode.INTERACTIVE,
                         stdin=subprocess.DEVNULL)
+
+
+@usage_lib.entrypoint
+def sync_down_logs(service_name: str,
+                   *,
+                   targets: Union[ServiceComponentOrStr,
+                                  List[ServiceComponentOrStr], None] = None,
+                   replica_id: Optional[int] = None) -> pathlib.Path:
+    """Sync down logs from the controller for the given service.
+
+    This function:
+      1) Gathers logs on the controller, by pulling or merging any needed
+         replica logs into `~/.sky/serve/<service_name>/*`.
+      2) Rsyncs those logs down to the local machine in a timestamped directory.
+
+    Args:
+        service_name: The name of the service to download logs from.
+        targets: Which component(s) to download logs for. If None or empty,
+            means download all logs (controller, load-balancer, all replicas).
+            Can be a string (e.g. "controller"), or a `ServiceComponent` object,
+            or a list of them for multiple components. Currently accepted
+            values:
+                - "controller"/ServiceComponent.CONTROLLER
+                - "load_balancer"/ServiceComponent.LOAD_BALANCER
+                - "replica"/ServiceComponent.REPLICA
+        replica_id: The replica ID to download logs from, specified when and
+            only when target is `ServiceComponent.REPLICA`.
+
+    Returns:
+        The parent directory of the downloaded logs.
+
+    Raises:
+        RuntimeError: If fails to gather logs or fails to rsync from the
+          controller.
+        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        ValueError: Arguments not valid.
+    """
+    if not targets:
+        normalized_targets = set()  # later interpret as "all"
+    elif isinstance(targets, (str, serve_utils.ServiceComponent)):
+        normalized_targets = {serve_utils.ServiceComponent(targets)}
+    else:  # list
+        normalized_targets = set(
+            serve_utils.ServiceComponent(t) for t in targets)
+
+    if ((serve_utils.ServiceComponent.REPLICA in normalized_targets) !=
+        (replica_id is not None)):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                '`replica_id` should be specified when and only when using '
+                'target=REPLICA.')
+
+    # Step 0) get the controller handle
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking '
+                                     'service status...')):
+        controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=controller_type.value.default_hint_if_non_existent)
+
+        backend = backend_utils.get_backend_from_handle(handle)
+        assert isinstance(backend, backends.CloudVmRayBackend)
+
+    # Step 1) unify logs on the controller
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Unifying '
+                                     'logs on the controller...')):
+        target_str_list = [t.value for t in normalized_targets
+                          ] if normalized_targets else []
+        timestamp = sky_logging.get_run_timestamp()
+        code = serve_utils.ServeCodeGen.sync_down_logs(service_name, timestamp,
+                                                       target_str_list,
+                                                       replica_id)
+        returncode, stdout, stderr = backend.run_on_head(handle,
+                                                         code,
+                                                         require_outputs=True,
+                                                         stream_logs=False,
+                                                         separate_stderr=True)
+        try:
+            subprocess_utils.handle_returncode(
+                returncode,
+                code,
+                'Failed to gather logs on the controller',
+                stderr,
+                stream_logs=True)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+    # Step 2) rsync logs back to local
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Syncing '
+                                     'logs to local...')):
+        runners = handle.get_command_runners()
+        assert runners, 'No command runner found'
+        head_runner = runners[0]
+
+        try:
+            local_base = serve_utils.rsync_service_logs_from_controller(
+                head_runner, service_name, timestamp)
+        except exceptions.CommandError as e:
+            raise RuntimeError(e.error_msg) from e
+
+    try:
+        # TODO(andyl): We should make `sync_down_logs` an endpoint, so
+        # that we can seperate the messy logging (e.g. from backend.sync_down_logs)
+        # from the actual results. Here [-1] is an workaround.
+        json_dict_str = stdout.splitlines()[-1]
+        results: Dict[str, str] = json.loads(json_dict_str)
+    except json.JSONDecodeError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                f'Failed to parse the output of `sync_down_logs`, '
+                f'while stdout is: {stdout}') from e
+
+    # TODO(andyl): The key is useful for future use. We should do more
+    # fine-grained rsync for components in different paths. They may
+    # fail in different steps. And we need to adjust the message accordingly.
+    for line in results.values():
+        line = line.format(PATH_PLACEHOLDER=local_base)
+        print(f'{colorama.Fore.CYAN}{line}{colorama.Style.RESET_ALL}')
+    return local_base

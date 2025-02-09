@@ -677,9 +677,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                            purge: bool = False) -> None:
         left_in_record = not (is_scale_down or purge)
         if left_in_record:
-            assert sync_down_logs, ('For the replica left in the record, '
-                                    'the logs should always be synced down.'
-                                    'So that the user can see the logs to debug.')
+            assert sync_down_logs, (
+                'For the replica left in the record, '
+                'the logs should always be synced down.'
+                'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_process_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
@@ -712,9 +713,9 @@ class SkyPilotReplicaManager(ReplicaManager):
                         self._service_name, replica_id))
                 # Write launch log to replica log file
                 with open(log_file_name, 'w',
-                        encoding='utf-8') as replica_log_file, open(
-                            launch_log_file_name, 'r',
-                            encoding='utf-8') as launch_file:
+                          encoding='utf-8') as replica_log_file, open(
+                              launch_log_file_name, 'r',
+                              encoding='utf-8') as launch_file:
                     replica_log_file.write(launch_file.read())
                 os.remove(launch_log_file_name)
 
