@@ -58,7 +58,7 @@ A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`.
    You can test your YAML on unamanged :code:`sky launch`, then do a production run as a managed job using :code:`sky jobs launch`.
 
 For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
-launch it with SkyPilot managed spot jobs.
+launch it with SkyPilot managed jobs.
 
 We can launch it with the following:
 
@@ -132,7 +132,7 @@ Managed jobs can run on spot instances, and preemptions are auto-recovered by Sk
    Depending on the cloud and VM type, spot instances can be 70-90% cheaper.
    Since SkyPilot automatically handles preemptions, you can get these savings for free.
 
-To launch a managed spot job, use :code:`sky jobs launch --use-spot`, or specify :code:`use_spot: true` in your SkyPilot YAML.
+To run on spot instances, use :code:`sky jobs launch --use-spot`, or specify :code:`use_spot: true` in your SkyPilot YAML.
 SkyPilot automatically finds available spot instances across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
