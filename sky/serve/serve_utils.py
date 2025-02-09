@@ -837,14 +837,10 @@ def sync_down_logs(service_name: str, timestamp: str,
     elif replica_id is not None:
         replica_info = serve_state.get_replica_info_from_id(
             service_name, replica_id)
-        if replica_info is None or replica_info.status in [
-                serve_state.ReplicaStatus.PREEMPTED,
-                serve_state.ReplicaStatus.UNKNOWN,
-        ]:
+        if replica_info is None:
             messages[f'replica_{replica_id}'] = (
-                f'Replica {replica_id} not found or '
-                'has been scaled down for '
-                f'{service_name}.')
+                f'Replica {replica_id} for {service_name} is '
+                'not found.')
         else:
             replicas_targets.append(replica_info)
 
@@ -855,6 +851,20 @@ def sync_down_logs(service_name: str, timestamp: str,
     def _fetch_replica_logs(info: 'replica_managers.ReplicaInfo'):
         handle = info.handle()
         replica_id = info.replica_id
+        status = info.status
+        if status in [
+                serve_state.ReplicaStatus.PREEMPTED,
+                serve_state.ReplicaStatus.UNKNOWN,
+        ]:
+            messages[f'replica_{replica_id}'] = (
+                f'Replica {replica_id} for {service_name} has been '
+                'scaled down or preempted.')
+            return
+        if status == serve_state.ReplicaStatus.PROVISIONING:
+            messages[f'replica_{replica_id}'] = (
+                f'Replica {replica_id} for {service_name} is still '
+                'provisioning.')
+            return
         if handle is None:
             messages[f'replica_{replica_id}'] = (
                 f'Cannot find cluster {info.cluster_name}. '
@@ -871,8 +881,8 @@ def sync_down_logs(service_name: str, timestamp: str,
             # Current blocker is error message is directly printed by
             # controller_utils.download_and_stream_latest_job_log.
             messages[f'replica_{replica_id}'] = (
-                f'Error pulling logs for replica {replica_id}.'
-                'See the controller log for more details.')
+                f'Error pulling logs for replica {replica_id} for '
+                f'{service_name}. See the controller log for more details.')
             return
 
         job_file_path = pathlib.Path(job_file)
@@ -886,8 +896,8 @@ def sync_down_logs(service_name: str, timestamp: str,
         shutil.rmtree(job_file_path.parent)
 
         messages[f'replica_{replica_id}'] = (
-            f'Successfully synced replica {replica_id} logs to '
-            f'{{PATH_PLACEHOLDER}}/replica_{replica_id}.log')
+            f'Successfully synced replica {replica_id} logs for '
+            f'{service_name} to {{PATH_PLACEHOLDER}}/replica_{replica_id}.log')
 
     subprocess_utils.run_in_parallel(
         _fetch_replica_logs,
@@ -900,8 +910,8 @@ def sync_down_logs(service_name: str, timestamp: str,
             pathlib.Path(controller_file).expanduser(),
             local_base / 'controller.log')
         messages['controller'] = (
-            'Successfully synced controller logs to {PATH_PLACEHOLDER}/'
-            'controller.log')
+            'Successfully synced controller logs for '
+            f'{service_name} to {{PATH_PLACEHOLDER}}/controller.log')
 
     if (ServiceComponent.LOAD_BALANCER.value in target_str_list or wants_all):
         load_balancer_file = (
@@ -910,8 +920,8 @@ def sync_down_logs(service_name: str, timestamp: str,
             pathlib.Path(load_balancer_file).expanduser(),
             local_base / 'load_balancer.log')
         messages['load_balancer'] = (
-            'Successfully synced load balancer logs to {PATH_PLACEHOLDER}/'
-            'load_balancer.log')
+            'Successfully synced load balancer logs for '
+            f'{service_name} to {{PATH_PLACEHOLDER}}/load_balancer.log')
 
     return json.dumps(messages)
 
