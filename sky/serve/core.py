@@ -925,8 +925,9 @@ def sync_down_logs(service_name: str,
 
     try:
         # TODO(andyl): We should make `sync_down_logs` an endpoint, so
-        # that we can seperate the messy logging (e.g. from backend.sync_down_logs)
-        # from the actual results. Here [-1] is an workaround.
+        # that we can seperate the messy logging, e.g. from
+        # backend.sync_down_logs, from the actual results. Here [-1] is an
+        # workaround.
         json_dict_str = stdout.splitlines()[-1]
         results: Dict[str, str] = json.loads(json_dict_str)
     except json.JSONDecodeError as e:

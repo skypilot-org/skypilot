@@ -4638,9 +4638,9 @@ def serve_logs(
 
     if sync_down:
         try:
-            local_base = serve_lib.sync_down_logs(service_name,
-                                                  targets=chosen_components,
-                                                  replica_id=replica_id)
+            serve_lib.sync_down_logs(service_name,
+                                     targets=chosen_components,
+                                     replica_id=replica_id)
         except (exceptions.ClusterNotUpError, ValueError, RuntimeError):
             with ux_utils.print_exception_no_traceback():
                 raise
