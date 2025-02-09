@@ -707,17 +707,16 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._service_name, replica_id)
 
         def _download_and_stream_logs(info: ReplicaInfo):
-            if sync_down_logs:
-                launch_log_file_name = (
-                    serve_utils.generate_replica_launch_log_file_name(
-                        self._service_name, replica_id))
-                # Write launch log to replica log file
-                with open(log_file_name, 'w',
-                          encoding='utf-8') as replica_log_file, open(
-                              launch_log_file_name, 'r',
-                              encoding='utf-8') as launch_file:
-                    replica_log_file.write(launch_file.read())
-                os.remove(launch_log_file_name)
+            launch_log_file_name = (
+                serve_utils.generate_replica_launch_log_file_name(
+                    self._service_name, replica_id))
+            # Write launch log to replica log file
+            with open(log_file_name, 'w',
+                      encoding='utf-8') as replica_log_file, open(
+                          launch_log_file_name, 'r',
+                          encoding='utf-8') as launch_file:
+                replica_log_file.write(launch_file.read())
+            os.remove(launch_log_file_name)
 
             logger.info(f'Syncing down logs for replica {replica_id}...')
             backend = backends.CloudVmRayBackend()

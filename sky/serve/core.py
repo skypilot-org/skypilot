@@ -6,7 +6,7 @@ import signal
 import subprocess
 import tempfile
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -832,7 +832,7 @@ def sync_down_logs(service_name: str,
 
     This function:
       1) Gathers logs on the controller, by pulling or merging any needed
-         replica logs into `~/.sky/serve/<service_name>/*`.
+         replica logs into `~/.sky/serve/<service_name>/<timestamp>/`.
       2) Rsyncs those logs down to the local machine in a timestamped directory.
 
     Args:
@@ -857,6 +857,7 @@ def sync_down_logs(service_name: str,
         sky.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
+    normalized_targets: Set[serve_utils.ServiceComponent]
     if not targets:
         normalized_targets = set()  # later interpret as "all"
     elif isinstance(targets, (str, serve_utils.ServiceComponent)):
@@ -888,8 +889,7 @@ def sync_down_logs(service_name: str,
     with rich_utils.safe_status(
             ux_utils.spinner_message('Unifying '
                                      'logs on the controller...')):
-        target_str_list = [t.value for t in normalized_targets
-                          ] if normalized_targets else []
+        target_str_list = [t.value for t in normalized_targets]
         timestamp = sky_logging.get_run_timestamp()
         code = serve_utils.ServeCodeGen.sync_down_logs(service_name, timestamp,
                                                        target_str_list,
