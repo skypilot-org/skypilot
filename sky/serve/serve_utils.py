@@ -876,7 +876,8 @@ def sync_down_logs(service_name: str, timestamp: str,
             return
 
         job_file_path = pathlib.Path(job_file)
-        shutil.move(job_file_path, local_base / f'replica_{replica_id}.log')
+        shutil.move(typing.cast(str, job_file_path),
+                    local_base / f'replica_{replica_id}.log')
 
         # TODO(andyl): The whole <run-timestamp> including
         # a run.log and 'tasks' subdir is synced down by
