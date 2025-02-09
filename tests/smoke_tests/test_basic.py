@@ -87,7 +87,7 @@ def test_minimal(generic_cloud: str):
 
 
 # ---------- Test fast launch ----------
-@pytest.mark.requires_gke
+@pytest.mark.requires_eks
 def test_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
@@ -346,7 +346,7 @@ def test_core_api_sky_launch_exec():
 
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
-@pytest.mark.requires_gke
+@pytest.mark.requires_eks
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.clouds.CLOUD_REGISTRY.from_str(generic_cloud)

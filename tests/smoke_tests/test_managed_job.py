@@ -42,7 +42,7 @@ from sky.utils import common_utils
 # when the controller being on Azure, which takes a long time for launching
 # step.
 @pytest.mark.managed_jobs
-@pytest.mark.requires_gke
+@pytest.mark.requires_eks
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
@@ -882,7 +882,7 @@ def test_managed_jobs_tpu():
 # ---------- Testing env for managed jobs ----------
 @pytest.mark.no_vast  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
-@pytest.mark.requires_gke
+@pytest.mark.requires_eks
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
     name = smoke_tests_utils.get_cluster_name()
