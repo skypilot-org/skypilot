@@ -39,7 +39,7 @@ PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'
-QUEUE_GKE = 'gke'
+QUEUE_EKS = 'eks'
 # Only aws, gcp, azure, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
@@ -174,7 +174,7 @@ def _extract_marked_tests(
     for function_name, marks in function_name_marks_map.items():
         clouds_to_include = []
         is_serve_test = 'serve' in marks
-        run_on_gke = ('requires_gke' in marks and
+        run_on_eks = ('requires_eks' in marks and
                       'kubernetes' in default_clouds_to_run)
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
@@ -211,7 +211,7 @@ def _extract_marked_tests(
             param_list += [None
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
-            QUEUE_GKE if run_on_gke else cloud_queue_map[cloud]
+            QUEUE_EKS if run_on_eks else cloud_queue_map[cloud]
             for cloud in final_clouds_to_include
         ], param_list)
 
