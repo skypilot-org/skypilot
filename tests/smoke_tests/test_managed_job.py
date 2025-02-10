@@ -619,7 +619,8 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
 @pytest.mark.managed_jobs
 def test_managed_jobs_cancellation_gcp():
     name = smoke_tests_utils.get_cluster_name()
-    name_3 = f'{name}-3'
+    # Use :-2 to avoid cluster name to be truncated twice for managed jobs.
+    name_3 = f'{name[:-2]}-3'
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
         name_3, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
@@ -664,20 +665,20 @@ def test_managed_jobs_cancellation_gcp():
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # Test cancellation during spot job is recovering.
-            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-3 --use-spot "sleep 1000" -y -d',
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name_3} --use-spot "sleep 1000" -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=f'{name}-3',
+                job_name=name_3,
                 job_status=[sky.ManagedJobStatus.RUNNING],
                 timeout=335),
             # Terminate the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=terminate_cmd),
-            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
-            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
-            f'sky jobs cancel -y -n {name}-3',
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name_3),
+            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name_3} | head -n1 | grep "RECOVERING"',
+            f'sky jobs cancel -y -n {name_3}',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                job_name=f'{name}-3',
+                job_name=name_3,
                 job_status=[sky.ManagedJobStatus.CANCELLED],
                 timeout=155),
             # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
@@ -707,6 +708,8 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'managed_jobs_retry_logs',
             [
+                # TODO(zhwu): we should make the override for generic_cloud work
+                # with multiple stages in pipeline.
                 f'sky jobs launch -n {name} {yaml_path} -y -d',
                 # TODO(zhwu): Check why the logs does not return immediately
                 # after job status FAILED.

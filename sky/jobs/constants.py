@@ -23,10 +23,18 @@ CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
     'disk_size': 50
 }
 
+# TODO(zhwu): This is no longer accurate, after #4592, which increases the
+# length of user hash appended to the cluster name from 4 to 8 chars. This makes
+# the cluster name on GCP being wrapped twice. However, we cannot directly
+# update this constant, because the job cluster cleanup and many other logic
+# in managed jobs depends on this constant, i.e., updating this constant will
+# break backward compatibility and existing jobs.
+#
 # Max length of the cluster name for GCP is 35, the user hash to be attached is
-# 4+1 chars, and we assume the maximum length of the job id is 4+1, so the max
-# length of the cluster name prefix is 25 to avoid the cluster name being too
-# long and truncated twice during the cluster creation.
+# 4(now 8)+1 chars, and we assume the maximum length of the job id is
+# 4(now 8)+1, so the max length of the cluster name prefix is 25(should be 21
+# now) to avoid the cluster name being too long and truncated twice during the
+# cluster creation.
 JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 
 # The version of the lib files that jobs/utils use. Whenever there is an API

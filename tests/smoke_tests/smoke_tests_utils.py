@@ -242,16 +242,20 @@ def get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
+    test_name = test_name.replace('managed-jobs', 'jobs')
+    # Use 20 to avoid cluster name to be truncated twice for managed jobs.
     test_name = common_utils.make_cluster_name_on_cloud(test_name,
-                                                        24,
+                                                        20,
                                                         add_user_hash=False)
     return f'{test_name}-{test_id}'
 
 
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, sky.GCP.max_cluster_name_length())
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                 f'"(labels.ray-cluster-name:{name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     return (f'gcloud compute instances delete --zone={zone}'
             f' --quiet $({query_cmd})')
