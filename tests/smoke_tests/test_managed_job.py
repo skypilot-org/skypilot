@@ -670,7 +670,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'managed_jobs_retry_logs',
             [
-                f'sky jobs launch -n {name} {yaml_path} -y -d',
+                f'sky jobs launch -n {name} {yaml_path} --cloud {generic_cloud} -y -d',
                 f'sky jobs logs -n {name} | tee {log_file.name}',
                 # First attempt
                 f'cat {log_file.name} | grep "Job started. Streaming logs..."',
