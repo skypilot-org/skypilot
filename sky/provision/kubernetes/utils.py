@@ -2186,7 +2186,9 @@ def get_kubernetes_node_info(
 
     for node in nodes:
         accelerator_name = None
-        # Determine the accelerator name from the node labels
+        # Determine the accelerator name from the node labels and pick the
+        # first one found. We assume that the node has only one accelerator type
+        # (e.g., either GPU or TPU).
         for label_key in label_keys:
             if lf is not None and label_key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
