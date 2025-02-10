@@ -195,8 +195,9 @@ def delete_register_auth(registry_auth_id: str) -> None:
     try:
         runpod.runpod.delete_container_registry_auth(registry_auth_id)
     except runpod.runpod.error.QueryError as e:
-        logger.warning(f'Failed to delete registry auth {registry_auth_id}: {e} '
-                       'Please delete it manually.')
+        logger.warning(
+            f'Failed to delete registry auth {registry_auth_id}: {e} '
+            'Please delete it manually.')
 
 
 def _create_template_for_docker_login(
