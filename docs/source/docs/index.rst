@@ -166,16 +166,6 @@ Read the research:
 
    Getting Started <../serving/sky-serve>
    ../serving/user-guides
-   ../serving/https
-
-.. .. toctree::
-..    :hidden:
-..    :maxdepth: 1
-..    :caption: Cost Optimization
-
-..    Managed Spot Jobs <../examples/spot-jobs>
-
-.. ..    ../reference/benchmark/index
 
 .. toctree::
    :hidden:
@@ -208,9 +198,6 @@ Read the research:
    ../examples/ports
    ../reference/logging
    ../reference/faq
-
-
-   .. :caption: Cloud Admin and Usage
 
 .. toctree::
    :hidden:
