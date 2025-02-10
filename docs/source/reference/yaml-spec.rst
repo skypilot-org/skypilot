@@ -390,6 +390,10 @@ In additional to the above fields, SkyPilot also supports the following experime
         nvidia_gpus:
             disable_ecc: ...
 
+
+
+.. _service-yaml-spec:
+
 SkyServe Services
 =================
 

@@ -207,6 +207,7 @@ clusters, or on-prem machines---using each infra's native authentication
 (cloud credentials, kubeconfig, SSH).
 
 .. _concept-cloud-vms:
+
 Cloud VMs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
