@@ -750,23 +750,20 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         A dag iff the entrypoint is YAML and contains more than 1 task.
         Otherwise, a task.
     """
+    del entrypoint_name  # Unused.
     entrypoint = ' '.join(entrypoint)
     is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        click.secho('YAML to run: ',
-                    fg='cyan',
-                    nl=False)
+        click.secho('YAML to run: ', fg='cyan', nl=False)
         click.secho(entrypoint)
     else:
         if not entrypoint:
             entrypoint = None
         else:
             # Treat entrypoint as a bash command.
-            click.secho('Command to run: ',
-                        fg='cyan',
-                        nl=False)
+            click.secho('Command to run: ', fg='cyan', nl=False)
             click.secho(entrypoint)
 
     override_params = _parse_override_params(cloud=cloud,
