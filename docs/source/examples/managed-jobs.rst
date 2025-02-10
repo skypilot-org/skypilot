@@ -118,7 +118,7 @@ search for resources across regions and clouds to re-launch the job.
 
 .. _spot-jobs:
 
-Running on Spot
+Running on Spot Instances
 ---------------
 
 Managed jobs can run on spot instances, and preemptions are auto-recovered by SkyPilot.
@@ -137,11 +137,11 @@ SkyPilot automatically finds available spot instances across regions and clouds 
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
 .. tip::
-   The job will be restarted from scratch after each preemption recovery.
+   By default, a job will be restarted from scratch after each preemption recovery.
    To avoid redoing work after recovery, implement :ref:`checkpointing and recovery <checkpointing>`.
    Your application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can then reload the latest checkpoint when restarted.
 
-Here is an example of a BERT training job failing over different regions across AWS and GCP.
+Here is an example of a training job failing over different regions across AWS and GCP.
 
 .. image:: https://i.imgur.com/Vteg3fK.gif
   :width: 600
@@ -230,11 +230,6 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
     job_recovery:
       # Restart the job up to 3 times on user code errors.
       max_restarts_on_errors: 3
-
-More advanced policies for resource selection, such as the `Can't Be Late
-<https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
-paper, may be supported in the future.
-
 
 .. _spot-jobs-end-to-end:
 

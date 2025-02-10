@@ -289,7 +289,7 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
               )
               job_idx += 1
 
-The launched jobs will "detach" once submitted, and will run in parallel.
+The launched jobs will "detach" once submitted (``-d``), and will run in parallel.
 
 Job statuses can be checked via ``sky jobs queue``:
 
