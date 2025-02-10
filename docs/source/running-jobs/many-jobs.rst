@@ -237,12 +237,7 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 Scale Out to Many Jobs
 -----------------------
 
-With the above setup, you can now scale out to run many jobs in parallel. You
-can either use SkyPilot CLI with many config files or use SkyPilot Python API.
-
-
-Using Environment Variables
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+With the above setup, you can now scale out to run many jobs in parallel.
 
 To run many jobs at once, we will launch the jobs as :ref:`SkyPilot managed jobs <managed-jobs>`. We can control the hyperparameter environment variables independently for each managed job.
 

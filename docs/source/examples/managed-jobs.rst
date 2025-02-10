@@ -49,6 +49,11 @@ Managed jobs have several benefits:
    processing, training a model, and then running inference on it.
 
 
+.. contents:: Contents
+   :local:
+   :backlinks: none
+
+
 Create a Managed Job
 --------------------
 
@@ -57,10 +62,7 @@ A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`.
 .. tip::
    You can test your YAML on unamanged :code:`sky launch`, then do a production run as a managed job using :code:`sky jobs launch`.
 
-For example, we found the BERT fine-tuning YAML works with :code:`sky launch`, and want to
-launch it with SkyPilot managed jobs.
-
-We can launch it with the following:
+Once we have a YAML that works with :code:`sky launch`, we can launch it with the following:
 
 .. code-block:: console
 
@@ -108,35 +110,99 @@ We can launch it with the following:
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be automatically uploaded to a
-  :ref:`cloud bucket <sky-storage>`. The bucket will be created during the job running time, and cleaned up after the job
-  finishes.
+  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be :ref:`automatically uploaded to a cloud bucket <intermediate-bucket>`.
+  The bucket will be cleaned up after the job finishes.
 
 SkyPilot will launch and start monitoring the job. When a spot preemption or any machine failure happens, SkyPilot will automatically
 search for resources across regions and clouds to re-launch the job.
 
 
+Work with Managed Jobs
+~~~~~~~~~~~~~~~~~~~~~~
+
+For a list of all commands and options, run :code:`sky jobs --help` or read the :ref:`CLI reference <cli>`.
+
+See a list of all managed jobs:
+
+.. code-block:: console
+
+  $ sky jobs queue
+
+.. code-block:: console
+
+  Fetching managed job statuses...
+  Managed jobs:
+  ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
+  2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
+  1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
+
+Stream the logs of a running managed job:
+
+.. code-block:: console
+
+  $ sky jobs logs -n bert-qa  # by name
+  $ sky jobs logs 2           # by job ID
+
+Cancel a managed job:
+
+.. code-block:: console
+
+  $ sky jobs cancel -n bert-qa  # by name
+  $ sky jobs cancel 2           # by job ID
+
+.. note::
+  If any failure happens for a managed job, you can check :code:`sky jobs queue -a` for the brief reason
+  of the failure. For more details, it would be helpful to check :code:`sky jobs logs --controller <job_id>`.
+
+
+Jobs Dashboard
+~~~~~~~~~~~~~~
+
+Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
+
+.. code-block:: console
+
+  $ sky jobs dashboard
+
+This automatically opens a browser tab to show the dashboard:
+
+.. image:: ../images/job-dashboard.png
+
+The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
+especially useful when there are many in-progress jobs to monitor, which the
+terminal-based CLI may need more than one page to display.
+
+
 .. _spot-jobs:
 
 Running on Spot Instances
----------------
+-------------------------
 
 Managed jobs can run on spot instances, and preemptions are auto-recovered by SkyPilot.
+
+To run on spot instances, use :code:`sky jobs launch --use-spot`, or specify :code:`use_spot: true` in your SkyPilot YAML.
+
+.. code-block:: yaml
+
+  name: spot-job
+
+  resources:
+    accelerators: A100:8
+    use_spot: true
+
+  run: ...
 
 .. tip::
    Spot instances are cloud VMs that may be "preempted".
    The cloud provider can forcibly shut down the underlying VM and remove your access to it, interrupting the job running on that instance.
-   This can be inconvenient, but SkyPilot will automatically restart/recover your job on another instance.
 
-   In exchange for unpredictability, spot instances are significantly cheaper than normal instances that are not subject to preemption (so-called "on-demand" instances).
+   In exchange, spot instances are significantly cheaper than normal instances that are not subject to preemption (so-called "on-demand" instances).
    Depending on the cloud and VM type, spot instances can be 70-90% cheaper.
-   Since SkyPilot automatically handles preemptions, you can get these savings for free.
 
-To run on spot instances, use :code:`sky jobs launch --use-spot`, or specify :code:`use_spot: true` in your SkyPilot YAML.
 SkyPilot automatically finds available spot instances across regions and clouds to maximize availability.
 Any spot preemptions are automatically handled by SkyPilot without user intervention.
 
-.. tip::
+.. note::
    By default, a job will be restarted from scratch after each preemption recovery.
    To avoid redoing work after recovery, implement :ref:`checkpointing and recovery <checkpointing>`.
    Your application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can then reload the latest checkpoint when restarted.
@@ -188,8 +254,8 @@ candidate resources for a job. See documentation :ref:`here
       - use_spot: true
       - use_spot: false
 
-In this example, SkyPilot will perform cost optimizations to select the resource to use, which almost certainly
-will be spot instances. If spot instances are not available, SkyPilot will fall back to launch on-demand/reserved instances.
+In this example, SkyPilot will choose the cheapest resource to use, which almost certainly
+will be spot instances. If spot instances are not available, SkyPilot will fall back to launching on-demand/reserved instances.
 
 
 .. _checkpointing:
@@ -230,6 +296,7 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
     job_recovery:
       # Restart the job up to 3 times on user code errors.
       max_restarts_on_errors: 3
+
 
 .. _spot-jobs-end-to-end:
 
@@ -332,45 +399,7 @@ Running Many Parallel Jobs
 
 For batch jobs such as **data processing** or **hyperparameter sweeps**, you can launch many jobs in parallel. See :ref:`many-jobs`.
 
-If you want to run more than around 90 jobs at once, you may need to use some advanced configuration. See :ref:`jobs-controller-sizing`.
-
-
-Useful CLIs
------------
-
-Here are some commands for managed jobs. Check :code:`sky jobs --help` and :ref:`CLI reference <cli>` for more details.
-
-See all managed jobs:
-
-.. code-block:: console
-
-  $ sky jobs queue
-
-.. code-block:: console
-
-  Fetching managed job statuses...
-  Managed jobs:
-  ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
-  2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
-  1  bert-qa  1x [V100:1][Spot]   4 hrs ago   4h 24m 26s      4h 17m 54s     0            RUNNING
-
-Stream the logs of a running managed job:
-
-.. code-block:: console
-
-  $ sky jobs logs -n bert-qa  # by name
-  $ sky jobs logs 2           # by job ID
-
-Cancel a managed job:
-
-.. code-block:: console
-
-  $ sky jobs cancel -n bert-qa  # by name
-  $ sky jobs cancel 2           # by job ID
-
-.. note::
-  If any failure happens for a managed job, you can check :code:`sky jobs queue -a` for the brief reason
-  of the failure. For more details, it would be helpful to check :code:`sky jobs logs --controller <job_id>`.
+To increase the maximum number of jobs that can run at once, see :ref:`jobs-controller-sizing`.
 
 
 .. _pipeline:
@@ -464,28 +493,10 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
   "sky-managed-2022-10-06-05-17-09-750781_pipeline_eval_8-1".
 
 
-Job Dashboard
--------------
-
-Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
-
-.. code-block:: console
-
-  $ sky jobs dashboard
-
-This automatically opens a browser tab to show the dashboard:
-
-.. image:: ../images/job-dashboard.png
-
-The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
-especially useful when there are many in-progress jobs to monitor, which the
-terminal-based CLI may need more than one page to display.
-
-
 .. _intermediate-bucket:
 
-Intermediate storage for files
-------------------------------
+Setting the Job Files Bucket
+----------------------------
 
 For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
 If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
