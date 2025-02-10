@@ -2196,8 +2196,7 @@ def get_kubernetes_node_info(
                 break
 
         allocated_qty = 0
-        accelerator_count = get_node_accelerator_count(
-            node.status.allocatable)
+        accelerator_count = get_node_accelerator_count(node.status.allocatable)
 
         if pods is None:
             accelerators_available = -1
