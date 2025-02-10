@@ -10,7 +10,7 @@ Kubernetes is a powerful system for managing containerized applications. :ref:`U
    Light: https://docs.google.com/drawings/d/1REe_W49SPJ44N-o4NRCKcIRhCkXG9o03ZXHh1mfLUzk/edit?usp=sharing
    Dark: https://docs.google.com/drawings/d/1MefAOXRNHj05B9raO3dCPhAyMJN3oWYM6nvUNgo8aoA/edit?usp=sharing
 
-.. figure:: ../images/k8s-skypilot-architecture-dark.png
+.. figure:: ../../images/k8s-skypilot-architecture-dark.png
    :width: 55%
    :align: center
    :alt: SkyPilot on Kubernetes
@@ -18,7 +18,7 @@ Kubernetes is a powerful system for managing containerized applications. :ref:`U
 
    SkyPilot layers on top of your Kubernetes cluster to deliver a better developer experience.
 
-.. figure:: ../images/k8s-skypilot-architecture-light.png
+.. figure:: ../../images/k8s-skypilot-architecture-light.png
    :width: 55%
    :align: center
    :alt: SkyPilot on Kubernetes
