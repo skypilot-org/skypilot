@@ -22,6 +22,7 @@
 import pathlib
 import tempfile
 import textwrap
+from typing import Dict
 
 import jinja2
 import pytest
@@ -37,21 +38,24 @@ from sky.utils import resources_utils
 
 
 # ---------- Job Queue. ----------
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue instead
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
-def test_job_queue(generic_cloud: str):
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'job_queue',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job.yaml',
-            f'sky exec {name} -n {name}-3 -d examples/job_queue/job.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/job_queue/cluster.yaml',
+            f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:0.5 examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:0.5 examples/job_queue/job.yaml',
+            f'sky exec {name} -n {name}-3 -d --gpus {accelerator}:0.5 examples/job_queue/job.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -59,8 +63,8 @@ def test_job_queue(generic_cloud: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
-            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 4 --status',
             f'sky logs {name} 5 --status',
         ],
@@ -73,10 +77,12 @@ def test_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support docker for now
 @pytest.mark.no_lambda_cloud  # Doesn't support Lambda Cloud for now
 @pytest.mark.no_ibm  # Doesn't support IBM Cloud for now
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace doesn't have T4 GPUs
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -93,17 +99,19 @@ def test_job_queue(generic_cloud: str):
         #  2. python>=3.12 works with SkyPilot runtime.
         'docker:winglian/axolotl:main-latest'
     ])
-def test_job_queue_with_docker(generic_cloud: str, image_id: str):
+def test_job_queue_with_docker(generic_cloud: str, image_id: str,
+                               accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name() + image_id[len('docker:'):][:4]
     total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
     time_to_sleep = 300 if generic_cloud == 'azure' else 180
     test = smoke_tests_utils.Test(
         'job_queue_with_docker',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
-            f'sky exec {name} -n {name}-1 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-2 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
-            f'sky exec {name} -n {name}-3 -d --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --gpus {accelerator} --image-id {image_id} examples/job_queue/cluster_docker.yaml',
+            f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:0.5 --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:0.5 --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
+            f'sky exec {name} -n {name}-3 -d --gpus {accelerator}:0.5 --image-id {image_id} --env TIME_TO_SLEEP={time_to_sleep} examples/job_queue/job_docker.yaml',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep RUNNING',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep PENDING',
@@ -112,7 +120,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 3',
             # Make sure the GPU is still visible to the container.
-            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep -i "{accelerator}"',
             f'sky logs {name} 4 --status',
             f'sky stop -y {name}',
             # Make sure the job status preserve after stop and start the
@@ -122,12 +130,12 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-1 | grep FAILED',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-2 | grep CANCELLED',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep CANCELLED',
-            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus T4:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:1 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 5 --status',
             f'sky logs {name} 6 --status',
             # Make sure it is still visible after an stop & start cycle.
-            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep -i "{accelerator}"',
             f'sky logs {name} 7 --status'
         ],
         f'sky down -y {name}',
@@ -207,23 +215,27 @@ def test_scp_job_queue():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus. run test_ibm_job_queue_multinode instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
-def test_job_queue_multinode(generic_cloud: str):
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 30 if generic_cloud == 'azure' else 15
     test = smoke_tests_utils.Test(
         'job_queue_multinode',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/job_queue/cluster_multinode.yaml',
-            f'sky exec {name} -n {name}-1 -d examples/job_queue/job_multinode.yaml',
-            f'sky exec {name} -n {name}-2 -d examples/job_queue/job_multinode.yaml',
-            f'sky launch -c {name} -n {name}-3 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/job_queue/cluster_multinode.yaml',
+            f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
+            f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-3 --detach-setup -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
@@ -232,16 +244,16 @@ def test_job_queue_multinode(generic_cloud: str):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep SETTING_UP',
             f'sky cancel -y {name} 1 2 3',
-            f'sky launch -c {name} -n {name}-4 --detach-setup -d examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-4 --detach-setup -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
             'sleep 5',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
             f'sky cancel -y {name} 4',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-4 | grep CANCELLED)',
-            f'sky exec {name} --gpus T4:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus T4:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
-            f'sky exec {name} --gpus T4:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:0.2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:0.2 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
+            f'sky exec {name} --gpus {accelerator}:1 --num-nodes 2 "[[ \$SKYPILOT_NUM_GPUS_PER_NODE -eq 1 ]] || exit 1"',
             f'sky logs {name} 5 --status',
             f'sky logs {name} 6 --status',
             f'sky logs {name} 7 --status',
@@ -254,6 +266,7 @@ def test_job_queue_multinode(generic_cloud: str):
 
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+@pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -299,6 +312,7 @@ def test_large_job_queue(generic_cloud: str):
 
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
+@pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
     name = smoke_tests_utils.get_cluster_name()
@@ -379,12 +393,14 @@ def test_docker_preinstalled_package(generic_cloud: str):
 
 
 # ---------- Submitting multiple tasks to the same cluster. ----------
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_fluidstack  # FluidStack DC has low availability of T4 GPUs
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have T4 gpus
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus
 @pytest.mark.no_ibm  # IBM Cloud does not have T4 gpus
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
+@pytest.mark.no_do  # DO does not have T4 gpus
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -423,18 +439,21 @@ def test_multi_echo(generic_cloud: str):
 
 
 # ---------- Task: 1 node training. ----------
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not have T4 gpus for now
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
-def test_huggingface(generic_cloud: str):
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'huggingface_glue_imdb_app',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/huggingface_glue_imdb_app.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky exec {name} examples/huggingface_glue_imdb_app.yaml',
+            f'sky exec {name} --gpus {accelerator} examples/huggingface_glue_imdb_app.yaml',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -483,7 +502,7 @@ def test_inferentia():
         'test_inferentia',
         [
             f'sky launch -y -c {name} -t inf2.xlarge -- echo hi',
-            f'sky exec {name} --gpus Inferentia:1 echo hi',
+            f'sky exec {name} --gpus Inferentia2:1 echo hi',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
         ],
@@ -556,7 +575,9 @@ def test_tpu_vm_pod():
 
 
 # ---------- TPU Pod Slice on GKE. ----------
+@pytest.mark.requires_gke
 @pytest.mark.kubernetes
+@pytest.mark.skip
 def test_tpu_pod_slice_gke():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -575,6 +596,7 @@ def test_tpu_pod_slice_gke():
 
 
 # ---------- Simple apps. ----------
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_hostname(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -595,6 +617,7 @@ def test_multi_hostname(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 def test_multi_node_failure(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -865,6 +888,7 @@ def test_add_and_remove_pod_annotations_with_autostop():
 
 
 # ---------- Container logs from task on Kubernetes ----------
+@pytest.mark.requires_gke
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
@@ -953,6 +977,7 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_dos  # DO does not have V100 gpus
 @pytest.mark.skip(
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
@@ -1040,6 +1065,7 @@ def test_azure_start_stop():
 @pytest.mark.no_ibm  # FIX(IBM) sporadically fails, as restarted workers stay uninitialized indefinitely
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 def test_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -1096,7 +1122,7 @@ def test_autostop(generic_cloud: str):
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
                 cluster_name=name,
                 cluster_status=[sky.ClusterStatus.STOPPED],
-                timeout=autostop_timeout + smoke_tests_utils.BUMP_UP_SECONDS),
+                timeout=autostop_timeout),
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
@@ -1107,6 +1133,7 @@ def test_autostop(generic_cloud: str):
 # ---------- Testing Autodowning ----------
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
@@ -1228,12 +1255,15 @@ def test_cancel_azure():
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-def test_cancel_pytorch(generic_cloud: str):
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
+def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
         'cancel-pytorch',
         [
-            f'sky launch -c {name} --cloud {generic_cloud} examples/resnet_distributed_torch.yaml -y -d',
+            f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 90',
             f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep python) || '
@@ -1283,6 +1313,7 @@ def test_cancel_ibm():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""
     name = smoke_tests_utils.get_cluster_name()
@@ -1293,6 +1324,34 @@ def test_use_spot(generic_cloud: str):
             f'sky logs {name} 1 --status',
             f'sky exec {name} echo hi',
             f'sky logs {name} 2 --status',
+        ],
+        f'sky down -y {name}',
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.azure
+def test_azure_spot_instance_verification():
+    """Test Azure spot instance provisioning with explicit verification.
+    This test verifies that when --use-spot is specified for Azure:
+    1. The cluster launches successfully
+    2. The instances are actually provisioned as spot instances
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'azure-spot-verification',
+        [
+            f'sky launch -c {name} --cloud azure tests/test_yamls/minimal.yaml --use-spot -y',
+            f'sky logs {name} 1 --status', f'TARGET_VM_NAME="{name}"; '
+            'VM_INFO=$(az vm list --query "[?contains(name, \'$TARGET_VM_NAME\')].{Name:name, ResourceGroup:resourceGroup}" -o tsv); '
+            '[[ -z "$VM_INFO" ]] && exit 1; '
+            'FULL_VM_NAME=$(echo "$VM_INFO" | awk \'{print $1}\'); '
+            'RESOURCE_GROUP=$(echo "$VM_INFO" | awk \'{print $2}\'); '
+            'VM_DETAILS=$(az vm list --resource-group "$RESOURCE_GROUP" '
+            '--query "[?name==\'$FULL_VM_NAME\'].{Name:name, Location:location, Priority:priority}" -o table); '
+            '[[ -z "$VM_DETAILS" ]] && exit 1; '
+            'echo "VM Details:"; echo "$VM_DETAILS"; '
+            'echo "$VM_DETAILS" | grep -qw "Spot" && exit 0 || exit 1'
         ],
         f'sky down -y {name}',
     )
@@ -1386,6 +1445,7 @@ def test_aws_custom_image():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.requires_gke
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
     'image_id',
@@ -1435,7 +1495,7 @@ def test_azure_start_stop_two_nodes():
                 cluster_status=[
                     sky.ClusterStatus.INIT, sky.ClusterStatus.STOPPED
                 ],
-                timeout=200 + smoke_tests_utils.BUMP_UP_SECONDS) +
+                timeout=235) +
             f'|| {{ ssh {name} "cat ~/.sky/skylet.log"; exit 1; }}'
         ],
         f'sky down -y {name}',
@@ -1527,7 +1587,7 @@ def test_azure_disk_tier():
         name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.Azure.max_cluster_name_length())
-        region = 'westus2'
+        region = 'eastus2'
         test = smoke_tests_utils.Test(
             'azure-disk-tier-' + disk_tier.value,
             [
@@ -1549,7 +1609,7 @@ def test_azure_best_tier_failover():
     name = smoke_tests_utils.get_cluster_name()
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
         name, sky.Azure.max_cluster_name_length())
-    region = 'westus2'
+    region = 'eastus2'
     test = smoke_tests_utils.Test(
         'azure-best-tier-failover',
         [

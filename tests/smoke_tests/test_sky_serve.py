@@ -24,14 +24,17 @@
 
 import inspect
 import json
+import os
 import shlex
-from typing import List, Tuple
+import tempfile
+from typing import Dict, List, Tuple
 
 import pytest
 from smoke_tests import smoke_tests_utils
 
 from sky import serve
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 
 # ---------- Testing skyserve ----------
 
@@ -84,15 +87,50 @@ _TEARDOWN_SERVICE = (
 _SERVE_ENDPOINT_WAIT = (
     'export ORIGIN_SKYPILOT_DEBUG=$SKYPILOT_DEBUG; export SKYPILOT_DEBUG=0; '
     'endpoint=$(sky serve status --endpoint {name}); '
-    'until ! echo "$endpoint" | grep "Controller is initializing"; '
+    'until ! echo "$endpoint" | grep -qE "Controller is initializing|^-$"; '
     'do echo "Waiting for serve endpoint to be ready..."; '
     'sleep 5; endpoint=$(sky serve status --endpoint {name}); done; '
     'export SKYPILOT_DEBUG=$ORIGIN_SKYPILOT_DEBUG; echo "$endpoint"')
 
-_SERVE_STATUS_WAIT = ('s=$(sky serve status {name}); '
-                      'until ! echo "$s" | grep "Controller is initializing."; '
-                      'do echo "Waiting for serve status to be ready..."; '
-                      'sleep 5; s=$(sky serve status {name}); done; echo "$s"')
+_SERVE_STATUS_WAIT = (
+    's=$(sky serve status {name}); '
+    # Wait for "Controller is initializing." to disappear
+    'until ! echo "$s" | grep "Controller is initializing."; '
+    'do '
+    '    echo "Waiting for serve status to be ready..."; '
+    '    sleep 5; '
+    '    s=$(sky serve status {name}); '
+    'done; '
+    'echo "$s"')
+
+_WAIT_PROVISION_REPR = (
+    # Once controller is ready, check provisioning vs. vCPU=2. This is for
+    # the `_check_replica_in_status`, which will check number of `vCPU=2` in the
+    # `sky serve status` output and use that to suggest the number of replicas.
+    # However, replicas in provisioning state is possible to have a repr of `-`,
+    # since the desired `launched_resources` is not decided yet. This would
+    # cause an error when counting desired number of replicas. We wait for the
+    # representation of `vCPU=2` the same with number of provisioning replicas
+    # to avoid this error.
+    # NOTE(tian): This assumes the replica will not do failover, as the
+    # requested resources is only 2 vCPU and likely to be immediately available
+    # on every region, hence no failover. If the replica will go through
+    # failover
+    # Check #4565 for more information.
+    'num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
+    'num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    'until [ "$num_provisioning" -eq "$num_vcpu_in_provision" ]; '
+    'do '
+    '    echo "Waiting for provisioning resource repr ready..."; '
+    '    echo "PROVISIONING: $num_provisioning, vCPU: $num_vcpu_in_provision"; '
+    '    sleep 2; '
+    '    s=$(sky serve status {name}); '
+    '    num_provisioning=$(echo "$s" | grep "PROVISIONING" | wc -l); '
+    '    num_vcpu_in_provision=$(echo "$s" | grep "PROVISIONING" | grep "vCPU=2" | wc -l); '
+    'done; '
+    # Provisioning is complete
+    'echo "Provisioning complete. PROVISIONING: $num_provisioning, vCPU=2: $num_vcpu_in_provision"'
+)
 
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
@@ -110,7 +148,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
             f'sky serve up -n {name} -y tests/skyserve/http/{cloud}.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=timeout_minutes * 60,
@@ -141,7 +179,9 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
             resource_str = f'({spot_str}vCPU=2)'
         check_cmd += (f' echo "$s" | grep "{resource_str}" | '
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
-    return (f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s"; ' + check_cmd)
+    return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            f'{_WAIT_PROVISION_REPR.format(name=name)}; '
+            f'echo "$s"; {check_cmd}')
 
 
 def _check_service_version(service_name: str, version: str) -> str:
@@ -180,6 +220,7 @@ def test_skyserve_azure_http():
 
 @pytest.mark.kubernetes
 @pytest.mark.serve
+@pytest.mark.requires_gke
 def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()
@@ -197,9 +238,12 @@ def test_skyserve_oci_http():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support T4 gpus for now
+@pytest.mark.no_vast  # Vast has low availability of T4 GPUs
+@pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
-def test_skyserve_llm(generic_cloud: str):
+def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_service_name()
 
     def generate_llm_test_command(prompt: str, expected_output: str) -> str:
@@ -217,7 +261,7 @@ def test_skyserve_llm(generic_cloud: str):
     test = smoke_tests_utils.Test(
         f'test-skyserve-llm',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/llm/service.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} --gpus {accelerator} -y tests/skyserve/llm/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             *[
                 generate_llm_test_command(prompt, output)
@@ -242,11 +286,11 @@ def test_skyserve_spot_recovery():
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -255,8 +299,10 @@ def test_skyserve_spot_recovery():
 
 
 @pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes
+@pytest.mark.no_do
 def test_skyserve_base_ondemand_fallback(generic_cloud: str):
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -321,7 +367,9 @@ def test_skyserve_dynamic_ondemand_fallback():
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -344,7 +392,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, SkyPilot here!"; do sleep 2; done; sleep 2; '
+            'until curl $endpoint | grep "Hi, SkyPilot here"; do sleep 2; done; sleep 2; '
             + _check_replica_in_status(name, [(1, False, 'READY'),
                                               (1, False, 'FAILED')]),
         ],
@@ -354,6 +402,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Replicas on k8s may be running on the same node and have the same public IP
 def test_skyserve_load_balancer(generic_cloud: str):
@@ -392,7 +441,7 @@ def test_skyserve_auto_restart():
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
@@ -412,7 +461,7 @@ def test_skyserve_auto_restart():
             '     sleep 10;'
             f'done); sleep {serve.LB_CONTROLLER_SYNC_INTERVAL_SECONDS};',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -420,6 +469,7 @@ def test_skyserve_auto_restart():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
@@ -445,6 +495,7 @@ def test_skyserve_cancel(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
@@ -464,6 +515,7 @@ def test_skyserve_streaming(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     """Test skyserve with large readiness probe latency, expected to fail"""
@@ -487,6 +539,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
@@ -497,7 +550,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/readiness_timeout/task_large_timeout.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'request_output=$(curl http://$endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
+            'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -507,6 +560,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
@@ -516,14 +571,14 @@ def test_skyserve_update(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
+            'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done;'
             # Make sure the traffic is not mixed
-            'curl http://$endpoint | grep "Hi, new SkyPilot here"',
+            'curl $endpoint | grep "Hi, new SkyPilot here"',
             # The latest 2 version should be READY and the older versions should be shutting down
             (_check_replica_in_status(name, [(2, False, 'READY'),
                                              (2, False, 'SHUTTING_DOWN')]) +
@@ -537,6 +592,8 @@ def test_skyserve_update(generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
@@ -549,14 +606,14 @@ def test_skyserve_rolling_update(generic_cloud: str):
         [
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
             # with even id will sleep 60 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl http://$endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
+            'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
             # The latest version should have one READY and the one of the older versions should be shutting down
             f'{single_new_replica} {_check_service_version(name, "1,2")} '
             # Check the output from the old version, immediately after the
@@ -565,7 +622,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             # TODO(zhwu): we should have a more generalized way for checking the
             # mixed version of replicas to avoid depending on the specific
             # round robin load balancing policy.
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -574,6 +631,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 
 
 @pytest.mark.no_fluidstack
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
@@ -584,7 +642,7 @@ def test_skyserve_fast_update(generic_cloud: str):
         [
             f'sky serve up -n {name} -y --cloud {generic_cloud} tests/skyserve/update/bump_version_before.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/bump_version_after.yaml',
             # sleep to wait for update to be registered.
             'sleep 40',
@@ -597,7 +655,7 @@ def test_skyserve_fast_update(generic_cloud: str):
                 _check_service_version(name, "2")),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=3) +
             _check_service_version(name, "2"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             # Test rolling update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/bump_version_before.yaml',
             # sleep to wait for update to be registered.
@@ -607,7 +665,7 @@ def test_skyserve_fast_update(generic_cloud: str):
                                             (1, False, 'SHUTTING_DOWN')]),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "3"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl http://$endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
@@ -615,6 +673,7 @@ def test_skyserve_fast_update(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
@@ -626,7 +685,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
@@ -634,7 +693,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) +
             _check_service_version(name, "2"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here!"',
+            'curl $endpoint | grep "Hi, SkyPilot here!"',
             # Rolling Update
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/num_min_two.yaml',
             # sleep before update is registered.
@@ -643,7 +702,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "3"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here!"',
+            'curl $endpoint | grep "Hi, SkyPilot here!"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
@@ -654,6 +713,8 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
+@pytest.mark.no_do  # Spot instances not on DO
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""
@@ -693,7 +754,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            's=$(curl http://$endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
+            's=$(curl $endpoint); echo "$s"; echo "$s" | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} --mode {mode} -y tests/skyserve/update/new_autoscaler_after.yaml',
             # Wait for update to be registered
             f'sleep 90',
@@ -705,7 +766,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
             *update_check,
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=5),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl http://$endpoint | grep "Hi, SkyPilot here"',
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             _check_replica_in_status(name, [(4, True, 'READY'),
                                             (1, False, 'READY')]),
         ],
@@ -717,6 +778,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 
 # TODO: fluidstack does not support `--cpus 2`, but the check for services in this test is based on CPUs
 @pytest.mark.no_fluidstack
+@pytest.mark.no_do  # DO does not support `--cpus 2`
+@pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
@@ -752,10 +815,70 @@ def test_skyserve_failures(generic_cloud: str):
             f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
             'echo "Waiting for replica to be out of pending..."; sleep 5; '
             f's=$(sky serve status {name}); echo "$s"; done; ' +
-            _check_replica_in_status(
-                name, [(1, False, 'FAILED_PROBING'),
-                       (1, False, _SERVICE_LAUNCHING_STATUS_REGEX)]),
+            _check_replica_in_status(name, [
+                (1, False, 'FAILED_PROBING'),
+                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+            ]),
             # TODO(zhwu): add test for FAILED_PROVISION
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=20 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_https(generic_cloud: str):
+    """Test skyserve with https"""
+    name = _get_service_name()
+
+    with tempfile.TemporaryDirectory() as tempdir:
+        keyfile = os.path.join(tempdir, 'key.pem')
+        certfile = os.path.join(tempdir, 'cert.pem')
+        subprocess_utils.run_no_outputs(
+            f'openssl req -x509 -newkey rsa:2048 -days 36500 -nodes '
+            f'-subj "/" -keyout {keyfile} -out {certfile}')
+
+        test = smoke_tests_utils.Test(
+            f'test-skyserve-https',
+            [
+                f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/https/service.yaml '
+                f'--env TLS_KEYFILE_ENV_VAR={keyfile} --env TLS_CERTFILE_ENV_VAR={certfile}',
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'output=$(curl $endpoint -k); echo $output; '
+                'echo $output | grep "Hi, SkyPilot here"',
+                # Self signed certificate should fail without -k.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'output=$(curl $endpoint 2>&1); echo $output; '
+                'echo $output | grep -E "self[ -]signed certificate"',
+                # curl with wrong schema (http) should fail.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'http_endpoint="${endpoint/https:/http:}"; '
+                'output=$(curl $http_endpoint 2>&1); echo $output; '
+                'echo $output | grep "Empty reply from server"',
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.serve
+def test_skyserve_multi_ports(generic_cloud: str):
+    """Test skyserve with multiple ports"""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        f'test-skyserve-multi-ports',
+        [
+            f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/multi_ports.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
+            f'export replica_endpoint=$(sky serve status {name} | tail -n 1 | awk \'{{print $4}}\'); '
+            'export replica_endpoint_alt=$(echo $endpoint | sed "s/8080/8081/"); '
+            'curl $replica_endpoint | grep "Hi, SkyPilot here"; '
+            'curl $replica_endpoint_alt | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
@@ -767,6 +890,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 # ------- Testing user dependencies --------
+@pytest.mark.no_vast  # Requires GCS
 def test_user_dependencies(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

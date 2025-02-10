@@ -732,7 +732,7 @@ def cancel(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling latest running job on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
-    elif len(job_ids):
+    elif job_ids:
         # all = False, len(job_ids) > 0 => cancel the specified jobs.
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
@@ -817,7 +817,7 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -866,7 +866,7 @@ def job_status(cluster_name: str,
             f'of type {backend.__class__.__name__!r}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     sky_logging.print(f'{colorama.Fore.YELLOW}'
@@ -915,8 +915,11 @@ def storage_delete(name: str) -> None:
     handle = global_user_state.get_handle_from_storage_name(name)
     if handle is None:
         raise ValueError(f'Storage name {name!r} not found.')
-    else:
-        storage_object = data.Storage(name=handle.storage_name,
-                                      source=handle.source,
-                                      sync_on_reconstruction=False)
-        storage_object.delete()
+
+    assert handle.storage_name == name, (
+        f'In global_user_state, storage name {name!r} does not match '
+        f'handle.storage_name {handle.storage_name!r}')
+    storage_object = data.Storage(name=handle.storage_name,
+                                  source=handle.source,
+                                  sync_on_reconstruction=False)
+    storage_object.delete()

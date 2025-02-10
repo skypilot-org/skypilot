@@ -8,7 +8,7 @@ with open('tests/skyserve/streaming/example.txt', 'r') as f:
 parser = argparse.ArgumentParser()
 parser.add_argument('--endpoint', type=str, required=True)
 args = parser.parse_args()
-url = f'http://{args.endpoint}/'
+url = f'{args.endpoint}/'
 
 expected = WORD_TO_STREAM.split()
 index = 0

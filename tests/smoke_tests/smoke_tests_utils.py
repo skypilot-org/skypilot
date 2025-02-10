@@ -4,7 +4,7 @@ import os
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Sequence
 import uuid
 
 import colorama
@@ -32,7 +32,7 @@ SCP_GPU_V100 = '--gpus V100-32GB'
 
 STORAGE_SETUP_COMMANDS = [
     'touch ~/tmpfile', 'mkdir -p ~/tmp-workdir',
-    'touch ~/tmp-workdir/tmp\ file', 'touch ~/tmp-workdir/tmp\ file2',
+    r'touch ~/tmp-workdir/tmp\ file', r'touch ~/tmp-workdir/tmp\ file2',
     'touch ~/tmp-workdir/foo',
     '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
@@ -55,7 +55,7 @@ _ALL_MANAGED_JOB_STATUSES = "|".join(
     [status.value for status in sky.ManagedJobStatus])
 
 
-def _statuses_to_str(statuses: List[enum.Enum]):
+def _statuses_to_str(statuses: Sequence[enum.Enum]):
     """Convert a list of enums to a string with all the values separated by |."""
     assert len(statuses) > 0, 'statuses must not be empty'
     if len(statuses) > 1:
@@ -74,8 +74,8 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'fi; '
     'current_status=$(sky status {cluster_name} --refresh | '
     'awk "/^{cluster_name}/ '
-    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_CLUSTER_STATUSES +
-    ')$/) print \$i}}"); '
+    r'{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_CLUSTER_STATUSES +
+    r')$/) print \$i}}"); '
     'if [[ "$current_status" =~ {cluster_status} ]]; '
     'then echo "Target cluster status {cluster_status} reached."; break; fi; '
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
@@ -136,8 +136,8 @@ _WAIT_UNTIL_JOB_STATUS_CONTAINS_MATCHING_JOB_ID = (
     'fi; '
     'current_status=$(sky queue {cluster_name} | '
     'awk "\\$1 == \\"{job_id}\\" '
-    '{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_JOB_STATUSES +
-    ')$/) print \$i}}"); '
+    r'{{for (i=1; i<=NF; i++) if (\$i ~ /^(' + _ALL_JOB_STATUSES +
+    r')$/) print \$i}}"); '
     'found=0; '  # Initialize found variable outside the loop
     'while read -r line; do '  # Read line by line
     '  if [[ "$line" =~ {job_status} ]]; then '  # Check each line
@@ -196,17 +196,13 @@ _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME = _WAIT_UNTIL_JOB_STAT
 
 
 def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-        job_name: str, job_status: List[sky.JobStatus], timeout: int):
+        job_name: str, job_status: Sequence[sky.ManagedJobStatus],
+        timeout: int):
     return _WAIT_UNTIL_MANAGED_JOB_STATUS_CONTAINS_MATCHING_JOB_NAME.format(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
         timeout=timeout)
 
-
-# After the timeout, the cluster will stop if autostop is set, and our check
-# should be more than the timeout. To address this, we extend the timeout by
-# _BUMP_UP_SECONDS before exiting.
-BUMP_UP_SECONDS = 35
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
@@ -220,7 +216,7 @@ class Test(NamedTuple):
     # Timeout for each command in seconds.
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
-    env: Dict[str, str] = None
+    env: Optional[Dict[str, str]] = None
 
     def echo(self, message: str):
         # pytest's xdist plugin captures stdout; print to stderr so that the
@@ -244,22 +240,26 @@ def get_cluster_name() -> str:
     """
     caller_func_name = inspect.stack()[1][3]
     test_name = caller_func_name.replace('_', '-').replace('test-', 't-')
+    test_name = test_name.replace('managed-jobs', 'jobs')
+    # Use 20 to avoid cluster name to be truncated twice for managed jobs.
     test_name = common_utils.make_cluster_name_on_cloud(test_name,
-                                                        24,
+                                                        20,
                                                         add_user_hash=False)
     return f'{test_name}-{test_id}'
 
 
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        cluster_name, sky.GCP.max_cluster_name_length())
     query_cmd = (f'gcloud compute instances list --filter='
-                 f'"(labels.ray-cluster-name:{cluster_name})" '
+                 f'"(labels.ray-cluster-name:{name_on_cloud})" '
                  f'--zones={zone} --format="value(name)"')
     return (f'gcloud compute instances delete --zone={zone}'
             f' --quiet $({query_cmd})')
 
 
-def run_one_test(test: Test) -> Tuple[int, str, str]:
+def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
     log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
@@ -276,7 +276,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         write = log_file.write
         flush = log_file.flush
         subprocess_out = log_file
-        test.echo(f'Test started. Log: less {log_file.name}')
+        test.echo(f'Test started. Log: less -r {log_file.name}')
 
     env_dict = os.environ.copy()
     if test.env:
@@ -310,7 +310,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL}'
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
                if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if proc.returncode else ''
     msg = (f'{outcome}.'
@@ -318,7 +318,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
     if log_to_stdout:
         test.echo(msg)
     else:
-        msg += f'\nLog: less {log_file.name}\n'
+        msg += f'\nLog: less -r {log_file.name}\n'
         test.echo(msg)
         write(msg)
 
@@ -336,7 +336,7 @@ def run_one_test(test: Test) -> Tuple[int, str, str]:
         if log_to_stdout:
             raise Exception(f'test failed')
         else:
-            raise Exception(f'test failed: less {log_file.name}')
+            raise Exception(f'test failed: less -r {log_file.name}')
 
 
 def get_aws_region_for_quota_failover() -> Optional[str]:
@@ -423,7 +423,7 @@ VALIDATE_LAUNCH_OUTPUT = (
     # └── To teardown the cluster:    sky down test
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-    'echo "$s" && echo "==Validating setup output==" && '
+    'echo "==Validating setup output==" && '
     'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '

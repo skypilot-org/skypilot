@@ -15,6 +15,7 @@ from sky.clouds.cloud_registry import CLOUD_REGISTRY
 from sky.clouds.aws import AWS
 from sky.clouds.azure import Azure
 from sky.clouds.cudo import Cudo
+from sky.clouds.do import DO
 from sky.clouds.fluidstack import Fluidstack
 from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
@@ -24,6 +25,7 @@ from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
 from sky.clouds.scp import SCP
+from sky.clouds.vast import Vast
 from sky.clouds.vsphere import Vsphere
 
 __all__ = [
@@ -34,9 +36,11 @@ __all__ = [
     'Cudo',
     'GCP',
     'Lambda',
+    'DO',
     'Paperspace',
     'SCP',
     'RunPod',
+    'Vast',
     'OCI',
     'Vsphere',
     'Kubernetes',

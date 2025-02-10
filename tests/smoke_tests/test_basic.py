@@ -34,6 +34,7 @@ from sky.utils import common_utils
 
 
 # ---------- Dry run: 2 Tasks in a chain. ----------
+@pytest.mark.no_vast  #requires GCP and AWS set up
 @pytest.mark.no_fluidstack  #requires GCP and AWS set up
 def test_example_app():
     test = smoke_tests_utils.Test(
@@ -139,7 +140,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
                 timeout=autostop_timeout),
             # Even the cluster is stopped, cloud platform may take a while to
             # delete the VM.
-            f'sleep {smoke_tests_utils.BUMP_UP_SECONDS}',
+            f'sleep 35',
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
@@ -155,6 +156,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support stopping instances
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_vast  # This requires port opening
 def test_stale_job(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -176,6 +178,7 @@ def test_stale_job(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast
 @pytest.mark.aws
 def test_aws_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -213,6 +216,7 @@ def test_aws_stale_job_manual_restart():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast
 @pytest.mark.gcp
 def test_gcp_stale_job_manual_restart():
     name = smoke_tests_utils.get_cluster_name()
@@ -250,6 +254,7 @@ def test_gcp_stale_job_manual_restart():
 # ---------- Check Sky's environment variables; workdir. ----------
 @pytest.mark.no_fluidstack  # Requires amazon S3
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 def test_env_check(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     total_timeout_minutes = 25 if generic_cloud == 'azure' else 15
@@ -267,6 +272,7 @@ def test_env_check(generic_cloud: str):
 
 # ---------- CLI logs ----------
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_logs instead.
+@pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet.
 def test_cli_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     num_nodes = 2
@@ -420,8 +426,10 @@ class TestYamlSpecs:
 
 
 # ---------- Testing Multiple Accelerators ----------
+@pytest.mark.no_vast  # Vast has low availability for K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
+@pytest.mark.no_do  # DO does not support K80s
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -436,8 +444,10 @@ def test_multiple_accelerators_ordered():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_do  # DO does not have multiple accelerators
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -452,8 +462,10 @@ def test_multiple_accelerators_ordered_with_default():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_do  # DO does not have multiple accelerators
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -467,8 +479,10 @@ def test_multiple_accelerators_unordered():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_do  # DO does not support multiple accelerators
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -483,6 +497,7 @@ def test_multiple_accelerators_unordered_with_default():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
 def test_multiple_resources():
     name = smoke_tests_utils.get_cluster_name()
@@ -499,9 +514,11 @@ def test_multiple_resources():
 
 # ---------- Sky Benchmark ----------
 @pytest.mark.no_fluidstack  # Requires other clouds to be enabled
+@pytest.mark.no_vast  # Requires other clouds to be enabled
 @pytest.mark.no_paperspace  # Requires other clouds to be enabled
 @pytest.mark.no_kubernetes
 @pytest.mark.aws  # SkyBenchmark requires S3 access
+@pytest.mark.no_do  # requires other clouds to be enabled
 def test_sky_bench(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -566,7 +583,7 @@ def test_kubernetes_context_failover():
                 'kubectl get namespaces --context kind-skypilot | grep test-namespace || '
                 '{ echo "Should set the namespace to test-namespace for kind-skypilot. Check the instructions in '
                 'tests/test_smoke.py::test_kubernetes_context_failover." && exit 1; }',
-                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 3, 4, 5, 6, 7, 8"',
+                'sky show-gpus --cloud kubernetes --region kind-skypilot | grep H100 | grep "1, 2, 4, 8"',
                 # Get contexts and set current context to the other cluster that is not kind-skypilot
                 f'kubectl config use-context {context}',
                 # H100 should not in the current context

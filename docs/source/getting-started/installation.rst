@@ -59,6 +59,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
           pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[do]"
           pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
@@ -296,6 +297,16 @@ Paperspace
   mkdir -p ~/.paperspace
   echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
+Vast
+~~~~~~~~~~
+
+`Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
+
+.. code-block:: shell
+  
+  pip install "vastai-sdk>=0.1.12"
+  echo "<your_api_key_here>" > ~/.vast_api_key
+
 RunPod
 ~~~~~~~~~~
 
@@ -303,7 +314,7 @@ RunPod
 
 .. code-block:: shell
   
-  pip install "runpod>=1.5.1"
+  pip install "runpod>=1.6.1"
   runpod config
 
 

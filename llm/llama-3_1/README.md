@@ -13,7 +13,7 @@ This guide walks through how to serve Llama 3.1 models **completely on your infr
 
 - Local GPU workstation
 - Kubernetes cluster
-- Cloud accounts ([12 clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
+- Cloud accounts ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
 
 SkyPilot will be used as the unified framework to launch serving on any (or multiple) infra that you bring.
 

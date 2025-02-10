@@ -10,6 +10,7 @@ import os
 import pathlib
 import re
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -26,6 +27,7 @@ import filelock
 
 import sky
 from sky import backends
+from sky import check as sky_check
 from sky import cloud_stores
 from sky import clouds
 from sky import exceptions
@@ -34,7 +36,6 @@ from sky import jobs as managed_jobs
 from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
-from sky import serve as serve_lib
 from sky import sky_logging
 from sky import status_lib
 from sky import task as task_lib
@@ -44,6 +45,7 @@ from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
 from sky.data import storage as storage_lib
+from sky.jobs import constants as managed_jobs_constants
 from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision import metadata_utils
@@ -154,6 +156,9 @@ _RAY_UP_WITH_MONKEY_PATCHED_HASH_LAUNCH_CONF_PATH = (
 # might be added during ssh.
 _MAX_INLINE_SCRIPT_LENGTH = 120 * 1024
 
+_RESOURCES_UNAVAILABLE_LOG = (
+    'Reasons for provision failures (for details, please check the log above):')
+
 
 def _is_command_length_over_limit(command: str) -> bool:
     """Check if the length of the command exceeds the limit.
@@ -178,9 +183,11 @@ def _get_cluster_config_template(cloud):
         clouds.SCP: 'scp-ray.yml.j2',
         clouds.OCI: 'oci-ray.yml.j2',
         clouds.Paperspace: 'paperspace-ray.yml.j2',
+        clouds.DO: 'do-ray.yml.j2',
         clouds.RunPod: 'runpod-ray.yml.j2',
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
+        clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
@@ -1995,6 +2002,23 @@ class RetryingVmProvisioner(object):
                                        skip_unnecessary_provisioning else None)
 
         failover_history: List[Exception] = list()
+        resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
+        # If the user is using local credentials which may expire, the
+        # controller may leak resources if the credentials expire while a job
+        # is running. Here we check the enabled clouds and expiring credentials
+        # and raise a warning to the user.
+        if task.is_controller_task():
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            expirable_clouds = backend_utils.get_expirable_clouds(
+                enabled_clouds)
+
+            if len(expirable_clouds) > 0:
+                warnings = (f'\033[93mWarning: Credentials used for '
+                            f'{expirable_clouds} may expire. Clusters may be '
+                            f'leaked if the credentials expire while jobs '
+                            f'are running. It is recommended to use credentials'
+                            f' that never expire or a service account.\033[0m')
+                logger.warning(warnings)
 
         # Retrying launchable resources.
         while True:
@@ -2070,6 +2094,8 @@ class RetryingVmProvisioner(object):
                 # Add failed resources to the blocklist, only when it
                 # is in fallback mode.
                 _add_to_blocked_resources(self._blocked_resources, to_provision)
+                assert len(failover_history) > 0
+                resource_exceptions[to_provision] = failover_history[-1]
             else:
                 # If we reach here, it means that the existing cluster must have
                 # a previous status of INIT, because other statuses (UP,
@@ -2114,7 +2140,14 @@ class RetryingVmProvisioner(object):
                 # possible resources or the requested resources is too
                 # restrictive. If we reach here, our failover logic finally
                 # ends here.
-                raise e.with_failover_history(failover_history)
+                table = log_utils.create_table(['Resource', 'Reason'])
+                for (resource, exception) in resource_exceptions.items():
+                    table.add_row(
+                        [resources_utils.format_resource(resource), exception])
+                table.max_table_width = shutil.get_terminal_size().columns
+                raise exceptions.ResourcesUnavailableError(
+                    _RESOURCES_UNAVAILABLE_LOG + '\n' + table.get_string(),
+                    failover_history=failover_history)
             to_provision = task.best_resources
             assert task in self._dag.tasks, 'Internal logic error.'
             assert to_provision is not None, task
@@ -2413,7 +2446,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # can be None. We need to update it here, even when force_cached is
             # set to True.
             # TODO: We can remove `self.cached_external_ips is None` after
-            # version 0.8.0.
+            # all clouds moved to new provisioner.
             if force_cached and self.cached_external_ips is None:
                 raise RuntimeError(
                     'Tried to use cached cluster info, but it\'s missing for '
@@ -2599,7 +2632,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
     ResourceHandle = CloudVmRayResourceHandle  # pylint: disable=invalid-name
 
     def __init__(self):
-        self.run_timestamp = backend_utils.get_run_timestamp()
+        self.run_timestamp = sky_logging.get_run_timestamp()
         # NOTE: do not expanduser() here, as this '~/...' path is used for
         # remote as well to be expanded on the remote side.
         self.log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
@@ -2626,7 +2659,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
-        assert len(kwargs) == 0, f'Unexpected kwargs: {kwargs}'
+        assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
         self,
@@ -2877,7 +2910,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'the `--retry-until-up` flag.')
                     with ux_utils.print_exception_no_traceback():
                         raise exceptions.ResourcesUnavailableError(
-                            error_message,
+                            error_message + '\n' + str(e),
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
@@ -3309,7 +3342,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # even if some of them raise exceptions. We should replace it with
         # multi-process.
         rich_utils.stop_safe_status()
-        subprocess_utils.run_in_parallel(_setup_node, range(num_nodes))
+        subprocess_utils.run_in_parallel(_setup_node, list(range(num_nodes)))
 
         if detach_setup:
             # Only set this when setup needs to be run outside the self._setup()
@@ -3383,17 +3416,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             managed_job_code = managed_job_codegen.set_pending(
                 job_id, managed_job_dag)
             # Set the managed job to PENDING state to make sure that this
-            # managed job appears in the `sky jobs queue`, when there are
-            # already 2x vCPU controller processes running on the controller VM,
-            # e.g., 16 controller processes running on a controller with 8
-            # vCPUs.
-            # The managed job should be set to PENDING state *after* the
-            # controller process job has been queued, as our skylet on spot
-            # controller will set the managed job in FAILED state if the
-            # controller process job does not exist.
-            # We cannot set the managed job to PENDING state in the codegen for
-            # the controller process job, as it will stay in the job pending
-            # table and not be executed until there is an empty slot.
+            # managed job appears in the `sky jobs queue`, even if it needs to
+            # wait to be submitted.
+            # We cannot set the managed job to PENDING state in the job template
+            # (jobs-controller.yaml.j2), as it may need to wait for the run
+            # commands to be scheduled on the job controller in high-load cases.
             job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
@@ -3873,42 +3900,157 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             stdin=subprocess.DEVNULL,
         )
 
-    def tail_serve_logs(self, handle: CloudVmRayResourceHandle,
-                        service_name: str, target: serve_lib.ServiceComponent,
-                        replica_id: Optional[int], follow: bool) -> None:
-        """Tail the logs of a service.
+    def sync_down_managed_job_logs(
+            self,
+            handle: CloudVmRayResourceHandle,
+            job_id: Optional[int] = None,
+            job_name: Optional[str] = None,
+            controller: bool = False,
+            local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
+        """Sync down logs for a managed job.
 
         Args:
-            handle: The handle to the sky serve controller.
-            service_name: The name of the service.
-            target: The component to tail the logs of. Could be controller,
-                load balancer, or replica.
-            replica_id: The replica ID to tail the logs of. Only used when
-                target is replica.
-            follow: Whether to follow the logs.
+            handle: The handle to the cluster.
+            job_id: The job ID to sync down logs for.
+            job_name: The job name to sync down logs for.
+            controller: Whether to sync down logs for the controller.
+            local_dir: The local directory to sync down logs to.
+
+        Returns:
+            A dictionary mapping job_id to log path.
         """
-        if target != serve_lib.ServiceComponent.REPLICA:
-            code = serve_lib.ServeCodeGen.stream_serve_process_logs(
-                service_name,
-                stream_controller=(
-                    target == serve_lib.ServiceComponent.CONTROLLER),
-                follow=follow)
-        else:
-            assert replica_id is not None, service_name
-            code = serve_lib.ServeCodeGen.stream_replica_logs(
-                service_name, replica_id, follow)
+        # if job_name and job_id should not both be specified
+        assert job_name is None or job_id is None, (job_name, job_id)
 
-        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
-        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+        if job_id is None:
+            # generate code to get the job_id
+            # if job_name is None, get all job_ids
+            # TODO: Only get the latest job_id, since that's the only one we use
+            code = managed_jobs.ManagedJobCodeGen.get_all_job_ids_by_name(
+                job_name=job_name)
+            returncode, job_ids, stderr = self.run_on_head(handle,
+                                                           code,
+                                                           stream_logs=False,
+                                                           require_outputs=True,
+                                                           separate_stderr=True)
+            subprocess_utils.handle_returncode(returncode, code,
+                                               'Failed to sync down logs.',
+                                               stderr)
+            job_ids = common_utils.decode_payload(job_ids)
+            if not job_ids:
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            'No matching job found'
+                            f'{colorama.Style.RESET_ALL}')
+                return {}
+            elif len(job_ids) > 1:
+                name_str = ''
+                if job_name is not None:
+                    name_str = ('Multiple jobs IDs found under the name '
+                                f'{job_name}. ')
+                logger.info(f'{colorama.Fore.YELLOW}'
+                            f'{name_str}'
+                            'Downloading the latest job logs.'
+                            f'{colorama.Style.RESET_ALL}')
+            # list should aready be in descending order
+            job_id = job_ids[0]
 
-        self.run_on_head(
+        # get the run_timestamp
+        # the function takes in [job_id]
+        code = job_lib.JobLibCodeGen.get_run_timestamp_with_globbing(
+            [str(job_id)])
+        returncode, run_timestamps, stderr = self.run_on_head(
             handle,
             code,
-            stream_logs=True,
-            process_stream=False,
-            ssh_mode=command_runner.SshMode.INTERACTIVE,
-            stdin=subprocess.DEVNULL,
-        )
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True)
+        subprocess_utils.handle_returncode(returncode, code,
+                                           'Failed to sync logs.', stderr)
+        # returns with a dict of {job_id: run_timestamp}
+        run_timestamps = common_utils.decode_payload(run_timestamps)
+        if not run_timestamps:
+            logger.info(f'{colorama.Fore.YELLOW}'
+                        'No matching log directories found'
+                        f'{colorama.Style.RESET_ALL}')
+            return {}
+
+        run_timestamp = list(run_timestamps.values())[0]
+        job_id = list(run_timestamps.keys())[0]
+        local_log_dir = ''
+        if controller:  # download controller logs
+            remote_log = os.path.join(
+                managed_jobs_constants.JOBS_CONTROLLER_LOGS_DIR,
+                f'{job_id}.log')
+            local_log_dir = os.path.expanduser(
+                os.path.join(local_dir, run_timestamp))
+
+            logger.info(f'{colorama.Fore.CYAN}'
+                        f'Job {job_id} local logs: {local_log_dir}'
+                        f'{colorama.Style.RESET_ALL}')
+
+            runners = handle.get_command_runners()
+
+            def _rsync_down(args) -> None:
+                """Rsync down logs from remote nodes.
+
+                Args:
+                    args: A tuple of (runner, local_log_dir, remote_log_dir)
+                """
+                (runner, local_log_dir, remote_log) = args
+                try:
+                    os.makedirs(local_log_dir, exist_ok=True)
+                    runner.rsync(
+                        source=remote_log,
+                        target=f'{local_log_dir}/controller.log',
+                        up=False,
+                        stream_logs=False,
+                    )
+                except exceptions.CommandError as e:
+                    if e.returncode == exceptions.RSYNC_FILE_NOT_FOUND_CODE:
+                        # Raised by rsync_down. Remote log dir may not exist
+                        # since the job can be run on some part of the nodes.
+                        logger.debug(
+                            f'{runner.node_id} does not have the tasks/*.')
+                    else:
+                        raise
+
+            parallel_args = [
+                (runner, local_log_dir, remote_log) for runner in runners
+            ]
+            subprocess_utils.run_in_parallel(_rsync_down, parallel_args)
+        else:  # download job logs
+            local_log_dir = os.path.expanduser(
+                os.path.join(local_dir, 'managed_jobs', run_timestamp))
+            os.makedirs(os.path.dirname(local_log_dir), exist_ok=True)
+            log_file = os.path.join(local_log_dir, 'run.log')
+
+            code = managed_jobs.ManagedJobCodeGen.stream_logs(job_name=None,
+                                                              job_id=job_id,
+                                                              follow=False,
+                                                              controller=False)
+
+            # With the stdin=subprocess.DEVNULL, the ctrl-c will not
+            # kill the process, so we need to handle it manually here.
+            if threading.current_thread() is threading.main_thread():
+                signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+                signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+            # We redirect the output to the log file
+            # and disable the STDOUT and STDERR
+            self.run_on_head(
+                handle,
+                code,
+                log_path=log_file,
+                stream_logs=False,
+                process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+                stdin=subprocess.DEVNULL,
+            )
+
+        logger.info(f'{colorama.Fore.CYAN}'
+                    f'Job {job_id} logs: {local_log_dir}'
+                    f'{colorama.Style.RESET_ALL}')
+        return {str(job_id): local_log_dir}
 
     def teardown_no_lock(self,
                          handle: CloudVmRayResourceHandle,
@@ -4198,11 +4340,20 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         attempts = 0
         while True:
             logger.debug(f'instance statuses attempt {attempts + 1}')
-            node_status_dict = provision_lib.query_instances(
-                repr(cloud),
-                cluster_name_on_cloud,
-                config['provider'],
-                non_terminated_only=False)
+            try:
+                node_status_dict = provision_lib.query_instances(
+                    repr(cloud),
+                    cluster_name_on_cloud,
+                    config['provider'],
+                    non_terminated_only=False)
+            except Exception as e:  # pylint: disable=broad-except
+                if purge:
+                    logger.warning(
+                        f'Failed to query instances. Skipping since purge is '
+                        f'set. Details: '
+                        f'{common_utils.format_exception(e, use_bracket=True)}')
+                    break
+                raise
 
             unexpected_node_state: Optional[Tuple[str, str]] = None
             for node_id, node_status in node_status_dict.items():
@@ -4221,8 +4372,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 time.sleep(_TEARDOWN_WAIT_BETWEEN_ATTEMPS_SECONDS)
             else:
                 (node_id, node_status) = unexpected_node_state
-                raise RuntimeError(f'Instance {node_id} in unexpected state '
-                                   f'{node_status}.')
+                if purge:
+                    logger.warning(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}. Skipping since purge '
+                                   'is set.')
+                    break
+                raise RuntimeError(f'Instance {node_id} in unexpected '
+                                   f'state {node_status}.')
 
         global_user_state.remove_cluster(handle.cluster_name,
                                          terminate=terminate)

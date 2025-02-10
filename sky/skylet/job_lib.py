@@ -10,9 +10,8 @@ import pathlib
 import shlex
 import signal
 import sqlite3
-import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import colorama
 import filelock
@@ -23,6 +22,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -162,13 +162,17 @@ class JobStatus(enum.Enum):
     def nonterminal_statuses(cls) -> List['JobStatus']:
         return [cls.INIT, cls.SETTING_UP, cls.PENDING, cls.RUNNING]
 
-    def is_terminal(self):
+    def is_terminal(self) -> bool:
         return self not in self.nonterminal_statuses()
 
-    def __lt__(self, other):
+    @classmethod
+    def user_code_failure_states(cls) -> Sequence['JobStatus']:
+        return (cls.FAILED, cls.FAILED_SETUP)
+
+    def __lt__(self, other: 'JobStatus') -> bool:
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
-    def colored_str(self):
+    def colored_str(self) -> str:
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
@@ -205,31 +209,7 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        # Use nohup to ensure the job driver process is a separate process tree,
-        # instead of being a child of the current process. This is important to
-        # avoid a chain of driver processes (job driver can call schedule_step()
-        # to submit new jobs, and the new job can also call schedule_step()
-        # recursively).
-        #
-        # echo $! will output the PID of the last background process started
-        # in the current shell, so we can retrieve it and record in the DB.
-        #
-        # TODO(zhwu): A more elegant solution is to use another daemon process
-        # to be in charge of starting these driver processes, instead of
-        # starting them in the current process.
-        wrapped_cmd = (f'nohup bash -c {shlex.quote(run_cmd)} '
-                       '</dev/null >/dev/null 2>&1 & echo $!')
-        proc = subprocess.run(wrapped_cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              stdin=subprocess.DEVNULL,
-                              start_new_session=True,
-                              check=True,
-                              shell=True,
-                              text=True)
-        # Get the PID of the detached process
-        pid = int(proc.stdout.strip())
-
+        pid = subprocess_utils.launch_new_process_tree(run_cmd)
         # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
         # This is for the case where the job is submitted with SkyPilot older
         # than #4318, using ray job submit.
@@ -586,7 +566,7 @@ def update_job_status(job_ids: List[int],
     This function should only be run on the remote instance with ray>=2.4.0.
     """
     echo = logger.info if not silent else logger.debug
-    if len(job_ids) == 0:
+    if not job_ids:
         return []
 
     statuses = []

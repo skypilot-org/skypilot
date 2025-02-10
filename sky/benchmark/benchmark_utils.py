@@ -535,7 +535,7 @@ def launch_benchmark_clusters(benchmark: str, clusters: List[str],
                    for yaml_fd, cluster in zip(yaml_fds, clusters)]
 
     # Save stdout/stderr from cluster launches.
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_dir = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp)
     log_dir = os.path.expanduser(log_dir)
     logger.info(
