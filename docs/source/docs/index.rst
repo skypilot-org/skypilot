@@ -30,20 +30,6 @@ Welcome to SkyPilot!
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-.. .. image:: ../images/skypilot-abstractions.png
-..     :width: 400px
-..     :align: center
-
-.. .. raw:: html
-
-..    <p align="center">
-..    <picture>
-..       <img alt="SkyPilot overview" src="https://i.imgur.com/HkSJXSG.png" width=400px>
-..    </picture>
-..    </p>
-
-
-
 SkyPilot **abstracts away infra burdens**:
 
 - Launch :ref:`clusters <dev-cluster>`, :ref:`jobs <managed-jobs>`, and :ref:`serving <sky-serve>` on any infra

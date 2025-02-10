@@ -119,7 +119,7 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
   envs:
     LR: 2e-5
     MAX_STEPS: 50
-    
+
   resources:
     accelerators: V100:4
 
@@ -146,7 +146,7 @@ To launch jobs with different hyperparameters, add them as :ref:`environment var
       --fp16
 
 .. raw:: html
-    
+
     </details>
 
 You can now use ``--env`` to launch a job with different hyperparameters:
@@ -192,7 +192,7 @@ When running many jobs, it is useful to log the outputs of all jobs. You can use
     LR: 2e-5
     MAX_STEPS: 50
     WANDB_API_KEY: # Empty field means this field is required when launching the job.
-      
+
   resources:
     accelerators: V100:4
 
@@ -309,10 +309,10 @@ Job statuses can be checked via ``sky jobs queue``:
 
   $ sky jobs queue
 
-  Fetching managed job statuses...
+  Fetching managed jobs...
   Managed jobs
   In progress tasks: 10 RUNNING
-  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS   
+  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
   9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
   8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING

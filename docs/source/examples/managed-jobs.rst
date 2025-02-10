@@ -324,7 +324,7 @@ See all managed jobs:
 
 .. code-block:: console
 
-  Fetching managed job statuses...
+  Fetching managed jobs...
   Managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
   2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
@@ -422,7 +422,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
   $ sky jobs launch -n pipeline pipeline.yaml
   $ sky jobs queue
-  Fetching managed job statuses...
+  Fetching managed jobs...
   Managed jobs
   In progress jobs: 1 RECOVERING
   ID  TASK  NAME      RESOURCES                    SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
