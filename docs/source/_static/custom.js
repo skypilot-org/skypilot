@@ -29,6 +29,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
         { selector: '.toctree-l2 > a', text: 'Multiple Kubernetes Clusters' },
+        { selector: '.toctree-l1 > a', text: 'HTTPS Encryption' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

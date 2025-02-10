@@ -344,3 +344,9 @@ To have more customized control over generation of job variants, you can also us
         retry_until_up=True,
       )
       job_idx += 1
+
+
+Best Practices for Scaling
+--------------------------
+
+By default, around 90 jobs can be managed at once. However, with some simple configuration, SkyPilot can reliably support **2000 jobs running in parallel**. See :ref:`the best practices <jobs-controller-sizing>` for more info.
