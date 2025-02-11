@@ -114,14 +114,14 @@ To use more than one cloud, combine the pip extras:
 
         .. code-block:: shell
 
-          pip install -U "skypilot-nightly[aws,gcp]"
+          pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
 
     .. tab-item:: From Source
         :sync: from-source-tab
 
         .. code-block:: shell
 
-          pip install -e ".[aws,gcp]"
+          pip install -e ".[kubernetes,aws,gcp]"
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
