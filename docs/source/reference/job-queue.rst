@@ -47,6 +47,11 @@ To cancel a job:
    # Cancel all jobs on a cluster.
    sky cancel mycluster --all
 
+.. tip::
+
+   The ``sky launch`` command/CLI performs many steps in one call, including
+   submitting jobs to an either existing or newly provisioned cluster. See :ref:`here <hello-skypilot>`.
+
 Multi-node jobs
 --------------------------------
 

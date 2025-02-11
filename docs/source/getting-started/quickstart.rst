@@ -12,6 +12,8 @@ This guide will walk you through:
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
+.. _hello-skypilot:
+
 Hello, SkyPilot!
 ------------------
 
