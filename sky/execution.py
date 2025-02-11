@@ -291,8 +291,7 @@ def _execute(
     controller = controller_utils.Controllers.from_name(cluster_name)
     if controller is not None:
         high_availability_specified = skypilot_config.get_nested(
-            (controller.value.name, 'controller',
-             'high_availability_controller'), False)
+            (controller.value.name, 'controller', 'high_availability'), False)
         if high_availability_specified:
             if (controller !=
                     controller_utils.Controllers.SKY_SERVE_CONTROLLER):

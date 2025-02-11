@@ -515,7 +515,7 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       # to automatically recover from failures (e.g., node failures, pod crashes)
       # and maintain service continuity.
       #
-      # NOTE: This feature is ONLY supported when Kubernetes cloud is enabled. To enable kubernetes, see xxx.
+      # NOTE: This feature is ONLY supported when Kubernetes cloud is enabled. To enable kubernetes, see :ref:`Kubernetes Setup <kubernetes-setup>`.
       # The service controller cluster will be scheduled to kubernetes. The k8s deployment needs to be always-on to keep the controller running. If using a local kubernetes deployment (e.g. `sky local up`), keeping the laptop/machines up is required.
       # When enabled:
       # - The controller is deployed as a Kubernetes Deployment instead of a Pod
