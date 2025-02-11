@@ -290,7 +290,8 @@ will be spot instances. If spot instances are not available, SkyPilot will fall 
 Checkpointing and Recovery
 --------------------------
 
-To recover quickly, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints).
+To recover quickly, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints). Any data on disk that is not stored inside a cloud bucket will be lost during the recovery process.
+
 Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 .. code-block:: yaml
@@ -302,8 +303,14 @@ Below is an example of mounting a bucket to :code:`/checkpoint`.
 
 The :code:`MOUNT` mode in :ref:`SkyPilot bucket mounting <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
 
-Note that the application code should save program checkpoints periodically and reload those states when the job is restarted.
-This is typically achieved by reloading the latest checkpoint at the beginning of your program.
+To implement checkpointing in your application code:
+
+1. Periodically save checkpoints containing the current program state during execution.
+2. When starting/restarting, check if any checkpoints are present, and load the latest checkpoint.
+
+Checkpointing features are included in most model training libraries, such as `PyTorch <https://pytorch.org/docs/stable/checkpoint.html>` and `TensorFlow <https://www.tensorflow.org/guide/checkpoint>`.
+
+For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
 
 .. _failure-recovery:
@@ -323,6 +330,28 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
     job_recovery:
       # Restart the job up to 3 times on user code errors.
       max_restarts_on_errors: 3
+
+This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
+
+Here's how various kinds of failures will be handled by SkyPilot:
+
+.. list-table::
+   :widths: 1 2
+   :header-rows: 0
+
+   * - **User code fails (**:code:`setup` **or** :code:`run` **commands have non-zero exit code):**
+     - If :code:`max_restarts_on_errors` is set, restart up to that many times. If :code:`max_restarts_on_errors` is not set, or we run out of restarts, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
+   * - **Instances are preempted or underlying hardware fails:**
+     - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
+   * - **Can't find available resources due to cloud quota or capacity restrictions:**
+     - Try other regions and other clouds indefinitely until resources are found.
+   * - **Cloud config/auth issue or invalid job configuration:**
+     - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
+
+To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:`sky jobs logs <job_id>`. If there is a provisioning or recovery issue, you can see the provisioning logs by running :code:`sky jobs logs --controller <job_id>`.
+
+.. tip::
+  Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. To learn more about the controller, see :ref:`jobs-controller`.
 
 
 .. _spot-jobs-end-to-end:
@@ -495,7 +524,9 @@ The YAML above defines a pipeline with two tasks. The first :code:`name:
 pipeline` names the pipeline. The first task has name :code:`train` and the
 second task has name :code:`eval`. The tasks are separated by a line with three
 dashes :code:`---`. Each task has its own :code:`resources`, :code:`setup`, and
-:code:`run` sections. Tasks are executed sequentially.
+:code:`run` sections. Tasks are executed sequentially. If a task fails, later tasks are skipped.
+
+To pass data between the tasks, use a shared file mount. In this example, the :code:`train` task writes its output to the :code:`/checkpoint` file mount, which the :code:`eval` task is then able to read from.
 
 To submit the pipeline, the same command :code:`sky jobs launch` is used. The pipeline will be automatically launched and monitored by SkyPilot. You can check the status of the pipeline with :code:`sky jobs queue` or :code:`sky jobs dashboard`.
 
@@ -559,6 +590,8 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 .. tip::
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
+
+.. _jobs-controller:
 
 How It Works: The Jobs Controller
 ---------------------------------
@@ -663,7 +696,14 @@ The number of active jobs that the controller supports is based on the controlle
 
 - **Actively launching job count**: maxes out at ``4 * vCPU count``.
   A job counts towards this limit when it is first starting, launching instances, or recovering.
+
+  - The default controller size has 4 CPUs, meaning **16 jobs** can be actively launching at once.
+
 - **Running job count**: maxes out at ``memory / 350MiB``, up to a max of ``2000`` jobs.
+
+  - The default controller size has 32GiB of memory, meaning around **90 jobs** can be running in parallel.
+
+The default size is appropriate for most moderate use cases, but if you need to run hundreds or thousands of jobs at once, you should increase the controller size.
 
 For maximum parallelism, the following configuration is recommended:
 
