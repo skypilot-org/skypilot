@@ -1,6 +1,10 @@
-# Building A Million Scale Image Vector Database With SkyPilot 
+# Building Large-Scale Image Search using VectorDB & OpenAI CLIP
 
-### Semantic Search at Million (Billion) Scale 
+<p align="center">
+<img src="https://i.imgur.com/xNyKyxK.png" alt="VectorDB with SkyPilot" style="width: 70%;">
+</p>
+
+### Large-Scale Image Search
 As the volume of image data grows, the need for efficient and powerful search methods becomes critical. Traditional keyword-based or metadata-based search often fails to capture the full semantic meaning in images. A vector database enables semantic search: you can find images that conceptually match a query (e.g., "a photo of a cloud") rather than relying on textual tags.
 
 In particular:
@@ -39,7 +43,11 @@ This will automatically find available machines to compute the vectors. Expect:
 (clip-batch-compute-vectors, pid=2523) 2025-01-28 00:06:25,009 - root - INFO - Saved partition 6 to /output/embeddings_90000_100000.parquet_part_6/data.parquet
 ...
 ```
-You can also use `sky jobs queue` and `sky jobs dashboard` to see the status of jobs. 
+You can also use `sky jobs queue` and `sky jobs dashboard` to see the status of jobs. Figure below shows our jobs are launched across different regions: 
+
+<p align="center">
+<img src="https://i.imgur.com/2CyQADY.png" alt="SkyPilot Dashboard" style="width: 70%;">
+</p>
 
 ### Step 2: Construct the Vector Database from Computed Embeddings
 Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. In this example, we use [ChromaDB](https://docs.trychroma.com/getting-started) to store and query the embeddings. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
@@ -87,3 +95,7 @@ sky serve status vectordb --endpoint
 ```
 
 to get the endpoint address of the service. 
+
+<p align="center">
+<img src="https://i.imgur.com/KONQ4wd.png" alt="Image Search Website" style="width: 70%;">
+</p>
