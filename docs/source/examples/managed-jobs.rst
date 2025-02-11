@@ -37,11 +37,12 @@ To start a managed job, use :code:`sky jobs launch`:
   ├── To view all managed jobs:         sky jobs queue
   └── To view managed job dashboard:    sky jobs dashboard
 
-The job is managed end-to-end and resources are automatically cleaned up.
+The job is launched on a temporary SkyPilot cluster, managed end-to-end, and automatically cleaned up.
 
 Managed jobs have several benefits:
 
 #. :ref:`Use spot instances <spot-jobs>`: Jobs can run on auto-recovering spot instances. This **saves significant costs** (e.g., ~70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
+#. :ref:`Scale across clouds <many-jobs>`: Easily run batch workloads on **thousands of instances and GPUs** across multiple regions/clouds, using a single SkyPilot YAML.
 #. :ref:`Recover from failure <failure-recovery>`: When a job fails, you can automatically retry it on a new cluster, eliminating flaky issues.
 #. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks (which
    can have different resource requirements and ``setup``/``run`` commands).
@@ -57,17 +58,7 @@ Managed jobs have several benefits:
 Create a Managed Job
 --------------------
 
-A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`.
-
-.. tip::
-   You can test your YAML on unamanged :code:`sky launch`, then do a production run as a managed job using :code:`sky jobs launch`.
-
-Once we have a YAML that works with :code:`sky launch`, we can launch it with the following:
-
-.. code-block:: console
-
-  $ git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
-  $ sky jobs launch -n bert-qa bert_qa.yaml
+A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`. For example:
 
 .. code-block:: yaml
 
@@ -85,6 +76,8 @@ Once we have a YAML that works with :code:`sky launch`, we can launch it with th
     WANDB_API_KEY:
 
   # Assume your working directory is under `~/transformers`.
+  # To get the code for this example, run:
+  # git clone https://github.com/huggingface/transformers.git ~/transformers -b v4.30.1
   workdir: ~/transformers
 
   setup: |
@@ -113,8 +106,42 @@ Once we have a YAML that works with :code:`sky launch`, we can launch it with th
   :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be :ref:`automatically uploaded to a cloud bucket <intermediate-bucket>`.
   The bucket will be cleaned up after the job finishes.
 
-SkyPilot will launch and start monitoring the job. When a spot preemption or any machine failure happens, SkyPilot will automatically
-search for resources across regions and clouds to re-launch the job.
+To launch this YAML as a managed job, use :code:`sky jobs launch`:
+
+.. code-block:: console
+
+  $ sky jobs launch -n bert-qa-job bert_qa.yaml
+
+:code:`sky jobs launch` works similarly to :code:`sky launch` - you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
+
+SkyPilot will launch and start monitoring the job.
+
+- Under the hood, SkyPilot spins up a temporary cluster for the job.
+- If a spot preemption or any machine failure happens, SkyPilot will automatically search for resources across regions and clouds to re-launch the job.
+- Resources are cleaned up as soon as the job is finished.
+
+.. tip::
+   You can test your YAML on |unmanaged sky launch|_ , then do a production run as a managed job using :code:`sky jobs launch`.
+
+.. https://stackoverflow.com/a/4836544
+.. |unmanaged sky launch| replace:: unmanaged :code:`sky launch`
+.. _unmanaged sky launch: ../getting-started/quickstart.html
+
+:code:`sky launch` and :code:`sky jobs launch` have a similar interface, but are useful in different scenarios.
+
+.. list-table::
+   :header-rows: 1
+
+   * - :code:`sky launch` (cluster jobs)
+     - :code:`sky jobs launch` (managed jobs)
+   * - Long-lived, manually managed cluster
+     - Dedicated auto-managed cluster for each job
+   * - Spot preemptions must be manually recovered
+     - Spot preemptions are auto-recovered
+   * - Useful for launching and working with a single cluster/job
+     - Much easier to launch hundreds or thousands of jobs
+   * - Good for interactive dev
+     - Good for scaling out production jobs
 
 
 Work with Managed Jobs

@@ -254,7 +254,7 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
           for lr in 0.01 0.03 0.1 0.3 1.0; do
               for max_steps in 100 300 1000; do
                   sky jobs launch -n train-job${job_idx} -y -d train-template.yaml \
-                    --env LR=${lr} --env MAX_STEPS=${max_steps} \
+                    --env LR="${lr}" --env MAX_STEPS="${max_steps}" \
                     --env WANDB_API_KEY # pick up from environment
                   ((job_idx++))
               done
