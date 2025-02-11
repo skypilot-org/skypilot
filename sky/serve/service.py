@@ -15,6 +15,7 @@ from typing import Dict
 import filelock
 
 from sky import authentication
+from sky import constants as sky_constants
 from sky import exceptions
 from sky import sky_logging
 from sky import task as task_lib
@@ -295,7 +296,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.delete_all_versions(service_name)
             logger.info(f'Service {service_name} terminated successfully.')
 
-        task_run_dir = Path('~/.sky/task_run').expanduser()
+        task_run_dir = Path(sky_constants.PERSISTENT_RUN_SCRIPT_DIR).expanduser()
         if task_run_dir.exists():
             # Please see `kubernetes-ray.yml.j2` for more details.
             this_task_run_script = task_run_dir / f'sky_job_{job_id}'

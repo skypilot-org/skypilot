@@ -519,7 +519,7 @@ available_node_types:
                 done
               }
 
-              mkdir -p ~/.sky/task_run
+              mkdir -p ~/.sky/.controller_recovery_task_run
               if [ -f ~/.sky/k8s_container_ready ]; then
                 # ! Keep this aligned with `CloudVmRayBackend._setup()`
                 # Suppose all `task.setup` are the same for skyserve controller task.
@@ -528,7 +528,7 @@ available_node_types:
                 /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && ~/.sky/.controller_recovery_setup_commands.sh > /tmp/controller_recovery_setup_commands.log 2>&1"
                 echo "=== Controller setup commands completed for recovery ==="
 
-                for file in ~/.sky/task_run/*; do
+                for file in ~/.sky/.controller_recovery_task_run/*; do
                   # ! Keep this aligned with `CloudVmRayBackend._execute()`
                   chmod +x $file
                   /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
