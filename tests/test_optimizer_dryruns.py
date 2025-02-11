@@ -779,3 +779,24 @@ def test_optimize_disk_tier(enable_all_clouds):
     ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
     assert ultra_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates
+
+
+def test_resource_hints_for_invalid_resources(monkeypatch, capfd):
+    """Tests that helpful hints are shown when no matching resources are found."""
+    # Test when there are no fuzzy candidates
+    with pytest.raises(exceptions.ResourcesUnavailableError):
+        _test_resources_launch(monkeypatch, cpus=111, memory=999)
+    stdout, _ = capfd.readouterr()
+    assert 'Try specifying a different CPU count' in stdout
+    assert 'add "+" to the end of the CPU count' in stdout
+    assert 'Try specifying a different memory size' in stdout
+    assert 'add "+" to the end of the memory size' in stdout
+    assert 'Did you mean:' not in stdout  # No fuzzy candidates
+
+    # Test when there are fuzzy candidates (e.g., for GPUs)
+    with pytest.raises(exceptions.ResourcesUnavailableError):
+        _test_resources_launch(monkeypatch, accelerators='V100-XYZ')
+    stdout, _ = capfd.readouterr()
+    assert 'Did you mean:' in stdout  # Has fuzzy candidates
+    assert 'Try specifying a different CPU count' not in stdout
+    assert 'Try specifying a different memory size' not in stdout
