@@ -401,14 +401,14 @@ class Cloud:
         try:
             self.check_features_are_supported(resources,
                                               resources_required_features)
-        except exceptions.NotSupportedError:
-            # TODO(zhwu): The resources are now silently filtered out. We
-            # should have some logging telling the user why the resources
-            # are not considered.
-            return resources_utils.FeasibleResources(resources_list=[],
-                                                     fuzzy_candidate_list=[],
-                                                     hint=None)
-        return self._get_feasible_launchable_resources(resources)
+            return self._get_feasible_launchable_resources(resources)
+        except exceptions.NotSupportedError as e:
+            hint = f'Excluded due to feature requirements: {e}'
+        except exceptions.ResourcesUnavailableError as e:
+            hint = f'Excluded due to resource unavailability: {e}'
+        return resources_utils.FeasibleResources(resources_list=[],
+                                                 fuzzy_candidate_list=[],
+                                                 hint=hint)
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'

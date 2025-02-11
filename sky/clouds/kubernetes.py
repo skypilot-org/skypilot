@@ -89,6 +89,7 @@ class Kubernetes(clouds.Cloud):
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        # TODO(aylei): features need to be regional (per context)
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
         context = resources.region
         if context is None:

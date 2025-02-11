@@ -1,6 +1,7 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
 import functools
+import inspect
 import json
 import math
 import os
@@ -113,7 +114,8 @@ DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
-                    resource_type: Optional[str] = None):
+                    resource_type: Optional[str] = None,
+                    context_param: str = 'context'):
     """Decorator to retry Kubernetes API calls on transient failures.
 
     Args:
@@ -121,6 +123,8 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
         retry_interval: Initial seconds to wait between retries
         resource_type: Type of resource being accessed (e.g. 'node', 'pod').
             Used to provide more specific error messages.
+        context_param: Name of the parameter that contains the Kubernetes
+            context. Empty means no context parameter. Defaults to 'context'.
     """
 
     def decorator(func):
@@ -130,6 +134,17 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             last_exception = None
             backoff = common_utils.Backoff(initial_backoff=retry_interval,
                                            max_backoff_factor=3)
+
+            # try to capture the kubernetes context from parameters
+            if context_param:
+                context = kwargs.get(context_param)
+                if context is None and len(args) > 0:
+                    sig = inspect.signature(func)
+                    param_names = list(sig.parameters.keys())
+                    if context_param in param_names:
+                        context_idx = param_names.index(context_param)
+                        if context_idx < len(args):
+                            context = args[context_idx]
 
             for attempt in range(max_retries):
                 try:
@@ -156,6 +171,8 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                 if resource_type else ''
             debug_cmd = f' To debug, run: kubectl get {resource_type}s' \
                 if resource_type else ''
+            if context:
+                debug_cmd += f' --context {context}'
 
             if isinstance(last_exception, kubernetes.max_retry_error()):
                 error_msg = f'Timed out{resource_msg} from Kubernetes cluster.'
@@ -615,9 +632,6 @@ def check_instance_fits(context: Optional[str],
         Optional[str]: Error message if the instance does not fit.
     """
 
-    # TODO(zhwu): this should check the node for specific context, instead
-    # of the default context to make failover fully functional.
-
     def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
                            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
         """Checks if the instance fits on the cluster based on CPU and memory.
@@ -678,7 +692,10 @@ def check_instance_fits(context: Optional[str],
                        f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
                        'podslices are currently not unsupported.')
 
-    nodes = get_kubernetes_nodes(context)
+    try:
+        nodes = get_kubernetes_nodes(context)
+    except exceptions.ResourcesUnavailableError as e:
+        return False, f'Failed to get kubernetes nodes: {e}'
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
