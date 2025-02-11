@@ -895,7 +895,6 @@ def test_skyserve_multi_ports(generic_cloud: str):
     test = smoke_tests_utils.Test(
         f'test-skyserve-multi-ports',
         [
-            'exit 1',
             f'sky serve up -n {name} --cloud {generic_cloud} -y tests/skyserve/multi_ports.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
