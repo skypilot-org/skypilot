@@ -313,6 +313,9 @@ class CommandRunner:
         command = ' '.join(rsync_command)
         logger.debug(f'Running rsync command: {command}')
 
+        print(f'Running rsync command: {command}')
+        logger.info(f'Running rsync command: {command}')
+
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
         stdout, stderr = '', ''

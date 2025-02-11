@@ -14,7 +14,6 @@ from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
-from sky import skypilot_config
 from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
@@ -201,9 +200,19 @@ def _execute(
     # Requested features that some clouds support and others don't.
     requested_features = set()
 
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
+    is_controller_high_availability_supported = False
+
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
+        if controller_utils.get_controller_high_availability_supported(
+                controller):
+            requested_features.add(clouds.CloudImplementationFeatures.
+                                   HIGH_AVAILABILITY_CONTROLLERS)
+            # If we provision a cluster that supports high availability
+            # controllers, we can use the high availability controller.
+            is_controller_high_availability_supported = True
 
     # Add requested features from the task
     requested_features |= task.get_required_cloud_features()
@@ -286,36 +295,6 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    # TODO(andyl): extend to more clouds beyond Kubernetes.
-    high_availability_specified = False
-    controller = controller_utils.Controllers.from_name(cluster_name)
-    if controller is not None:
-        high_availability_specified = skypilot_config.get_nested(
-            (controller.value.name, 'controller', 'high_availability'), False)
-        if high_availability_specified:
-            if (controller !=
-                    controller_utils.Controllers.SKY_SERVE_CONTROLLER):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'High availability controller is only supported '
-                        'for SkyServe controller. It cannot be enabled '
-                        f'for {controller.value.name}.')
-
-            if not isinstance(handle, backends.CloudVmRayResourceHandle):
-                unsupported_cloud_name = type(handle).__name__
-            elif not isinstance(handle.launched_resources.cloud,
-                                clouds.Kubernetes):
-                unsupported_cloud_name = str(handle.launched_resources.cloud)
-            else:
-                unsupported_cloud_name = None
-
-            if unsupported_cloud_name is not None:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'High availability controller is not supported for '
-                        f'cloud {unsupported_cloud_name}. '
-                        'Only Kubernetes is supported currently.')
-
     backend.register_info(
         dag=dag,
         optimize_target=optimize_target,
@@ -323,7 +302,7 @@ def _execute(
         # That's because we want to do `task.run` again when K8S pod
         # is recovered after a crash.
         # See `kubernetes-ray.yml.j2` for more details.
-        dump_final_script=high_availability_specified)
+        dump_final_script=is_controller_high_availability_supported)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket

@@ -435,6 +435,25 @@ def shared_controller_vars_to_fill(
     return vars_to_fill
 
 
+def get_controller_high_availability_supported(
+    controller: Controllers,) -> bool:
+    """Check if the controller high availability is supported.
+    """
+    if skypilot_config.loaded():
+        high_availability_specified = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller',
+             'high_availability'), False)
+        if high_availability_specified:
+            if controller != Controllers.SKY_SERVE_CONTROLLER:
+                print(f'{colorama.Fore.RED}High availability controller is only'
+                      'supported for SkyServe controller. It cannot be enabled '
+                      f'for {controller.value.name}. Skipping this flag.'
+                      f'{colorama.Style.RESET_ALL}')
+            else:
+                return True
+    return False
+
+
 def get_controller_resources(
     controller: Controllers,
     task_resources: Iterable['resources.Resources'],
