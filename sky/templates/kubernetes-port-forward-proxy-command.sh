@@ -34,9 +34,6 @@ if [ $# -lt 1 ]; then
   exit 1
 fi
 
-  exit 1
-fi
-
 POD_NAME="$1"  # The first positional argument is the name of the pod
 
 # Checks if socat is installed
