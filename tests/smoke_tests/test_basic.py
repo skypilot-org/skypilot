@@ -345,6 +345,7 @@ def test_core_api_sky_launch_exec():
 
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
+@pytest.mark.no_kubernetes
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.clouds.CLOUD_REGISTRY.from_str(generic_cloud)

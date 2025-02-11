@@ -55,7 +55,7 @@ Managed jobs have several benefits:
    :backlinks: none
 
 
-Create a Managed Job
+Create a managed job
 --------------------
 
 A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`. For example:
@@ -144,7 +144,7 @@ SkyPilot will launch and start monitoring the job.
      - Good for scaling out production jobs
 
 
-Work with Managed Jobs
+Work with managed jobs
 ~~~~~~~~~~~~~~~~~~~~~~
 
 For a list of all commands and options, run :code:`sky jobs --help` or read the :ref:`CLI reference <cli>`.
@@ -157,7 +157,7 @@ See a list of all managed jobs:
 
 .. code-block:: console
 
-  Fetching managed job statuses...
+  Fetching managed jobs...
   Managed jobs:
   ID NAME     RESOURCES           SUBMITTED   TOT. DURATION   JOB DURATION   #RECOVERIES  STATUS
   2  roberta  1x [A100:8][Spot]   2 hrs ago   2h 47m 18s      2h 36m 18s     0            RUNNING
@@ -182,7 +182,7 @@ Cancel a managed job:
   of the failure. For more details, it would be helpful to check :code:`sky jobs logs --controller <job_id>`.
 
 
-Jobs Dashboard
+Jobs dashboard
 ~~~~~~~~~~~~~~
 
 Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
@@ -202,7 +202,7 @@ terminal-based CLI may need more than one page to display.
 
 .. _spot-jobs:
 
-Running on Spot Instances
+Running on spot instances
 -------------------------
 
 Managed jobs can run on spot instances, and preemptions are auto-recovered by SkyPilot.
@@ -264,7 +264,7 @@ Quick comparison between *managed spot jobs* vs. *launching unmanaged spot clust
      - Interactive dev on spot instances (especially for hardware with low preemption rates)
 
 
-Either Spot or On-Demand/Reserved
+Either spot or on-demand/reserved
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 By default, on-demand instances will be used (not spot instances). To use spot instances, you must specify :code:`--use-spot` on the command line or :code:`use_spot: true` in your SkyPilot YAML.
@@ -287,7 +287,7 @@ will be spot instances. If spot instances are not available, SkyPilot will fall 
 
 .. _checkpointing:
 
-Checkpointing and Recovery
+Checkpointing and recovery
 --------------------------
 
 To recover quickly, a cloud bucket is typically needed to store the job's states (e.g., model checkpoints). Any data on disk that is not stored inside a cloud bucket will be lost during the recovery process.
@@ -315,7 +315,7 @@ For other types of workloads, you can implement a similar mechanism as long as y
 
 .. _failure-recovery:
 
-Jobs Restarts on User Code Failure
+Jobs restarts on user code failure
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Preemptions or hardware failures will be auto-recovered, but **by default, user code failures (non-zero exit codes) are not auto-recovered**.
@@ -359,7 +359,7 @@ To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:
 Examples
 --------
 
-BERT End-to-End
+BERT end-to-end
 ~~~~~~~~~~~~~~~
 
 Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
@@ -441,7 +441,7 @@ cost savings from spot instances without worrying about preemption or losing pro
   $ sky jobs launch -n bert-qa bert_qa.yaml
 
 
-Real-World Examples
+Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
@@ -450,7 +450,7 @@ Real-World Examples
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
 
-Running Many Parallel Jobs
+Running many parallel jobs
 --------------------------
 
 For batch jobs such as **data processing** or **hyperparameter sweeps**, you can launch many jobs in parallel. See :ref:`many-jobs`.
@@ -460,7 +460,7 @@ To increase the maximum number of jobs that can run at once, see :ref:`jobs-cont
 
 .. _pipeline:
 
-Managed Pipelines
+Managed pipelines
 -----------------
 
 A pipeline is a managed job that contains a sequence of tasks running one after another.
@@ -593,7 +593,7 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
 
 .. _jobs-controller:
 
-How It Works: The Jobs Controller
+How it works: The jobs controller
 ---------------------------------
 
 The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.
@@ -610,7 +610,7 @@ you can still tear it down manually with
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
 
-Customizing Jobs Controller Resources
+Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You may want to customize the resources of the jobs controller for several reasons:
@@ -686,7 +686,7 @@ The next time you use :code:`sky jobs launch`, a new controller will be created 
 
 .. _jobs-controller-sizing:
 
-Best Practices for Scaling Up the Jobs Controller
+Best practices for scaling up the jobs controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
