@@ -32,6 +32,16 @@ TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
 
+# Please be careful when changing this.
+# When mounting, Kubernetes changes the ownership of the parent directory
+# to root:root.
+# pylint: disable=line-too-long
+# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
+DEPLOYMENT_VOLUME_MOUNTS = {
+    # volume name -> mount path
+    'sky-data': '/home/sky',
+}
+
 
 def _is_head(pod) -> bool:
     return pod.metadata.labels.get(constants.TAG_RAY_NODE_KIND) == 'head'
@@ -40,6 +50,14 @@ def _is_head(pod) -> bool:
 def _get_head_pod_name(pods: Dict[str, Any]) -> Optional[str]:
     return next((pod_name for pod_name, pod in pods.items() if _is_head(pod)),
                 None)
+
+
+def _get_pvc_name(cluster_name: str, volume_name: str) -> str:
+    return f'{cluster_name}-{volume_name}'
+
+
+def _get_deployment_name(cluster_name: str) -> str:
+    return f'{cluster_name}-deployment'
 
 
 def head_service_selector(cluster_name: str) -> Dict[str, str]:
@@ -498,40 +516,30 @@ def _create_serve_controller_deployment(
     assert len(
         pod_spec['spec']['containers']) == 1, 'Only one container is supported'
 
-    # Please be careful when changing this.
-    # When mounting, Kubernetes changes the ownership of the parent directory
-    # to root:root.
-    # pylint: disable=line-too-long
-    # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
-
-    volume_mounts = {
-        # TODO(andyl): make sure user is sky, and use constant here
-        'sky-data': '/home/sky',
-    }
-
     # The pod template part of pod_spec is used in the deployment
     # spec.template.spec
     spec = pod_spec.pop('spec')
     container = spec['containers'][0]
 
-    if volume_mounts:
+    if DEPLOYMENT_VOLUME_MOUNTS:
+        # TODO(andyl): use defaultdict
         if spec.get('volumes') is None:
             spec['volumes'] = []
         if container.get('volumeMounts') is None:
             container['volumeMounts'] = []
 
-    for name, mount_path in volume_mounts.items():
-        pvc_name = f'{cluster_name_on_cloud}-{name}'
+    for volume_name, mount_path in DEPLOYMENT_VOLUME_MOUNTS.items():
+        pvc_name = _get_pvc_name(cluster_name_on_cloud, volume_name)
         _create_persistent_volume_claim(namespace, context, pvc_name)
         spec['volumes'].append({
-            'name': name,
+            'name': volume_name,
             'persistentVolumeClaim': {
                 'claimName': pvc_name
             }
         })
         container['volumeMounts'].append({
             'mountPath': mount_path,
-            'name': name
+            'name': volume_name
         })
 
     template_metadata = pod_spec.pop('metadata')
@@ -566,7 +574,7 @@ def _create_serve_controller_deployment(
         'apiVersion': 'apps/v1',
         'kind': 'Deployment',
         'metadata': {
-            'name': f'{cluster_name_on_cloud}-deployment',
+            'name': _get_deployment_name(cluster_name_on_cloud),
             'namespace': namespace,
         },
         'spec': {
@@ -855,58 +863,69 @@ def stop_instances(
     raise NotImplementedError()
 
 
+def _delete_k8s_resource_with_retry(delete_func: Callable, resource_type: str,
+                                    resource_name: str) -> None:
+    """Helper to delete Kubernetes resources with 404 handling and retries.
+
+    Args:
+        delete_func: Function to call to delete the resource
+        resource_type: Type of resource being deleted (e.g. 'service'),
+            used in logging
+        resource_name: Name of the resource being deleted, used in logging
+    """
+    max_retries = 3
+    retry_delay = 5  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            delete_func()
+            return
+        except kubernetes.api_exception() as e:
+            if e.status == 404:
+                logger.warning(
+                    f'terminate_instances: Tried to delete {resource_type} '
+                    f'{resource_name}, but the {resource_type} was not '
+                    'found (404).')
+                return
+            elif attempt < max_retries - 1:
+                logger.warning(f'terminate_instances: Failed to delete '
+                               f'{resource_type} {resource_name} (attempt '
+                               f'{attempt + 1}/{max_retries}). Error: {e}. '
+                               f'Retrying in {retry_delay} seconds...')
+                time.sleep(retry_delay)
+            else:
+                raise
+
+
+def _delete_services(name_prefix: str, namespace: str,
+                     context: Optional[str]) -> None:
+    """Delete services with the given name prefix.
+
+    Args:
+        name_prefix: Prefix of the service names to delete
+        namespace: Kubernetes namespace
+        context: Kubernetes context
+    """
+    for service_suffix in ['', '-ssh']:
+        service_name = f'{name_prefix}{service_suffix}'
+        # Since we are not saving this lambda, it's a false positive.
+        # TODO(andyl): Wait for https://github.com/pylint-dev/pylint/issues/5263.
+        # pylint: disable=cell-var-from-loop
+        _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
+            context).delete_namespaced_service(name=service_name,
+                                               namespace=namespace,
+                                               _request_timeout=config_lib.
+                                               DELETION_TIMEOUT),
+                                        resource_type='service',
+                                        resource_name=service_name)
+
+
 def _terminate_node(namespace: str, context: Optional[str],
                     pod_name: str) -> None:
-    """Terminate a pod."""
+    """Terminate a pod and its associated services."""
     logger.debug('terminate_instances: calling delete_namespaced_pod')
 
-    def _delete_k8s_resource_with_retry(delete_func: Callable,
-                                        resource_type: str,
-                                        resource_name: str) -> None:
-        """Helper to delete Kubernetes resources with 404 handling and retries.
-
-        Args:
-            delete_func: Function to call to delete the resource
-            resource_type: Type of resource being deleted (e.g. 'service'),
-                used in logging
-            resource_name: Name of the resource being deleted, used in logging
-        """
-        max_retries = 3
-        retry_delay = 5  # seconds
-
-        for attempt in range(max_retries):
-            try:
-                delete_func()
-                return
-            except kubernetes.api_exception() as e:
-                if e.status == 404:
-                    logger.warning(
-                        f'terminate_instances: Tried to delete {resource_type} '
-                        f'{resource_name}, but the {resource_type} was not '
-                        'found (404).')
-                    return
-                elif attempt < max_retries - 1:
-                    logger.warning(f'terminate_instances: Failed to delete '
-                                   f'{resource_type} {resource_name} (attempt '
-                                   f'{attempt + 1}/{max_retries}). Error: {e}. '
-                                   f'Retrying in {retry_delay} seconds...')
-                    time.sleep(retry_delay)
-                else:
-                    raise
-
-    # Delete services for the pod
-    for service_name in [pod_name, f'{pod_name}-ssh']:
-        _delete_k8s_resource_with_retry(
-            delete_func=lambda name=service_name: kubernetes.core_api(
-                context).delete_namespaced_service(name=name,
-                                                   namespace=namespace,
-                                                   _request_timeout=config_lib.
-                                                   DELETION_TIMEOUT),
-            resource_type='service',
-            resource_name=service_name)
-
-    # TODO(andyl): Remove pod-related deployment first
-    # Controllers can be manually downed by `sky down sky-serve-controller`
+    _delete_services(pod_name, namespace, context)
 
     # Note - delete pod after all other resources are deleted.
     # This is to ensure there are no leftover resources if this down is run
@@ -918,6 +937,35 @@ def _terminate_node(namespace: str, context: Optional[str],
             _request_timeout=config_lib.DELETION_TIMEOUT),
         resource_type='pod',
         resource_name=pod_name)
+
+
+def _terminate_deployment(cluster_name: str, namespace: str,
+                          context: Optional[str]) -> None:
+    """Terminate a deployment."""
+    # Delete services first
+    _delete_services(f'{cluster_name}-head', namespace, context)
+
+    # Delete deployment
+    deployment_name = _get_deployment_name(cluster_name)
+    _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.apps_api(
+        context).delete_namespaced_deployment(name=deployment_name,
+                                              namespace=namespace,
+                                              _request_timeout=config_lib.
+                                              DELETION_TIMEOUT),
+                                    resource_type='deployment',
+                                    resource_name=deployment_name)
+
+    # Delete PVCs
+    for volume_name in DEPLOYMENT_VOLUME_MOUNTS:
+        pvc_name = _get_pvc_name(cluster_name, volume_name)
+        # pylint: disable=cell-var-from-loop
+        _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
+            context).delete_namespaced_persistent_volume_claim(
+                name=pvc_name,
+                namespace=namespace,
+                _request_timeout=config_lib.DELETION_TIMEOUT),
+                                        resource_type='pvc',
+                                        resource_name=pvc_name)
 
 
 def terminate_instances(
@@ -944,6 +992,10 @@ def terminate_instances(
         except Exception as e:  # pylint: disable=broad-except
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
+
+    if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
+        _terminate_deployment(cluster_name_on_cloud, namespace, context)
+        return
 
     def _terminate_pod_thread(pod_info):
         pod_name, pod = pod_info
