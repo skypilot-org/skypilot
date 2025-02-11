@@ -3785,7 +3785,7 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky jobs queue
 
     """
-    click.secho('Fetching managed job statuses...', fg='yellow')
+    click.secho('Fetching managed jobs...', fg='yellow')
     with rich_utils.safe_status(
             ux_utils.spinner_message('Checking managed jobs')):
         _, msg = _get_managed_jobs(refresh=refresh,

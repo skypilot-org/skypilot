@@ -170,9 +170,7 @@ You can also inspect the real-time GPU usage on the cluster with :code:`sky show
     my-cluster-5               H100      8           8
 
 
-.. _kubernetes-custom-images:
-
-Using Custom Images
+Using custom images
 -------------------
 By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
 
@@ -217,7 +215,7 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
     If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
 
 
-Opening Ports
+Opening ports
 -------------
 
 Opening ports on SkyPilot clusters running on Kubernetes is supported through two modes:
@@ -258,17 +256,17 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 
     To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
 
-Customizing SkyPilot pods
+Customizing SkyPilot Pods
 -------------------------
 
 You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
-The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_. This will apply to all pods created by SkyPilot. 
+The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_. This will apply to all pods created by SkyPilot.
 
 For example, to set custom environment variables and use GPUDirect RDMA, you can add the following to your :code:`~/.sky/config.yaml` file:
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml 
+    # ~/.sky/config.yaml
     kubernetes:
       pod_config:
         spec:
@@ -331,7 +329,7 @@ FAQs
 * **Are autoscaling Kubernetes clusters supported?**
 
   To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
-  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud).
 
   If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
 
