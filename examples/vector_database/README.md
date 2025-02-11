@@ -15,6 +15,8 @@ In particular:
 
 SkyPilot streamlines the process of running such large-scale jobs in the cloud. It abstracts away much of the complexity of managing infrastructure and helps you run compute-intensive tasks efficiently and cost-effectively through managed jobs. 
 
+Please find the complete blog post [here](https://blog.skypilot.co/large-scale-vector-database/)
+
 ### Step 0: Set Up The Environment
 Install the following Prerequisites:  
 * SkyPilot: Make sure you have SkyPilot installed and `sky check` should succeed. Refer to [SkyPilot’s documentation](https://docs.skypilot.co/en/latest/getting-started/installation.html) for instructions.

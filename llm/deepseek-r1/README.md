@@ -12,7 +12,7 @@ DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning b
 
 This guide walks through how to run and host DeepSeek-R1 models **on any infrastructure** from ranging from Local GPU workstation, Kubernetes cluster and public Clouds ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html)). 
 
-Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. Please find the complete blog post [here](https://blog.skypilot.co/large-scale-vector-database/)
+Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
 
 ### Step 0: Bring any infra
 
