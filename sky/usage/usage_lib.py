@@ -336,7 +336,10 @@ def _send_to_loki(message_type: MessageType):
     # In case the message has no start time, set it to the current time.
     message.start()
     message.send_time = _get_current_timestamp_ns()
-    log_timestamp = message.start_time
+    # Use send time instead of start time to avoid the message being dropped
+    # by Loki, due to the timestamp being too old. We still have the start time
+    # in the message for dashboard.
+    log_timestamp = message.send_time
 
     environment = 'prod'
     if env_options.Options.IS_DEVELOPER.get():
