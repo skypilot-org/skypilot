@@ -4196,7 +4196,7 @@ def serve_up(
         ports=ports,
         not_supported_cmd='sky serve up',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('Each replica will use the following resources (estimated):',
@@ -4314,7 +4314,7 @@ def serve_update(
         ports=ports,
         not_supported_cmd='sky serve update',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('New replica will use the following resources (estimated):',
