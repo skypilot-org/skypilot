@@ -723,7 +723,6 @@ def _pop_and_ignore_fields_in_override_params(
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
-    entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
@@ -750,7 +749,6 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
         A dag iff the entrypoint is YAML and contains more than 1 task.
         Otherwise, a task.
     """
-    del entrypoint_name  # Unused.
     entrypoint = ' '.join(entrypoint)
     is_yaml, _ = _check_yaml(entrypoint)
     entrypoint: Optional[str]
@@ -4031,7 +4029,6 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        entrypoint_name='Service',
     )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
