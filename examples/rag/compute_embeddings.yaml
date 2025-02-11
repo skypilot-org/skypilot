@@ -40,7 +40,7 @@ run: |
     
     echo "Processing documents from $start_idx to $end_idx"
     
-    python compute_vectors.py \
+    python scripts/compute_vectors.py \
       --output-path "/output/embeddings_${start_idx}_${end_idx}.parquet" \
       --start-idx $start_idx \
       --end-idx $end_idx \
