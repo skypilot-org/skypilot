@@ -24,13 +24,14 @@ setup: |
 
 run: |
   # Start vLLM service in background
-  # python -m vllm.entrypoints.openai.api_server \
-  #   --host 0.0.0.0 \
-  #   --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-  #   --max-model-len 4096 &
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --max-model-len 4096 \
+    --task embed &
   
   # # Wait for vLLM to start
-  # sleep 30
+  sleep 30
   
   # Process dataset in chunks of 1000 documents
   for i in {0..1000}; do
