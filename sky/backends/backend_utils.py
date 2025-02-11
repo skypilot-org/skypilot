@@ -1022,8 +1022,6 @@ def write_cluster_config(
     # compatibility should go before this call.
     _optimize_file_mounts(tmp_yaml_path)
 
-    # TODO(andyl): Check if `file_mounts` and `setup_commands` are both recoverable.
-
     # Rename the tmp file to the final YAML path.
     os.rename(tmp_yaml_path, yaml_path)
     usage_lib.messages.usage.update_ray_yaml(yaml_path)
