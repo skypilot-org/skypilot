@@ -524,8 +524,8 @@ available_node_types:
                 # ! Keep this aligned with `CloudVmRayBackend._setup()`
                 # Suppose all `task.setup` are the same for skyserve controller task.
                 # So be careful for compatibility issue once you change it.
-                chmod +x ~/.sky/setup_commands.sh
-                /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && ~/.sky/setup_commands.sh > /tmp/setup_commands.log 2>&1"
+                chmod +x ~/.sky/.controller_recovery_setup_commands.sh
+                /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && ~/.sky/.controller_recovery_setup_commands.sh > /tmp/controller_recovery_setup_commands.log 2>&1"
                 echo "=== Controller setup commands completed for recovery ==="
 
                 for file in ~/.sky/task_run/*; do
