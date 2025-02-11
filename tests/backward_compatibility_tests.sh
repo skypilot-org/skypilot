@@ -65,8 +65,9 @@ deactivate
 
 cleanup_resources() {
   source ~/sky-back-compat-current/bin/activate
-  sky down ${CLUSTER_NAME}* -y
-  sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y
+  sky down ${CLUSTER_NAME}* -y || true
+  sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y || true
+  sky serve down ${CLUSTER_NAME}-* -y || true
   deactivate
 }
 
@@ -225,5 +226,30 @@ s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
 echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
+deactivate
+fi
+
+# sky serve
+if [ "$start_from" -le 8 ]; then
+source ~/sky-back-compat-master/bin/activate
+rm -r  ~/.sky/wheels || true
+sky serve up --cloud ${CLOUD} -y --cpus 2 -y -n ${CLUSTER_NAME}-8-0 examples/serve/http_server/task.yaml
+sky serve status ${CLUSTER_NAME}-8-0
+deactivate
+
+source ~/sky-back-compat-current/bin/activate
+rm -r  ~/.sky/wheels || true
+sky serve status
+sky serve logs ${CLUSTER_NAME}-8-0 2 --no-follow
+sky serve logs --controller ${CLUSTER_NAME}-8-0  --no-follow
+sky serve logs --load-balancer ${CLUSTER_NAME}-8-0  --no-follow
+sky serve update ${CLUSTER_NAME}-8-0 -y --cloud ${CLOUD} --cpus 2 --num-nodes 4 examples/serve/http_server/task.yaml
+sky serve logs --controller ${CLUSTER_NAME}-8-0  --no-follow
+sky serve up --cloud ${CLOUD} -y --cpus 2 -n ${CLUSTER_NAME}-8-1 examples/serve/http_server/task.yaml
+sky serve status ${CLUSTER_NAME}-8-1
+sky serve down ${CLUSTER_NAME}-8-0 -y
+sky serve logs --controller ${CLUSTER_NAME}-8-1  --no-follow
+sky serve logs --load-balancer ${CLUSTER_NAME}-8-1  --no-follow
+sky serve down ${CLUSTER_NAME}-8-1 -y
 deactivate
 fi
