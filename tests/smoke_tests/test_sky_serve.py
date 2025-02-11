@@ -71,7 +71,7 @@ _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
 _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 
 # _SHOW_SERVE_STATUS: Extracts service names from the "Services" section of
-# `sky status --refresh` output and runs `sky serve logs` commands for each
+# `sky serve status` output and runs `sky serve logs` commands for each
 # service's controller and load balancer.
 # The awk command works as follows:
 # 1. `/^Services$/{flag=1; next}`: When the line matches "Services", set a flag
@@ -82,7 +82,7 @@ _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 #    "Services" section), increment a counter. Skip the first line (header) and
 #    print the first column (service name) for subsequent lines.
 _SHOW_SERVE_STATUS = (
-    'sky status --refresh | awk \''
+    'sky serve status | awk \''
     '/^Services$/{{flag=1; next}} '
     '/^$/{{flag=0}} '
     'flag {{if (++count > 1) print $1}}\' | '
