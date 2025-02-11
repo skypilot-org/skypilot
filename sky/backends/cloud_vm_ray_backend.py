@@ -2665,6 +2665,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
+        self._dump_final_script = kwargs.pop('dump_final_script', False)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -3215,11 +3216,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._set_storage_mounts_metadata(handle.cluster_name,
                                               storage_mounts)
 
-    def _setup(self,
-               handle: CloudVmRayResourceHandle,
-               task: task_lib.Task,
-               detach_setup: bool,
-               dump_final_script: bool = False) -> None:
+    def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
+               detach_setup: bool) -> None:
         start = time.time()
 
         if task.setup is None:
@@ -3261,7 +3259,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 create_script_code = (f'{{ echo {encoded_script} > '
                                       f'{remote_setup_file_name}; }}')
 
-            if dump_final_script:
+            if self._dump_final_script:
                 _dump_final_script(setup_script,
                                    constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
@@ -3378,7 +3376,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
-        dump_final_script: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3439,7 +3436,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # commands to be scheduled on the job controller in high-load cases.
             job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
 
-        if dump_final_script:
+        if self._dump_final_script:
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
 
@@ -3561,7 +3558,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task: task_lib.Task,
         detach_run: bool,
         dryrun: bool = False,
-        is_high_avail_controller: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
 
@@ -3610,26 +3606,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
-        # That's because we want to do `task.run` again when K8S pod
-        # is recovered after a crash.
-        # See `kubernetes-ray.yml.j2` for more details.
-        dump_final_script = is_high_avail_controller
-
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle,
-                                       task_copy,
-                                       job_id,
-                                       detach_run,
-                                       dump_final_script=dump_final_script)
+            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle,
-                                        task_copy,
-                                        job_id,
-                                        detach_run,
-                                        dump_final_script=dump_final_script)
+            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
 
         return job_id
 
@@ -5043,12 +5026,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         env_vars.update(self._skypilot_predefined_env_vars(handle))
         return env_vars
 
-    def _execute_task_one_node(self,
-                               handle: CloudVmRayResourceHandle,
-                               task: task_lib.Task,
-                               job_id: int,
-                               detach_run: bool,
-                               dump_final_script: bool = False) -> None:
+    def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
+                               task: task_lib.Task, job_id: int,
+                               detach_run: bool) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
 
@@ -5088,15 +5068,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag,
-                                dump_final_script=dump_final_script)
+                                managed_job_dag=task.managed_job_dag)
 
-    def _execute_task_n_nodes(self,
-                              handle: CloudVmRayResourceHandle,
-                              task: task_lib.Task,
-                              job_id: int,
-                              detach_run: bool,
-                              dump_final_script: bool = False) -> None:
+    def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
+                              task: task_lib.Task, job_id: int,
+                              detach_run: bool) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -5148,5 +5124,4 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag,
-                                dump_final_script=dump_final_script)
+                                managed_job_dag=task.managed_job_dag)

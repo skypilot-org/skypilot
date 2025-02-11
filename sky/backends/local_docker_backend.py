@@ -211,11 +211,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                 }
         self.volume_mounts[handle] = docker_mounts
 
-    def _setup(self,
-               handle: LocalDockerResourceHandle,
-               task: 'task_lib.Task',
-               detach_setup: bool,
-               dump_final_script: bool = False) -> None:
+    def _setup(self, handle: LocalDockerResourceHandle, task: 'task_lib.Task',
+               detach_setup: bool) -> None:
         """Launches a container and runs a sleep command on it.
 
         setup() in LocalDockerBackend runs the container with a sleep job
@@ -226,11 +223,6 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         style = colorama.Style
         assert handle in self.images, \
             f'No image found for {handle}, have you run Backend.provision()?'
-        if dump_final_script:
-            raise NotImplementedError(
-                'dump_final_script flag is for High Availability '
-                'controller, which is not supported in '
-                'LocalDockerBackend.')
         image_tag, metadata = self.images[handle]
         volumes = self.volume_mounts[handle]
         runtime = 'nvidia' if self._use_gpu else None

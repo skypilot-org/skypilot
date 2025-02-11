@@ -286,9 +286,45 @@ def _execute(
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
-    backend.register_info(dag=dag,
-                          optimize_target=optimize_target,
-                          requested_features=requested_features)
+    # TODO(andyl): extend to more clouds beyond Kubernetes.
+    high_availability_specified = False
+    controller = controller_utils.Controllers.from_name(cluster_name)
+    if controller is not None:
+        high_availability_specified = skypilot_config.get_nested(
+            (controller.value.name, 'controller',
+             'high_availability_controller'), False)
+        if high_availability_specified:
+            if (controller !=
+                    controller_utils.Controllers.SKY_SERVE_CONTROLLER):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'High availability controller is only supported '
+                        'for SkyServe controller. It cannot be enabled '
+                        f'for {controller.value.name}.')
+
+            if not isinstance(handle, backends.CloudVmRayResourceHandle):
+                unsupported_cloud_name = type(handle).__name__
+            elif not isinstance(handle.launched_resources.cloud,
+                                clouds.Kubernetes):
+                unsupported_cloud_name = str(handle.launched_resources.cloud)
+            else:
+                unsupported_cloud_name = None
+
+            if unsupported_cloud_name is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'High availability controller is not supported for '
+                        f'cloud {unsupported_cloud_name}. '
+                        'Only Kubernetes is supported currently.')
+
+    backend.register_info(
+        dag=dag,
+        optimize_target=optimize_target,
+        requested_features=requested_features,
+        # That's because we want to do `task.run` again when K8S pod
+        # is recovered after a crash.
+        # See `kubernetes-ray.yml.j2` for more details.
+        dump_final_script=high_availability_specified)
 
     if task.storage_mounts is not None:
         # Optimizer should eventually choose where to store bucket
@@ -315,38 +351,6 @@ def _execute(
             logger.info('Dryrun finished.')
             return None, None
 
-        # TODO(andyl): extend to more clouds beyond Kubernetes.
-        high_availability_specified = False
-        controller = controller_utils.Controllers.from_name(cluster_name)
-        if controller is not None:
-            high_availability_specified = skypilot_config.get_nested(
-                (controller.value.name, 'controller',
-                 'high_availability_controller'), False)
-            if high_availability_specified:
-                if (controller !=
-                        controller_utils.Controllers.SKY_SERVE_CONTROLLER):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'High availability controller is only supported '
-                            'for SkyServe controller. It cannot be enabled '
-                            f'for {controller.value.name}.')
-
-                if not isinstance(handle, backends.CloudVmRayResourceHandle):
-                    unsupported_cloud_name = type(handle).__name__
-                elif not isinstance(handle.launched_resources.cloud,
-                                    clouds.Kubernetes):
-                    unsupported_cloud_name = str(
-                        handle.launched_resources.cloud)
-                else:
-                    unsupported_cloud_name = None
-
-                if unsupported_cloud_name is not None:
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            'High availability controller is not supported for '
-                            f'cloud {unsupported_cloud_name}. '
-                            'Only Kubernetes is supported currently.')
-
         do_workdir = (Stage.SYNC_WORKDIR in stages and not dryrun and
                       task.workdir is not None)
         do_file_mounts = (Stage.SYNC_FILE_MOUNTS in stages and not dryrun and
@@ -365,10 +369,7 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            backend.setup(handle,
-                          task,
-                          detach_setup=detach_setup,
-                          dump_final_script=high_availability_specified)
+            backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -381,12 +382,10 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(
-                    handle,
-                    task,
-                    detach_run,
-                    dryrun=dryrun,
-                    is_high_avail_controller=high_availability_specified)
+                job_id = backend.execute(handle,
+                                         task,
+                                         detach_run,
+                                         dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)

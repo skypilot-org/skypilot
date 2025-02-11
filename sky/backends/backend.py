@@ -102,16 +102,10 @@ class Backend(Generic[_ResourceHandleType]):
 
     @timeline.event
     @usage_lib.messages.usage.update_runtime('setup')
-    def setup(self,
-              handle: _ResourceHandleType,
-              task: 'task_lib.Task',
-              detach_setup: bool,
-              dump_final_script: bool = False) -> None:
+    def setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
+              detach_setup: bool) -> None:
         with rich_utils.safe_status(ux_utils.spinner_message('Running setup')):
-            return self._setup(handle,
-                               task,
-                               detach_setup,
-                               dump_final_script=dump_final_script)
+            return self._setup(handle, task, detach_setup)
 
     def add_storage_objects(self, task: 'task_lib.Task') -> None:
         raise NotImplementedError
@@ -122,8 +116,7 @@ class Backend(Generic[_ResourceHandleType]):
                 handle: _ResourceHandleType,
                 task: 'task_lib.Task',
                 detach_run: bool,
-                dryrun: bool = False,
-                is_high_avail_controller: bool = False) -> Optional[int]:
+                dryrun: bool = False) -> Optional[int]:
         """Execute the task on the cluster.
 
         Returns:
@@ -133,8 +126,7 @@ class Backend(Generic[_ResourceHandleType]):
             handle.get_cluster_name())
         usage_lib.messages.usage.update_actual_task(task)
         with rich_utils.safe_status(ux_utils.spinner_message('Submitting job')):
-            return self._execute(handle, task, detach_run, dryrun,
-                                 is_high_avail_controller)
+            return self._execute(handle, task, detach_run, dryrun)
 
     @timeline.event
     def post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
@@ -181,19 +173,15 @@ class Backend(Generic[_ResourceHandleType]):
     ) -> None:
         raise NotImplementedError
 
-    def _setup(self,
-               handle: _ResourceHandleType,
-               task: 'task_lib.Task',
-               detach_setup: bool,
-               dump_final_script: bool = False) -> None:
+    def _setup(self, handle: _ResourceHandleType, task: 'task_lib.Task',
+               detach_setup: bool) -> None:
         raise NotImplementedError
 
     def _execute(self,
                  handle: _ResourceHandleType,
                  task: 'task_lib.Task',
                  detach_run: bool,
-                 dryrun: bool = False,
-                 is_high_avail_controller: bool = False) -> Optional[int]:
+                 dryrun: bool = False) -> Optional[int]:
         raise NotImplementedError
 
     def _post_execute(self, handle: _ResourceHandleType, down: bool) -> None:
