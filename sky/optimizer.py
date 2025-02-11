@@ -1313,9 +1313,7 @@ def _fill_in_launchable_resources(
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)
-        if not quiet:
-            for cloud, hint in hints.items():
-                logger.info(f'{repr(cloud)}: {hint}')
+
         if not launchable[resources]:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])
@@ -1340,6 +1338,8 @@ def _fill_in_launchable_resources(
                         logger.info('Try specifying a different memory size, '
                                     'or add "+" to the end of the memory size '
                                     'to allow for larger instances.')
+                for cloud, hint in hints.items():
+                    logger.info(f'{repr(cloud)}: {hint}')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)
