@@ -1,0 +1,26 @@
+name: build-law-vectordb
+
+workdir: .
+
+resources:
+  memory: 32+  # Need more memory for merging embeddings
+
+file_mounts:
+  /embeddings:
+    name: sky-law-embeddings
+    # this needs to be the same as the output in compute_embeddings.yaml
+    mode: MOUNT
+  
+  /vectordb:
+    name: sky-law-vectordb
+    mode: MOUNT
+
+setup: |
+  pip install chromadb pandas tqdm pyarrow
+
+run: |
+  python scripts/build_vectordb.py \
+    --collection-name legal_docs \
+    --persist-dir /vectordb/chroma \
+    --embeddings-dir /embeddings \
+    --batch-size 1000 

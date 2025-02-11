@@ -1,0 +1,52 @@
+name: compute-law-embeddings
+
+workdir: .
+
+resources:
+  accelerators: 
+    L4: 1
+    A10G: 1
+    A10: 1
+    V100: 1
+  memory: 32+
+  ports: 8000  # For vLLM service
+
+file_mounts:
+  /output:
+    name: sky-law-embeddings
+    mode: MOUNT
+
+setup: |
+  # Install dependencies for vLLM
+  pip install transformers==4.48.1 vllm==0.6.6.post1
+  
+  # Install dependencies for embedding computation
+  pip install numpy pandas requests tqdm datasets
+
+run: |
+  # Start vLLM service in background
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --max-model-len 4096 &
+  
+  # Wait for vLLM to start
+  sleep 30
+  
+  # Process dataset in chunks of 1000 documents
+  for i in {0..99}; do
+    start_idx=$((i * 1000))
+    end_idx=$(((i + 1) * 1000))
+    
+    echo "Processing documents from $start_idx to $end_idx"
+    
+    python compute_vectors.py \
+      --output-path "/output/embeddings_${start_idx}_${end_idx}.parquet" \
+      --start-idx $start_idx \
+      --end-idx $end_idx \
+      --chunk-size 512 \
+      --chunk-overlap 50 \
+      --vllm-endpoint http://localhost:8000 \
+      --batch-size 32
+  done 
