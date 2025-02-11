@@ -511,18 +511,18 @@ To achieve the above, you can specify custom configs in :code:`~/.sky/config.yam
       # Enable high availability mode for the controller (optional).
       #
       # When set to true, the controller will be deployed with high availability
-      # capabilities on Kubernetes using Deployments. This allows the controller
+      # capabilities on Kubernetes using Deployments. This allows the controller and load balancer
       # to automatically recover from failures (e.g., node failures, pod crashes)
       # and maintain service continuity.
       #
-      # NOTE: This feature is ONLY supported when running on Kubernetes.
+      # NOTE: This feature is ONLY supported when Kubernetes cloud is enabled. To enable kubernetes, see xxx.
+      # The service controller cluster will be scheduled to kubernetes. The k8s deployment needs to be always-on to keep the controller running. If using a local kubernetes deployment (e.g. `sky local up`), keeping the laptop/machines up is required.
       # When enabled:
       # - The controller is deployed as a Kubernetes Deployment instead of a Pod
-      # - Controller state and setup/run scripts are persisted to allow recovery
       # - Automatic pod rescheduling and recovery is handled by Kubernetes
       #
       # Default: false.
-      high_availability_controller: true
+      high_availability: true
 
       resources:
         # All configs below are optional.
