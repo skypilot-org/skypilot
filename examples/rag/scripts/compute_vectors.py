@@ -9,6 +9,7 @@ from pathlib import Path
 import pickle
 import time
 from typing import List, Dict
+import shutil
 
 from datasets import load_dataset
 import numpy as np
@@ -27,7 +28,7 @@ def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
     documents = []
     for idx, doc in enumerate(dataset.skip(start_idx).take(end_idx - start_idx)):
         documents.append({
-            'id': f"{idx}",
+            'id': f"{idx + start_idx}",
             'name': doc['url'],
             'text': doc['text'],
             'split': 'train',
@@ -42,8 +43,18 @@ def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
     
     return documents
 
-def chunk_document(document, chunk_size=512, overlap=50):
-    """Split document into overlapping chunks."""
+def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
+    """Split document into overlapping chunks.
+    
+    Args:
+        document: The document to chunk
+        chunk_size: Maximum size of each chunk
+        overlap: Number of characters to overlap between chunks
+        start_chunk_idx: Starting index for global chunk counting
+        
+    Returns:
+        List of chunks and the next available chunk index
+    """
     text = document['text']
     chunks = []
     
@@ -51,16 +62,18 @@ def chunk_document(document, chunk_size=512, overlap=50):
     paragraphs = text.split('\n\n')
     
     current_chunk = ''
+    chunk_idx = start_chunk_idx  # Use the provided starting index
     for para in paragraphs:
         # If adding this paragraph would exceed chunk size, save current chunk
         if len(current_chunk) + len(para) > chunk_size and current_chunk:
             chunks.append({
-                'id': document['id'],
+                'id': str(chunk_idx),  # Use global index as ID
                 'name': document['name'],
                 'content': current_chunk.strip(),
                 'split': document['split'],
                 'source': document['source']
             })
+            chunk_idx += 1  # Increment global index
             # Keep last part for overlap
             current_chunk = current_chunk[-overlap:] if overlap > 0 else ''
         
@@ -69,18 +82,21 @@ def chunk_document(document, chunk_size=512, overlap=50):
     # Add the last chunk if it's not empty
     if current_chunk.strip():
         chunks.append({
-            'id': document['id'],
+            'id': str(chunk_idx),  # Use global index as ID
             'name': document['name'],
             'content': current_chunk.strip(),
             'split': document['split'],
             'source': document['source']
         })
+        chunk_idx += 1
     
-    return chunks
+    return chunks, chunk_idx  # Return both chunks and next available index
 
-def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str, batch_size: int = 32) -> List[Dict]:
-    """Compute embeddings for document chunks using DeepSeek R1."""
-    all_embeddings = []
+def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str,output_path: str, batch_size: int = 32, 
+                            partition_size: int = 1000) -> None:
+    """Compute embeddings for document chunks using DeepSeek R1 and save in partitions."""
+    current_partition = []
+    partition_counter = 0
     
     # Process in batches
     for i in tqdm(range(0, len(chunks), batch_size), desc='Computing embeddings'):
@@ -114,21 +130,48 @@ def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str, batch_size:
             
             # Combine embeddings with metadata
             for chunk, embedding in zip(batch, embeddings):
-                all_embeddings.append({
+                current_partition.append({
                     'id': chunk['id'],
                     'name': chunk['name'],
                     'content': chunk['content'],
                     'split': chunk['split'],
                     'source': chunk['source'],
-                    'embedding': pickle.dumps(np.array(embedding))  # Serialize the embedding
+                    'embedding': pickle.dumps(np.array(embedding))
                 })
+            
+            # Save partition when it reaches the desired size
+            if len(current_partition) >= partition_size:
+                save_partition(current_partition, output_path, partition_counter)
+                partition_counter += 1
+                current_partition = []
+                
         except Exception as e:
             logger.error(f"Error computing embeddings for batch: {str(e)}")
-            # Wait a bit before retrying
             time.sleep(5)
             continue
     
-    return all_embeddings
+    # Save any remaining embeddings in the final partition
+    if current_partition:
+        save_partition(current_partition, output_path, partition_counter)
+
+def save_partition(results: List[Dict], output_path: str, partition_counter: int):
+    """Save a partition of embeddings to a parquet file with atomic write."""
+    if not results:
+        return
+        
+    df = pd.DataFrame(results)
+    final_path = f'{output_path}_part_{partition_counter}.parquet'
+    temp_path = f'/tmp/embeddings_{partition_counter}.tmp'
+    
+    # Write to temporary file first
+    df.to_parquet(temp_path, engine='pyarrow', index=False)
+    
+    # Copy from temp to final destination
+    os.makedirs(os.path.dirname(final_path), exist_ok=True)
+    shutil.copy2(temp_path, final_path)
+    os.remove(temp_path)  # Clean up temp file
+    
+    logger.info(f'Saved partition {partition_counter} to {final_path} with {len(df)} rows')
 
 def main():
     parser = argparse.ArgumentParser(
@@ -161,6 +204,10 @@ def main():
                        type=int,
                        default=32,
                        help='Batch size for computing embeddings')
+    parser.add_argument('--partition-size',
+                       type=int,
+                       default=1000,
+                       help='Number of embeddings per partition file')
     
     args = parser.parse_args()
     
@@ -172,22 +219,20 @@ def main():
     documents = load_law_documents(args.start_idx, args.end_idx)
     logger.info(f'Loaded {len(documents)} documents')
     
-    # Chunk documents
+    # Chunk documents with global counter
     logger.info('Chunking documents...')
     chunks = []
+    next_chunk_idx = 0  # Initialize global chunk counter
     for doc in documents:
-        chunks.extend(chunk_document(doc, args.chunk_size, args.chunk_overlap))
+        doc_chunks, next_chunk_idx = chunk_document(doc, args.chunk_size, args.chunk_overlap, next_chunk_idx)
+        chunks.extend(doc_chunks)
     logger.info(f'Created {len(chunks)} chunks')
     
-    # Compute embeddings
+    # Compute embeddings and save in partitions
     logger.info('Computing embeddings...')
-    embeddings = compute_embeddings_batch(chunks, args.vllm_endpoint, args.batch_size)
-    
-    # Save to parquet
-    logger.info('Saving embeddings...')
-    df = pd.DataFrame(embeddings)
-    df.to_parquet(args.output_path)
-    logger.info(f'Saved embeddings to {args.output_path}')
+    compute_embeddings_batch(chunks, args.vllm_endpoint, args.output_path, 
+                           args.batch_size, args.partition_size)
+    logger.info('Finished computing and saving embeddings')
 
 if __name__ == '__main__':
     main()

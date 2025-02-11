@@ -15,6 +15,11 @@ file_mounts:
     name: sky-law-embeddings
     mode: MOUNT
 
+envs:
+  START_IDX: 0  # Will be overridden by batch_compute_vectors.py
+  END_IDX: 1000  # Will be overridden by batch_compute_vectors.py
+  HF_TOKEN: ""  # Will be overridden by batch_compute_vectors.py
+
 setup: |
   # Install dependencies for vLLM
   pip install transformers==4.48.1 vllm==0.6.6.post1
@@ -24,28 +29,23 @@ setup: |
 
 run: |
   # Start vLLM service in background
-  python -m vllm.entrypoints.openai.api_server \
-    --host 0.0.0.0 \
-    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-    --max-model-len 4096 \
-    --task embed &
+  # python -m vllm.entrypoints.openai.api_server \
+  #   --host 0.0.0.0 \
+  #   --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+  #   --max-model-len 4096 \
+  #   --task embed &
   
   # # Wait for vLLM to start
-  sleep 30
+  # sleep 30
   
-  # Process dataset in chunks of 1000 documents
-  for i in {0..1000}; do
-    start_idx=$((i * 1000))
-    end_idx=$(((i + 1) * 1000))
-    
-    echo "Processing documents from $start_idx to $end_idx"
-    
-    python scripts/compute_vectors.py \
-      --output-path "/output/embeddings_${start_idx}_${end_idx}.parquet" \
-      --start-idx $start_idx \
-      --end-idx $end_idx \
-      --chunk-size 512 \
-      --chunk-overlap 50 \
-      --vllm-endpoint http://localhost:8000 \
-      --batch-size 32
-  done 
+  # Process the assigned range of documents
+  echo "Processing documents from $START_IDX to $END_IDX"
+  
+  python scripts/compute_vectors.py \
+    --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
+    --start-idx $START_IDX \
+    --end-idx $END_IDX \
+    --chunk-size 512 \
+    --chunk-overlap 50 \
+    --vllm-endpoint http://localhost:8000 \
+    --batch-size 32 

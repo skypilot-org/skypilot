@@ -41,11 +41,17 @@ def process_parquet_file(args):
         # Process in batches
         for i in range(0, len(df), batch_size):
             batch_df = df.iloc[i:i + batch_size]
-            # Extract data from DataFrame and unpack the pickled data
-            ids = [str(idx) for idx in batch_df['idx']]
-            unpacked_data = [pickle.loads(row) for row in batch_df['output']]
-            images_base64, embeddings = zip(*unpacked_data)
-            results.append((ids, embeddings, images_base64))
+            # Extract data from DataFrame
+            ids = [str(idx) for idx in batch_df['id']]
+            embeddings = [pickle.loads(emb) for emb in batch_df['embedding']]
+            # Create metadata from the available fields
+            metadatas = [{
+                'name': row['name'],
+                'content': row['content'],
+                'split': row['split'],
+                'source': row['source']
+            } for _, row in batch_df.iterrows()]
+            results.append((ids, embeddings, metadatas))
 
         return results
     except Exception as e:
@@ -127,10 +133,12 @@ def main():
                 try:
                     results = future.result()
                     if results:
-                        for ids, embeddings, images_paths in results:
-                            collection.add(ids=list(ids),
-                                           embeddings=list(embeddings),
-                                           documents=list(images_paths))
+                        for ids, embeddings, metadatas in results:
+                            collection.add(
+                                ids=list(ids),
+                                embeddings=list(embeddings),
+                                metadatas=list(metadatas)
+                            )
                 except Exception as e:
                     logger.error(f'Error processing file {file}: {str(e)}')
                     continue
