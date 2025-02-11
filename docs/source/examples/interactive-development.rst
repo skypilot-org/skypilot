@@ -210,7 +210,7 @@ You can verify that this notebook has access to the mounted storage bucket.
 
 
 
-Working with Clusters
+Working with clusters
 ---------------------
 
 To see a typical workflow of working with clusters, you can refer to :ref:`quickstart`.

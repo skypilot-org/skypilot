@@ -277,7 +277,7 @@ sending requests to :code:`<endpoint-url>` (e.g., ``44.201.119.3:30001``):
     </body>
     </html>
 
-Tutorial: Serve a Chatbot LLM!
+Tutorial: Serve a chatbot LLM!
 ------------------------------
 
 Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
@@ -453,7 +453,7 @@ Authorization
 See :ref:`Authorization <serve-auth>` for more information.
 
 
-SkyServe Architecture
+SkyServe architecture
 ---------------------
 
 .. image:: ../images/sky-serve-architecture.png

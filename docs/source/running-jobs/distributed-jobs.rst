@@ -140,7 +140,7 @@ This allows you directly to SSH into the worker nodes, if required.
 
 SSH access is only available for :ref:`clusters <dev-cluster>` (designed for interactive development), not for :ref:`managed jobs <managed-jobs>` (designed for production, scale-out runs).
 
-Executing a Distributed Ray Program
+Executing a distributed Ray program
 ------------------------------------
 To execute a distributed Ray program on many nodes, you can download the `training script <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/train.py>`_ and launch the `job yaml <https://github.com/skypilot-org/skypilot/blob/master/examples/distributed_ray_train/ray_train.yaml>`_:
 

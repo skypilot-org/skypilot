@@ -114,7 +114,7 @@ GCP, where it succeeded after one region:
   ✓ Cluster launched: a100-8.  View logs at: ~/sky_logs/sky-2024-10-11-18-24-14-357884/provision.log
 
 
-Multiple Candidate GPUs
+Multiple candidate GPUs
 -------------------------
 
 If a task can be run on different GPUs, the user can specify multiple candidate GPUs,
@@ -155,7 +155,7 @@ In the above example, SkyPilot will first try to provision an A10 GPU, then an A
 
 .. _multiple-resources:
 
-Multiple Candidate Resources
+Multiple candidate resources
 --------------------------------------------
 
 If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:

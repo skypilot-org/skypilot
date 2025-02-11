@@ -100,7 +100,7 @@ If your ``run`` commands use Docker/``docker run``, simply pass ``--gpus=all``;
 the correct environment variable would be set inside the container (only the
 allocated device IDs will be set).
 
-Example: Grid Search
+Example: Grid search
 ----------------------
 
 To submit multiple trials with different hyperparameters to a cluster:

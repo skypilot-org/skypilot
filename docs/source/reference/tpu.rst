@@ -31,7 +31,7 @@ After the command finishes, you will be dropped into a TPU host VM and can start
 
 Below, we show examples of using SkyPilot to (1) train LLMs on TPU VMs/Pods and (2) train MNIST on TPU Nodes (legacy).
 
-TPU Architectures
+TPU architectures
 =================
 
 Two different TPU architectures are available on GCP:

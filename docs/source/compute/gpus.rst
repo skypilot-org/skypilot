@@ -5,7 +5,7 @@ GPUs and Accelerators
 
 SkyPilot supports a wide range of GPUs, TPUs, and other accelerators.
 
-Supported Accelerators
+Supported accelerators
 ----------------------
 
 .. code-block:: console
@@ -45,7 +45,7 @@ You can query the accelerators available in your Kubernetes clusters with:
     my-cluster-4               H100      8           8
     my-cluster-5               H100      8           8
 
-Querying Accelerator Details
+Querying accelerator details
 ----------------------------
 
 You can query the details of a supported accelerator config, ``accelerator:count``:
@@ -57,7 +57,7 @@ You can query the details of a supported accelerator config, ``accelerator:count
 .. literalinclude:: show-gpus-h100-8.txt
    :language: text
 
-Requesting Accelerators
+Requesting accelerators
 ----------------------------
 
 You can use ``accelerator:count`` in various places that accept accelerator specifications.

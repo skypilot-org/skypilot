@@ -245,7 +245,7 @@ You may distribute the generated kubeconfig file to users who can then use it to
 
 .. _kubernetes-setup-verify:
 
-Verifying Setup
+Verifying setup
 ---------------
 
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
@@ -278,7 +278,7 @@ You can also check the GPUs available on your nodes by running:
 
 .. _kubernetes-observability:
 
-Observability for Administrators
+Observability for administrators
 --------------------------------
 All SkyPilot tasks are run in pods inside a Kubernetes cluster. As a cluster administrator,
 you can inspect running pods (e.g., with :code:`kubectl get pods -n namespace`) to check which
@@ -357,7 +357,7 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
     for more information on how to set up access control for the dashboard.
 
 
-Troubleshooting Kubernetes Setup
+Troubleshooting Kubernetes setup
 --------------------------------
 
 If you encounter issues while setting up your Kubernetes cluster, please refer to the :ref:`troubleshooting guide <kubernetes-troubleshooting>` to diagnose and fix issues.

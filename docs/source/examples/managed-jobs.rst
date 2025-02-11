@@ -50,7 +50,7 @@ Managed jobs have several benefits:
 
 .. _spot-jobs:
 
-Managed Spot Jobs
+Managed spot jobs
 -----------------
 
 Managed jobs can run on spot instances, and preemptions are auto-recovered by SkyPilot.
@@ -275,7 +275,7 @@ Real-World Examples
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
 
-Managed On-Demand/Reserved Jobs
+Managed on-demand/reserved jobs
 -------------------------------
 
 The same ``sky jobs launch`` and YAML interfaces can run jobs on auto-recovering
@@ -314,7 +314,7 @@ will be spot instances. If spot instances are not available, SkyPilot will fall 
 
 .. _failure-recovery:
 
-Jobs Restarts on User Code Failure
+Jobs restarts on user code failure
 -----------------------------------
 
 By default, SkyPilot will try to recover a job when its underlying cluster is preempted or failed. Any user code failures (non-zero exit codes) are not auto-recovered.
@@ -335,7 +335,7 @@ More advanced policies for resource selection, such as the `Can't Be Late
 <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`__ (NSDI'24)
 paper, may be supported in the future.
 
-Running Many Parallel Jobs
+Running many parallel jobs
 --------------------------
 
 For batch jobs such as **data processing** or **hyperparameter sweeps**, you can launch many jobs in parallel. See :ref:`many-jobs`.
@@ -379,7 +379,7 @@ Cancel a managed job:
 
 .. _pipeline:
 
-Managed Pipelines
+Managed pipelines
 -----------------
 
 A pipeline is a managed job that contains a sequence of tasks running one after another.
@@ -467,7 +467,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 
 
-Job Dashboard
+Job dashboard
 -------------
 
 Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
@@ -525,7 +525,7 @@ When using a custom bucket (:code:`jobs.bucket`), the job-specific directories (
   Multiple users can share the same intermediate bucket. Each user's jobs will have their own unique job-specific directories, ensuring that files are kept separate and organized.
 
 
-How It Works: The Jobs Controller
+How it works: The jobs controller
 ---------------------------------
 
 The jobs controller is a small on-demand CPU VM or pod running in the cloud that manages all jobs of a user.

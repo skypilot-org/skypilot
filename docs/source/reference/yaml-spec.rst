@@ -362,7 +362,7 @@ Available fields:
 
 .. _task-yaml-experimental:
 
-Experimental Configurations
+Experimental configurations
 ---------------------------
 
 .. note::
@@ -394,7 +394,7 @@ In additional to the above fields, SkyPilot also supports the following experime
 
 .. _service-yaml-spec:
 
-SkyServe Services
+SkyServe services
 =================
 
 To define a YAML for use for :ref:`services <sky-serve>`, use previously
