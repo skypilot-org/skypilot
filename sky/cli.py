@@ -762,7 +762,6 @@ def _pop_and_ignore_fields_in_override_params(
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
-    entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
@@ -794,19 +793,15 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        click.secho(f'{entrypoint_name} from YAML spec: ',
-                    fg='yellow',
-                    nl=False)
-        click.secho(entrypoint, bold=True)
+        click.secho('YAML to run: ', fg='cyan', nl=False)
+        click.secho(entrypoint)
     else:
         if not entrypoint:
             entrypoint = None
         else:
             # Treat entrypoint as a bash command.
-            click.secho(f'{entrypoint_name} from command: ',
-                        fg='yellow',
-                        nl=False)
-            click.secho(entrypoint, bold=True)
+            click.secho('Command to run: ', fg='cyan', nl=False)
+            click.secho(entrypoint)
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
@@ -1370,7 +1365,8 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
                                'supports a single task only.')
     task = task_or_dag
 
-    click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
+    click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
+    click.secho(cluster)
     request_id = sdk.exec(task, cluster_name=cluster)
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
@@ -2020,7 +2016,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='yellow')
+    click.secho('Fetching and parsing job queue...', fg='cyan')
     if not clusters:
         cluster_records = _get_cluster_records_and_set_ssh_config(
             None, all_users=all_users)
@@ -3972,7 +3968,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky jobs queue
 
     """
-    click.secho('Fetching managed job statuses...', fg='yellow')
+    click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         managed_jobs_request_id = managed_jobs.queue(
             refresh=refresh, skip_finished=skip_finished)
@@ -4169,7 +4165,6 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        entrypoint_name='Service',
     )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
@@ -4335,7 +4330,7 @@ def serve_up(
         ports=ports,
         not_supported_cmd='sky serve up',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('Each replica will use the following resources (estimated):',
@@ -4434,7 +4429,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
         ports=ports,
         not_supported_cmd='sky serve update',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('New replica will use the following resources (estimated):',
@@ -4893,7 +4888,7 @@ def benchmark_launch(
             'Please provide a YAML file.')
     assert config is not None, (is_yaml, config)
 
-    click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
+    click.secho('Benchmarking a task from YAML: ', fg='cyan', nl=False)
     click.secho(entrypoint, bold=True)
 
     candidates = _get_candidate_configs(entrypoint)

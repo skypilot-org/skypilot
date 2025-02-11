@@ -1,4 +1,3 @@
-
 .. _many-jobs:
 
 Many Parallel Jobs
@@ -15,7 +14,7 @@ This guide shows a typical workflow for running many jobs with SkyPilot.
 .. TODO: Show the components in a GIF.
 
 
-Why Use SkyPilot to Run Many Jobs
+Why use SkyPilot to run many jobs
 -------------------------------------
 
 - **Unified**: Use any or multiple of your own infrastructure (Kubernetes, cloud VMs, reservations, etc.).
@@ -24,7 +23,7 @@ Why Use SkyPilot to Run Many Jobs
 - **Robust**: Automatically recover jobs from failures.
 - **Observable**: Monitor and manage all jobs in a single pane of glass.
 
-Write a YAML for One Job
+Write a YAML for one job
 -----------------------------------
 
 Before scaling up to many jobs, write a SkyPilot YAML for a single job first and ensure it runs correctly. This can save time by avoiding debugging many jobs at once.
@@ -100,7 +99,7 @@ Sometimes, it may be more efficient to log into the cluster and interactively de
 
 Next, after confirming the job is working correctly, **add (hyper)parameters** to the job YAML so that all job variants can be specified.
 
-1. Add Hyperparameters
+1. Add hyperparameters
 ~~~~~~~~~~~~~~~~~~~~~~
 
 To launch jobs with different hyperparameters, add them as :ref:`environment variables <env-vars>` to the SkyPilot YAML, and make your main program read these environment variables:
@@ -172,7 +171,7 @@ Alternative, store the environment variable values in a dotenv file and use ``--
 
 
 
-2. Logging Job Outputs
+2. Logging job outputs
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 When running many jobs, it is useful to log the outputs of all jobs. You can use tools like `W&B <https://wandb.ai>`__ for this purpose:
@@ -234,13 +233,10 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 
 
 
-Scale Out to Many Jobs
+Scale out to many jobs
 -----------------------
 
-With the above setup, you can now scale out to run many jobs in parallel. You
-can either use SkyPilot CLI with many config files or use SkyPilot Python API.
-
-With CLI and Config Files
+With CLI and config files
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can run many jobs in parallel by (1) creating multiple config files and (2)
@@ -309,10 +305,10 @@ Job statuses can be checked via ``sky jobs queue``:
 
   $ sky jobs queue
 
-  Fetching managed job statuses...
+  Fetching managed jobs...
   Managed jobs
   In progress tasks: 10 RUNNING
-  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS   
+  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
   10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
   9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
   8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
@@ -346,7 +342,7 @@ To have more customized control over generation of job variants, you can also us
       job_idx += 1
 
 
-Best Practices for Scaling
+Best practices for scaling
 --------------------------
 
 By default, around 90 jobs can be managed at once. However, with some simple configuration, SkyPilot can reliably support **2000 jobs running in parallel**. See :ref:`the best practices <jobs-controller-sizing>` for more info.

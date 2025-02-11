@@ -1,15 +1,7 @@
 .. _sky-compare:
 
-Comparing SkyPilot with other systems
-=====================================
-
-SkyPilot is a framework for running AI and batch workloads on any infrastructure. While SkyPilot offers unique capabilities, certain functionalities like job scheduling overlap with existing systems (e.g., Kubernetes, Slurm). That said, SkyPilot can be used in conjunction with them to provide additional benefits.
-
-This page provides a comparison of SkyPilot with other systems, focusing on the unique benefits provided by SkyPilot. We welcome feedback and contributions to this page.
-
-
 SkyPilot vs Vanilla Kubernetes
-------------------------------
+==============================
 
 Kubernetes is a powerful system for managing containerized applications. :ref:`Using SkyPilot to access your Kubernetes cluster <kubernetes-overview>` boosts developer productivity and allows you to scale your infra beyond a single Kubernetes cluster.
 
@@ -18,7 +10,7 @@ Kubernetes is a powerful system for managing containerized applications. :ref:`U
    Light: https://docs.google.com/drawings/d/1REe_W49SPJ44N-o4NRCKcIRhCkXG9o03ZXHh1mfLUzk/edit?usp=sharing
    Dark: https://docs.google.com/drawings/d/1MefAOXRNHj05B9raO3dCPhAyMJN3oWYM6nvUNgo8aoA/edit?usp=sharing
 
-.. figure:: ../images/k8s-skypilot-architecture-dark.png
+.. figure:: ../../images/k8s-skypilot-architecture-dark.png
    :width: 55%
    :align: center
    :alt: SkyPilot on Kubernetes
@@ -26,7 +18,7 @@ Kubernetes is a powerful system for managing containerized applications. :ref:`U
 
    SkyPilot layers on top of your Kubernetes cluster to deliver a better developer experience.
 
-.. figure:: ../images/k8s-skypilot-architecture-light.png
+.. figure:: ../../images/k8s-skypilot-architecture-light.png
    :width: 55%
    :align: center
    :alt: SkyPilot on Kubernetes

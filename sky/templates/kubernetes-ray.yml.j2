@@ -373,15 +373,16 @@ available_node_types:
                 done;
                 if [ ! -z "$INSTALL_FIRST" ]; then
                   echo "Installing core packages: $INSTALL_FIRST";
-                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y $INSTALL_FIRST;
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $INSTALL_FIRST;
                 fi;
                 # SSH and other packages are not necessary, so we disable set -e
                 set +e
                 
                 if [ ! -z "$MISSING_PACKAGES" ]; then
                   echo "Installing missing packages: $MISSING_PACKAGES";
-                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y $MISSING_PACKAGES;
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $MISSING_PACKAGES;
                 fi;
+              
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
                 $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;

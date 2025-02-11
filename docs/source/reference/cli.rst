@@ -11,11 +11,6 @@ Cluster CLI
    :prog: sky launch
    :nested: full
 
-.. _sky-exec:
-.. click:: sky.cli:exec
-   :prog: sky exec
-   :nested: full
-
 .. _sky-stop:
 .. click:: sky.cli:stop
    :prog: sky stop
@@ -41,14 +36,18 @@ Cluster CLI
    :prog: sky autostop
    :nested: full
 
+
+Cluster Jobs CLI
+----------------
+
+.. _sky-exec:
+.. click:: sky.cli:exec
+   :prog: sky exec
+   :nested: full
+
 .. _sky-queue:
 .. click:: sky.cli:queue
    :prog: sky queue
-   :nested: full
-
-.. _sky-logs:
-.. click:: sky.cli:logs
-   :prog: sky logs
    :nested: full
 
 .. _sky-cancel:
@@ -56,7 +55,12 @@ Cluster CLI
    :prog: sky cancel
    :nested: full
 
-Managed (Spot) Jobs CLI
+.. _sky-logs:
+.. click:: sky.cli:logs
+   :prog: sky logs
+   :nested: full
+
+Managed Jobs CLI
 ---------------------------
 
 .. _sky-job-launch:
@@ -79,8 +83,7 @@ Managed (Spot) Jobs CLI
    :prog: sky jobs logs
    :nested: full
 
-
-SkyServe CLI
+Serving CLI
 -------------
 
 .. click:: sky.cli:serve_up

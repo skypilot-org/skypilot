@@ -15,7 +15,7 @@ SkyPilot can run a container either as a task, or as the runtime environment of 
 
 .. _docker-containers-as-tasks:
 
-Running Containers as Tasks
+Running containers as tasks
 ---------------------------
 
 .. note::
@@ -42,7 +42,7 @@ For example, to run a HuggingFace TGI serving container:
     # `docker run` is blocking, so any commands after it
     # will NOT be run inside the container.
 
-Private Registries
+Private registries
 ^^^^^^^^^^^^^^^^^^
 
 When using this mode, to access Docker images hosted on private registries,
@@ -98,7 +98,7 @@ Our GitHub repository has more examples, including running `Detectron2 in a Dock
 
 .. _docker-containers-as-runtime-environments:
 
-Using Containers as Runtime Environments
+Using containers as runtime environments
 ----------------------------------------
 
 When a container is used as the runtime environment, everything happens inside the container:
@@ -174,7 +174,7 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
   to limitations in the RunPod API, so ensure that you choose a container with a
   default entrypoint (i.e. :code:`/bin/bash`).
 
-Private Registries
+Private registries
 ^^^^^^^^^^^^^^^^^^
 
 .. note::

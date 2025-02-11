@@ -192,7 +192,7 @@ For example, if you have access to special regions of GCP, add the data to ``~/.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
 
-Package Installation
+Package installation
 ---------------------
 
 Unable to import PyTorch in a SkyPilot task.

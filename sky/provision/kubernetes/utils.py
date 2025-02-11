@@ -2144,52 +2144,54 @@ def get_kubernetes_node_info(
 
     lf, _ = detect_gpu_label_formatter(context)
     if not lf:
-        label_key = None
+        label_keys = []
     else:
         label_keys = lf.get_label_keys()
 
     node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
 
-    for label_key in label_keys:
-        for node in nodes:
-            allocated_qty = 0
+    for node in nodes:
+        accelerator_name = None
+        # Determine the accelerator name from the node labels and pick the
+        # first one found. We assume that the node has only one accelerator type
+        # (e.g., either GPU or TPU).
+        for label_key in label_keys:
             if lf is not None and label_key in node.metadata.labels:
                 accelerator_name = lf.get_accelerator_from_label_value(
                     node.metadata.labels.get(label_key))
-            else:
-                accelerator_name = None
+                break
 
-            accelerator_count = get_node_accelerator_count(
-                node.status.allocatable)
+        allocated_qty = 0
+        accelerator_count = get_node_accelerator_count(node.status.allocatable)
 
-            if pods is None:
-                accelerators_available = -1
+        if pods is None:
+            accelerators_available = -1
 
-            else:
-                for pod in pods:
-                    # Get all the pods running on the node
-                    if (pod.spec.node_name == node.metadata.name and
-                            pod.status.phase in ['Running', 'Pending']):
-                        # Iterate over all the containers in the pod and sum the
-                        # GPU requests
-                        for container in pod.spec.containers:
-                            if container.resources.requests:
-                                allocated_qty += get_node_accelerator_count(
-                                    container.resources.requests)
+        else:
+            for pod in pods:
+                # Get all the pods running on the node
+                if (pod.spec.node_name == node.metadata.name and
+                        pod.status.phase in ['Running', 'Pending']):
+                    # Iterate over all the containers in the pod and sum the
+                    # GPU requests
+                    for container in pod.spec.containers:
+                        if container.resources.requests:
+                            allocated_qty += get_node_accelerator_count(
+                                container.resources.requests)
 
-                accelerators_available = accelerator_count - allocated_qty
+            accelerators_available = accelerator_count - allocated_qty
 
-            # Exclude multi-host TPUs from being processed.
-            # TODO(Doyoung): Remove the logic when adding support for
-            # multi-host TPUs.
-            if is_multi_host_tpu(node.metadata.labels):
-                continue
+        # Exclude multi-host TPUs from being processed.
+        # TODO(Doyoung): Remove the logic when adding support for
+        # multi-host TPUs.
+        if is_multi_host_tpu(node.metadata.labels):
+            continue
 
-            node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
-                name=node.metadata.name,
-                accelerator_type=accelerator_name,
-                total={'accelerator_count': int(accelerator_count)},
-                free={'accelerators_available': int(accelerators_available)})
+        node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
+            name=node.metadata.name,
+            accelerator_type=accelerator_name,
+            total={'accelerator_count': int(accelerator_count)},
+            free={'accelerators_available': int(accelerators_available)})
 
     return node_info_dict
 
