@@ -121,7 +121,7 @@ A *job* is a program you want to run. Two types of jobs are supported:
 
 
 
-A job can contain one or :ref:`more <pipeline>` tasks. In most cases, a job has just one task; we'll refer to them interchangeably.
+A job can contain one or :ref:`more <pipeline>` *tasks*. In most cases, a job has just one task; we'll refer to them interchangeably.
 
 
 
