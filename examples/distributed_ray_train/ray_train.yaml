@@ -29,5 +29,5 @@ run: |
   else
     sleep 5
     ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $head_ip:6379 --disable-usage-stats
-    sleep infinity
+    sleep 5
   fi
