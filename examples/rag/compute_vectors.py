@@ -22,16 +22,19 @@ logger = logging.getLogger(__name__)
 
 def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
     """Load documents from Pile of Law dataset."""
-    dataset = load_dataset('pile-of-law/pile-of-law', split='train', streaming=True)
+    dataset = load_dataset('pile-of-law/pile-of-law', 'all', split='train', streaming=True, trust_remote_code=True)
     
     documents = []
     for idx, doc in enumerate(dataset.skip(start_idx).take(end_idx - start_idx)):
         documents.append({
-            'id': f"{doc['split']}/{doc['id']}",
-            'name': doc['name'],
+            'id': f"{idx}",
+            'name': doc['url'],
             'text': doc['text'],
-            'split': doc['split'],
-            'source': doc['source']
+            'split': 'train',
+            'source': 'r_legaladvice',
+            'created_timestamp': doc['created_timestamp'],
+            'downloaded_timestamp': doc['downloaded_timestamp'],
+            'url': doc['url']
         })
         
         if (idx + 1) % 100 == 0:
@@ -83,26 +86,31 @@ def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str, batch_size:
     for i in tqdm(range(0, len(chunks), batch_size), desc='Computing embeddings'):
         batch = chunks[i:i + batch_size]
         
-        # Create prompt for each chunk
-        prompts = [
-            f"Please analyze this legal text and provide a comprehensive embedding. Text: {chunk['content']}"
-            for chunk in batch
-        ]
+        # Create prompt for each chunk - simplified prompt
+        prompts = [chunk['content'] for chunk in batch]
         
         try:
-            # Get embeddings from vLLM
+            # Print request payload for debugging
+            request_payload = {
+                "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+                "input": prompts
+            }
+            
             response = requests.post(
                 f"{vllm_endpoint}/v1/embeddings",
-                json={
-                    "input": prompts,
-                    "model": "deepseek-ai/deepseek-r1-distill-llama-8b"
-                },
+                json=request_payload,
                 timeout=60
             )
+            
             response.raise_for_status()
             
-            # Extract embeddings
-            embeddings = [data['embedding'] for data in response.json()['data']]
+            # Extract embeddings - updated response parsing
+            result = response.json()
+
+            if 'data' not in result:
+                raise ValueError(f"Unexpected response format: {result}")
+            
+            embeddings = [item['embedding'] for item in result['data']]
             
             # Combine embeddings with metadata
             for chunk, embedding in zip(batch, embeddings):
@@ -114,7 +122,6 @@ def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str, batch_size:
                     'source': chunk['source'],
                     'embedding': pickle.dumps(np.array(embedding))  # Serialize the embedding
                 })
-                
         except Exception as e:
             logger.error(f"Error computing embeddings for batch: {str(e)}")
             # Wait a bit before retrying

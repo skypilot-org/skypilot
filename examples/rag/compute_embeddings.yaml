@@ -5,8 +5,7 @@ workdir: .
 resources:
   accelerators: 
     L4: 1
-    A10G: 1
-    A10: 1
+    # A10G: 1
     V100: 1
   memory: 32+
   ports: 8000  # For vLLM service
@@ -25,17 +24,16 @@ setup: |
 
 run: |
   # Start vLLM service in background
-  python -m vllm.entrypoints.openai.api_server \
-    --host 0.0.0.0 \
-    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-    --max-model-len 4096 &
+  # python -m vllm.entrypoints.openai.api_server \
+  #   --host 0.0.0.0 \
+  #   --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+  #   --max-model-len 4096 &
   
-  # Wait for vLLM to start
-  sleep 30
+  # # Wait for vLLM to start
+  # sleep 30
   
   # Process dataset in chunks of 1000 documents
-  for i in {0..99}; do
+  for i in {0..1000}; do
     start_idx=$((i * 1000))
     end_idx=$(((i + 1) * 1000))
     
