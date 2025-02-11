@@ -185,6 +185,7 @@ To execute a distributed Ray program on many nodes, you can download the `traini
       else
         sleep 5
         ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $HEAD_IP:6379 --disable-usage-stats
+        sleep infinity
       fi
 
 .. warning::
