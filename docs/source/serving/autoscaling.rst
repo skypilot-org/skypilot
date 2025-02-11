@@ -5,7 +5,7 @@ Autoscaling
 
 SkyServe provides out-of-the-box autoscaling for your services.
 
-Fixed Replicas
+Fixed replicas
 --------------
 
 In a service YAML, the number of replicas to launch is specified in the ``service`` section's ``replicas`` field:
@@ -22,7 +22,7 @@ In a service YAML, the number of replicas to launch is specified in the ``servic
 In this case, SkyServe will launch 2 replicas of your service. However, this deployment is fixed and cannot adjust to dynamic traffic.
 SkyServe provides autoscaling to help you scale your service up and down based on traffic, as shown below.
 
-Enabling Autoscaling
+Enabling autoscaling
 --------------------
 
 Here is a minimal example to enable autoscaling for your service:
@@ -71,7 +71,7 @@ Specifically, the current target number of replicas is calculated as:
 
     :code:`target_qps_per_replica` can be any positive floating point number. If processing one request takes two seconds in one replica, we can use :code:`target_qps_per_replica=0.5`.
 
-Scaling Delay
+Scaling delay
 -------------
 
 SkyServe will not scale up or down immediately. Instead, SkyServe will only
@@ -99,7 +99,7 @@ change the scaling delay by specifying the :code:`upscale_delay_seconds` and
 
 If you want more aggressive scaling, set those values to a lower number and vice versa.
 
-Scale-to-Zero
+Scale-to-zero
 -------------
 
 SkyServe supports scale-to-zero.

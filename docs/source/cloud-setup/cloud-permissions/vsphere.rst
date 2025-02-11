@@ -7,7 +7,7 @@ This document is provided for users who use VMware vSphere provider and helps th
 
 .. _cloud-prepare-vsphere-tags:
 
-Prepare Category & Tag
+Prepare category & tag
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 The Categories and Tags is needed when using the vSphere provider, please follow bellow steps to create them.
@@ -79,7 +79,7 @@ The Categories and Tags is needed when using the vSphere provider, please follow
 
 .. _cloud-prepare-vsphere-storage-policy:
 
-Create VM Storage Policies
+Create VM storage policies
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The vSphere provider depends on the VM Storage Policies to place the VM. A Shared Datastore is recommended.
