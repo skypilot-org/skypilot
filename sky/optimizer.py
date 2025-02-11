@@ -1330,7 +1330,6 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{repr(cloud)}: {hint}')
-            else:
                 if resources.cpus is not None:
                     logger.info('Try specifying a different CPU count, '
                                 'or add "+" to the end of the CPU count '
