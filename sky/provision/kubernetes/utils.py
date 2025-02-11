@@ -694,10 +694,7 @@ def check_instance_fits(context: Optional[str],
                        f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
                        'podslices are currently not unsupported.')
 
-    try:
-        nodes = get_kubernetes_nodes(context)
-    except exceptions.ResourcesUnavailableError as e:
-        return False, f'Failed to get kubernetes nodes: {e}'
+    nodes = get_kubernetes_nodes(context)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type

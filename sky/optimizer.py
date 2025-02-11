@@ -1313,7 +1313,6 @@ def _fill_in_launchable_resources(
             else:
                 all_fuzzy_candidates.update(
                     feasible_resources.fuzzy_candidate_list)
-
         if not launchable[resources]:
             clouds_str = str(clouds_list) if len(clouds_list) > 1 else str(
                 clouds_list[0])

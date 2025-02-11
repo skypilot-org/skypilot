@@ -14,7 +14,6 @@ import typing
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import exceptions
-from sky import sky_logging
 from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.utils import log_utils
@@ -26,7 +25,6 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
     from sky import status_lib
 
-logger = sky_logging.init_logger(__name__)
 
 class CloudImplementationFeatures(enum.Enum):
     """Features that might not be implemented for all clouds.
@@ -400,20 +398,17 @@ class Cloud:
             resources_required_features.add(
                 CloudImplementationFeatures.MULTI_NODE)
 
-        hint = None
         try:
             self.check_features_are_supported(resources,
                                               resources_required_features)
-            return self._get_feasible_launchable_resources(resources)
-        except exceptions.NotSupportedError as e:
-            hint = f'Required features can not be fullfilled: {e}'
-        except Exception as e:  # pylint: disable=broad-except
-            # Leave hint as None to avoid duplicate warnings.
-            logger.warning(f'Exclude {self._REPR} due to error: {e}. '
-                           f'Run `sky check {self._REPR}` for more info.')
-        return resources_utils.FeasibleResources(resources_list=[],
-                                                 fuzzy_candidate_list=[],
-                                                 hint=hint)
+        except exceptions.NotSupportedError:
+            # TODO(zhwu): The resources are now silently filtered out. We
+            # should have some logging telling the user why the resources
+            # are not considered.
+            return resources_utils.FeasibleResources(resources_list=[],
+                                                     fuzzy_candidate_list=[],
+                                                     hint=None)
+        return self._get_feasible_launchable_resources(resources)
 
     def _get_feasible_launchable_resources(
         self, resources: 'resources_lib.Resources'
