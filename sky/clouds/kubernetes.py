@@ -80,7 +80,7 @@ class Kubernetes(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
-    # Set of contexts that are marked as unavailable in runtime
+    # Set of contexts that are marked as unavailable at runtime
     unavailable_contexts: Set[str] = set()
 
     @property
