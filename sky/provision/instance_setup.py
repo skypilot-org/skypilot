@@ -79,12 +79,13 @@ def _set_usage_run_id_cmd() -> str:
     We use a function instead of a constant so that the usage run id is the
     latest one when the function is called.
     """
-    return (f'cat {usage_constants.USAGE_RUN_ID_FILE} || '
-            # The run id is retrieved locally for the current run, so that the
-            # remote cluster will be set with the same run id as the initial
-            # launch operation.
-            f'echo "{usage_lib.messages.usage.run_id}" > '
-            f'{usage_constants.USAGE_RUN_ID_FILE}')
+    return (
+        f'cat {usage_constants.USAGE_RUN_ID_FILE} || '
+        # The run id is retrieved locally for the current run, so that the
+        # remote cluster will be set with the same run id as the initial
+        # launch operation.
+        f'echo "{usage_lib.messages.usage.run_id}" > '
+        f'{usage_constants.USAGE_RUN_ID_FILE}')
 
 
 def _set_skypilot_env_var_cmd() -> str:
