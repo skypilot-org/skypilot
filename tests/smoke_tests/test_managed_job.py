@@ -619,8 +619,9 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
 @pytest.mark.managed_jobs
 def test_managed_jobs_cancellation_gcp():
     name = smoke_tests_utils.get_cluster_name()
-    # Use :-2 to avoid cluster name to be truncated twice for managed jobs.
-    name_3 = f'{name[:-2]}-3'
+    # Reduce the name length further to avoid cluster name to be truncated twice
+    # after adding the suffix '-3'.
+    name_3 = name.replace('-jobs', '-j') + '-3'
     name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
         name_3, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
     zone = 'us-west3-b'
