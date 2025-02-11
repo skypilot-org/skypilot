@@ -19,8 +19,8 @@ from sky.serve import serve_utils
 from sky.skylet import autostop_lib
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.utils import cluster_utils
 from sky.usage import usage_lib
+from sky.utils import cluster_utils
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import ux_utils

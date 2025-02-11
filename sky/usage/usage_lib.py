@@ -459,6 +459,7 @@ def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
         messages.usage.exception = common_utils.remove_color(
             common_utils.format_exception(e))
 
+
 def send_heartbeat(interval_seconds: int = 600):
     messages.heartbeat.interval_seconds = interval_seconds
     _send_to_loki(MessageType.HEARTBEAT)

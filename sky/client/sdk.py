@@ -439,7 +439,8 @@ def launch(
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if not confirm_shown:
-        click.secho(f'Running task on cluster {cluster_name}...', fg='yellow')
+        click.secho('Running on cluster: ', fg='cyan', nl=False)
+        click.secho(cluster_name)
 
     dag = client_common.upload_mounts_to_api_server(dag)
 
