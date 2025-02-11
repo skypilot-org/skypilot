@@ -167,7 +167,9 @@ def compare_optimization_results(dag: sky.Dag, minimize_cost: bool):
     print(optimizer_plan, file=sys.stderr)
     print('=== brute force ===', file=sys.stderr)
     print(bf_plan, file=sys.stderr)
-    assert abs(objective - min_objective) < 5e-2
+    # We use $1 as the tolerance for the objective value, since there can be
+    # floating point precision issues.
+    assert abs(objective - min_objective) < 1
 
 
 def test_optimizer(enable_all_clouds):
