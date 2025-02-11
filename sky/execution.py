@@ -299,8 +299,8 @@ def _execute(
         dag=dag,
         optimize_target=optimize_target,
         requested_features=requested_features,
-        # That's because we want to do `task.run` again when K8S pod
-        # is recovered after a crash.
+        # That's because we want to do commands in task.setup and task.run again
+        # after K8S pod recovers from a crash.
         # See `kubernetes-ray.yml.j2` for more details.
         dump_final_script=is_controller_high_availability_supported)
 

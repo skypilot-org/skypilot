@@ -274,14 +274,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
                  handle: LocalDockerResourceHandle,
                  task: 'task_lib.Task',
                  detach_run: bool,
-                 dryrun: bool = False,
-                 is_high_avail_controller: bool = False) -> None:
+                 dryrun: bool = False) -> None:
         """ Launches the container."""
-        if is_high_avail_controller:
-            raise NotImplementedError(
-                'High availability controller is not supported in '
-                'LocalDockerBackend.')
-
         if detach_run:
             raise NotImplementedError('detach_run=True is not supported in '
                                       'LocalDockerBackend.')
