@@ -26,6 +26,7 @@ each other.
 import copy
 import datetime
 import functools
+import getpass
 import os
 import shlex
 import shutil
@@ -64,6 +65,7 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
 from sky.skylet import job_lib
+from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import cluster_utils
@@ -5625,10 +5627,13 @@ def api_info():
     """Shows the SkyPilot API server URL."""
     url = server_common.get_server_url()
     api_server_info = sdk.api_info()
-    click.echo(f'Using SkyPilot API server: {url} '
-               f'({api_server_info["status"]}, '
+    user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
+    user_hash = common_utils.get_user_hash()
+    click.echo(f'Using SkyPilot API server: {url}\n'
+               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
                f'commit: {api_server_info["commit"]}, '
-               f'version: {api_server_info["version"]})')
+               f'version: {api_server_info["version"]}\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user_name} ({user_hash})')
 
 
 def main():
