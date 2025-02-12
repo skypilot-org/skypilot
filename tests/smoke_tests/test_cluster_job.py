@@ -1394,7 +1394,7 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
             f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
             # Wait the GPU process to start.
             'sleep 90',
-            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep python) || '
+            f'sky exec {name} --num-nodes 2 "s=\$(nvidia-smi); echo "$s"; echo "$s" | grep python" || '
             # When run inside container/k8s, nvidia-smi cannot show process ids.
             # See https://github.com/NVIDIA/nvidia-docker/issues/179
             # To work around, we check if GPU utilization is greater than 0.
@@ -1402,7 +1402,7 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',
-            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep \'No running process\') || '
+            f'sky exec {name} --num-nodes 2 "s=\$(nvidia-smi); echo "$s"; (echo "$s" | grep \'No running process\') || '
             # Ensure Xorg is the only process running.
             '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
