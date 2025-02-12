@@ -623,7 +623,8 @@ def _launch_with_confirm(
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if not confirm_shown:
-        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
+        click.secho('Running on cluster: ', fg='cyan', nl=False)
+        click.secho(cluster)
 
     sky.launch(
         dag,
@@ -722,7 +723,6 @@ def _pop_and_ignore_fields_in_override_params(
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
-    entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
@@ -754,19 +754,15 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        click.secho(f'{entrypoint_name} from YAML spec: ',
-                    fg='yellow',
-                    nl=False)
-        click.secho(entrypoint, bold=True)
+        click.secho('YAML to run: ', fg='cyan', nl=False)
+        click.secho(entrypoint)
     else:
         if not entrypoint:
             entrypoint = None
         else:
             # Treat entrypoint as a bash command.
-            click.secho(f'{entrypoint_name} from command: ',
-                        fg='yellow',
-                        nl=False)
-            click.secho(entrypoint, bold=True)
+            click.secho('Command to run: ', fg='cyan', nl=False)
+            click.secho(entrypoint)
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
@@ -1333,7 +1329,8 @@ def exec(
                                'supports a single task only.')
     task = task_or_dag
 
-    click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
+    click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
+    click.secho(cluster)
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
@@ -1982,7 +1979,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='yellow')
+    click.secho('Fetching and parsing job queue...', fg='cyan')
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
@@ -3600,12 +3597,6 @@ def jobs():
               default=False,
               required=False,
               help='Skip confirmation prompt.')
-# TODO(cooperc): remove this flag before releasing 0.8.0
-@click.option('--fast',
-              default=False,
-              is_flag=True,
-              help=('[Deprecated] Does nothing. Previous flag behavior is now '
-                    'enabled by default.'))
 @timeline.event
 @usage_lib.entrypoint
 def jobs_launch(
@@ -3631,7 +3622,6 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
-    fast: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3673,16 +3663,6 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-
-    # Deprecation. The default behavior is fast, and the flag will be removed.
-    # The flag was not present in 0.7.x (only nightly), so we will remove before
-    # 0.8.0 so that it never enters a stable release.
-    if fast:
-        click.secho(
-            'Flag --fast is deprecated, as the behavior is now default. The '
-            'flag will be removed soon. Please do not use it, so that you '
-            'avoid "No such option" errors.',
-            fg='yellow')
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
@@ -3802,7 +3782,7 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky jobs queue
 
     """
-    click.secho('Fetching managed job statuses...', fg='yellow')
+    click.secho('Fetching managed jobs...', fg='cyan')
     with rich_utils.safe_status(
             ux_utils.spinner_message('Checking managed jobs')):
         _, msg = _get_managed_jobs(refresh=refresh,
@@ -3955,7 +3935,7 @@ def jobs_dashboard(port: Optional[int]):
     # see if the controller is UP first, which is slow; (2) not have to run SSH
     # port forwarding first (we'd just launch a local dashboard which would make
     # REST API calls to the controller dashboard server).
-    click.secho('Checking if jobs controller is up...', fg='yellow')
+    click.secho('Checking if jobs controller is up...', fg='cyan')
     hint = ('Dashboard is not available if jobs controller is not up. Run a '
             'managed job first.')
     backend_utils.is_controller_accessible(
@@ -4049,7 +4029,6 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        entrypoint_name='Service',
     )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
@@ -4214,7 +4193,7 @@ def serve_up(
         ports=ports,
         not_supported_cmd='sky serve up',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('Each replica will use the following resources (estimated):',
@@ -4332,7 +4311,7 @@ def serve_update(
         ports=ports,
         not_supported_cmd='sky serve update',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('New replica will use the following resources (estimated):',
@@ -4784,7 +4763,7 @@ def benchmark_launch(
             'Please provide a YAML file.')
     assert config is not None, (is_yaml, config)
 
-    click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
+    click.secho('Benchmarking a task from YAML: ', fg='cyan', nl=False)
     click.secho(entrypoint, bold=True)
 
     candidates = _get_candidate_configs(entrypoint)

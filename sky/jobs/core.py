@@ -41,8 +41,6 @@ def launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
-    # TODO(cooperc): remove fast arg before 0.8.0
-    fast: bool = True,  # pylint: disable=unused-argument for compatibility
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
@@ -54,8 +52,6 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
-        fast: [Deprecated] Does nothing, and will be removed soon. We will
-          always use fast mode as it's fully safe now.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
@@ -101,7 +97,7 @@ def launch(
             ux_utils.spinner_message('Initializing managed job')):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, path='jobs')
+                task_, task_type='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -476,24 +472,3 @@ def sync_down_logs(
                                        job_name=name,
                                        controller=controller,
                                        local_dir=local_dir)
-
-
-spot_launch = common_utils.deprecated_function(
-    launch,
-    name='sky.jobs.launch',
-    deprecated_name='spot_launch',
-    removing_version='0.8.0',
-    override_argument={'use_spot': True})
-spot_queue = common_utils.deprecated_function(queue,
-                                              name='sky.jobs.queue',
-                                              deprecated_name='spot_queue',
-                                              removing_version='0.8.0')
-spot_cancel = common_utils.deprecated_function(cancel,
-                                               name='sky.jobs.cancel',
-                                               deprecated_name='spot_cancel',
-                                               removing_version='0.8.0')
-spot_tail_logs = common_utils.deprecated_function(
-    tail_logs,
-    name='sky.jobs.tail_logs',
-    deprecated_name='spot_tail_logs',
-    removing_version='0.8.0')
