@@ -866,21 +866,23 @@ def test_add_and_remove_pod_annotations_with_autostop():
             # Set autodown on the cluster with 'autostop' command.
             f'sky autostop -y {name} -i 20 --down',
             # Get names of the pods containing cluster name.
-            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
-            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
             # Describe the first pod and check for annotations.
-            'pod_tag=$(kubectl describe pod $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown',
+            'pod_tag=$(kubectl describe pod $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
             'pod_tag=$(kubectl describe pod $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             # Describe the second pod and check for annotations.
-            'pod_tag=$(kubectl describe pod $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+            'pod_tag=$(kubectl describe pod $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
             'pod_tag=$(kubectl describe pod $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             # Cancel the set autodown to remove the annotations from the pods.
             f'sky autostop -y {name} --cancel',
             # Describe the first pod and check if annotations are removed.
-            'pod_tag=$(kubectl describe pod $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown',
+            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+            'pod_tag=$(kubectl describe pod $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
             'pod_tag=$(kubectl describe pod $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
             # Describe the second pod and check if annotations are removed.
-            'pod_tag=$(kubectl describe pod $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown',
+            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+            'pod_tag=$(kubectl describe pod $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
             'pod_tag=$(kubectl describe pod $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
         ],
         f'sky down -y {name}',
