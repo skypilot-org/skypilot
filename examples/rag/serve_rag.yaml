@@ -5,7 +5,6 @@ workdir: .
 resources:
   accelerators: 
     L4: 4
-    V100: 2
   memory: 32+
   ports: 
     - 8000  # vLLM endpoint

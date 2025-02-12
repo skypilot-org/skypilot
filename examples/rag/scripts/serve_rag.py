@@ -134,7 +134,7 @@ async def query_llm(prompt: str, temperature: float = 0.7) -> str:
                     {"role": "user", "content": prompt}
                 ],
                 "temperature": temperature,
-                "max_tokens": 3766,
+                "max_tokens": 2048,
                 "stop": None
             },
             timeout=120
@@ -142,7 +142,7 @@ async def query_llm(prompt: str, temperature: float = 0.7) -> str:
         response.raise_for_status()
 
         logger.info(f"Response: {response.json()}")
-        
+
         return response.json()['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Error querying LLM: {str(e)}")
