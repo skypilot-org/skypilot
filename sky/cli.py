@@ -64,8 +64,8 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import requests
-from sky.skylet import job_lib
 from sky.skylet import constants
+from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import cluster_utils
