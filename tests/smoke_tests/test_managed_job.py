@@ -23,7 +23,6 @@
 # > pytest tests/smoke_tests/test_managed_job.py --generic-cloud aws
 import pathlib
 import re
-import shlex
 import tempfile
 import time
 
@@ -33,6 +32,7 @@ from smoke_tests import test_mount_and_storage
 
 import sky
 from sky import jobs
+from sky.clouds import gcp
 from sky.data import storage as storage_lib
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -825,8 +825,14 @@ def test_managed_jobs_storage(generic_cloud: str):
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
+        try_activating_gcp_service_account = (
+            f'GOOGLE_APPLICATION_CREDENTIALS={gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+            'gcloud auth activate-service-account '
+            '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+            '2> /dev/null || true')
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
+            f'{try_activating_gcp_service_account}; '
             f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd}; }}')
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
