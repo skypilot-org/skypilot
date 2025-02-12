@@ -4,15 +4,15 @@ workdir: .
 
 resources:
   accelerators: 
-    L4: 1
-    A10G: 1
-    A10: 1
-    V100: 1
+    L4: 4
+    V100: 2 # 1 GPU for calculating embeddings, 1 GPU for generating responses
   memory: 32+
   ports: 
     - 8000  # vLLM endpoint
     - 8001  # RAG endpoint
-
+  any_of:
+    - use_spot: true
+    - use_spot: false
 file_mounts:
   /vectordb:
     name: sky-legal-vectordb
@@ -33,16 +33,27 @@ service:
     path: /health
 run: |
   # Start vLLM service in background
-  # python -m vllm.entrypoints.openai.api_server \
-  #   --host 0.0.0.0 \
-  #   --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-  #   --max-model-len 4096 &
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0:8002 \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --max-model-len 4096 &
   
   # Wait for vLLM to start
-  # sleep 30
+  sleep 30
+  
+  # Start vLLM embeddings service in background
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0:8003 \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --max-model-len 4096 \
+    --task embed &
+
+  # Wait for vLLM embeddings service to start
+  sleep 30
   
   # Start RAG service
   python scripts/serve_rag.py \
     --collection-name legal_docs \
     --persist-dir /vectordb/chroma \
-    --vllm-endpoint http://localhost:8000 
+    --vllm-endpoint http://localhost:8002 \
+    --rag-endpoint http://localhost:8003 

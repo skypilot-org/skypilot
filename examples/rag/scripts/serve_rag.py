@@ -25,7 +25,8 @@ app = FastAPI(title='RAG System with DeepSeek R1')
 
 # Global variables
 collection = None
-vllm_endpoint = None
+generator_endpoint = None  # For text generation
+embed_endpoint = None     # For embeddings
 
 class QueryRequest(BaseModel):
     query: str
@@ -50,11 +51,11 @@ class RAGResponse(BaseModel):
 
 def encode_query(query: str) -> np.ndarray:
     """Encode query text using vLLM embeddings endpoint."""
-    global vllm_endpoint
+    global embed_endpoint
     
     try:
         response = requests.post(
-            f"{vllm_endpoint}/v1/embeddings",
+            f"{embed_endpoint}/v1/embeddings",
             json={
                 "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
                 "input": [query]
@@ -129,11 +130,11 @@ Answer:"""
 
 async def query_llm(prompt: str, temperature: float = 0.7) -> str:
     """Query DeepSeek R1 through vLLM endpoint."""
-    global vllm_endpoint
+    global generator_endpoint
     
     try:
         response = requests.post(
-            f"{vllm_endpoint}/v1/completions",
+            f"{generator_endpoint}/v1/completions",
             json={
                 "prompt": prompt,
                 "temperature": temperature,
@@ -196,18 +197,23 @@ def main():
                        type=str,
                        default='/vectordb/chroma',
                        help='Directory where ChromaDB is persisted')
-    parser.add_argument('--vllm-endpoint',
+    parser.add_argument('--generator-endpoint',
                        type=str,
                        required=True,
-                       help='Endpoint for vLLM service')
+                       help='Endpoint for text generation service')
+    parser.add_argument('--embed-endpoint',
+                       type=str,
+                       required=True,
+                       help='Endpoint for embeddings service')
     
     args = parser.parse_args()
     
     # Initialize global variables
-    global collection, vllm_endpoint
+    global collection, generator_endpoint, embed_endpoint
     
-    # Set vLLM endpoint
-    vllm_endpoint = args.vllm_endpoint.rstrip('/')
+    # Set endpoints
+    generator_endpoint = args.generator_endpoint.rstrip('/')
+    embed_endpoint = args.embed_endpoint.rstrip('/')
     
     # Initialize ChromaDB
     logger.info(f'Connecting to ChromaDB at {args.persist_dir}')
