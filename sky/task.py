@@ -982,9 +982,7 @@ class Task:
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
         """
-        print('zhwu DEBUG sync_storage_mounts storage_mounts', self.storage_mounts)
         for storage in self.storage_mounts.values():
-            print('zhwu DEBUG sync_storage_mounts storage', storage.__dict__)
             storage.construct()
             assert storage.name is not None, storage
             if not storage.stores:
@@ -992,7 +990,6 @@ class Task:
                 self.storage_plans[storage] = store_type
                 storage.add_store(store_type, store_region)
                 storage.sync_all_stores()
-                print('zhwu DEBUG sync_storage_mounts storage no stores synced', storage.__dict__)
             else:
                 # We don't need to sync the storage here as if the stores are
                 # not empty, it measn the storage has been synced during
@@ -1001,7 +998,6 @@ class Task:
                 assert all(store is not None
                            for store in storage.stores.values()), storage
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
-                print('zhwu DEBUG sync_storage_mounts storage stores synced', storage.__dict__)
 
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
