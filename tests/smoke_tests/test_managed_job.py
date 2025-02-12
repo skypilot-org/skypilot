@@ -822,20 +822,20 @@ def test_managed_jobs_storage(generic_cloud: str):
         gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
+        cloud_dependencies_setup_cmd = ' && '.join(
+            controller_utils._get_cloud_dependencies_installation_commands(
+                controller_utils.Controllers.JOBS_CONTROLLER))
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
-            name, f'{s3_output_check_cmd} || {gcs_output_check_cmd}')
+            name, f'{cloud_dependencies_setup_cmd}; '
+            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} }}')
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.S3, storage_name)
         storage_removed_check_gcs_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.GCS, storage_name)
-        cloud_dependencies_setup_cmd = ' && '.join(
-            controller_utils._get_cloud_dependencies_installation_commands(
-                controller_utils.Controllers.JOBS_CONTROLLER))
         non_persistent_bucket_removed_check_cmd = (
             smoke_tests_utils.run_cloud_cmd_on_cluster(
-                name, f'{cloud_dependencies_setup_cmd} && '
-                f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
+                name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || true'))
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
