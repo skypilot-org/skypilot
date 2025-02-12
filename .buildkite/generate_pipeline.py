@@ -40,6 +40,11 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
+QUEUE_GKE = 'gke'
+# We use KUBE_BACKEND to specify the queue for kubernetes tests mark as
+# resource_heavy. It can be either EKS or GKE.
+QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
+assert QUEUE_KUBE_BACKEND in [QUEUE_EKS, QUEUE_GKE]
 # Only aws, gcp, azure, and kubernetes are supported for now.
 # Other clouds do not have credentials.
 CLOUD_QUEUE_MAP = {
@@ -174,8 +179,9 @@ def _extract_marked_tests(
     for function_name, marks in function_name_marks_map.items():
         clouds_to_include = []
         is_serve_test = 'serve' in marks
-        run_on_eks = ('requires_eks' in marks and
-                      'kubernetes' in default_clouds_to_run)
+        run_on_cloud_kube_backend = ('resource_heavy' in marks and
+                                     'kubernetes' in default_clouds_to_run)
+
         for mark in marks:
             if mark not in PYTEST_TO_CLOUD_KEYWORD:
                 # This mark does not specify a cloud, so we skip it.
@@ -211,7 +217,8 @@ def _extract_marked_tests(
             param_list += [None
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
-            QUEUE_EKS if run_on_eks else cloud_queue_map[cloud]
+            QUEUE_KUBE_BACKEND
+            if run_on_cloud_kube_backend else cloud_queue_map[cloud]
             for cloud in final_clouds_to_include
         ], param_list)
 

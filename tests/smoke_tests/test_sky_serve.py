@@ -220,7 +220,7 @@ def test_skyserve_azure_http():
 
 @pytest.mark.kubernetes
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()
@@ -241,7 +241,7 @@ def test_skyserve_oci_http():
 @pytest.mark.no_vast  # Vast has low availability of T4 GPUs
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -371,7 +371,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -473,7 +473,7 @@ def test_skyserve_auto_restart():
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -500,7 +500,7 @@ def test_skyserve_cancel(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     name = _get_service_name()
@@ -545,7 +545,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
@@ -568,7 +568,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -601,7 +601,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     name = _get_service_name()
@@ -640,7 +640,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -683,7 +683,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -790,7 +790,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
     name = _get_service_name()
@@ -838,7 +838,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
@@ -876,7 +876,7 @@ def test_skyserve_https(generic_cloud: str):
 
 
 @pytest.mark.serve
-@pytest.mark.requires_eks
+@pytest.mark.resource_heavy
 def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""
     name = _get_service_name()
