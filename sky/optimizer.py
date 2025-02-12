@@ -884,10 +884,8 @@ class Optimizer:
                 # Add a new line for better readability, when there are multiple
                 # tasks.
                 logger.info('')
-            logger.info(
-                f'{colorama.Style.BRIGHT}Considered resources {task_str}'
-                f'({task.num_nodes} node{plural}):'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'Considered resources {task_str}'
+                        f'({task.num_nodes} node{plural}):')
 
             # Only print 1 row per cloud.
             # The following code is to generate the table

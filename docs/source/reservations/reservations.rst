@@ -1,7 +1,7 @@
 
 .. _reservation:
 
-Reserved, Capacity Blocks, DWS
+Using Reservations
 ===================================
 
 
@@ -79,7 +79,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
     resources:
       cloud: aws
       accelerators: A100:8
-    
+
     num_nodes: 2
 
 
@@ -166,9 +166,9 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
     resources:
       cloud: gcp
       accelerators: A100:8
-    
+
     num_nodes: 4
-    
+
 Using DWS on GKE with Kueue
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 

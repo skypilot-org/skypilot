@@ -2448,7 +2448,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             # can be None. We need to update it here, even when force_cached is
             # set to True.
             # TODO: We can remove `self.cached_external_ips is None` after
-            # version 0.8.0.
+            # all clouds moved to new provisioner.
             if force_cached and self.cached_external_ips is None:
                 raise RuntimeError(
                     'Tried to use cached cluster info, but it\'s missing for '

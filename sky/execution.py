@@ -269,8 +269,8 @@ def _execute(
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
             logger.info(
-                f'{yellow}Launching an unmanaged spot task, which does not '
-                f'automatically recover from preemptions.{reset}\n{yellow}To '
+                f'{yellow}Launching a spot job that does not '
+                f'automatically recover from preemptions. To '
                 'get automatic recovery, use managed job instead: '
                 f'{reset}{bold}sky jobs launch{reset} {yellow}or{reset} '
                 f'{bold}sky.jobs.launch(){reset}.')
