@@ -122,6 +122,21 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
   run: |
     # Commands to run inside the container
 
+.. note::
+  For **non-root** docker images on RunPod, you must manually set the :code:`SKYPILOT_RUNPOD_DOCKER_USERNAME` environment variable to match the login user of the docker image (set by the last `USER` instruction in the Dockerfile).
+
+  You can set this environment variable in the :code:`envs` section of your task YAML file:
+
+  .. code-block:: yaml
+
+    envs:
+      SKYPILOT_RUNPOD_DOCKER_USERNAME: <ssh-user>
+
+  It's a workaround for RunPod's limitation that we can't get the login user for the created pods, and even `runpodctl` uses a hardcoded `root` for SSH access.
+  But for other clouds, the login users for the created docker containers are automatically fetched and used.
+
+  See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/4282#issuecomment-2652576673>`_ for more.
+
 As another example, here's how to use `NVIDIA's PyTorch NGC Container <https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch>`_:
 
 .. code-block:: yaml
@@ -199,11 +214,6 @@ you can provide the registry authentication details using :ref:`task environment
             SKYPILOT_DOCKER_USERNAME: <user>
             SKYPILOT_DOCKER_PASSWORD: <password>
             SKYPILOT_DOCKER_SERVER: docker.io
-
-            # Optional: specify a custom username for accessing the container.
-            # Should be same as the login username for the docker image.
-            # It's only used by RunPod, as a workaround to set the ssh user for the docker containers. For other clouds, the default docker username is automatically fetched and used.
-            SKYPILOT_RUNPOD_DOCKER_USERNAME: <ssh-user>
 
     .. tab-item:: Cloud Provider Registry (e.g., ECR)
         :sync: csp-registry-tab
