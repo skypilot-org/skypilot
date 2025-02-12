@@ -896,7 +896,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # the src for copy mounts.
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
         # TODO(zhwu): this fails due to IndexError: list index out of range
-        print('zhwu DEBUG storage_obj', storage_obj)
+        print('zhwu DEBUG storage_obj', storage_obj.__dict__)
         curr_store_type = list(storage_obj.stores.keys())[0]
         store_object = storage_obj.stores[curr_store_type]
         assert store_object is not None
