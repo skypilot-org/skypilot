@@ -14,11 +14,11 @@ Example usage:
 - :ref:`use-spot-for-gpu-policy`
 - :ref:`enforce-autostop-policy`
 - :ref:`dynamic-kubernetes-contexts-update-policy`
- 
+
 
 To implement and use an admin policy:
 
-- Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface; 
+- Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface;
 - Admins distributes this package to users;
 - Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
 
@@ -117,7 +117,7 @@ The ``sky.Config`` and ``sky.RequestOptions`` classes are defined as follows:
 
     The ``sky.AdminPolicy`` should be idempotent. In other words, it should be safe to apply the policy multiple times to the same user request.
 
-Example Policies    
+Example policies
 ----------------
 
 We have provided a few example policies in `examples/admin_policy/example_policy <https://github.com/skypilot-org/skypilot/tree/master/examples/admin_policy/example_policy>`_. You can test these policies by installing the example policy package in your Python environment.
@@ -128,8 +128,8 @@ We have provided a few example policies in `examples/admin_policy/example_policy
     cd skypilot
     pip install examples/admin_policy/example_policy
 
-Reject All
-~~~~~~~~~~
+Reject all tasks
+~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
     :language: python
@@ -142,7 +142,7 @@ Reject All
 
 .. _kubernetes-labels-policy:
 
-Add Labels for all Tasks on Kubernetes
+Add labels for all tasks on Kubernetes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
@@ -156,8 +156,8 @@ Add Labels for all Tasks on Kubernetes
 
 
 .. _disable-public-ip-policy:
-    
-Always Disable Public IP for AWS Tasks
+
+Always disable public IP for AWS tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
@@ -171,7 +171,7 @@ Always Disable Public IP for AWS Tasks
 
 .. _use-spot-for-gpu-policy:
 
-Use Spot for all GPU Tasks
+Use spot for all GPU tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 ..
@@ -186,7 +186,7 @@ Use Spot for all GPU Tasks
 
 .. _enforce-autostop-policy:
 
-Enforce Autostop for all Tasks
+Enforce autostop for all tasks
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py
@@ -201,7 +201,7 @@ Enforce Autostop for all Tasks
 
 .. _dynamic-kubernetes-contexts-update-policy:
 
-Dynamically Update Kubernetes Contexts to Use
+Dynamically update Kubernetes contexts to use
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. literalinclude:: ../../../examples/admin_policy/example_policy/example_policy/skypilot_policy.py

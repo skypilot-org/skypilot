@@ -13,10 +13,9 @@ During an update, the service will remain accessible with no downtime and its
 endpoint will remain the same. By default, :ref:`rolling update <rolling-update>`
 is applied, while you can also specify a :ref:`blue-green update <blue-green-update>`.
 
-
 .. _rolling-update:
 
-Rolling Update
+Rolling update
 ---------------
 
 To update an existing service, use ``sky serve update``:
@@ -168,7 +167,7 @@ Eventually, we will only have new replicas ready to serve user requests.
 
 .. _blue-green-update:
 
-Blue-Green Update
+Blue-green update
 ------------------
 
 SkyServe also supports blue-green updates, by the following command:

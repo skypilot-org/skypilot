@@ -321,6 +321,7 @@ def test_kubernetes_context_switch():
 
 
 @pytest.mark.no_vast  # Requires AWS
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize(
     'image_id',
     [

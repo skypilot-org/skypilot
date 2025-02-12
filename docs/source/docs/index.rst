@@ -49,7 +49,7 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 
-:ref:`Current supported infra <installation>` (Kubernetes; AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack, RunPod, Cudo, Paperspace, Cloudflare, Samsung, IBM, VMware vSphere):
+:ref:`Current supported infra <installation>` (Kubernetes; AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack, RunPod, Cudo, Paperspace, Digital Ocean, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere):
 
 .. raw:: html
 
@@ -136,89 +136,87 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
-   ../examples/interactive-development
-   ../getting-started/tutorial
+   Example: AI Training <../getting-started/tutorial>
    ../sky-computing
 
-
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Running Jobs
+   :caption: Clusters
 
-   ../examples/managed-jobs
-   ../reference/job-queue
+   Start a Cluster <../examples/interactive-development>
    ../examples/auto-failover
-   ../running-jobs/distributed-jobs
-   ../running-jobs/many-jobs
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: Reserved & Existing Clusters
-
-   ../reservations/reservations
-   Using Existing Machines <../reservations/existing-machines>
-   ../reference/kubernetes/index
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: SkyServe: Model Serving
-
-   ../serving/sky-serve
-   ../serving/user-guides
-   ../serving/service-yaml-spec
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: Cutting Cloud Costs
-
-   Managed Spot Jobs <../examples/spot-jobs>
    ../reference/auto-stop
-   ../reference/benchmark/index
 
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Using Data
+   :caption: Jobs
 
-   ../examples/syncing-code-artifacts
+   Cluster Jobs <../reference/job-queue>
+   ../examples/managed-jobs
+   Multi-Node Jobs <../running-jobs/distributed-jobs>
+   Many Parallel Jobs <../running-jobs/many-jobs>
+
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Model Serving
+
+   Getting Started <../serving/sky-serve>
+   ../serving/user-guides
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Infra Choices
+
+   ../compute/gpus
+   Using Cloud VMs <../compute/cloud-vm>
+   ../reference/kubernetes/index
+   Using Existing Machines <../reservations/existing-machines>
+   ../reservations/reservations
+
+
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Data
+
    ../reference/storage
+   ../examples/syncing-code-artifacts
 
 .. toctree::
    :hidden:
    :maxdepth: 1
    :caption: User Guides
 
-   ../running-jobs/environment-variables
-   ../examples/docker-containers
+   Secrets and Environment Variables <../running-jobs/environment-variables>
+   Docker Containers <../examples/docker-containers>
    ../examples/ports
-   ../reference/tpu
    ../reference/logging
    ../reference/faq
-   SkyPilot vs. Other Systems <../reference/comparison>
-
 
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Cloud Admin and Usage
+   :caption: Administrator Guides
 
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
    ../cloud-setup/quota
-   ../cloud-setup/policy
+   Admin Policies <../cloud-setup/policy>
 
 .. toctree::
    :hidden:
    :maxdepth: 1
    :caption: References
 
-   ../reference/yaml-spec
-   ../reference/cli
-   ../reference/api
+   Task YAML <../reference/yaml-spec>
+   CLI <../reference/cli>
+   Python API <../reference/api>
    ../reference/config
    ../developers/index
 
