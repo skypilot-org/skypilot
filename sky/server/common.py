@@ -175,7 +175,9 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
     cmd = f'{api_server_cmd} > {log_path} 2>&1'
 
     # Start the uvicorn process in the background and don't wait for it.
-    subprocess.Popen(cmd, shell=True)
+    # If this is called from a CLI invocation, we need start_new_session=True so
+    # that SIGINT on the CLI will not also kill the API server.
+    subprocess.Popen(cmd, shell=True, start_new_session=True)
 
     # Wait for the server to start until timeout.
     # Conservative upper time bound for starting the server based on profiling.
