@@ -925,3 +925,162 @@ def test_user_dependencies(generic_cloud: str):
         f'sky down -y {name}',
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_after_ready():
+    """Test HA recovery when killing controller after replicas are READY."""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-after-ready',
+        [
+            # Launch service and wait for ready
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            # Verify service is accessible
+            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Kill controller and verify recovery
+            _kill_and_wait_controller(),
+            # Verify service remains accessible after controller recovery
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_provision():
+    """Test HA recovery when killing controller during PROVISIONING."""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-provision',
+        [
+            # Launch service and wait for provisioning
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            # Wait for service to enter PROVISIONING state
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'until echo "$s" | grep "PROVISIONING"; do '
+            '  echo "Waiting for PROVISIONING state..."; '
+            '  sleep 5; '
+            f'  s=$(sky serve status {name}); '
+            'done; echo "$s"',
+            # Kill controller during provisioning
+            _kill_and_wait_controller(),
+            # Verify service eventually becomes ready
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Check there is only one cluster
+            f'instance_names=$(gcloud compute instances list --filter="name~{name}" --format="value(name)"); '
+            'echo "Initial instances: $instance_names"; '
+            'num_instances=$(echo "$instance_names" | wc -l); '
+            '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_pending():
+    """Test HA recovery when killing controller during PENDING."""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-pending',
+        [
+            # Launch service and wait for pending
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; ',
+            _check_replica_in_status(name, [(1, False, 'PENDING')]),
+            # Kill controller during pending
+            _kill_and_wait_controller(),
+            # Verify service eventually becomes ready and accessible
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            _check_replica_in_status(name, [(1, False, 'READY')]),
+            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Check there are one cluster
+            'instance_names=$(gcloud compute instances list --filter="name~{name}" --format="value(name)"); '
+            'echo "Initial instances: $instance_names"; '
+            'num_instances=$(echo "$instance_names" | wc -l); '
+            '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.kubernetes
+@pytest.mark.gcp
+@pytest.mark.serve
+def test_skyserve_ha_kill_during_shutdown():
+    """Test HA recovery when killing controller during replica shutdown."""
+    name = _get_service_name()
+    test = smoke_tests_utils.Test(
+        'test-skyserve-ha-kill-during-shutdown',
+        [
+            # Launch service and wait for ready
+            f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
+            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
+            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            # Record instance names and initiate shutdown of the replica
+            'gcloud compute instances list --filter="" --format="value(name)"',
+            f'cluster_name=$(sky serve status {name} | grep -A 100 "Service Replicas" | grep -v "Service Replicas" | head -n 1 | awk \'{{print $1}}\'); '
+            f'name_on_cloud=$(python3 -c "from sky import serve; from sky.utils import common_utils; from sky import GCP; cluster_name = serve.generate_replica_cluster_name(\'{name}\', 1); print(common_utils.make_cluster_name_on_cloud(cluster_name, GCP.max_cluster_name_length()))"); '
+            'echo $cluster_name; '
+            f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:$cluster_name)" --format="value(name)"); '
+            'echo "Initial instances: $instance_names"; '
+            'num_instances=$(echo "$instance_names" | wc -l); '
+            '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
+            # Shutdown the replica
+            f'sky serve down -y {name} 1',
+            # Verify the replica is in SHUTTING_DOWN state
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN" > /dev/null; do '
+            '  echo "Waiting for replica to be SHUTTING_DOWN..."; sleep 5; '
+            f'  s=$(sky serve status {name}); '
+            'done; echo "$s"',
+            # Kill controller during shutdown
+            _kill_and_wait_controller(),
+            # Verify replicas remain in SHUTTING_DOWN state after controller recovery
+            f'{_SERVE_STATUS_WAIT.format(name=name)}; '
+            'echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN" > /dev/null',
+            # Verify GCP instances are eventually terminated
+            'until [ "$(gcloud compute instances list --filter="(labels.ray-cluster-name:$name_on_cloud)" --format="value(name)" | wc -l)" = "0" ]; do '
+            '  echo "Waiting for instances to terminate..."; sleep 5; '
+            'done',
+        ],
+        _TEARDOWN_SERVICE.format(name=name),
+        timeout=30 * 60,
+        env={'SKYPILOT_CONFIG': 'tests/skyserve/high_availability/config.yaml'})
+    smoke_tests_utils.run_one_test(test)
+
+
+def _kill_and_wait_controller() -> str:
+    """Kill the controller pod and wait for a new one to be ready."""
+    return (
+        'initial_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}"); '
+        'echo "Killing controller pod: $initial_controller_pod"; '
+        'kubectl delete pod $initial_controller_pod; '
+        'until new_controller_pod=$(kubectl get pods -l "skypilot-head-node=1" -o jsonpath="{.items[0].metadata.name}") && '
+        '[ "$new_controller_pod" != "$initial_controller_pod" ] && kubectl get pod $new_controller_pod | grep "1/1"; do '
+        '  echo "Waiting for new controller pod..."; sleep 5; '
+        'done; '
+        'echo "New controller pod ready: $new_controller_pod"')
