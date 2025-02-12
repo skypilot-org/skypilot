@@ -355,6 +355,7 @@ def test_kubernetes_context_switch():
 # credentials for getting azure storage commands, even though the API server
 # is running remotely. We should fix this.
 @pytest.mark.no_vast  # Requires AWS
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize(
     'image_id',
     [
