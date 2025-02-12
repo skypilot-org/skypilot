@@ -384,6 +384,11 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
                       f'ls gs://{storage_name}/hello.txt; }}')
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
+    # TODO(zpoint): this is a temporary fix. We should make it more robust.
+    # If azure is used, the azure blob storage checking assumes the bucket is
+    # created in the centralus region when getting the storage account. We
+    # should set the cluster to be launched in the same region.
+    region_str = '--region centralus' if generic_cloud == 'azure' else ''
     if azure_mount_unsupported_ubuntu_version in image_id:
         # The store for mount_private_mount is not specified in the template.
         # If we're running on Azure, the private mount will be created on
@@ -409,7 +414,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         file_path = f.name
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {region_str} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
             f'sky exec {name} {quoted_check}',
