@@ -995,6 +995,8 @@ class Task:
                 # not empty, it measn the storage has been synced during
                 # construct() above
                 # We will download the first store that is added to remote.
+                assert all(store is not None
+                           for store in storage.stores.values()), storage
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
 
         storage_mounts = self.storage_mounts
