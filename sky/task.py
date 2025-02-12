@@ -982,6 +982,8 @@ class Task:
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
         """
+        print('zhwu DEBUG sync_storage_mounts task inner', self.__dict__)
+        print('zhwu DEBUG sync_storage_mounts storage_mounts', self.storage_mounts)
         for storage in self.storage_mounts.values():
             print('zhwu DEBUG sync_storage_mounts storage', storage.__dict__)
             storage.construct()
