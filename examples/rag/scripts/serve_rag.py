@@ -13,7 +13,6 @@ import numpy as np
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 import requests
-from sentence_transformers import SentenceTransformer
 import torch
 import uvicorn
 
@@ -25,7 +24,6 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title='RAG System with DeepSeek R1')
 
 # Global variables
-embedding_model = None
 collection = None
 vllm_endpoint = None
 
@@ -40,6 +38,10 @@ class SearchResult(BaseModel):
     name: str
     split: str
     source: str
+    document_id: str
+    document_url: str
+    document_created_timestamp: str
+    document_downloaded_timestamp: str
     similarity: float
 
 class RAGResponse(BaseModel):
@@ -47,12 +49,29 @@ class RAGResponse(BaseModel):
     sources: List[SearchResult]
 
 def encode_query(query: str) -> np.ndarray:
-    """Encode query text using sentence transformer."""
-    global embedding_model
+    """Encode query text using vLLM embeddings endpoint."""
+    global vllm_endpoint
     
-    # Compute embedding
-    embedding = embedding_model.encode([query])[0]
-    return embedding
+    try:
+        response = requests.post(
+            f"{vllm_endpoint}/v1/embeddings",
+            json={
+                "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+                "input": [query]
+            },
+            timeout=30
+        )
+        response.raise_for_status()
+        
+        result = response.json()
+        if 'data' not in result:
+            raise ValueError(f"Unexpected response format: {result}")
+        
+        return np.array(result['data'][0]['embedding'])
+        
+    except Exception as e:
+        logger.error(f"Error computing query embedding: {str(e)}")
+        raise HTTPException(status_code=500, detail="Error computing query embedding")
 
 def query_collection(query_embedding: np.ndarray,
                     n_results: int = 3) -> List[SearchResult]:
@@ -66,7 +85,7 @@ def query_collection(query_embedding: np.ndarray,
     )
     
     # Get results
-    documents = results['documents'][0]
+    documents = results['documents'][0]  # This contains the actual content
     metadatas = results['metadatas'][0]
     distances = results['distances'][0]
     
@@ -75,11 +94,15 @@ def query_collection(query_embedding: np.ndarray,
     
     return [
         SearchResult(
-            content=doc,
+            content=doc,  # Get content directly from documents
             id=meta['id'],
             name=meta['name'],
             split=meta['split'],
             source=meta['source'],
+            document_id=meta['document_id'],
+            document_url=meta['document_url'],
+            document_created_timestamp=meta['document_created_timestamp'],
+            document_downloaded_timestamp=meta['document_downloaded_timestamp'],
             similarity=sim
         )
         for doc, meta, sim in zip(documents, metadatas, similarities)
@@ -88,7 +111,7 @@ def query_collection(query_embedding: np.ndarray,
 def generate_prompt(query: str, context_docs: List[SearchResult]) -> str:
     """Generate prompt for DeepSeek R1."""
     context = "\n\n".join([
-        f"Document: {doc.name} (Source: {doc.source})\nContent: {doc.content}"
+        f"Document: {doc.document_url}\nTimestamp: {doc.document_created_timestamp}\nContent: {doc.content}"
         for doc in context_docs
     ])
     
@@ -167,16 +190,12 @@ def main():
                        help='Port to serve on')
     parser.add_argument('--collection-name',
                        type=str,
-                       default='legal_docs',
+                       default='rag_embeddings',  # Use RAG-specific name
                        help='ChromaDB collection name')
     parser.add_argument('--persist-dir',
                        type=str,
                        default='/vectordb/chroma',
                        help='Directory where ChromaDB is persisted')
-    parser.add_argument('--model-name',
-                       type=str,
-                       default='sentence-transformers/all-mpnet-base-v2',
-                       help='Sentence transformer model name')
     parser.add_argument('--vllm-endpoint',
                        type=str,
                        required=True,
@@ -185,14 +204,10 @@ def main():
     args = parser.parse_args()
     
     # Initialize global variables
-    global embedding_model, collection, vllm_endpoint
+    global collection, vllm_endpoint
     
     # Set vLLM endpoint
     vllm_endpoint = args.vllm_endpoint.rstrip('/')
-    
-    # Load embedding model
-    logger.info(f'Loading embedding model: {args.model_name}')
-    embedding_model = SentenceTransformer(args.model_name)
     
     # Initialize ChromaDB
     logger.info(f'Connecting to ChromaDB at {args.persist_dir}')

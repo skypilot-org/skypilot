@@ -71,7 +71,12 @@ def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
                 'name': document['name'],
                 'content': current_chunk.strip(),
                 'split': document['split'],
-                'source': document['source']
+                'source': document['source'],
+                # Add original document metadata
+                'document_id': document['id'],
+                'document_url': document['url'],
+                'document_created_timestamp': document['created_timestamp'],
+                'document_downloaded_timestamp': document['downloaded_timestamp']
             })
             chunk_idx += 1  # Increment global index
             # Keep last part for overlap
@@ -86,7 +91,12 @@ def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
             'name': document['name'],
             'content': current_chunk.strip(),
             'split': document['split'],
-            'source': document['source']
+            'source': document['source'],
+            # Add original document metadata
+            'document_id': document['id'],
+            'document_url': document['url'],
+            'document_created_timestamp': document['created_timestamp'],
+            'document_downloaded_timestamp': document['downloaded_timestamp']
         })
         chunk_idx += 1
     
@@ -136,7 +146,12 @@ def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str,output_path:
                     'content': chunk['content'],
                     'split': chunk['split'],
                     'source': chunk['source'],
-                    'embedding': pickle.dumps(np.array(embedding))
+                    'embedding': pickle.dumps(np.array(embedding)),
+                    # Include document metadata
+                    'document_id': chunk['document_id'],
+                    'document_url': chunk['document_url'],
+                    'document_created_timestamp': chunk['document_created_timestamp'],
+                    'document_downloaded_timestamp': chunk['document_downloaded_timestamp']
                 })
             
             # Save partition when it reaches the desired size

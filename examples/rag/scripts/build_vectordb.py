@@ -44,14 +44,14 @@ def process_parquet_file(args):
             # Extract data from DataFrame
             ids = [str(idx) for idx in batch_df['id']]
             embeddings = [pickle.loads(emb) for emb in batch_df['embedding']]
-            # Create metadata from the available fields
+            documents = batch_df['content'].tolist()  # Content goes to documents
+            # Create metadata from the available fields (excluding content)
             metadatas = [{
                 'name': row['name'],
-                'content': row['content'],
                 'split': row['split'],
-                'source': row['source']
+                'source': row['source'],
             } for _, row in batch_df.iterrows()]
-            results.append((ids, embeddings, metadatas))
+            results.append((ids, embeddings, documents, metadatas))
 
         return results
     except Exception as e:
@@ -64,7 +64,7 @@ def main():
         description='Build ChromaDB from mounted S3 parquet files')
     parser.add_argument('--collection-name',
                         type=str,
-                        default='clip_embeddings',
+                        default='rag_embeddings',
                         help='ChromaDB collection name')
     parser.add_argument('--persist-dir',
                         type=str,
@@ -102,7 +102,7 @@ def main():
         try:
             collection = client.create_collection(
                 name=args.collection_name,
-                metadata={'description': 'CLIP embeddings from dataset'})
+                metadata={'description': 'RAG embeddings from legal documents'})
             logger.info(f'Created new collection: {args.collection_name}')
         except ValueError:
             collection = client.get_collection(name=args.collection_name)
@@ -133,10 +133,11 @@ def main():
                 try:
                     results = future.result()
                     if results:
-                        for ids, embeddings, metadatas in results:
+                        for ids, embeddings, documents, metadatas in results:
                             collection.add(
                                 ids=list(ids),
                                 embeddings=list(embeddings),
+                                documents=list(documents),
                                 metadatas=list(metadatas)
                             )
                 except Exception as e:

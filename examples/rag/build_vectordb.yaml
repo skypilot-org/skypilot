@@ -4,6 +4,7 @@ workdir: .
 
 resources:
   memory: 32+  # Need more memory for merging embeddings
+  cloud: aws
 
 file_mounts:
   /embeddings:
@@ -12,7 +13,7 @@ file_mounts:
     mode: MOUNT
   
   /vectordb:
-    name: sky-law-vectordb
+    name: sky-legal-vectordb
     mode: MOUNT
 
 setup: |

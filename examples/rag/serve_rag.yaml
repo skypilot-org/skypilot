@@ -4,8 +4,6 @@ workdir: .
 
 resources:
   accelerators: 
-    # ordered by pricing (cheapest to most expensive)
-    T4: 1
     L4: 1
     A10G: 1
     A10: 1
@@ -14,7 +12,6 @@ resources:
   ports: 
     - 8000  # vLLM endpoint
     - 8001  # RAG endpoint
-  use_spot: true
 
 file_mounts:
   /vectordb:
@@ -32,19 +29,20 @@ setup: |
 
 service:
   replicas: 1
-
+  readiness_probe:
+    path: /health
 run: |
   # Start vLLM service in background
-  python -m vllm.entrypoints.openai.api_server \
-    --host 0.0.0.0 \
-    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-    --max-model-len 4096 &
+  # python -m vllm.entrypoints.openai.api_server \
+  #   --host 0.0.0.0 \
+  #   --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+  #   --max-model-len 4096 &
   
   # Wait for vLLM to start
-  sleep 30
+  # sleep 30
   
   # Start RAG service
-  python serve_rag.py \
+  python scripts/serve_rag.py \
     --collection-name legal_docs \
     --persist-dir /vectordb/chroma \
     --vllm-endpoint http://localhost:8000 
