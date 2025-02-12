@@ -135,8 +135,6 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
   It's a workaround for RunPod's limitation that we can't get the login user for the created pods, and even `runpodctl` uses a hardcoded `root` for SSH access.
   But for other clouds, the login users for the created docker containers are automatically fetched and used.
 
-  See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/4282#issuecomment-2652576673>`_ for more.
-
 As another example, here's how to use `NVIDIA's PyTorch NGC Container <https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch>`_:
 
 .. code-block:: yaml
