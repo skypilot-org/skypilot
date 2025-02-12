@@ -80,8 +80,8 @@ class Kubernetes(clouds.Cloud):
 
     _INDENT_PREFIX = ' ' * 4
 
-    # Set of contexts that are marked as unavailable at runtime
-    unavailable_contexts: Set[str] = set()
+    # Set of contexts that has logged as temporarily unavailable
+    logged_unavailable_contexts: Set[str] = set()
 
     @property
     def ssh_key_secret_field_name(self):
@@ -119,7 +119,7 @@ class Kubernetes(clouds.Cloud):
                 unsupported_features.pop(
                     clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
         except exceptions.ResourcesUnavailableError as e:
-            cls.mark_context_unavailable(context, str(e))
+            cls._log_unavailable_context(context, str(e))
         return unsupported_features
 
     @classmethod
@@ -174,35 +174,43 @@ class Kubernetes(clouds.Cloud):
         skipped_contexts = []
         for context in allowed_contexts:
             if context in all_contexts:
-                if context not in cls.unavailable_contexts:
-                    existing_contexts.append(context)
+                existing_contexts.append(context)
             else:
                 skipped_contexts.append(context)
         cls._log_skipped_contexts_once(tuple(skipped_contexts))
         return existing_contexts
 
     @classmethod
-    def mark_context_unavailable(cls,
+    def _log_unavailable_context(cls,
                                  context: str,
                                  reason: Optional[str] = None,
                                  silent: bool = False) -> None:
-        """Mark a Kubernetes context as unavailable.
+        """log a Kubernetes context as unavailable.
 
         Args:
             context: The Kubernetes context to mark as unavailable.
             reason: Optional reason for marking the context as unavailable.
+            silent: Whether to suppress the log message.
         """
-        cls.unavailable_contexts.add(context)
+        # Skip if this context has already been logged as unavailable
+        if context in cls.logged_unavailable_contexts:
+            return
+
+        cls.logged_unavailable_contexts.add(context)
         if not silent:
             msg = f'Excluding Kubernetes context {context}'
             if reason is not None:
                 msg += f': {reason}'
             logger.info(msg)
-            if not cls.existing_allowed_contexts():
+
+            # Check if all existing allowed contexts are now unavailable
+            existing_contexts = cls.existing_allowed_contexts()
+            if existing_contexts and all(ctx in cls.logged_unavailable_contexts
+                                         for ctx in existing_contexts):
                 logger.warning(
-                    'No Kubernetes context available. '
-                    'Retry if it is a transient error or run `sky check` '
-                    'to refresh kubernetes availability if permanent.')
+                    'All Kubernetes contexts have reported as unavailable. '
+                    'Retry if it is a transient error, or run sky check to '
+                    'refresh Kubernetes availability if permanent.')
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
@@ -236,7 +244,7 @@ class Kubernetes(clouds.Cloud):
                     fits, reason = kubernetes_utils.check_instance_fits(
                         context, instance_type)
                 except exceptions.ResourcesUnavailableError as e:
-                    cls.mark_context_unavailable(context, str(e))
+                    cls._log_unavailable_context(context, str(e))
                     continue
                 if fits:
                     regions_to_return.append(r)

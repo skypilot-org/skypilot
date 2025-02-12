@@ -169,12 +169,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             # Format error message based on the type of exception
             resource_msg = f' when trying to get {resource_type} info' \
                 if resource_type else ''
-            debug_cmd = f' To debug, run: `kubectl get {resource_type}s' \
+            debug_cmd = f' To debug, run: kubectl get {resource_type}s' \
                 if resource_type else ''
             if context:
-                debug_cmd += f' --context {context}`'
-            else:
-                debug_cmd += '`'
+                debug_cmd += f' --context {context}'
 
             if isinstance(last_exception, kubernetes.max_retry_error()):
                 error_msg = f'Timed out{resource_msg} from Kubernetes cluster.'
