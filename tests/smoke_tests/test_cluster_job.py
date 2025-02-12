@@ -930,7 +930,10 @@ def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
     head_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                 f'echo "$all_pods" | grep {name} |  grep head | '
+                 f'echo "$all_pods" | grep {name} | '
+                 # Exclude the cloud cmd execution pod.
+                'grep -v "cloud-cmd" |  '
+                 'grep head | '
                  " awk '{print $1}' | xargs -I {} kubectl logs {}")
     worker_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
                    f'echo "$all_pods" | grep {name} |  grep worker | '
@@ -961,7 +964,10 @@ def test_container_logs_two_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
     pod_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                f'echo "$all_pods" | grep {name} |  grep head |'
+                f'echo "$all_pods" | grep {name} | '
+                # Exclude the cloud cmd execution pod.
+                'grep -v "cloud-cmd" |  '
+                'grep head |'
                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
@@ -1025,8 +1031,11 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
-    pod_logs = ('kubectl get pods '
-                f' | grep {name} |  grep head |'
+    pod_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
+                f'echo "$all_pods" | grep {name} |  '
+                # Exclude the cloud cmd execution pod.
+                'grep -v "cloud-cmd" |  '
+                'grep head |'
                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
