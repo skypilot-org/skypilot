@@ -827,7 +827,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 controller_utils.Controllers.JOBS_CONTROLLER))
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} }}')
+            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd}; }}')
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.S3, storage_name)
