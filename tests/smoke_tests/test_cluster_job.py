@@ -822,15 +822,20 @@ def test_task_labels_kubernetes():
         test = smoke_tests_utils.Test(
             'task_labels_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with kubectl that the labels are set.
-                'kubectl get pods '
-                '--selector inlinelabel1=inlinevalue1 '
-                '--selector inlinelabel2=inlinevalue2 '
-                '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                f'grep \'^{name}\''
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    'kubectl get pods '
+                    '--selector inlinelabel1=inlinevalue1 '
+                    '--selector inlinelabel2=inlinevalue2 '
+                    '-o jsonpath=\'{.items[*].metadata.name}\' | '
+                    f'grep \'^{name}\''
+                )
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -842,21 +847,29 @@ def test_add_pod_annotations_for_autodown_with_launch():
     test = smoke_tests_utils.Test(
         'add_pod_annotations_for_autodown_with_launch',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
             # Autodown is set.
             f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --cloud kubernetes',
             # Get names of the pods containing cluster name.
-            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
-            # Describe the first pod and check for annotations.
-            'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
-            'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                # Describe the first pod and check for annotations.
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            ),
             # Get names of the pods containing cluster name.
-            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
-            # Describe the second pod and check for annotations.
-            'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
-            'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                # Describe the second pod and check for annotations.
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            ),
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -867,31 +880,45 @@ def test_add_and_remove_pod_annotations_with_autostop():
     test = smoke_tests_utils.Test(
         'add_and_remove_pod_annotations_with_autostop',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
             f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --cloud kubernetes',
             # Set autodown on the cluster with 'autostop' command.
             f'sky autostop -y {name} -i 20 --down',
             # Get names of the pods containing cluster name.
-            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
-            # Describe the first pod and check for annotations.
-            'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
-            'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                # Describe the first pod and check for annotations.
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            ),
             # Describe the second pod and check for annotations.
-            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
-            'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
-            'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            ),
             # Cancel the set autodown to remove the annotations from the pods.
             f'sky autostop -y {name} --cancel',
             # Describe the first pod and check if annotations are removed.
-            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
-            'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
-            'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            ),
             # Describe the second pod and check if annotations are removed.
-            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
-            'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
-            'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            ),
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -912,11 +939,19 @@ def test_container_logs_multinode_kubernetes():
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
-                f'{head_logs} | wc -l | grep 9',
-                f'{worker_logs} | wc -l | grep 9',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{head_logs} | wc -l | grep 9',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{worker_logs} | wc -l | grep 9',
+                ),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -932,21 +967,56 @@ def test_container_logs_two_jobs_kubernetes():
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml}',
-                f'{pod_logs} | wc -l | grep 9',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | wc -l | grep 9',
+                ),
                 f'sky launch -y -c {name} {task_yaml}',
-                f'{pod_logs} | wc -l | grep 18',
-                f'{pod_logs} | grep 1 | wc -l | grep 2',
-                f'{pod_logs} | grep 2 | wc -l | grep 2',
-                f'{pod_logs} | grep 3 | wc -l | grep 2',
-                f'{pod_logs} | grep 4 | wc -l | grep 2',
-                f'{pod_logs} | grep 5 | wc -l | grep 2',
-                f'{pod_logs} | grep 6 | wc -l | grep 2',
-                f'{pod_logs} | grep 7 | wc -l | grep 2',
-                f'{pod_logs} | grep 8 | wc -l | grep 2',
-                f'{pod_logs} | grep 9 | wc -l | grep 2',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | wc -l | grep 18',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 1 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 2 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 3 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 4 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 5 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 6 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 7 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 8 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 9 | wc -l | grep 2',
+                ),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -962,22 +1032,54 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
                 f'sky launch -y -c {name}',
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
-                f'{pod_logs} | wc -l | grep 18',
-                f'{pod_logs} | grep 1 | wc -l | grep 2',
-                f'{pod_logs} | grep 2 | wc -l | grep 2',
-                f'{pod_logs} | grep 3 | wc -l | grep 2',
-                f'{pod_logs} | grep 4 | wc -l | grep 2',
-                f'{pod_logs} | grep 5 | wc -l | grep 2',
-                f'{pod_logs} | grep 6 | wc -l | grep 2',
-                f'{pod_logs} | grep 7 | wc -l | grep 2',
-                f'{pod_logs} | grep 8 | wc -l | grep 2',
-                f'{pod_logs} | grep 9 | wc -l | grep 2',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | wc -l | grep 18',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 1 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 2 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 3 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 4 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 5 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 6 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 7 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 8 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 9 | wc -l | grep 2',
+                ),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
