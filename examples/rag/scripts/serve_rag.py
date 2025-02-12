@@ -35,14 +35,9 @@ class QueryRequest(BaseModel):
 
 class SearchResult(BaseModel):
     content: str
-    id: str
     name: str
     split: str
     source: str
-    document_id: str
-    document_url: str
-    document_created_timestamp: str
-    document_downloaded_timestamp: str
     similarity: float
 
 class RAGResponse(BaseModel):
@@ -93,17 +88,15 @@ def query_collection(query_embedding: np.ndarray,
     # Convert distances to similarities
     similarities = [1 - (d / 2) for d in distances]
     
+    for doc, meta, sim in zip(documents, metadatas, similarities):
+        logger.info(f"Found {meta} with similarity {sim}")
+        logger.info(f"Content: {doc}")
     return [
         SearchResult(
             content=doc,  # Get content directly from documents
-            id=meta['id'],
             name=meta['name'],
             split=meta['split'],
             source=meta['source'],
-            document_id=meta['document_id'],
-            document_url=meta['document_url'],
-            document_created_timestamp=meta['document_created_timestamp'],
-            document_downloaded_timestamp=meta['document_downloaded_timestamp'],
             similarity=sim
         )
         for doc, meta, sim in zip(documents, metadatas, similarities)
@@ -112,7 +105,7 @@ def query_collection(query_embedding: np.ndarray,
 def generate_prompt(query: str, context_docs: List[SearchResult]) -> str:
     """Generate prompt for DeepSeek R1."""
     context = "\n\n".join([
-        f"Document: {doc.document_url}\nTimestamp: {doc.document_created_timestamp}\nContent: {doc.content}"
+        f"Source: {doc.source}\nContent: {doc.content}"
         for doc in context_docs
     ])
     
@@ -134,17 +127,23 @@ async def query_llm(prompt: str, temperature: float = 0.7) -> str:
     
     try:
         response = requests.post(
-            f"{generator_endpoint}/v1/completions",
+            f"{generator_endpoint}/v1/chat/completions",
             json={
-                "prompt": prompt,
+                "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+                "messages": [
+                    {"role": "user", "content": prompt}
+                ],
                 "temperature": temperature,
-                "max_tokens": 512,
+                "max_tokens": 3766,
                 "stop": None
             },
-            timeout=30
+            timeout=120
         )
         response.raise_for_status()
-        return response.json()['choices'][0]['text'].strip()
+
+        logger.info(f"Response: {response.json()}")
+        
+        return response.json()['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Error querying LLM: {str(e)}")
         raise HTTPException(status_code=500, detail="Error querying language model")
