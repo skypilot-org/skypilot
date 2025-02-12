@@ -895,7 +895,6 @@ def test_add_and_remove_pod_annotations_with_autostop():
     smoke_tests_utils.run_one_test(test)
 
 
-
 # ---------- Container logs from task on Kubernetes ----------
 @pytest.mark.resource_heavy
 @pytest.mark.kubernetes
