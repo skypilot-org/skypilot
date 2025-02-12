@@ -419,13 +419,24 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
+    # We have to use payload_type here to avoid the issue of
+    # message_utils.decode_payload() not being able to correctly decode the
+    # message with <sky-payload> tags.
     return message_utils.encode_payload(service_statuses,
                                         payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = message_utils.decode_payload(
-        payload, payload_type='service_status')
+    try:
+        service_statuses_encoded = message_utils.decode_payload(
+            payload, payload_type='service_status')
+    except ValueError as e:
+        if 'Invalid payload string' in str(e):
+            # Backward compatibility for serve controller started before #4660
+            # where the payload type is not added.
+            service_statuses_encoded = message_utils.decode_payload(payload)
+        else:
+            raise
     service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
         if not isinstance(service_status, dict):
