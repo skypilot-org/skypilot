@@ -490,7 +490,7 @@ You can see the controller with :code:`sky status` and refresh its status by usi
 
 .. _customizing-sky-serve-controller-resources:
 
-Customizing SkyServe Controller Resources
+Customizing SkyServe controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 You may want to customize the resources of the SkyServe controller for several reasons:
