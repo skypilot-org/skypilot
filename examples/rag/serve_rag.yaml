@@ -41,7 +41,12 @@ run: |
     --task generate &
   
   # Wait for vLLM to start
-  sleep 30
+  echo "Waiting for vLLM service to be ready..."
+  while ! curl -s http://localhost:8002/health > /dev/null; do
+    sleep 5
+    echo "Still waiting for vLLM service..."
+  done
+  echo "vLLM service is ready!"
   
   # Start vLLM embeddings service in background
   CUDA_VISIBLE_DEVICES=3 python -m vllm.entrypoints.openai.api_server \
@@ -52,7 +57,12 @@ run: |
     --task embed &
 
   # Wait for vLLM embeddings service to start
-  sleep 30
+  echo "Waiting for vLLM embeddings service to be ready..."
+  while ! curl -s http://localhost:8003/health > /dev/null; do
+    sleep 5
+    echo "Still waiting for vLLM embeddings service..."
+  done
+  echo "vLLM embeddings service is ready!"
   
   # Start RAG service
   python scripts/serve_rag.py \

@@ -17,7 +17,7 @@ file_mounts:
 
 envs:
   START_IDX: 0  # Will be overridden by batch_compute_vectors.py
-  END_IDX: 1000  # Will be overridden by batch_compute_vectors.py
+  END_IDX: 10000  # Will be overridden by batch_compute_vectors.py
   HF_TOKEN: ""  # Will be overridden by batch_compute_vectors.py
 
 setup: |
@@ -25,18 +25,23 @@ setup: |
   pip install transformers==4.48.1 vllm==0.6.6.post1
   
   # Install dependencies for embedding computation
-  pip install numpy pandas requests tqdm datasets
+  pip install numpy pandas requests tqdm datasets 
 
 run: |
   # Start vLLM service in background
-  # python -m vllm.entrypoints.openai.api_server \
-  #   --host 0.0.0.0 \
-  #   --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-  #   --max-model-len 4096 \
-  #   --task embed &
-  
-  # # Wait for vLLM to start
-  # sleep 30
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --max-model-len 4096 \
+    --task embed &
+
+  # Wait for vLLM to be ready by checking the health endpoint
+  echo "Waiting for vLLM service to be ready..."
+  while ! curl -s http://localhost:8000/health > /dev/null; do
+    sleep 5
+    echo "Still waiting for vLLM service..."
+  done
+  echo "vLLM service is ready!"
   
   # Process the assigned range of documents
   echo "Processing documents from $START_IDX to $END_IDX"
@@ -45,7 +50,7 @@ run: |
     --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
     --start-idx $START_IDX \
     --end-idx $END_IDX \
-    --chunk-size 512 \
-    --chunk-overlap 50 \
+    --chunk-size 2048 \
+    --chunk-overlap 512 \
     --vllm-endpoint http://localhost:8000 \
     --batch-size 32 
