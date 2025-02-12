@@ -202,7 +202,7 @@ you can provide the registry authentication details using :ref:`task environment
 
             # Optional: specify a custom username for accessing the container.
             # Should be same as the login username for the docker image.
-            # It's only used by RunPod, as a workaround to set the ssh user for the docker containers.
+            # It's only used by RunPod, as a workaround to set the ssh user for the docker containers. For other clouds, the default docker username is automatically fetched and used.
             SKYPILOT_RUNPOD_DOCKER_USERNAME: <ssh-user>
 
     .. tab-item:: Cloud Provider Registry (e.g., ECR)
