@@ -70,28 +70,11 @@ _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
 _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 
-# _SHOW_SERVE_STATUS: Extracts service names from the "Services" section of
-# `sky serve status` output and runs `sky serve logs` commands for each
-# service's controller and load balancer.
-# The awk command works as follows:
-# 1. `/^Services$/{flag=1; next}`: When the line matches "Services", set a flag
-#    to 1 and skip to the next line.
-# 2. `/^$/{flag=0}`: When an empty line is encountered (indicating the end of
-#    the "Services" section), set the flag to 0.
-# 3. `flag {if (++count > 1) print $1}`: If the flag is set (i.e., we're in the
-#    "Services" section), increment a counter. Skip the first line (header) and
-#    print the first column (service name) for subsequent lines.
 _SHOW_SERVE_STATUS = (
-    'sky serve status | awk \''
-    '/^Services$/{{flag=1; next}} '
-    '/^$/{{flag=0}} '
-    'flag {{if (++count > 1) print $1}}\' | '
-    'while read -r service_name; do '
-    '    echo "+ sky serve logs --controller $service_name --no-follow"; '
-    '    sky serve logs --controller $service_name --no-follow; '
-    '    echo "+ sky serve logs --load-balancer $service_name --no-follow"; '
-    '    sky serve logs --load-balancer $service_name --no-follow; '
-    'done; ')
+    'echo "+ sky serve logs --controller {name} --no-follow"; '
+    'sky serve logs --controller {name} --no-follow; '
+    'echo "+ sky serve logs --load-balancer {name} --no-follow"; '
+    'sky serve logs --load-balancer {name} --no-follow; ')
 
 # Since we don't allow terminate the service if the controller is INIT,
 # which is common for simultaneous pytest, we need to wait until the
