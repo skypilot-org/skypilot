@@ -15,6 +15,7 @@ from pydantic import BaseModel
 import requests
 import torch
 import uvicorn
+from fastapi.responses import HTMLResponse
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -43,6 +44,7 @@ class SearchResult(BaseModel):
 class RAGResponse(BaseModel):
     answer: str
     sources: List[SearchResult]
+    thinking_process: str  # Add thinking process to response
 
 def encode_query(query: str) -> np.ndarray:
     """Encode query text using vLLM embeddings endpoint."""
@@ -114,15 +116,18 @@ Below is some relevant context from legal documents, followed by a question.
 Please answer the question based on the context provided. If you cannot find the answer in the context,
 say so - do not make up information.
 
+First, explain your thinking process between <think> tags.
+Then provide your final answer after the thinking process.
+
 Context:
 {context}
 
 Question: {query}
 
-Answer:"""
+Let's approach this step by step:"""
 
-async def query_llm(prompt: str, temperature: float = 0.7) -> str:
-    """Query DeepSeek R1 through vLLM endpoint."""
+async def query_llm(prompt: str, temperature: float = 0.7) -> tuple[str, str]:
+    """Query DeepSeek R1 through vLLM endpoint and return thinking process and answer."""
     global generator_endpoint
     
     try:
@@ -142,8 +147,20 @@ async def query_llm(prompt: str, temperature: float = 0.7) -> str:
         response.raise_for_status()
 
         logger.info(f"Response: {response.json()}")
+        
+        full_response = response.json()['choices'][0]['message']['content'].strip()
+        
+        # Split response into thinking process and answer
+        parts = full_response.split("</think>")
+        if len(parts) > 1:
+            thinking = parts[0].replace("<think>", "").strip()
+            answer = parts[1].strip()
+        else:
+            thinking = ""
+            answer = full_response
+            
+        return thinking, answer
 
-        return response.json()['choices'][0]['message']['content'].strip()
     except Exception as e:
         logger.error(f"Error querying LLM: {str(e)}")
         raise HTTPException(status_code=500, detail="Error querying language model")
@@ -162,9 +179,9 @@ async def rag_query(request: QueryRequest):
         prompt = generate_prompt(request.query, results)
         
         # Get LLM response
-        answer = await query_llm(prompt, request.temperature)
+        thinking, answer = await query_llm(prompt, request.temperature)
         
-        return RAGResponse(answer=answer, sources=results)
+        return RAGResponse(answer=answer, sources=results, thinking_process=thinking)
     
     except Exception as e:
         logger.error(f"Error processing RAG query: {str(e)}")
@@ -177,6 +194,240 @@ async def health_check():
         'status': 'healthy',
         'collection_size': collection.count() if collection else 0
     }
+
+@app.get('/', response_class=HTMLResponse)
+async def get_search_page():
+    """Serve a simple search interface."""
+    return """
+    <html>
+        <head>
+            <title>Legal Document RAG System</title>
+            <style>
+                * { box-sizing: border-box; margin: 0; padding: 0; }
+                body { 
+                    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                    line-height: 1.6;
+                    background-color: #f5f5f5;
+                    color: #333;
+                    min-height: 100vh;
+                }
+                .container {
+                    max-width: 1200px;
+                    margin: 0 auto;
+                    padding: 2rem;
+                }
+                .search-container {
+                    background: white;
+                    padding: 2rem;
+                    border-radius: 10px;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                    margin-bottom: 2rem;
+                    text-align: center;
+                }
+                h1 {
+                    color: #2c3e50;
+                    margin-bottom: 1.5rem;
+                    font-size: 2.5rem;
+                }
+                .search-box {
+                    display: flex;
+                    gap: 10px;
+                    max-width: 800px;
+                    margin: 0 auto;
+                }
+                input {
+                    flex: 1;
+                    padding: 12px 20px;
+                    border: 2px solid #e0e0e0;
+                    border-radius: 25px;
+                    font-size: 16px;
+                    transition: all 0.3s ease;
+                }
+                input:focus {
+                    outline: none;
+                    border-color: #3498db;
+                    box-shadow: 0 0 5px rgba(52, 152, 219, 0.3);
+                }
+                button {
+                    padding: 12px 30px;
+                    background: #3498db;
+                    color: white;
+                    border: none;
+                    border-radius: 25px;
+                    cursor: pointer;
+                    font-size: 16px;
+                    transition: background 0.3s ease;
+                }
+                button:hover {
+                    background: #2980b9;
+                }
+                .results-container {
+                    display: grid;
+                    gap: 2rem;
+                }
+                .result-section {
+                    background: white;
+                    border-radius: 10px;
+                    padding: 1.5rem;
+                    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                }
+                .section-title {
+                    color: #2c3e50;
+                    margin-bottom: 1rem;
+                    font-size: 1.5rem;
+                    border-bottom: 2px solid #e0e0e0;
+                    padding-bottom: 0.5rem;
+                }
+                .source-document {
+                    background: #f8f9fa;
+                    padding: 1rem;
+                    margin-bottom: 1rem;
+                    border-radius: 5px;
+                    border-left: 4px solid #3498db;
+                    white-space: pre-wrap;
+                }
+                .source-header {
+                    font-weight: bold;
+                    color: #2c3e50;
+                    margin-bottom: 0.5rem;
+                }
+                .source-url {
+                    color: #3498db;
+                    text-decoration: underline;
+                    word-break: break-all;
+                    margin-bottom: 0.5rem;
+                }
+                .thinking-process {
+                    background: #fff3e0;
+                    padding: 1rem;
+                    border-radius: 5px;
+                    border-left: 4px solid #ff9800;
+                    white-space: pre-wrap;
+                }
+                .final-answer {
+                    background: #e8f5e9;
+                    padding: 1rem;
+                    border-radius: 5px;
+                    border-left: 4px solid #4caf50;
+                    white-space: pre-wrap;
+                }
+                #loading {
+                    display: none;
+                    text-align: center;
+                    margin: 2rem 0;
+                    font-size: 1.2rem;
+                    color: #666;
+                }
+                .similarity-score {
+                    color: #666;
+                    font-size: 0.9rem;
+                    margin-top: 0.5rem;
+                }
+            </style>
+        </head>
+        <body>
+            <div class="container">
+                <div class="search-container">
+                    <h1>Legal Document RAG System</h1>
+                    <div class="search-box">
+                        <input type="text" id="searchInput" placeholder="Ask a question about legal documents..."
+                            onkeypress="if(event.key === 'Enter') search()">
+                        <button onclick="search()">Ask</button>
+                    </div>
+                </div>
+                <div id="loading">Processing your question...</div>
+                <div id="results" class="results-container"></div>
+            </div>
+            
+            <script>
+            function escapeHtml(unsafe) {
+                return unsafe
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
+
+            async function search() {
+                const searchInput = document.getElementById('searchInput');
+                const loading = document.getElementById('loading');
+                const resultsDiv = document.getElementById('results');
+                
+                if (!searchInput.value.trim()) return;
+                
+                loading.style.display = 'block';
+                resultsDiv.innerHTML = '';
+                
+                try {
+                    const response = await fetch('/rag', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Accept': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            query: searchInput.value.trim(),
+                            n_results: 3,
+                            temperature: 0.7
+                        })
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.detail || 'Query failed');
+                    }
+                    
+                    const result = await response.json();
+                    
+                    // Display final answer first
+                    const answerHtml = `
+                        <div class="result-section">
+                            <h2 class="section-title">Final Answer</h2>
+                            <div class="final-answer">${escapeHtml(result.answer)}</div>
+                        </div>
+                    `;
+                    
+                    // Display thinking process second
+                    const thinkingHtml = `
+                        <div class="result-section">
+                            <h2 class="section-title">Thinking Process</h2>
+                            <div class="thinking-process">${escapeHtml(result.thinking_process)}</div>
+                        </div>
+                    `;
+                    
+                    // Display source documents last
+                    let sourcesHtml = '<div class="result-section"><h2 class="section-title">Source Documents</h2>';
+                    result.sources.forEach(source => {
+                        sourcesHtml += `
+                            <div class="source-document">
+                                <div class="source-header">Source: ${escapeHtml(source.source)}</div>
+                                <div class="source-url">URL: ${escapeHtml(source.name)}</div>
+                                <div>${escapeHtml(source.content)}</div>
+                                <div class="similarity-score">Similarity: ${(source.similarity * 100).toFixed(1)}%</div>
+                            </div>
+                        `;
+                    });
+                    sourcesHtml += '</div>';
+                    
+                    // Combine all sections in the new order
+                    resultsDiv.innerHTML = answerHtml + thinkingHtml + sourcesHtml;
+                    
+                } catch (error) {
+                    resultsDiv.innerHTML = `
+                        <div class="result-section" style="color: #e74c3c;">
+                            <h2 class="section-title">Error</h2>
+                            <p>${error.message}</p>
+                        </div>
+                    `;
+                } finally {
+                    loading.style.display = 'none';
+                }
+            }
+            </script>
+        </body>
+    </html>
+    """
 
 def main():
     parser = argparse.ArgumentParser(description='Serve RAG system')
