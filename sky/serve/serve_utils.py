@@ -428,6 +428,8 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
         payload, payload_type='service_status')
     service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
+        if not isinstance(service_status, dict):
+            raise ValueError(f'Invalid service status: {service_status}')
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
             for k, v in service_status.items()
