@@ -398,6 +398,10 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     cloud_dependencies_setup_cmd = ' && '.join(
         controller_utils._get_cloud_dependencies_installation_commands(
             controller_utils.Controllers.JOBS_CONTROLLER))
+    quoted_check = shlex.quote(
+        f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
+        f'{cloud_dependencies_setup_cmd}; {s3_command} || {gsutil_command} || '
+        f'{azure_blob_command}')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -407,7 +411,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
             f'sky launch -y -c {name} --cloud {generic_cloud} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
-            f'sky exec {name} -- "{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cloud_dependencies_setup_cmd}; {s3_command} || {gsutil_command} || {azure_blob_command}"',
+            f'sky exec {name} {quoted_check}',
             f'sky logs {name} 2 --status',  # Ensure the bucket check succeeded.
         ]
         test = smoke_tests_utils.Test(
