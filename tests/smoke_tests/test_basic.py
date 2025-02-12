@@ -87,7 +87,6 @@ def test_minimal(generic_cloud: str):
 
 
 # ---------- Test fast launch ----------
-@pytest.mark.resource_heavy
 def test_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
 
