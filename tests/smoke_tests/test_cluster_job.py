@@ -822,17 +822,16 @@ def test_task_labels_kubernetes():
         test = smoke_tests_utils.Test(
             'task_labels_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with kubectl that the labels are set.
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
-                    name,
-                    'kubectl get pods '
+                    name, 'kubectl get pods '
                     '--selector inlinelabel1=inlinevalue1 '
                     '--selector inlinelabel2=inlinevalue2 '
                     '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                    f'grep \'^{name}\''
-                )
+                    f'grep \'^{name}\'')
             ],
             f'sky down -y {name} && '
             f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
@@ -929,12 +928,13 @@ def test_add_and_remove_pod_annotations_with_autostop():
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    head_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                 f'echo "$all_pods" | grep {name} | '
-                 # Exclude the cloud cmd execution pod.
-                'grep -v "cloud-cmd" |  '
-                 'grep head | '
-                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    head_logs = (
+        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'echo "$all_pods" | grep {name} | '
+        # Exclude the cloud cmd execution pod.
+        'grep -v "cloud-cmd" |  '
+        'grep head | '
+        " awk '{print $1}' | xargs -I {} kubectl logs {}")
     worker_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
                    f'echo "$all_pods" | grep {name} |  grep worker | '
                    " awk '{print $1}' | xargs -I {} kubectl logs {}")
@@ -942,7 +942,8 @@ def test_container_logs_multinode_kubernetes():
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -963,17 +964,19 @@ def test_container_logs_multinode_kubernetes():
 def test_container_logs_two_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    pod_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                f'echo "$all_pods" | grep {name} | '
-                # Exclude the cloud cmd execution pod.
-                'grep -v "cloud-cmd" |  '
-                'grep head |'
-                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    pod_logs = (
+        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'echo "$all_pods" | grep {name} | '
+        # Exclude the cloud cmd execution pod.
+        'grep -v "cloud-cmd" |  '
+        'grep head |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml}',
                 smoke_tests_utils.run_cloud_cmd_on_cluster(
                     name,
@@ -1031,17 +1034,19 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
-    pod_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
-                f'echo "$all_pods" | grep {name} |  '
-                # Exclude the cloud cmd execution pod.
-                'grep -v "cloud-cmd" |  '
-                'grep head |'
-                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    pod_logs = (
+        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'echo "$all_pods" | grep {name} |  '
+        # Exclude the cloud cmd execution pod.
+        'grep -v "cloud-cmd" |  '
+        'grep head |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
             [
-                smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name}',
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
