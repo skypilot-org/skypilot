@@ -46,6 +46,11 @@ logger = sky_logging.init_logger(__name__)
 _usage_run_id = None
 
 
+def is_cluster_name_indicating_serve_controller(cluster_name: str) -> bool:
+    """Check if the cluster name is indicating a serve controller."""
+    return cluster_name.startswith('sky-serve-controller-')
+
+
 def get_usage_run_id() -> str:
     """Returns a unique run id for each 'run'.
 

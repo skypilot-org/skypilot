@@ -657,9 +657,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 serve_state.ReplicaStatus.PROVISIONING
             ])
 
-        for replica_id in to_down_replicas:
+        for replica_info in to_down_replicas:
+            replica_id = replica_info.replica_id
             try:
-                self._terminate_replica(replica_id.replica_id,
+                self._terminate_replica(replica_id,
                                         sync_down_logs=False,
                                         purge=True,
                                         replica_drain_delay_seconds=0)

@@ -1396,7 +1396,8 @@ class KubernetesInstanceType:
 
 
 def is_serve_controller(cluster_name_on_cloud: str) -> bool:
-    return cluster_name_on_cloud.startswith('sky-serve-controller-')
+    return common_utils.is_cluster_name_indicating_serve_controller(
+        cluster_name_on_cloud)
 
 
 def get_head_pod_name_from_deployment(cluster_name: str) -> str:
@@ -2585,7 +2586,8 @@ def process_skypilot_pods(
             # because hash is different across users
             if 'sky-jobs-controller' in cluster_name_on_cloud:
                 jobs_controllers.append(cluster_info)
-            elif 'sky-serve-controller' in cluster_name_on_cloud:
+            elif common_utils.is_cluster_name_indicating_serve_controller(
+                    cluster_name_on_cloud):
                 serve_controllers.append(cluster_info)
         else:
             # Update start_time if this pod started earlier

@@ -2455,7 +2455,8 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
         # TODO(andyl): must force refresh here?
-        if self.cluster_name.startswith('sky-serve-controller'):
+        if common_utils.is_cluster_name_indicating_serve_controller(
+                self.cluster_name):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
