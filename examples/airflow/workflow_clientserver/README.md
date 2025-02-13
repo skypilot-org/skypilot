@@ -4,9 +4,12 @@ In this guide, we show how a training workflow involving data preprocessing, tra
 
 This example uses a remote SkyPilot API Server to manage shared state across invocations, and includes a failure callback to tear down the SkyPilot cluster on task failure.
 
+<!-- Source: https://docs.google.com/drawings/d/1Di_KIOlxQEUib_RhMKysXBc6u-5WW9FnbougVWRiGF0/edit?usp=sharing -->
+
 <p align="center">
-  <img src="https://i.imgur.com/TXn5eKI.png" width="800">
+  <img src="https://i.imgur.com/IiPYQTW.png" width="400">
 </p>
+
 
 **💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#job-pipelines) for more information. 
 
@@ -148,8 +151,9 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
 4. Trigger the DAG from the Airflow UI using the `Trigger DAG` button.
 5. Navigate to the run in the Airflow UI to see the DAG progress and logs of each task.
 
+
 <p align="center">
-  <img src="https://i.imgur.com/Z1iEikn.png" width="800">
+  <img src="https://i.imgur.com/TXn5eKI.png" width="800">
 </p>
 <p align="center">
   <img src="https://i.imgur.com/D89N5xt.png" width="800">
