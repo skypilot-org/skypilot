@@ -2830,14 +2830,16 @@ class AzureBlobStore(AbstractStore):
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
             if dest_dir_name:
-                container_path = f'{container_path}/{dest_dir_name}'
+                dest_dir_name = f'/{dest_dir_name}'
+            else:
+                dest_dir_name = ''
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
                             f'{excludes} '
                             '--delete-destination false '
                             f'--source {src_dir_path} '
-                            f'--container {container_path}')
+                            f'--container {container_path}{dest_dir_name}')
             return sync_command
 
         # Generate message for upload
