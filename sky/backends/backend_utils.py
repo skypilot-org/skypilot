@@ -40,6 +40,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import status_lib
 from sky.clouds import cloud_registry
+from sky.provision import common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -2928,7 +2929,8 @@ def check_stale_runtime_on_remote(returncode: int, stderr: str,
 
 def get_endpoints(cluster: str,
                   port: Optional[Union[int, str]] = None,
-                  skip_status_check: bool = False) -> Dict[int, str]:
+                  skip_status_check: bool = False,
+                  protocol: str = 'http') -> Dict[int, str]:
     """Gets the endpoint for a given cluster and port number (endpoint).
 
     Args:
@@ -2984,6 +2986,8 @@ def get_endpoints(cluster: str,
 
     launched_resources = handle.launched_resources
     cloud = launched_resources.cloud
+    assert isinstance(cloud, clouds.Cloud)
+    assert launched_resources.ports is not None
     try:
         cloud.check_features_are_supported(
             launched_resources, {clouds.CloudImplementationFeatures.OPEN_PORTS})
@@ -2995,9 +2999,31 @@ def get_endpoints(cluster: str,
     config = common_utils.read_yaml(handle.cluster_yaml)
     port_details = provision_lib.query_ports(repr(cloud),
                                              handle.cluster_name_on_cloud,
-                                             handle.launched_resources.ports,
+                                             launched_resources.ports,
                                              head_ip=handle.head_ip,
                                              provider_config=config['provider'])
+
+    def filter_endpoints_by_protocol(
+            port_details: Dict[int, List['common.Endpoint']]) -> Dict[int, str]:
+        if protocol == 'https':
+            results = {
+                port: [
+                    endpoint for endpoint in endpoints
+                    if isinstance(endpoint, common.HTTPSEndpoint)
+                ] for port, endpoints in port_details.items()
+            }
+
+        def add_prefix(endpoint: 'common.Endpoint') -> str:
+            url = endpoint.url()
+            if url.startswith(protocol):
+                return url
+            return f'{protocol}://{url}'
+
+        return {
+            port:
+            add_prefix(endpoints[0])  # TODO(andyl): handle multiple endpoints
+            for port, endpoints in results.items()
+        }
 
     # Validation before returning the endpoints
     if port is not None:
@@ -3012,13 +3038,12 @@ def get_endpoints(cluster: str,
         if port not in port_details:
             error_msg = (f'Port {port} not exposed yet. '
                          f'{_ENDPOINTS_RETRY_MESSAGE} ')
-            if handle.launched_resources.cloud.is_same_cloud(
-                    clouds.Kubernetes()):
+            if cloud.is_same_cloud(clouds.Kubernetes()):
                 # Add Kubernetes specific debugging info
                 error_msg += (kubernetes_utils.get_endpoint_debug_message())
             logger.warning(error_msg)
             return {}
-        return {port: port_details[port][0].url()}
+        return filter_endpoints_by_protocol({port: port_details[port]})
     else:
         if not port_details:
             # If cluster had no ports to be exposed
@@ -3031,13 +3056,9 @@ def get_endpoints(cluster: str,
             else:
                 error_msg = (f'No endpoints exposed yet. '
                              f'{_ENDPOINTS_RETRY_MESSAGE} ')
-                if handle.launched_resources.cloud.is_same_cloud(
-                        clouds.Kubernetes()):
+                if cloud.is_same_cloud(clouds.Kubernetes()):
                     # Add Kubernetes specific debugging info
-                    error_msg += \
-                        kubernetes_utils.get_endpoint_debug_message()
+                    error_msg += kubernetes_utils.get_endpoint_debug_message()
                 logger.warning(error_msg)
                 return {}
-        return {
-            port_num: urls[0].url() for port_num, urls in port_details.items()
-        }
+        return filter_endpoints_by_protocol(port_details)
