@@ -1463,6 +1463,8 @@ class S3Store(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
 
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join([
@@ -1470,8 +1472,6 @@ class S3Store(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
                             f's3://{self.name}{sub_path}')
@@ -1486,8 +1486,6 @@ class S3Store(AbstractStore):
                 for file_name in excluded_list
             ])
             src_dir_path = shlex.quote(src_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
                             f's3://{self.name}{sub_path}/{dest_dir_name}')
@@ -1501,7 +1499,7 @@ class S3Store(AbstractStore):
 
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> s3://{self.name}/'
+        sync_path = f'{source_message} -> s3://{self.name}{sub_path}/'
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
@@ -1960,11 +1958,13 @@ class GcsStore(AbstractStore):
         copy_list = '\n'.join(
             os.path.abspath(os.path.expanduser(p)) for p in source_path_list)
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
         sync_command = (f'{alias_gen}; echo "{copy_list}" | {gsutil_alias} '
-                        f'cp -e -n -r -I gs://{self.name}')
+                        f'cp -e -n -r -I gs://{self.name}{sub_path}')
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> gs://{self.name}/'
+        sync_path = f'{source_message} -> gs://{self.name}{sub_path}/'
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
@@ -1996,13 +1996,13 @@ class GcsStore(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
 
         def get_file_sync_command(base_dir_path, file_names):
             sync_format = '|'.join(file_names)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             base_dir_path = shlex.quote(base_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -x \'^(?!{sync_format}$).*\' '
                             f'{base_dir_path} gs://{self.name}{sub_path}')
@@ -2015,8 +2015,6 @@ class GcsStore(AbstractStore):
             excludes = '|'.join(excluded_list)
             gsutil_alias, alias_gen = data_utils.get_gsutil_command()
             src_dir_path = shlex.quote(src_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = (f'{alias_gen}; {gsutil_alias} '
                             f'rsync -e -r -x \'({excludes})\' {src_dir_path} '
                             f'gs://{self.name}{sub_path}/{dest_dir_name}')
@@ -2030,7 +2028,7 @@ class GcsStore(AbstractStore):
 
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> gs://{self.name}/'
+        sync_path = f'{source_message} -> gs://{self.name}{sub_path}/'
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
@@ -2804,6 +2802,8 @@ class AzureBlobStore(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        container_path = (f'{self.container_name}/{self._bucket_sub_path}'
+                            if self._bucket_sub_path else self.container_name)
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
             # shlex.quote is not used for file_names as 'az storage blob sync'
@@ -2812,8 +2812,6 @@ class AzureBlobStore(AbstractStore):
             includes_list = ';'.join(file_names)
             includes = f'--include-pattern "{includes_list}"'
             base_dir_path = shlex.quote(base_dir_path)
-            container_path = (f'{self.container_name}/{self._bucket_sub_path}'
-                              if self._bucket_sub_path else self.container_name)
             sync_command = (f'az storage blob sync '
                             f'--account-name {self.storage_account_name} '
                             f'--account-key {self.storage_account_key} '
@@ -2831,9 +2829,6 @@ class AzureBlobStore(AbstractStore):
                 [file_name.rstrip('*') for file_name in excluded_list])
             excludes = f'--exclude-path "{excludes_list}"'
             src_dir_path = shlex.quote(src_dir_path)
-            container_path = (f'{self.container_name}/{self._bucket_sub_path}'
-                              if self._bucket_sub_path else
-                              f'{self.container_name}')
             if dest_dir_name:
                 container_path = f'{container_path}/{dest_dir_name}'
             sync_command = (f'az storage blob sync '
@@ -2853,7 +2848,7 @@ class AzureBlobStore(AbstractStore):
             source_message = source_path_list[0]
         container_endpoint = data_utils.AZURE_CONTAINER_URL.format(
             storage_account_name=self.storage_account_name,
-            container_name=self.name)
+            container_name=container_path)
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
         sync_path = f'{source_message} -> {container_endpoint}/'
@@ -3247,6 +3242,8 @@ class R2Store(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
 
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join([
@@ -3255,8 +3252,6 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             base_dir_path = shlex.quote(base_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             'aws s3 sync --no-follow-symlinks --exclude="*" '
@@ -3276,8 +3271,6 @@ class R2Store(AbstractStore):
             ])
             endpoint_url = cloudflare.create_endpoint()
             src_dir_path = shlex.quote(src_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = ('AWS_SHARED_CREDENTIALS_FILE='
                             f'{cloudflare.R2_CREDENTIALS_PATH} '
                             f'aws s3 sync --no-follow-symlinks {excludes} '
@@ -3295,7 +3288,7 @@ class R2Store(AbstractStore):
 
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> r2://{self.name}/'
+        sync_path = f'{source_message} -> r2://{self.name}{sub_path}/'
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
@@ -3719,6 +3712,8 @@ class IBMCosStore(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        sub_path = (f'/{self._bucket_sub_path}'
+                    if self._bucket_sub_path else '')
 
         def get_dir_sync_command(src_dir_path, dest_dir_name) -> str:
             """returns an rclone command that copies a complete folder
@@ -3740,8 +3735,6 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = (
                 'rclone copy --exclude ".git/*" '
                 f'{src_dir_path} '
@@ -3772,8 +3765,6 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sub_path = (f'/{self._bucket_sub_path}'
-                        if self._bucket_sub_path else '')
             sync_command = (
                 'rclone copy '
                 f'{includes} {base_dir_path} '
@@ -3788,7 +3779,7 @@ class IBMCosStore(AbstractStore):
 
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> cos://{self.region}/{self.name}/'
+        sync_path = f'{source_message} -> cos://{self.region}/{self.name}{sub_path}/'
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
@@ -4187,6 +4178,8 @@ class OciStore(AbstractStore):
                 set to True, the directory is created in the bucket root and
                 contents are uploaded to it.
         """
+        sub_path = (f'{self._bucket_sub_path}/'
+                    if self._bucket_sub_path else '')
 
         @oci.with_oci_env
         def get_file_sync_command(base_dir_path, file_names):
@@ -4196,6 +4189,7 @@ class OciStore(AbstractStore):
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--region {self.region} --src-dir "{base_dir_path}" '
+                f'--object-prefix "{sub_path}" '
                 f'{includes}')
 
             return sync_command
@@ -4216,7 +4210,7 @@ class OciStore(AbstractStore):
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--region {self.region} --object-prefix "{dest_dir_name}" '
+                f'--region {self.region} --object-prefix "{sub_path}{dest_dir_name}" '
                 f'--src-dir "{src_dir_path}" {excludes}')
 
             return sync_command
@@ -4229,7 +4223,7 @@ class OciStore(AbstractStore):
 
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> oci://{self.name}/'
+        sync_path = f'{source_message} -> oci://{self.name}/{sub_path}'
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
