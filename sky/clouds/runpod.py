@@ -178,6 +178,11 @@ class RunPod(clouds.Cloud):
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
+        # default to root
+        docker_username_for_runpod = (resources.docker_username_for_runpod
+                                      if resources.docker_username_for_runpod
+                                      is not None else 'root')
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
@@ -185,6 +190,7 @@ class RunPod(clouds.Cloud):
             'image_id': image_id,
             'use_spot': use_spot,
             'bid_per_gpu': str(hourly_cost),
+            'docker_username_for_runpod': docker_username_for_runpod,
         }
 
     def _get_feasible_launchable_resources(

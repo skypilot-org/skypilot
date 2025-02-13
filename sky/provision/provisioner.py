@@ -451,6 +451,13 @@ def _post_provision_setup(
         logger.info(f'{indent_str}{colorama.Style.DIM}{vm_str}{plural} {verb} '
                     f'up.{colorama.Style.RESET_ALL}')
 
+        # It's promised by the cluster config that docker_config does not
+        # exist for docker-native clouds, i.e. they provide docker containers
+        # instead of full VMs, like Kubernetes and RunPod, as it requires some
+        # special handlings to run docker inside their docker virtualization.
+        # For their Docker image settings, we do them when provisioning the
+        # cluster. See provision/{cloud}/instance.py:get_cluster_info for more
+        # details.
         if docker_config:
             status.update(
                 ux_utils.spinner_message(

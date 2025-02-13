@@ -465,7 +465,9 @@ class Kubernetes(clouds.Cloud):
         # CPU resources on the node instead within the pod.
         custom_ray_options = {
             'object-store-memory': 500000000,
-            'num-cpus': str(int(cpus)),
+            # 'num-cpus' must be an integer, but we should not set it to 0 if
+            # cpus is <1.
+            'num-cpus': str(max(int(cpus), 1)),
         }
         deploy_vars = {
             'instance_type': resources.instance_type,
