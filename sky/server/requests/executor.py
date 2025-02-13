@@ -27,6 +27,7 @@ import os
 import queue as queue_lib
 import signal
 import sys
+import threading
 import time
 import traceback
 import typing
@@ -412,6 +413,15 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names,))
         queue_server.start()
+
+        # Start a monitoring thread to watch queue_server process
+        def monitor_queue_server():
+            queue_server.join()
+            raise RuntimeError('Queue server process exited unexpectedly')
+
+        monitor_thread = threading.Thread(target=monitor_queue_server,
+                                          daemon=True)
+        monitor_thread.start()
         mp_queue.wait_for_queues_to_be_ready(queue_names)
 
     logger.info('Request queues created')
