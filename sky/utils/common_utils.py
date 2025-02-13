@@ -732,3 +732,13 @@ def hash_file(path: str, hash_alg: str) -> 'hashlib._Hash':
                 break
             file_hash.update(view[:size])
         return file_hash
+
+
+def is_port_available(port: int) -> bool:
+    """Check if the given port is available."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        try:
+            s.bind(('localhost', port))
+            return True
+        except socket.error:
+            return False
