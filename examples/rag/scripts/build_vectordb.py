@@ -44,7 +44,8 @@ def process_parquet_file(args):
             # Extract data from DataFrame
             ids = [str(idx) for idx in batch_df['id']]
             embeddings = [pickle.loads(emb) for emb in batch_df['embedding']]
-            documents = batch_df['content'].tolist()  # Content goes to documents
+            documents = batch_df['content'].tolist(
+            )  # Content goes to documents
             # Create metadata from the available fields (excluding content)
             metadatas = [{
                 'name': row['name'],
@@ -134,12 +135,10 @@ def main():
                     results = future.result()
                     if results:
                         for ids, embeddings, documents, metadatas in results:
-                            collection.add(
-                                ids=list(ids),
-                                embeddings=list(embeddings),
-                                documents=list(documents),
-                                metadatas=list(metadatas)
-                            )
+                            collection.add(ids=list(ids),
+                                           embeddings=list(embeddings),
+                                           documents=list(documents),
+                                           metadatas=list(metadatas))
                 except Exception as e:
                     logger.error(f'Error processing file {file}: {str(e)}')
                     continue
