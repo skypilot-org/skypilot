@@ -1132,6 +1132,12 @@ class Task:
                         raise ValueError(f'Storage Type {store_type} '
                                          'does not exist!')
 
+                # TODO: Delete from storage_mounts, now that the storage is
+                # translated into file_mounts. Note: as is, this will break
+                # controller_utils.
+                # _maybe_translate_local_file_mounts_and_sync_up(), which still
+                # needs the storage, but not the file_mounts.
+
     def get_local_to_remote_file_mounts(self) -> Optional[Dict[str, str]]:
         """Returns file mounts of the form (dst=VM path, src=local path).
 

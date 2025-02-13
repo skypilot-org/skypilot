@@ -19,6 +19,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common
@@ -100,9 +101,33 @@ def launch(
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing managed job')):
+
         for task_ in dag.tasks:
-            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, task_type='jobs')
+            if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+                controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                    task_, task_type='jobs')
+                first_hop_file_mounts = {}
+
+            else:
+                # We do not have any cloud storage available, so fall back to
+                # two-hop file_mount uploading.
+                # Note: we can't easily hack sync_storage_mounts() to upload
+                # directly to the controller, because the controller may not
+                # even be up yet.
+
+                if task_.storage_mounts:
+                    # Technically, we could convert COPY storage_mounts that
+                    # have a local source and do not specify `store`, but we
+                    # will not do that for now. Only plain file_mounts are
+                    # supported.
+                    raise exceptions.NotSupportedError(
+                        'Cloud-based file_mounts are specified, but no cloud '
+                        'storage is available. Please specify local '
+                        'file_mounts only.')
+
+                first_hop_file_mounts = (
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task_, task_type='jobs'))
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -119,6 +144,7 @@ def launch(
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
+            'two_hop_file_mounts': first_hop_file_mounts,
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,

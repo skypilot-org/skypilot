@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 import os
 import pathlib
+import shutil
 import time
 import traceback
 import typing
@@ -17,6 +18,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.data import data_utils
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -488,6 +490,7 @@ def _cleanup(job_id: int, dag_yaml: str):
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
         managed_job_utils.terminate_cluster(cluster_name)
+
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
@@ -498,6 +501,16 @@ def _cleanup(job_id: int, dag_yaml: str):
         for storage in task.storage_mounts.values():
             storage.construct()
         backend.teardown_ephemeral_storage(task)
+
+        # Clean up any files mounted from the local disk, such as two-hop file
+        # mounts.
+        for file_mount in (task.file_mounts or {}).values():
+            if not data_utils.is_cloud_store_url(file_mount):
+                path = os.path.expanduser(file_mount)
+                if os.path.isdir(path):
+                    shutil.rmtree(path)
+                else:
+                    os.remove(path)
 
 
 def start(job_id, dag_yaml):

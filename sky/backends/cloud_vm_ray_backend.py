@@ -3233,7 +3233,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
-        """Mounts all user files to the remote nodes."""
+        """Mounts all user files to the remote nodes.
+
+        Note: This does not handle COPY storage_mounts. These should have
+        already been translated into file_mounts by task.sync_storage_mounts().
+
+        TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
+        assert here that all storage_mounts are MOUNT mode.
+        """
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
                 handle.launched_resources.cloud, all_file_mounts)

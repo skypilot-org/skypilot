@@ -10,6 +10,9 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
+  {%- for controller_file_mount_path, local_file_mount_path in two_hop_file_mounts.items() %}
+  {{controller_file_mount_path}}: {{local_file_mount_path}}
+  {%- endfor %}
 
 setup: |
   {{ sky_activate_python_env }}
