@@ -308,7 +308,7 @@ To implement checkpointing in your application code:
 1. Periodically save checkpoints containing the current program state during execution.
 2. When starting/restarting, check if any checkpoints are present, and load the latest checkpoint.
 
-Checkpointing features are included in most model training libraries, such as `PyTorch <https://pytorch.org/docs/stable/checkpoint.html>` and `TensorFlow <https://www.tensorflow.org/guide/checkpoint>`.
+Both features are included in most model training libraries. See below [TODO: link to the Bert example] for an example.
 
 For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
