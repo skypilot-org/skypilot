@@ -408,6 +408,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_names = [
             schedule_type.value for schedule_type in api_requests.ScheduleType
         ]
+        # TODO(aylei): queue manager port should be configurable.
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names,))
         queue_server.start()

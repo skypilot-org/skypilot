@@ -1085,8 +1085,8 @@ if __name__ == '__main__':
                     host=cmd_args.host,
                     port=cmd_args.port,
                     workers=num_workers)
-    except Exception as e:
-        logger.error(f'Failed to start SkyPilot API server: {e}')
+    except Exception as outer_e:  # pylint: disable=broad-except
+        logger.error(f'Fakled to start SkyPilot API server: {outer_e}')
     finally:
         logger.error('Shutting down SkyPilot API server...')
         for worker in workers:
