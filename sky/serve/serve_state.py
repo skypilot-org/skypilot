@@ -115,10 +115,7 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
                                  'INTEGER DEFAULT 0')
     conn.commit()
 
-<<<<<<< HEAD
-=======
 
->>>>>>> origin/master
 db_utils.SQLiteConn(_DB_PATH, create_table)
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
 
