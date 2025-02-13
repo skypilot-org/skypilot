@@ -573,6 +573,8 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     start_time = time.time()
     # TODO(tian): Add a field in service record to indicate whether it has
     # external load balancer or not. And change this timeout accordingly.
+    # TODO(tian): Or, immediately return and let the user to pull the latest
+    # external LB status.
     # timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS
     timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB
     while True:

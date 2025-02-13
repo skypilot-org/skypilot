@@ -388,6 +388,26 @@ def get_service_schema():
             'replicas': {
                 'type': 'integer',
             },
+            'load_balancing_policy': {
+                'type': 'string',
+                'case_insensitive_enum': lb_policy_choices,
+            },
+            'tls': {
+                'type': 'object',
+                'required': ['keyfile', 'certfile'],
+                'additionalProperties': False,
+                'properties': {
+                    'keyfile': {
+                        'type': 'string',
+                    },
+                    'certfile': {
+                        'type': 'string',
+                    },
+                },
+            },
+            'route53_hosted_zone': {
+                'type': 'string',
+            },
             'external_load_balancers': {
                 'type': 'array',
                 'items': {
@@ -404,26 +424,6 @@ def get_service_schema():
                         },
                     }
                 }
-            },
-            'load_balancing_policy': {
-                'type': 'string',
-                'case_insensitive_enum': lb_policy_choices,
-            },
-            'route53_hosted_zone': {
-                'type': 'string',
-            },
-            'tls': {
-                'type': 'object',
-                'required': ['keyfile', 'certfile'],
-                'additionalProperties': False,
-                'properties': {
-                    'keyfile': {
-                        'type': 'string',
-                    },
-                    'certfile': {
-                        'type': 'string',
-                    },
-                },
             },
         }
     }

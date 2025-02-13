@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from sky import resources as resources_lib
+from sky import serve
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
@@ -63,12 +64,19 @@ class SkyServiceSpec:
                 raise ValueError('readiness_path must start with a slash (/). '
                                  f'Got: {readiness_path}')
 
-        # Use load_balancing_policy as fallback for external_load_balancers
-        if (load_balancing_policy is not None and
-                external_load_balancers is not None):
-            for lb_config in external_load_balancers:
-                if lb_config.get('load_balancing_policy') is None:
-                    lb_config['load_balancing_policy'] = load_balancing_policy
+        if load_balancing_policy is not None:
+            if load_balancing_policy not in serve.LB_POLICIES:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Unknown load balancing policy: '
+                                     f'{load_balancing_policy}. '
+                                     f'Available policies: '
+                                     f'{list(serve.LB_POLICIES.keys())}')
+            # Use load_balancing_policy as fallback for external_load_balancers.
+            if external_load_balancers is not None:
+                for lb_config in external_load_balancers:
+                    if lb_config.get('load_balancing_policy') is None:
+                        lb_config[
+                            'load_balancing_policy'] = load_balancing_policy
 
         self._target_hosted_zone_id: Optional[str] = None
         if external_load_balancers is not None:
@@ -83,12 +91,12 @@ class SkyServiceSpec:
                         raise ValueError('`ports` must not be set for '
                                          'external_load_balancers.')
                 if route53_hosted_zone is not None:
-                    if r.get('cloud', 'aws') != 'aws':
+                    if r.get('cloud', None) != 'aws':
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(
                                 '`cloud` in `external_load_balancers` must be '
                                 'set to `aws` if using route53_hosted_zone.')
-                        r['cloud'] = 'aws'
+                    r['cloud'] = 'aws'
                     if r.get('region') is None:
                         with ux_utils.print_exception_no_traceback():
                             raise ValueError(

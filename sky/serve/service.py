@@ -128,7 +128,6 @@ def _cleanup(service_name: str,
              service_spec: 'service_spec.SkyServiceSpec') -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
     failed = False
-    change_batch = []
     hosted_zone = service_spec.route53_hosted_zone
 
     replica_infos = serve_state.get_replica_infos(service_name)
@@ -148,6 +147,7 @@ def _cleanup(service_name: str,
             replica_managers.ProcessStatus.RUNNING)
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
+    change_batch = []
     for external_lb_record in external_lbs:
         lb_cluster_name = external_lb_record['cluster_name']
         lb_id = external_lb_record['lb_id']
@@ -158,10 +158,11 @@ def _cleanup(service_name: str,
         lbid2proc[lb_id] = p
         lb_ip = _get_cluster_ip(lb_cluster_name)
         assert lb_ip is not None
-        if hosted_zone is not None:
-            change_batch.append(
-                _get_route53_change('DELETE', service_name, hosted_zone, 'A',
-                                    lb_region, lb_ip))
+        # Hosted zone must be set for external LBs.
+        assert hosted_zone is not None
+        change_batch.append(
+            _get_route53_change('DELETE', service_name, hosted_zone, 'A',
+                                lb_region, lb_ip))
         logger.info(f'Terminating external load balancer {lb_cluster_name} ...')
 
     if change_batch:
@@ -306,6 +307,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     shutil.copy(tmp_task_yaml, task_yaml)
 
     controller_process = None
+    load_balancer_processes = []
     try:
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
@@ -346,7 +348,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                                                     controller_port)
 
             controller_addr = f'http://{controller_host}:{controller_port}'
-            load_balancer_processes = []
             # TODO(tian): Combine the following two.
             lbid2cluster = {}
             lbid2region = {}
