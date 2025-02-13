@@ -42,10 +42,9 @@ The job is launched on a temporary SkyPilot cluster, managed end-to-end, and aut
 Managed jobs have several benefits:
 
 #. :ref:`Use spot instances <spot-jobs>`: Jobs can run on auto-recovering spot instances. This **saves significant costs** (e.g., ~70\% for GPU VMs) by making preemptible spot instances useful for long-running jobs.
-#. :ref:`Scale across clouds <many-jobs>`: Easily run batch workloads on **thousands of instances and GPUs** across multiple regions/clouds, using a single SkyPilot YAML.
-#. :ref:`Recover from failure <failure-recovery>`: When a job fails, you can automatically retry it on a new cluster, eliminating flaky issues.
-#. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks (which
-   can have different resource requirements and ``setup``/``run`` commands).
+#. :ref:`Scale across regions and clouds <scaling-to-many-jobs>`: Easily run and manage **thousands of jobs at once**, using instances and GPUs across multiple regions/clouds.
+#. :ref:`Recover from failure <failure-recovery>`: When a job fails, you can automatically retry it on a new cluster, eliminating flaky failures.
+#. :ref:`Managed pipelines <pipeline>`: Run pipelines that contain multiple tasks.
    Useful for running a sequence of tasks that depend on each other, e.g., data
    processing, training a model, and then running inference on it.
 
@@ -54,6 +53,8 @@ Managed jobs have several benefits:
    :local:
    :backlinks: none
 
+
+.. _managed-job-quickstart:
 
 Create a managed job
 --------------------
@@ -103,7 +104,7 @@ A managed job is created from a standard :ref:`SkyPilot YAML <yaml-spec>`. For e
 
 .. note::
 
-  :ref:`workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be :ref:`automatically uploaded to a cloud bucket <intermediate-bucket>`.
+  :ref:`Workdir <sync-code-artifacts>` and :ref:`file mounts with local files <sync-code-artifacts>` will be :ref:`automatically uploaded to a cloud bucket <intermediate-bucket>`.
   The bucket will be cleaned up after the job finishes.
 
 To launch this YAML as a managed job, use :code:`sky jobs launch`:
@@ -112,7 +113,7 @@ To launch this YAML as a managed job, use :code:`sky jobs launch`:
 
   $ sky jobs launch -n bert-qa-job bert_qa.yaml
 
-:code:`sky jobs launch` works similarly to :code:`sky launch` - you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
+:code:`sky jobs launch` has a similar interface to :code:`sky launch` - you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
 
 SkyPilot will launch and start monitoring the job.
 
@@ -179,7 +180,7 @@ Cancel a managed job:
 
 .. note::
   If any failure happens for a managed job, you can check :code:`sky jobs queue -a` for the brief reason
-  of the failure. For more details, it would be helpful to check :code:`sky jobs logs --controller <job_id>`.
+  of the failure. For more details related to provisioning, check :code:`sky jobs logs --controller <job_id>`.
 
 
 Jobs dashboard
@@ -193,7 +194,7 @@ Use ``sky jobs dashboard`` to open a dashboard to see all jobs:
 
 This automatically opens a browser tab to show the dashboard:
 
-.. image:: ../images/job-dashboard.png
+.. image:: ../images/managed-jobs-dashboard.png
 
 The UI shows the same information as the CLI ``sky jobs queue -a``. The UI is
 especially useful when there are many in-progress jobs to monitor, which the
@@ -234,15 +235,12 @@ Any spot preemptions are automatically handled by SkyPilot without user interven
    To avoid redoing work after recovery, implement :ref:`checkpointing and recovery <checkpointing>`.
    Your application code can checkpoint its progress periodically to a :ref:`mounted cloud bucket <sky-storage>`. The program can then reload the latest checkpoint when restarted.
 
-Here is an example of a training job failing over different regions across AWS and GCP.
+Here is :ref:`an example of a training job <bert>` failing over different regions across AWS and GCP.
 
 .. image:: https://i.imgur.com/Vteg3fK.gif
   :width: 600
   :alt: GIF for BERT training on Spot V100
-
-.. image:: ../images/spot-training.png
-  :width: 600
-  :alt: Static plot, BERT training on Spot V100
+  :align: center
 
 Quick comparison between *managed spot jobs* vs. *launching unmanaged spot clusters*:
 
@@ -308,7 +306,9 @@ To implement checkpointing in your application code:
 1. Periodically save checkpoints containing the current program state during execution.
 2. When starting/restarting, check if any checkpoints are present, and load the latest checkpoint.
 
-Both features are included in most model training libraries. See below [TODO: link to the Bert example] for an example.
+Both features are included in most model training libraries, such as `PyTorch <https://pytorch.org/docs/stable/checkpoint.html>`__, `TensorFlow <https://www.tensorflow.org/guide/checkpoint>`__, and `Hugging Face <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`__.
+
+To see checkpointing in action, see the :ref:`BERT end-to-end example below <bert>`.
 
 For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
@@ -333,25 +333,29 @@ can set :code:`max_restarts_on_errors` in :code:`resources.job_recovery` in the 
 
 This will restart the job, up to 3 times (for a total of 4 attempts), if your code has any non-zero exit code. Each restart runs on a newly provisioned temporary cluster.
 
+
+When will my job be recovered?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 Here's how various kinds of failures will be handled by SkyPilot:
 
 .. list-table::
    :widths: 1 2
    :header-rows: 0
 
-   * - **User code fails (**:code:`setup` **or** :code:`run` **commands have non-zero exit code):**
+   * - User code fails (:code:`setup` or :code:`run` commands have non-zero exit code):
      - If :code:`max_restarts_on_errors` is set, restart up to that many times. If :code:`max_restarts_on_errors` is not set, or we run out of restarts, set the job to :code:`FAILED` or :code:`FAILED_SETUP`.
-   * - **Instances are preempted or underlying hardware fails:**
+   * - Instances are preempted or underlying hardware fails:
      - Tear down the old temporary cluster and provision a new one in another region, then restart the job.
-   * - **Can't find available resources due to cloud quota or capacity restrictions:**
+   * - Can't find available resources due to cloud quota or capacity restrictions:
      - Try other regions and other clouds indefinitely until resources are found.
-   * - **Cloud config/auth issue or invalid job configuration:**
+   * - Cloud config/auth issue or invalid job configuration:
      - Mark the job as :code:`FAILED_PRECHECKS` and exit. Won't be retried.
 
 To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:`sky jobs logs <job_id>`. If there is a provisioning or recovery issue, you can see the provisioning logs by running :code:`sky jobs logs --controller <job_id>`.
 
 .. tip::
-  Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. To learn more about the controller, see :ref:`jobs-controller`.
+  Under the hood, SkyPilot uses a "controller" to provision, monitor, and recover the underlying temporary clusters. See :ref:`jobs-controller`.
 
 
 .. _spot-jobs-end-to-end:
@@ -359,10 +363,17 @@ To see the logs of user code (:code:`setup` or :code:`run` commands), use :code:
 Examples
 --------
 
+.. _bert:
+
 BERT end-to-end
 ~~~~~~~~~~~~~~~
 
-Below we show an `example <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_ for fine-tuning a BERT model on a question-answering task with HuggingFace.
+We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
+
+.. note::
+  You can find all the code for this example `in the SkyPilot GitHub repository <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_
+
+In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.
 
 This example:
 
@@ -418,10 +429,10 @@ This example:
       --save_total_limit 10 \
       --save_steps 1000
 
-As HuggingFace has built-in support for periodically checkpointing, we only need to pass the highlighted arguments for setting up
-the output directory and frequency of checkpointing (see more
-on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`_).
-You may also refer to another example `here <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`__ for periodically checkpointing with PyTorch.
+The highlighted lines add a bucket for checkpoints.
+As HuggingFace has built-in support for periodic checkpointing, we just need to pass the highlighted arguments to save checkpoints to the bucket.
+(See more on `Huggingface API <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`__).
+To see another example of periodic checkpointing with PyTorch, check out `our ResNet example <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`__.
 
 We also set :code:`--run_name` to :code:`$SKYPILOT_TASK_ID` so that the logs for all recoveries of the same job will be saved
 to the same run in Weights & Biases.
@@ -445,15 +456,20 @@ Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
 * `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
+* `Large-scale vector database ingestion <https://github.com/skypilot-org/skypilot/tree/master/examples/vector_database>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
 * BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
 * PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
 * PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
 
 
-Running many parallel jobs
---------------------------
+.. _scaling-to-many-jobs:
 
-For batch jobs such as **data processing** or **hyperparameter sweeps**, you can launch many jobs in parallel. See :ref:`many-jobs`.
+Scaling to many jobs
+--------------------
+
+You can easily manage dozens, hundreds, or thousands of managed jobs at once. This is a great fit for batch jobs such as **data processing**, **batch inference**, or **hyperparameter sweeps**. To see an example launching many jobs in parallel, see :ref:`many-jobs`.
+
+.. TODO(cooperc): code block or dashboard showcasing UX of many jobs (thousand-scale)
 
 To increase the maximum number of jobs that can run at once, see :ref:`jobs-controller-sizing`.
 
@@ -553,7 +569,7 @@ To submit the pipeline, the same command :code:`sky jobs launch` is used. The pi
 
 .. _intermediate-bucket:
 
-Setting the Job Files Bucket
+Setting the job files bucket
 ----------------------------
 
 For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
