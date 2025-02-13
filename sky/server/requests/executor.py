@@ -414,7 +414,8 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             target=mp_queue.start_queue_manager, args=(queue_names,))
         queue_server.start()
 
-        # Start a monitoring thread to watch queue_server process
+        # Monitor the queue server process and raise an error if it exits to
+        # avoid the main process hanging on the queue server.
         def monitor_queue_server():
             queue_server.join()
             raise RuntimeError('Queue server process exited unexpectedly')
