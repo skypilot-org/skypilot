@@ -24,13 +24,16 @@ from sky.utils import ux_utils
 
 POLL_INTERVAL = 2
 _TIMEOUT_FOR_POD_TERMINATION = 60  # 1 minutes
-_MAX_RETRIES = 3
 _NUM_THREADS = subprocess_utils.get_parallel_threads('kubernetes')
 
 logger = sky_logging.init_logger(__name__)
 TAG_RAY_CLUSTER_NAME = 'ray-cluster-name'
 TAG_SKYPILOT_CLUSTER_NAME = 'skypilot-cluster-name'
 TAG_POD_INITIALIZED = 'skypilot-initialized'
+
+
+def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
+    return {TAG_RAY_CLUSTER_NAME: cluster_name}
 
 # Please be careful when changing this.
 # When mounting, Kubernetes changes the ownership of the parent directory
@@ -60,8 +63,7 @@ def _get_deployment_name(cluster_name: str) -> str:
     return f'{cluster_name}-deployment'
 
 
-def head_service_selector(cluster_name: str) -> Dict[str, str]:
-    """Selector for Operator-configured head service."""
+def _head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
@@ -625,9 +627,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
-    tags = {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-    }
+    tags = ray_tag_filter(cluster_name_on_cloud)
 
     pod_spec['metadata']['namespace'] = namespace
     if 'labels' in pod_spec['metadata']:
@@ -714,7 +714,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         if head_pod_name is None and i == 0:
             # First pod should be head if no head exists
             pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
-            head_selector = head_service_selector(cluster_name_on_cloud)
+            head_selector = _head_service_selector(cluster_name_on_cloud)
             pod_spec_copy['metadata']['labels'].update(head_selector)
             pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
@@ -976,10 +976,9 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
-    tag_filters = {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-    }
-    pods = kubernetes_utils.filter_pods(namespace, context, tag_filters, None)
+    pods = kubernetes_utils.filter_pods(namespace, context,
+                                        ray_tag_filter(cluster_name_on_cloud),
+                                        None)
 
     # Clean up the SSH jump pod if in use
     networking_mode = network_utils.get_networking_mode(
@@ -1017,12 +1016,9 @@ def get_cluster_info(
     assert provider_config is not None
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
-    tag_filters = {
-        TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud,
-    }
 
-    running_pods = kubernetes_utils.filter_pods(namespace, context, tag_filters,
-                                                ['Running'])
+    running_pods = kubernetes_utils.filter_pods(
+        namespace, context, ray_tag_filter(cluster_name_on_cloud), ['Running'])
 
     pods: Dict[str, List[common.InstanceInfo]] = {}
     head_pod_name = None

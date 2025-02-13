@@ -2454,7 +2454,13 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
-        # TODO(andyl): must force refresh here?
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andy): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner.
         if common_utils.is_cluster_name_indicating_serve_controller(
                 self.cluster_name):
             self._update_cluster_info()
