@@ -1395,11 +1395,6 @@ class KubernetesInstanceType:
         return self.name
 
 
-def is_serve_controller(cluster_name_on_cloud: str) -> bool:
-    return common_utils.is_cluster_name_indicating_serve_controller(
-        cluster_name_on_cloud)
-
-
 def construct_ssh_jump_command(
         private_key_path: str,
         ssh_jump_ip: str,

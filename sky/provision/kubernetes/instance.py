@@ -709,6 +709,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
+    # TODO(andyl): We should not check user config here. Somehow breaks the abstraction.
+    # Instead, we should move this flag to provision config.
+    to_create_deployment = common_utils.high_availability_specified(
+        cluster_name_on_cloud)
+
     def _create_pod_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         if head_pod_name is None and i == 0:
@@ -767,7 +772,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             }
             pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
 
-        if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
+        if to_create_deployment:
             deployment_spec = _create_serve_controller_deployment(
                 pod_spec_copy, cluster_name_on_cloud, namespace, context)
             try:
@@ -786,7 +791,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                                             list(range(to_start_count)),
                                             _NUM_THREADS)
 
-    if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
+    if to_create_deployment:
         deployments = copy.deepcopy(pods)
         pods.clear()  # Since it's not pods. What created here are true pods.
         for deployment in deployments:
@@ -992,7 +997,12 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    if kubernetes_utils.is_serve_controller(cluster_name_on_cloud):
+    if cluster_name_on_cloud.startswith('sky-serve-controller'):
+        # We chooese to only check cluster name, because users may launch a
+        # high availability controller, and then remove `controller.high_availability`
+        # from the config, which creates a resource leak.
+        # TODO(andyl): Could be resolved by storing the high availability property
+        # in the cluster config.
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 

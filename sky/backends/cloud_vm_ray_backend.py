@@ -2416,6 +2416,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+        assert self.launched_resources.cloud is not None, self
         updated_to_skypilot_provisioner_after_provisioned = (
             self.launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
@@ -2461,8 +2462,11 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # to manually update the cluster info here.
         # TODO(andy): See if we can prevent this refresh. Like pass in
         # deployment name as identifier for KubernetesCommandRunner.
-        if common_utils.is_cluster_name_indicating_serve_controller(
-                self.cluster_name):
+        # TODO(andyl): Should also check through the cluster config. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                common_utils.high_availability_specified(
+                    self.cluster_name_on_cloud)):
             self._update_cluster_info()
 
         assert self.cached_cluster_info is not None, self
