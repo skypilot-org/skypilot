@@ -1160,7 +1160,14 @@ class TestStorageWithCredentials:
                              store_type):
         # Creates a new bucket with a local source, uploads files to it
         # and deletes it.
-        tmp_local_storage_obj_with_sub_path.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        tmp_local_storage_obj_with_sub_path.add_store(store_type,
+                                                      **region_kwargs)
 
         # Check files under bucket and filter by prefix
         files = self.list_all_files(store_type,
@@ -1476,7 +1483,13 @@ class TestStorageWithCredentials:
         bucket_name, _ = request.getfixturevalue(ext_bucket_fixture)
         storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
         storage_obj.construct()
-        storage_obj.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        storage_obj.add_store(store_type, **region_kwargs)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
         out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
@@ -1522,7 +1535,13 @@ class TestStorageWithCredentials:
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
-        tmp_local_list_storage_obj.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        tmp_local_list_storage_obj.add_store(store_type, **region_kwargs)
 
         # Check if tmp-file exists in the bucket root using cli
         out = subprocess.check_output(self.cli_ls_cmd(
@@ -1578,7 +1597,13 @@ class TestStorageWithCredentials:
                                                      tmp_gitignore_storage_obj):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
-        tmp_gitignore_storage_obj.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        tmp_gitignore_storage_obj.add_store(store_type, **region_kwargs)
         upload_file_name = 'included'
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
