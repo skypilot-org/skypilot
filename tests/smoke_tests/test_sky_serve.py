@@ -1000,6 +1000,8 @@ def test_skyserve_ha_kill_during_provision():
 def test_skyserve_ha_kill_during_pending():
     """Test HA recovery when killing controller during PENDING."""
     name = _get_service_name()
+    replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
+        name, 1)
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-pending',
         [
@@ -1015,7 +1017,7 @@ def test_skyserve_ha_kill_during_pending():
             # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             # 'curl $endpoint | grep "Hi, SkyPilot here"',
             # Check there are one cluster
-            'instance_names=$(gcloud compute instances list --filter="name~{name}" --format="value(name)"); '
+            f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)"); '
             'echo "Initial instances: $instance_names"; '
             'num_instances=$(echo "$instance_names" | wc -l); '
             '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
@@ -1032,6 +1034,8 @@ def test_skyserve_ha_kill_during_pending():
 def test_skyserve_ha_kill_during_shutdown():
     """Test HA recovery when killing controller during replica shutdown."""
     name = _get_service_name()
+    replica_cluster_name = smoke_tests_utils.get_replica_cluster_name_on_gcp(
+        name, 1)
     test = smoke_tests_utils.Test(
         'test-skyserve-ha-kill-during-shutdown',
         [
@@ -1041,11 +1045,7 @@ def test_skyserve_ha_kill_during_shutdown():
             # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             # 'curl $endpoint | grep "Hi, SkyPilot here"',
             # Record instance names and initiate shutdown of the replica
-            'gcloud compute instances list --filter="" --format="value(name)"',
-            f'cluster_name=$(sky serve status {name} | grep -A 100 "Service Replicas" | grep -v "Service Replicas" | head -n 1 | awk \'{{print $1}}\'); '
-            f'name_on_cloud=$(python3 -c "from sky import serve; from sky.utils import common_utils; from sky import GCP; cluster_name = serve.generate_replica_cluster_name(\'{name}\', 1); print(common_utils.make_cluster_name_on_cloud(cluster_name, GCP.max_cluster_name_length()))"); '
-            'echo $cluster_name; '
-            f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:$cluster_name)" --format="value(name)"); '
+            f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)"); '
             'echo "Initial instances: $instance_names"; '
             'num_instances=$(echo "$instance_names" | wc -l); '
             '[ "$num_instances" -eq "1" ] || (echo "Expected 1 instance, got $num_instances"; exit 1)',
@@ -1059,11 +1059,14 @@ def test_skyserve_ha_kill_during_shutdown():
             'done; echo "$s"',
             # Kill controller during shutdown
             _kill_and_wait_controller(),
-            # Verify replicas remain in SHUTTING_DOWN state after controller recovery
+            # Even after the pod ready, `serve status` may return `Failed to connect to serve controller, please try again later.`
+            # So we need to wait for a while before checking the status again.
+            'sleep 10',
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             'echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN" > /dev/null',
             # Verify GCP instances are eventually terminated
-            'until [ "$(gcloud compute instances list --filter="(labels.ray-cluster-name:$name_on_cloud)" --format="value(name)" | wc -l)" = "0" ]; do '
+            # First check this command run well
+            f'until gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)" 2>/dev/null | wc -l | grep -q "^0$"; do '
             '  echo "Waiting for instances to terminate..."; sleep 5; '
             'done',
         ],
