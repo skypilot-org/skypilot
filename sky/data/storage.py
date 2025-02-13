@@ -354,7 +354,8 @@ class AbstractStore:
                                              metadata.is_sky_managed),
             sync_on_reconstruction=override_args.get('sync_on_reconstruction',
                                                      True),
-            # backward compatibility
+            # Backward compatibility
+            # TODO: remove the hasattr check after v0.11.0
             _bucket_sub_path=override_args.get(
                 '_bucket_sub_path',
                 metadata._bucket_sub_path  # pylint: disable=protected-access
@@ -2307,6 +2308,8 @@ class AzureBlobStore(AbstractStore):
             An instance of AzureBlobStore.
         """
         assert isinstance(metadata, AzureBlobStore.AzureBlobStoreMetadata)
+                # TODO: this needs to be kept in sync with the abstract
+        # AbstractStore.from_metadata.
         return cls(name=override_args.get('name', metadata.name),
                    storage_account_name=override_args.get(
                        'storage_account', metadata.storage_account_name),
@@ -2315,7 +2318,13 @@ class AzureBlobStore(AbstractStore):
                    is_sky_managed=override_args.get('is_sky_managed',
                                                     metadata.is_sky_managed),
                    sync_on_reconstruction=override_args.get(
-                       'sync_on_reconstruction', True))
+                       'sync_on_reconstruction', True),
+                    # Backward compatibility
+                    # TODO: remove the hasattr check after v0.11.0
+                    _bucket_sub_path=override_args.get(
+                        '_bucket_sub_path',
+                        metadata._bucket_sub_path  # pylint: disable=protected-access
+                    ) if hasattr(metadata, '_bucket_sub_path') else None)
 
     def get_metadata(self) -> AzureBlobStoreMetadata:
         return self.AzureBlobStoreMetadata(
