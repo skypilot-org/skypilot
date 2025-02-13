@@ -10,7 +10,7 @@ SkyPilot can run a container either as a task, or as the runtime environment of 
 
 .. note::
 
-    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, either use your docker image (the username should be ``root`` for RunPod) :ref:`as a runtime environment <docker-containers-as-runtime-environments>` or use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
+    Running docker containers is `not supported on RunPod <https://docs.runpod.io/references/faq#can-i-run-my-own-docker-daemon-on-runpod>`_. To use RunPod, either use your docker image :ref:`as a runtime environment <docker-containers-as-runtime-environments>` or use ``setup`` and ``run`` to configure your environment. See `GitHub issue <https://github.com/skypilot-org/skypilot/issues/3096#issuecomment-2150559797>`_ for more.
 
 
 .. _docker-containers-as-tasks:
@@ -121,6 +121,19 @@ For example, to use the :code:`ubuntu:20.04` image from Docker Hub:
 
   run: |
     # Commands to run inside the container
+
+.. note::
+  For **non-root** docker images on RunPod, you must manually set the :code:`SKYPILOT_RUNPOD_DOCKER_USERNAME` environment variable to match the login user of the docker image (set by the last `USER` instruction in the Dockerfile).
+
+  You can set this environment variable in the :code:`envs` section of your task YAML file:
+
+  .. code-block:: yaml
+
+    envs:
+      SKYPILOT_RUNPOD_DOCKER_USERNAME: <ssh-user>
+
+  It's a workaround for RunPod's limitation that we can't get the login user for the created pods, and even `runpodctl` uses a hardcoded `root` for SSH access.
+  But for other clouds, the login users for the created docker containers are automatically fetched and used.
 
 As another example, here's how to use `NVIDIA's PyTorch NGC Container <https://catalog.ngc.nvidia.com/orgs/nvidia/containers/pytorch>`_:
 
