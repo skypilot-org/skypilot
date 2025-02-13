@@ -17,6 +17,10 @@ file_mounts:
     name: sky-legal-vectordb
     # this needs to be the same as in build_vectordb.yaml
     mode: MOUNT
+  /model:
+    # this needs to be the same as in compute_vectors.yaml
+    name: sky-law-models
+    mode: MOUNT
 
 setup: |
   # Install dependencies for RAG service
@@ -30,13 +34,14 @@ service:
   replicas: 1
   readiness_probe:
     path: /health
+
 run: |
   # Start vLLM service in background
   CUDA_VISIBLE_DEVICES=0,1,2 python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8002 \
-    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
-    --max-model-len 4096 \
+    --model /model \
+    --max-model-len 28816 \
     --tensor-parallel-size 2 \
     --task generate &
   
@@ -52,7 +57,7 @@ run: |
   CUDA_VISIBLE_DEVICES=3 python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8003 \
-    --model deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
+    --model /model \
     --max-model-len 4096 \
     --task embed &
 

@@ -54,7 +54,7 @@ def encode_query(query: str) -> np.ndarray:
         response = requests.post(
             f"{embed_endpoint}/v1/embeddings",
             json={
-                "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+                "model": "/model",
                 "input": [query]
             },
             timeout=30
@@ -112,9 +112,9 @@ def generate_prompt(query: str, context_docs: List[SearchResult]) -> str:
     ])
     
     return f"""You are a helpful AI assistant that answers questions about legal documents from the Pile of Law dataset.
-Below is some relevant context from legal documents, followed by a question.
-Please answer the question based on the context provided. If you cannot find the answer in the context,
-say so - do not make up information.
+Below is some relevant context from the dataset that may or may not be relevant to the question, followed by a question.
+If you cannot find the answer in the context, say so - do not make up information. Some of them may be random reddit posts,
+so don't be too strict about the legal format.
 
 First, explain your thinking process between <think> tags.
 Then provide your final answer after the thinking process.
@@ -134,7 +134,7 @@ async def query_llm(prompt: str, temperature: float = 0.7) -> tuple[str, str]:
         response = requests.post(
             f"{generator_endpoint}/v1/chat/completions",
             json={
-                "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+                "model": "/model",
                 "messages": [
                     {"role": "user", "content": prompt}
                 ],
