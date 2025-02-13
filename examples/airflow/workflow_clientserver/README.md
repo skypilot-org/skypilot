@@ -34,8 +34,25 @@ Here's how you can use SkyPilot to take your dev workflows to production in Airf
 
 * Airflow installed [locally](https://airflow.apache.org/docs/apache-airflow/stable/start.html) (`SequentialExecutor`)
 * SkyPilot API server endpoint to send requests to.
-  * If you do not have one, deploy with TODO: Add instructions.
+  * If you do not have one, refer to the [API server docs](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) to deploy one.
   * This API server should have AWS/GCS access to create buckets to store intermediate task outputs.
+
+## Configuring the API server endpoint
+
+Once your API server is deployed, you will need to configure your Airflow worker to use it. Set the `SKYPILOT_API_SERVER_ENDPOINT` environment variable in your Airflow worker environment to the endpoint of the SkyPilot API server:
+
+```bash
+# In your bashrc/zshrc
+export SKYPILOT_API_SERVER_ENDPOINT=<api-server-endpoint>
+```
+
+Alternatively, you can also set the endpoint in the `~/.sky/config.yaml` file on your Airflow workers:
+
+```yaml
+# In ~/.sky/config.yaml on your Airflow worker
+api_server:
+  endpoint: http://<api-server-endpoint>
+```
 
 ## Defining the tasks
 
@@ -122,7 +139,7 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
 
 1. Copy the DAG file to the Airflow DAGs directory.
    ```bash
-   cp sky_k8s_train_pipeline.py /path/to/airflow/dags                                              
+   cp sky_k8s_train_pipeline.py /path/to/airflow/dags                                               
    # If your Airflow is running on Kubernetes, you may use kubectl cp to copy the file to the pod
    # kubectl cp sky_k8s_example.py <airflow-pod-name>:/opt/airflow/dags 
    ```
