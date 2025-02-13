@@ -854,16 +854,18 @@ class TestStorageWithCredentials:
                                           persistent=persistent,
                                           mode=mode,
                                           _bucket_sub_path=_bucket_sub_path)
-        yield storage_obj
-        handle = global_user_state.get_handle_from_storage_name(
-            storage_obj.name)
-        if handle:
-            # If handle exists, delete manually
-            # TODO(romilb): This is potentially risky - if the delete method has
-            #   bugs, this can cause resource leaks. Ideally we should manually
-            #   eject storage from global_user_state and delete the bucket using
-            #   boto3 directly.
-            storage_obj.delete()
+        try:
+            yield storage_obj
+        finally:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                # If handle exists, delete manually
+                # TODO(romilb): This is potentially risky - if the delete method has
+                #   bugs, this can cause resource leaks. Ideally we should manually
+                #   eject storage from global_user_state and delete the bucket using
+                #   boto3 directly.
+                storage_obj.delete()
 
     @pytest.fixture
     def tmp_scratch_storage_obj(self, tmp_bucket_name):
@@ -881,17 +883,19 @@ class TestStorageWithCredentials:
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
             storage_mult_obj.append(store_obj)
-        yield storage_mult_obj
-        for storage_obj in storage_mult_obj:
-            handle = global_user_state.get_handle_from_storage_name(
-                storage_obj.name)
-            if handle:
-                # If handle exists, delete manually
-                # TODO(romilb): This is potentially risky - if the delete method has
-                # bugs, this can cause resource leaks. Ideally we should manually
-                # eject storage from global_user_state and delete the bucket using
-                # boto3 directly.
-                storage_obj.delete()
+        try:
+            yield storage_mult_obj
+        finally:
+            for storage_obj in storage_mult_obj:
+                handle = global_user_state.get_handle_from_storage_name(
+                    storage_obj.name)
+                if handle:
+                    # If handle exists, delete manually
+                    # TODO(romilb): This is potentially risky - if the delete method has
+                    # bugs, this can cause resource leaks. Ideally we should manually
+                    # eject storage from global_user_state and delete the bucket using
+                    # boto3 directly.
+                    storage_obj.delete()
 
     @pytest.fixture
     def tmp_multiple_custom_source_storage_obj(self):
@@ -907,12 +911,14 @@ class TestStorageWithCredentials:
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=src_path)
             storage_mult_obj.append(store_obj)
-        yield storage_mult_obj
-        for storage_obj in storage_mult_obj:
-            handle = global_user_state.get_handle_from_storage_name(
-                storage_obj.name)
-            if handle:
-                storage_obj.delete()
+        try:
+            yield storage_mult_obj
+        finally:
+            for storage_obj in storage_mult_obj:
+                handle = global_user_state.get_handle_from_storage_name(
+                    storage_obj.name)
+                if handle:
+                    storage_obj.delete()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
