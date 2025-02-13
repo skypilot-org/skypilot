@@ -140,7 +140,8 @@ def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str,output_path:
         try:
             # Print request payload for debugging
             request_payload = {
-                "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-8B",
+                "model": "/model",
+                # because this is loaded from the mounted directory
                 "input": prompts
             }
             
