@@ -21,8 +21,9 @@ import pytest
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod'
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
+    'vast'
 ]
 default_clouds_to_run = ['aws', 'azure']
 
@@ -43,6 +44,8 @@ cloud_to_pytest_keyword = {
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'do': 'do',
+    'vast': 'vast',
     'runpod': 'runpod'
 }
 
@@ -183,6 +186,12 @@ def pytest_collection_modifyitems(config, items):
             if generic_cloud_keyword in item.keywords:
                 item.add_marker(serial_mark)
                 item._nodeid = f'{item.nodeid}@serial_{generic_cloud_keyword}'  # See comment on item.nodeid above
+
+    if config.option.collectonly:
+        for item in items:
+            full_name = item.nodeid
+            marks = [mark.name for mark in item.iter_markers()]
+            print(f"Collected {full_name} with marks: {marks}")
 
 
 def _is_generic_test(item) -> bool:

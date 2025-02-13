@@ -1,0 +1,18 @@
+envs:
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
+resources:
+  accelerators: {L4:1, A10G:1, A10:1, A100:8, A100-80GB:1}
+  ports:
+    - 8000
+  disk_tier: best
+  memory: 32+
+
+setup: |
+  git clone https://github.com/deepseek-ai/Janus.git
+  pip install -e Janus[gradio]
+  pip install diffusers==0.32.2
+  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
+
+run: |
+  cd Janus && python demo/app.py

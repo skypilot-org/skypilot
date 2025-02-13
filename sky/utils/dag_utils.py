@@ -12,7 +12,7 @@ from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.{exec,launch,spot.launch}() received a string
+# Message thrown when APIs sky.{exec,launch,jobs.launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
 _ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
@@ -31,7 +31,7 @@ The command can then be run as:
 
   sky.launch(task, ...)
 
-  sky.spot.launch(task, ...)
+  sky.jobs.launch(task, ...)
 """.strip()
 
 
@@ -89,7 +89,7 @@ def load_chain_dag_from_yaml(
     elif len(configs) == 1:
         dag_name = configs[0].get('name')
 
-    if len(configs) == 0:
+    if not configs:
         # YAML has only `name: xxx`. Still instantiate a task.
         configs = [{'name': dag_name}]
 

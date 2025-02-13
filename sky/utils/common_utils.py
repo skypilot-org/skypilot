@@ -28,7 +28,6 @@ from sky.utils import validator
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
-USER_HASH_LENGTH_IN_CLUSTER_NAME = 4
 
 # We are using base36 to reduce the length of the hash. 2 chars -> 36^2 = 1296
 # possibilities. considering the final cluster name contains the prefix as well,
@@ -182,7 +181,7 @@ def make_cluster_name_on_cloud(display_name: str,
             f'on the cloud, we convert it to {cluster_name_on_cloud}.')
     user_hash = ''
     if add_user_hash:
-        user_hash = get_user_hash()[:USER_HASH_LENGTH_IN_CLUSTER_NAME]
+        user_hash = get_user_hash()
         user_hash = f'-{user_hash}'
     user_hash_length = len(user_hash)
 
@@ -633,7 +632,7 @@ def get_cleaned_username(username: str = '') -> str:
     return username
 
 
-def fill_template(template_name: str, variables: Dict,
+def fill_template(template_name: str, variables: Dict[str, Any],
                   output_path: str) -> None:
     """Create a file from a Jinja template and return the filename."""
     assert template_name.endswith('.j2'), template_name
@@ -697,3 +696,22 @@ def truncate_long_string(s: str, max_length: int = 35) -> str:
     if len(prefix) < max_length:
         prefix += s[len(prefix):max_length]
     return prefix + '...'
+
+
+def hash_file(path: str, hash_alg: str) -> 'hashlib._Hash':
+    # In python 3.11, hashlib.file_digest is available, but for <3.11 we have to
+    # do it manually.
+    # This implementation is simplified from the implementation in CPython.
+    # TODO(cooperc): Use hashlib.file_digest once we move to 3.11+.
+    # Beware of f.read() as some files may be larger than memory.
+    with open(path, 'rb') as f:
+        file_hash = hashlib.new(hash_alg)
+        buf = bytearray(2**18)
+        view = memoryview(buf)
+        while True:
+            size = f.readinto(buf)
+            if size == 0:
+                # EOF
+                break
+            file_hash.update(view[:size])
+        return file_hash

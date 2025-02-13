@@ -283,6 +283,7 @@ class Cloud:
         cluster_name: resources_utils.ClusterName,
         region: 'Region',
         zones: Optional[List['Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
@@ -534,6 +535,10 @@ class Cloud:
         Returns a dictionary that will be added to a task's file mounts.
         """
         raise NotImplementedError
+
+    def can_credential_expire(self) -> bool:
+        """Returns whether the cloud credential can expire."""
+        return False
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:

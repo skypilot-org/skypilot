@@ -2,20 +2,25 @@
 from multiprocessing import pool
 import os
 import random
+import resource
+import shlex
 import subprocess
 import time
-from typing import Any, Callable, Iterable, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 import psutil
 
 from sky import exceptions
 from sky import sky_logging
+from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+_fd_limit_warning_shown = False
 
 
 @timeline.event
@@ -42,20 +47,60 @@ def run_no_outputs(cmd, **kwargs):
                **kwargs)
 
 
-def get_parallel_threads() -> int:
-    """Returns the number of idle CPUs."""
+def _get_thread_multiplier(cloud_str: Optional[str] = None) -> int:
+    # If using Kubernetes, we use 4x the number of cores.
+    if cloud_str and cloud_str.lower() == 'kubernetes':
+        return 4
+    return 1
+
+
+def get_max_workers_for_file_mounts(common_file_mounts: Dict[str, str],
+                                    cloud_str: Optional[str] = None) -> int:
+    global _fd_limit_warning_shown
+    fd_limit, _ = resource.getrlimit(resource.RLIMIT_NOFILE)
+
+    # Raise warning for low fd_limit (only once)
+    if fd_limit < 1024 and not _fd_limit_warning_shown:
+        logger.warning(
+            f'Open file descriptor limit ({fd_limit}) is low. File sync to '
+            'remote clusters may be slow. Consider increasing the limit using '
+            '`ulimit -n <number>` or modifying system limits.')
+        _fd_limit_warning_shown = True
+
+    fd_per_rsync = 5
+    for src in common_file_mounts.values():
+        if os.path.isdir(src):
+            # Assume that each file/folder under src takes 5 file descriptors
+            # on average.
+            fd_per_rsync = max(fd_per_rsync, len(os.listdir(src)) * 5)
+
+    # Reserve some file descriptors for the system and other processes
+    fd_reserve = 100
+
+    max_workers = (fd_limit - fd_reserve) // fd_per_rsync
+    # At least 1 worker, and avoid too many workers overloading the system.
+    num_threads = get_parallel_threads(cloud_str)
+    max_workers = min(max(max_workers, 1), num_threads)
+    logger.debug(f'Using {max_workers} workers for file mounts.')
+    return max_workers
+
+
+def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
+    """Returns the number of threads to use for parallel execution.
+
+    Args:
+        cloud_str: The cloud
+    """
     cpu_count = os.cpu_count()
     if cpu_count is None:
         cpu_count = 1
-    return max(4, cpu_count - 1)
+    return max(4, cpu_count - 1) * _get_thread_multiplier(cloud_str)
 
 
 def run_in_parallel(func: Callable,
-                    args: Iterable[Any],
+                    args: List[Any],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
-
-    The function 'func' should raise a CommandError if the command fails.
 
     Args:
         func: The function to run in parallel
@@ -65,14 +110,23 @@ def run_in_parallel(func: Callable,
 
     Returns:
       A list of the return values of the function func, in the same order as the
-      arguments.
+        arguments.
+
+    Raises:
+        Exception: The first exception encountered.
     """
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    processes = num_threads if num_threads is not None else get_parallel_threads(
-    )
+    # Short-circuit for short lists
+    if len(args) == 0:
+        return []
+    if len(args) == 1:
+        return [func(args[0])]
+
+    processes = (num_threads
+                 if num_threads is not None else get_parallel_threads())
+
     with pool.ThreadPool(processes=processes) as p:
-        # Run the function in parallel on the arguments, keeping the order.
-        return list(p.imap(func, args))
+        ordered_iterators = p.imap(func, args)
+        return list(ordered_iterators)
 
 
 def handle_returncode(returncode: int,
@@ -198,3 +252,88 @@ def run_with_retries(
                 continue
         break
     return returncode, stdout, stderr
+
+
+def kill_process_daemon(process_pid: int) -> None:
+    """Start a daemon as a safety net to kill the process.
+
+    Args:
+        process_pid: The PID of the process to kill.
+    """
+    # Get initial children list
+    try:
+        process = psutil.Process(process_pid)
+        initial_children = [p.pid for p in process.children(recursive=True)]
+    except psutil.NoSuchProcess:
+        initial_children = []
+
+    parent_pid = os.getpid()
+    daemon_script = os.path.join(
+        os.path.dirname(os.path.abspath(log_lib.__file__)),
+        'subprocess_daemon.py')
+    python_path = subprocess.check_output(constants.SKY_GET_PYTHON_PATH_CMD,
+                                          shell=True,
+                                          stderr=subprocess.DEVNULL,
+                                          encoding='utf-8').strip()
+    daemon_cmd = [
+        python_path,
+        daemon_script,
+        '--parent-pid',
+        str(parent_pid),
+        '--proc-pid',
+        str(process_pid),
+        # We pass the initial children list to avoid the race condition where
+        # the process_pid is terminated before the daemon starts and gets the
+        # children list.
+        '--initial-children',
+        ','.join(map(str, initial_children)),
+    ]
+
+    # We do not need to set `start_new_session=True` here, as the
+    # daemon script will detach itself from the parent process with
+    # fork to avoid being killed by parent process. See the reason we
+    # daemonize the process in `sky/skylet/subprocess_daemon.py`.
+    subprocess.Popen(
+        daemon_cmd,
+        # Suppress output
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        # Disable input
+        stdin=subprocess.DEVNULL,
+    )
+
+
+def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
+    """Launch a new process that will not be a child of the current process.
+
+    This will launch bash in a new session, which will launch the given cmd.
+    This will ensure that cmd is in its own process tree, and once bash exits,
+    will not be an ancestor of the current process. This is useful for job
+    launching.
+
+    Returns the pid of the launched cmd.
+    """
+    # Use nohup to ensure the job driver process is a separate process tree,
+    # instead of being a child of the current process. This is important to
+    # avoid a chain of driver processes (job driver can call schedule_step() to
+    # submit new jobs, and the new job can also call schedule_step()
+    # recursively).
+    #
+    # echo $! will output the PID of the last background process started in the
+    # current shell, so we can retrieve it and record in the DB.
+    #
+    # TODO(zhwu): A more elegant solution is to use another daemon process to be
+    # in charge of starting these driver processes, instead of starting them in
+    # the current process.
+    wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
+                   f'</dev/null >{log_output} 2>&1 & echo $!')
+    proc = subprocess.run(wrapped_cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL,
+                          start_new_session=True,
+                          check=True,
+                          shell=True,
+                          text=True)
+    # Get the PID of the detached process
+    return int(proc.stdout.strip())

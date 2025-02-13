@@ -8,10 +8,10 @@ import typing
 from typing import Dict, List, Optional, Set, Tuple
 
 from sky import check as sky_check
+from sky import clouds as sky_clouds
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
-from sky.clouds import Kubernetes
 from sky.clouds.service_catalog import CloudFilter
 from sky.clouds.service_catalog import common
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -65,9 +65,14 @@ def list_accelerators(
     # TODO(romilb): We should consider putting a lru_cache() with TTL to
     #   avoid multiple calls to kubernetes API in a short period of time (e.g.,
     #   from the optimizer).
-    return list_accelerators_realtime(gpus_only, name_filter, region_filter,
-                                      quantity_filter, case_sensitive,
-                                      all_regions, require_price)[0]
+    return _list_accelerators(gpus_only,
+                              name_filter,
+                              region_filter,
+                              quantity_filter,
+                              case_sensitive,
+                              all_regions,
+                              require_price,
+                              realtime=False)[0]
 
 
 def list_accelerators_realtime(
@@ -80,28 +85,73 @@ def list_accelerators_realtime(
     require_price: bool = True
 ) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
                                                                           int]]:
+    return _list_accelerators(gpus_only,
+                              name_filter,
+                              region_filter,
+                              quantity_filter,
+                              case_sensitive,
+                              all_regions,
+                              require_price,
+                              realtime=True)
+
+
+def _list_accelerators(
+    gpus_only: bool,
+    name_filter: Optional[str],
+    region_filter: Optional[str],
+    quantity_filter: Optional[int],
+    case_sensitive: bool = True,
+    all_regions: bool = False,
+    require_price: bool = True,
+    realtime: bool = False
+) -> Tuple[Dict[str, List[common.InstanceTypeInfo]], Dict[str, int], Dict[str,
+                                                                          int]]:
     """List accelerators in the Kubernetes cluster.
+
+    If realtime is True, the function will query the cluster to fetch real-time
+    GPU usage, which is returned in total_accelerators_available. Note that
+    this may require an expensive list_pod_for_all_namespaces call, which
+    requires cluster-wide pod read permissions.
 
     If the user does not have sufficient permissions to list pods in all
     namespaces, the function will return free GPUs as -1.
+
+    Returns:
+        A tuple of three dictionaries:
+        - qtys_map: Dict mapping accelerator names to lists of InstanceTypeInfo
+            objects with quantity information.
+        - total_accelerators_capacity: Dict mapping accelerator names to their
+            total capacity in the cluster.
+        - total_accelerators_available: Dict mapping accelerator names to their
+            current availability. Returns -1 for each accelerator if
+            realtime=False or if insufficient permissions.
     """
     # TODO(romilb): This should be refactored to use get_kubernetes_node_info()
     #   function from kubernetes_utils.
     del all_regions, require_price  # Unused.
+
+    # First check if Kubernetes is enabled. This ensures k8s python client is
+    # installed. Do not put any k8s-specific logic before this check.
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    if not sky_clouds.cloud_in_iterable(sky_clouds.Kubernetes(),
+                                        enabled_clouds):
+        return {}, {}, {}
+
     # TODO(zhwu): this should return all accelerators in multiple kubernetes
     # clusters defined by allowed_contexts.
     if region_filter is None:
         context = kubernetes_utils.get_current_kube_config_context_name()
+        if context is None and kubernetes_utils.is_incluster_config_available():
+            # If context is None and we are running in a kubernetes pod, use the
+            # in-cluster context as the current context.
+            context = kubernetes.in_cluster_context_name()
     else:
         context = region_filter
     if context is None:
         return {}, {}, {}
 
-    k8s_cloud = Kubernetes()
-    if not any(
-            map(k8s_cloud.is_same_cloud,
-                sky_check.get_cached_enabled_clouds_or_refresh())
-    ) or not kubernetes_utils.check_credentials(context)[0]:
+    # Verify that the credentials are still valid.
+    if not kubernetes_utils.check_credentials(context)[0]:
         return {}, {}, {}
 
     has_gpu = kubernetes_utils.detect_accelerator_resource(context)
@@ -115,18 +165,20 @@ def list_accelerators_realtime(
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
     nodes = kubernetes_utils.get_kubernetes_nodes(context)
-    # Get the pods to get the real-time GPU usage
-    try:
-        pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
-    except kubernetes.api_exception() as e:
-        if e.status == 403:
-            logger.warning('Failed to get pods in the Kubernetes cluster '
-                           '(forbidden). Please check if your account has '
-                           'necessary permissions to list pods. Realtime GPU '
-                           'availability information may be incorrect.')
-            pods = None
-        else:
-            raise
+    pods = None
+    if realtime:
+        # Get the pods to get the real-time GPU usage
+        try:
+            pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+        except kubernetes.api_exception() as e:
+            if e.status == 403:
+                logger.warning(
+                    'Failed to get pods in the Kubernetes cluster '
+                    '(forbidden). Please check if your account has '
+                    'necessary permissions to list pods. Realtime GPU '
+                    'availability information may be incorrect.')
+            else:
+                raise
     # Total number of GPUs in the cluster
     total_accelerators_capacity: Dict[str, int] = {}
     # Total number of GPUs currently available in the cluster
@@ -206,13 +258,16 @@ def list_accelerators_realtime(
 
                 accelerators_available = accelerator_count - allocated_qty
 
+                # Initialize the entry if it doesn't exist yet
                 if accelerator_name not in total_accelerators_available:
                     total_accelerators_available[accelerator_name] = 0
+
                 if accelerators_available >= min_quantity_filter:
                     quantized_availability = min_quantity_filter * (
                         accelerators_available // min_quantity_filter)
-                    total_accelerators_available[
-                        accelerator_name] += quantized_availability
+                    total_accelerators_available[accelerator_name] = (
+                        total_accelerators_available.get(accelerator_name, 0) +
+                        quantized_availability)
 
     result = []
 

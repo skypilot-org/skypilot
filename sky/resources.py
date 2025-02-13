@@ -45,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 19
+    _VERSION = 20
 
     def __init__(
         self,
@@ -67,6 +67,7 @@ class Resources:
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
+        _docker_username_for_runpod: Optional[str] = None,
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
@@ -148,6 +149,9 @@ class Resources:
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
+          _docker_username_for_runpod: the login username for the docker
+            containers. This is used by RunPod to set the ssh user for the
+            docker containers.
           _requires_fuse: whether the task requires FUSE mounting support. This
             is used internally by certain cloud implementations to do additional
             setup for FUSE mounting. This flag also safeguards against using
@@ -233,6 +237,12 @@ class Resources:
         self._labels = labels
 
         self._docker_login_config = _docker_login_config
+
+        # TODO(andyl): This ctor param seems to be unused.
+        # We always use `Task.set_resources` and `Resources.copy` to set the
+        # `docker_username_for_runpod`. But to keep the consistency with
+        # `_docker_login_config`, we keep it here.
+        self._docker_username_for_runpod = _docker_username_for_runpod
 
         self._requires_fuse = _requires_fuse
 
@@ -479,6 +489,10 @@ class Resources:
     def requires_fuse(self, value: Optional[bool]) -> None:
         self._requires_fuse = value
 
+    @property
+    def docker_username_for_runpod(self) -> Optional[str]:
+        return self._docker_username_for_runpod
+
     def _set_cpus(
         self,
         cpus: Union[None, int, float, str],
@@ -540,7 +554,7 @@ class Resources:
         if memory_gb <= 0:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
-                    f'The "cpus" field should be positive. Found: {memory!r}')
+                    f'The "memory" field should be positive. Found: {memory!r}')
 
     def _set_accelerators(
         self,
@@ -661,7 +675,7 @@ class Resources:
                     continue
                 valid_clouds.append(cloud)
 
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -773,7 +787,7 @@ class Resources:
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
-            if len(valid_clouds) == 0:
+            if not valid_clouds:
                 if len(enabled_clouds) == 1:
                     cloud_str = f'for cloud {enabled_clouds[0]}'
                 else:
@@ -1008,7 +1022,7 @@ class Resources:
                         f'Label rejected due to {cloud}: {err_msg}'
                     ])
                     break
-        if len(invalid_table.rows) > 0:
+        if invalid_table.rows:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     'The following labels are invalid:'
@@ -1041,6 +1055,7 @@ class Resources:
     def make_deploy_variables(self, cluster_name: resources_utils.ClusterName,
                               region: clouds.Region,
                               zones: Optional[List[clouds.Zone]],
+                              num_nodes: int,
                               dryrun: bool) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to resource variables.
 
@@ -1062,7 +1077,11 @@ class Resources:
 
         # Cloud specific variables
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
-            self, cluster_name, region, zones, dryrun)
+            self, cluster_name, region, zones, num_nodes, dryrun)
+
+        # TODO(andyl): Should we print some warnings if users' envs share
+        # same names with the cloud specific variables, but not enabled
+        # since it's not on the particular cloud?
 
         # Docker run options
         docker_run_options = skypilot_config.get_nested(
@@ -1276,13 +1295,16 @@ class Resources:
             labels=override.pop('labels', self.labels),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
+            _docker_username_for_runpod=override.pop(
+                '_docker_username_for_runpod',
+                self._docker_username_for_runpod),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override.pop(
                 '_cluster_config_overrides', self._cluster_config_overrides),
         )
-        assert len(override) == 0
+        assert not override
         return resources
 
     def valid_on_region_zones(self, region: str, zones: List[str]) -> bool:
@@ -1437,6 +1459,8 @@ class Resources:
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
+        resources_fields['_docker_username_for_runpod'] = config.pop(
+            '_docker_username_for_runpod', None)
         resources_fields['_is_image_managed'] = config.pop(
             '_is_image_managed', None)
         resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
@@ -1485,6 +1509,9 @@ class Resources:
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
+        if self._docker_username_for_runpod is not None:
+            config['_docker_username_for_runpod'] = (
+                self._docker_username_for_runpod)
         add_if_not_none('_cluster_config_overrides',
                         self._cluster_config_overrides)
         if self._is_image_managed is not None:
@@ -1605,5 +1632,26 @@ class Resources:
         if version < 19:
             self._cluster_config_overrides = state.pop(
                 '_cluster_config_overrides', None)
+
+        if version < 20:
+            # Pre-0.7.0, we used 'kubernetes' as the default region for
+            # Kubernetes clusters. With the introduction of support for
+            # multiple contexts, we now set the region to the context name.
+            # Since we do not have information on which context the cluster
+            # was run in, we default it to the current active context.
+            legacy_region = clouds.Kubernetes().LEGACY_SINGLETON_REGION
+            original_cloud = state.get('_cloud', None)
+            original_region = state.get('_region', None)
+            if (isinstance(original_cloud, clouds.Kubernetes) and
+                    original_region == legacy_region):
+                current_context = (
+                    kubernetes_utils.get_current_kube_config_context_name())
+                state['_region'] = current_context
+                # Also update the image_id dict if it contains the old region
+                if isinstance(state['_image_id'], dict):
+                    if legacy_region in state['_image_id']:
+                        state['_image_id'][current_context] = (
+                            state['_image_id'][legacy_region])
+                        del state['_image_id'][legacy_region]
 
         self.__dict__.update(state)

@@ -100,7 +100,7 @@ Just like autonomous driving has different levels of autonomy (e.g., Level 1-5),
 **For users on a fixed cluster** (e.g., Kubernetes, Slurm), SkyPilot provides:
 
 - A simple interface to submit and manage AI workloads, tailored to AI users' ergonomics.
-- Support for dev clusters, jobs, and serving on your cluster.
+- Support for clusters, jobs, and serving on your cluster.
 - Cost savings: Autostop, queueing, and higher hardware utilization.
 - Future-proofness: No retooling when you add other clusters or clouds in the future.
 

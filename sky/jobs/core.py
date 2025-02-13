@@ -1,7 +1,8 @@
 """SDK functions for managed jobs."""
 import os
 import tempfile
-from typing import Any, Dict, List, Optional, Union
+import typing
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
 
 import colorama
@@ -29,6 +30,9 @@ from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
+if typing.TYPE_CHECKING:
+    from sky.backends import cloud_vm_ray_backend
+
 
 @timeline.event
 @usage_lib.entrypoint
@@ -37,9 +41,7 @@ def launch(
     name: Optional[str] = None,
     stream_logs: bool = True,
     detach_run: bool = False,
-    retry_until_up: bool = False,
-    fast: bool = False,
-) -> None:
+) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Launch a managed job.
 
@@ -50,14 +52,18 @@ def launch(
           managed job.
         name: Name of the managed job.
         detach_run: Whether to detach the run.
-        fast: Whether to use sky.launch(fast=True) for the jobs controller. If
-          True, the SkyPilot wheel and the cloud credentials may not be updated
-          on the jobs controller.
 
     Raises:
         ValueError: cluster does not exist. Or, the entrypoint is not a valid
             chain dag.
         sky.exceptions.NotSupportedError: the feature is not supported.
+
+    Returns:
+      job_id: Optional[int]; the job ID of the submitted job. None if the
+        backend is not CloudVmRayBackend, or no job is submitted to
+        the cluster.
+      handle: Optional[backends.ResourceHandle]; handle to the controller VM.
+        None if dryrun.
     """
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
@@ -91,7 +97,7 @@ def launch(
             ux_utils.spinner_message('Initializing managed job')):
         for task_ in dag.tasks:
             controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, path='jobs')
+                task_, task_type='jobs')
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -111,7 +117,6 @@ def launch(
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
-            'retry_until_up': retry_until_up,
             'remote_user_config_path': remote_user_config_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
@@ -133,21 +138,20 @@ def launch(
         controller_task.set_resources(controller_resources)
 
         controller_task.managed_job_dag = dag
-        assert len(controller_task.resources) == 1, controller_task
 
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        sky.launch(task=controller_task,
-                   stream_logs=stream_logs,
-                   cluster_name=controller_name,
-                   detach_run=detach_run,
-                   idle_minutes_to_autostop=skylet_constants.
-                   CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                   retry_until_up=True,
-                   fast=fast,
-                   _disable_controller_check=True)
+        return sky.launch(task=controller_task,
+                          stream_logs=stream_logs,
+                          cluster_name=controller_name,
+                          detach_run=detach_run,
+                          idle_minutes_to_autostop=skylet_constants.
+                          CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                          retry_until_up=True,
+                          fast=True,
+                          _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -226,6 +230,40 @@ def queue_from_kubernetes_pod(
     return jobs
 
 
+def _maybe_restart_controller(
+        refresh: bool, stopped_message: str, spinner_message: str
+) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+    """Restart controller if refresh is True and it is stopped."""
+    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    if refresh:
+        stopped_message = ''
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=jobs_controller_type, stopped_message=stopped_message)
+    except exceptions.ClusterNotUpError as e:
+        if not refresh:
+            raise
+        handle = None
+        controller_status = e.cluster_status
+
+    if handle is not None:
+        return handle
+
+    sky_logging.print(f'{colorama.Fore.YELLOW}'
+                      f'Restarting {jobs_controller_type.value.name}...'
+                      f'{colorama.Style.RESET_ALL}')
+
+    rich_utils.force_update_status(
+        ux_utils.spinner_message(f'{spinner_message} - restarting '
+                                 'controller'))
+    handle = sky.start(jobs_controller_type.value.cluster_name)
+    controller_status = status_lib.ClusterStatus.UP
+    rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
+
+    assert handle is not None, (controller_status, refresh)
+    return handle
+
+
 @usage_lib.entrypoint
 def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -253,34 +291,11 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-    stopped_message = ''
-    if not refresh:
-        stopped_message = 'No in-progress managed jobs.'
-    try:
-        handle = backend_utils.is_controller_accessible(
-            controller=jobs_controller_type, stopped_message=stopped_message)
-    except exceptions.ClusterNotUpError as e:
-        if not refresh:
-            raise
-        handle = None
-        controller_status = e.cluster_status
-
-    if refresh and handle is None:
-        sky_logging.print(f'{colorama.Fore.YELLOW}'
-                          'Restarting controller for latest status...'
-                          f'{colorama.Style.RESET_ALL}')
-
-        rich_utils.force_update_status(
-            ux_utils.spinner_message('Checking managed jobs - restarting '
-                                     'controller'))
-        handle = sky.start(jobs_controller_type.value.cluster_name)
-        controller_status = status_lib.ClusterStatus.UP
-        rich_utils.force_update_status(
-            ux_utils.spinner_message('Checking managed jobs'))
-
-    assert handle is not None, (controller_status, refresh)
-
+    handle = _maybe_restart_controller(refresh,
+                                       stopped_message='No in-progress '
+                                       'managed jobs.',
+                                       spinner_message='Checking '
+                                       'managed jobs')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -333,8 +348,8 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'job_ids={job_id_str}' if job_ids else ''
         argument_str += f' name={name}' if name is not None else ''
         argument_str += ' all' if all else ''
         with ux_utils.print_exception_no_traceback():
@@ -372,7 +387,7 @@ def cancel(name: Optional[str] = None,
 
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool) -> None:
+              controller: bool, refresh: bool) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
@@ -383,15 +398,26 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         sky.exceptions.ClusterNotUpError: the jobs controller is not up.
     """
     # TODO(zhwu): Automatically restart the jobs controller
-    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-    handle = backend_utils.is_controller_accessible(
-        controller=jobs_controller_type,
-        stopped_message=(
-            'Please restart the jobs controller with '
-            f'`sky start {jobs_controller_type.value.cluster_name}`.'))
-
     if name is not None and job_id is not None:
-        raise ValueError('Cannot specify both name and job_id.')
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
+
+    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    job_name_or_id_str = ''
+    if job_id is not None:
+        job_name_or_id_str = str(job_id)
+    elif name is not None:
+        job_name_or_id_str = f'-n {name}'
+    else:
+        job_name_or_id_str = ''
+    handle = _maybe_restart_controller(
+        refresh,
+        stopped_message=(
+            f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
+            f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
+            f'-r {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
+        spinner_message='Retrieving job logs')
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
@@ -402,22 +428,47 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                                   controller=controller)
 
 
-spot_launch = common_utils.deprecated_function(
-    launch,
-    name='sky.jobs.launch',
-    deprecated_name='spot_launch',
-    removing_version='0.8.0',
-    override_argument={'use_spot': True})
-spot_queue = common_utils.deprecated_function(queue,
-                                              name='sky.jobs.queue',
-                                              deprecated_name='spot_queue',
-                                              removing_version='0.8.0')
-spot_cancel = common_utils.deprecated_function(cancel,
-                                               name='sky.jobs.cancel',
-                                               deprecated_name='spot_cancel',
-                                               removing_version='0.8.0')
-spot_tail_logs = common_utils.deprecated_function(
-    tail_logs,
-    name='sky.jobs.tail_logs',
-    deprecated_name='spot_tail_logs',
-    removing_version='0.8.0')
+@usage_lib.entrypoint
+def sync_down_logs(
+        name: Optional[str],
+        job_id: Optional[int],
+        refresh: bool,
+        controller: bool,
+        local_dir: str = skylet_constants.SKY_LOGS_DIRECTORY) -> None:
+    """Sync down logs of managed jobs.
+
+    Please refer to sky.cli.job_logs for documentation.
+
+    Raises:
+        ValueError: invalid arguments.
+        sky.exceptions.ClusterNotUpError: the jobs controller is not up.
+    """
+    # TODO(zhwu): Automatically restart the jobs controller
+    if name is not None and job_id is not None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Cannot specify both name and job_id.')
+
+    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+    job_name_or_id_str = ''
+    if job_id is not None:
+        job_name_or_id_str = str(job_id)
+    elif name is not None:
+        job_name_or_id_str = f'-n {name}'
+    else:
+        job_name_or_id_str = ''
+    handle = _maybe_restart_controller(
+        refresh,
+        stopped_message=(
+            f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
+            f'get the logs, run: {colorama.Style.BRIGHT}sky jobs logs '
+            f'-r --sync-down {job_name_or_id_str}{colorama.Style.RESET_ALL}'),
+        spinner_message='Retrieving job logs')
+
+    backend = backend_utils.get_backend_from_handle(handle)
+    assert isinstance(backend, backends.CloudVmRayBackend), backend
+
+    backend.sync_down_managed_job_logs(handle,
+                                       job_id=job_id,
+                                       job_name=name,
+                                       controller=controller,
+                                       local_dir=local_dir)

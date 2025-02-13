@@ -81,6 +81,14 @@ class ManagedJobReachedMaxRetriesError(Exception):
     pass
 
 
+class ManagedJobStatusError(Exception):
+    """Raised when a managed job task status update is invalid.
+
+    For instance, a RUNNING job cannot become SUBMITTED.
+    """
+    pass
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass
@@ -129,6 +137,13 @@ class ClusterNotUpError(Exception):
 
 class ClusterSetUpError(Exception):
     """Raised when a cluster has setup error."""
+    pass
+
+
+class ClusterDoesNotExist(ValueError):
+    """Raise when trying to operate on a cluster that does not exist."""
+    # This extends ValueError for compatibility reasons - we used to throw
+    # ValueError instead of this.
     pass
 
 

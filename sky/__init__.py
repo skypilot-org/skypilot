@@ -105,12 +105,7 @@ from sky.data import StorageMode
 from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
-# TODO (zhwu): These imports are for backward compatibility, and spot APIs
-# should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
-from sky.jobs.core import spot_cancel
-from sky.jobs.core import spot_launch
-from sky.jobs.core import spot_queue
-from sky.jobs.core import spot_tail_logs
+from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
@@ -132,6 +127,7 @@ K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
+Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
@@ -149,6 +145,7 @@ __all__ = [
     'OCI',
     'Paperspace',
     'RunPod',
+    'Vast',
     'SCP',
     'Vsphere',
     'Fluidstack',
@@ -163,6 +160,7 @@ __all__ = [
     'StoreType',
     'ClusterStatus',
     'JobStatus',
+    'ManagedJobStatus',
     # APIs
     'Dag',
     'Task',
@@ -170,7 +168,6 @@ __all__ = [
     # execution APIs
     'launch',
     'exec',
-    'spot_launch',
     # core APIs
     'status',
     'start',
@@ -182,12 +179,8 @@ __all__ = [
     'queue',
     'cancel',
     'tail_logs',
-    'spot_tail_logs',
     'download_logs',
     'job_status',
-    # core APIs Spot Job Management
-    'spot_queue',
-    'spot_cancel',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',

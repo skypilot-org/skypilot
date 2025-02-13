@@ -1,6 +1,9 @@
 """SkyServe core APIs."""
 import re
+import signal
+import subprocess
 import tempfile
+import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
@@ -18,6 +21,7 @@ from sky.serve import serve_utils
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import resources_utils
@@ -64,7 +68,8 @@ def _validate_service_task(task: 'sky.Task') -> None:
                                  'SkyServe will replenish preempted spot '
                                  f'with {policy_description} instances.')
 
-    replica_ingress_port: Optional[int] = None
+    replica_ingress_port: Optional[int] = int(
+        task.service.ports) if (task.service.ports is not None) else None
     for requested_resources in task.resources:
         if (task.service.use_ondemand_fallback and
                 not requested_resources.use_spot):
@@ -73,22 +78,58 @@ def _validate_service_task(task: 'sky.Task') -> None:
                     '`use_ondemand_fallback` is only supported '
                     'for spot resources. Please explicitly specify '
                     '`use_spot: true` in resources for on-demand fallback.')
-        requested_ports = list(
-            resources_utils.port_ranges_to_set(requested_resources.ports))
-        if len(requested_ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port = requested_ports[0]
-        if replica_ingress_port is None:
-            replica_ingress_port = service_port
-        elif service_port != replica_ingress_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Got multiple ports: {service_port} and '
-                    f'{replica_ingress_port} in different resources. '
-                    'Please specify the same port instead.')
+        if task.service.ports is None:
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'To open multiple ports on the replica, please set the '
+                        '`service.ports` field to specify a main service port. '
+                        'Must only specify one port in resources otherwise. '
+                        'Each replica will use the port specified as '
+                        'application ingress port.')
+            service_port = requested_ports[0]
+            if replica_ingress_port is None:
+                replica_ingress_port = service_port
+            elif service_port != replica_ingress_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{replica_ingress_port} in different resources. '
+                        'Please specify the same port instead.')
+
+
+def _rewrite_tls_credential_paths_and_get_tls_env_vars(
+        service_name: str, task: 'sky.Task') -> Dict[str, Any]:
+    """Rewrite the paths of TLS credentials in the task.
+
+    Args:
+        service_name: Name of the service.
+        task: sky.Task to rewrite.
+
+    Returns:
+        The generated template variables for TLS.
+    """
+    service_spec = task.service
+    # Already checked by _validate_service_task
+    assert service_spec is not None
+    if service_spec.tls_credential is None:
+        return {'use_tls': False}
+    remote_tls_keyfile = (
+        serve_utils.generate_remote_tls_keyfile_name(service_name))
+    remote_tls_certfile = (
+        serve_utils.generate_remote_tls_certfile_name(service_name))
+    tls_template_vars = {
+        'use_tls': True,
+        'remote_tls_keyfile': remote_tls_keyfile,
+        'remote_tls_certfile': remote_tls_certfile,
+        'local_tls_keyfile': service_spec.tls_credential.keyfile,
+        'local_tls_certfile': service_spec.tls_credential.certfile,
+    }
+    service_spec.tls_credential = serve_utils.TLSCredential(
+        remote_tls_keyfile, remote_tls_certfile)
+    return tls_template_vars
 
 
 @usage_lib.entrypoint
@@ -134,7 +175,10 @@ def up(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, path='serve')
+            task, task_type='serve')
+
+    tls_template_vars = _rewrite_tls_credential_paths_and_get_tls_env_vars(
+        service_name, task)
 
     with tempfile.NamedTemporaryFile(
             prefix=f'service-task-{service_name}-',
@@ -164,6 +208,7 @@ def up(
             'remote_user_config_path': remote_config_yaml_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
+            **tls_template_vars,
             **controller_utils.shared_controller_vars_to_fill(
                 controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
                 remote_user_config_path=remote_config_yaml_path,
@@ -281,12 +326,17 @@ def up(
                     service_init_payload))
             if task.service.external_load_balancers is None:
                 assert isinstance(service_init_result, int)
-                endpoint = backend_utils.get_endpoints(
+                socket_endpoint = backend_utils.get_endpoints(
                     controller_handle.cluster_name,
                     service_init_result,
                     skip_status_check=True).get(service_init_result)
-                assert endpoint is not None, (
+                assert socket_endpoint is not None, (
                     'Did not get endpoint for controller.')
+                # Already checked by _validate_service_task
+                assert task.service is not None
+                protocol = ('http'
+                            if task.service.tls_credential is None else 'https')
+                endpoint = f'{protocol}://{socket_endpoint}'
             else:
                 assert isinstance(service_init_result, str)
                 endpoint = service_init_result
@@ -339,6 +389,7 @@ def update(
     """
     # TODO(tian): Implement update of external LBs.
     _validate_service_task(task)
+
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -347,6 +398,14 @@ def update(
     dag, _ = admin_policy_utils.apply(
         task, use_mutated_config_in_current_request=False)
     task = dag.tasks[0]
+
+    assert task.service is not None
+    if task.service.tls_credential is not None:
+        logger.warning('Updating TLS keyfile and certfile is not supported. '
+                       'Any updates to the keyfile and certfile will not take '
+                       'effect. To update TLS keyfile and certfile, please '
+                       'tear down the service and spin up a new one.')
+
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=
@@ -378,7 +437,7 @@ def update(
         raise RuntimeError(e.error_msg) from e
 
     service_statuses = serve_utils.load_service_status(serve_status_payload)
-    if len(service_statuses) == 0:
+    if not service_statuses:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(f'Cannot find service {service_name!r}.'
                                f'To spin up a service, use {ux_utils.BOLD}'
@@ -402,10 +461,21 @@ def update(
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(prompt)
 
+    original_lb_policy = service_record['load_balancing_policy']
+    assert task.service is not None, 'Service section not found.'
+    if original_lb_policy != task.service.load_balancing_policy:
+        logger.warning(
+            f'{colorama.Fore.YELLOW}Current load balancing policy '
+            f'{original_lb_policy!r} is different from the new policy '
+            f'{task.service.load_balancing_policy!r}. Updating the load '
+            'balancing policy is not supported yet and it will be ignored. '
+            'The service will continue to use the current load balancing '
+            f'policy.{colorama.Style.RESET_ALL}')
+
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing service')):
         controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-            task, path='serve')
+            task, task_type='serve')
 
     code = serve_utils.ServeCodeGen.add_version(service_name)
     returncode, version_string_payload, stderr = backend.run_on_head(
@@ -498,9 +568,9 @@ def down(
         stopped_message='All services should have terminated.')
 
     service_names_str = ','.join(service_names)
-    if sum([len(service_names) > 0, all]) != 1:
-        argument_str = f'service_names={service_names_str}' if len(
-            service_names) > 0 else ''
+    if sum([bool(service_names), all]) != 1:
+        argument_str = (f'service_names={service_names_str}'
+                        if service_names else '')
         argument_str += ' all' if all else ''
         raise ValueError('Can only specify one of service_names or all. '
                          f'Provided {argument_str!r}.')
@@ -599,9 +669,11 @@ def status(
             'status': (sky.ServiceStatus) service status,
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
-            'policy': (Optional[str]) load balancer policy description,
+            'policy': (Optional[str]) autoscaling policy description,
             'requested_resources_str': (str) str representation of
               requested resources,
+            'load_balancing_policy': (str) load balancing policy name,
+            'tls_encrypted': (bool) whether the service is TLS encrypted,
             'dns_endpoint': (Optional[str]) DNS endpoint,
             'replica_info': (List[Dict[str, Any]]) replica information,
             'external_lb_info': (Dict[str, Any]) external load balancer
@@ -736,6 +808,7 @@ def tail_logs(
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'`target` must be a string or '
                              f'sky.serve.ServiceComponent, got {type(target)}.')
+
     if target == serve_utils.ServiceComponent.REPLICA:
         if replica_id is None:
             with ux_utils.print_exception_no_traceback():
@@ -753,8 +826,29 @@ def tail_logs(
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
-    backend.tail_serve_logs(handle,
-                            service_name,
-                            target,
-                            replica_id,
-                            follow=follow)
+
+    if target != serve_utils.ServiceComponent.REPLICA:
+        code = serve_utils.ServeCodeGen.stream_serve_process_logs(
+            service_name,
+            stream_controller=(
+                target == serve_utils.ServiceComponent.CONTROLLER),
+            follow=follow)
+    else:
+        assert replica_id is not None, service_name
+        code = serve_utils.ServeCodeGen.stream_replica_logs(
+            service_name, replica_id, follow)
+
+    # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
+    # kill the process, so we need to handle it manually here.
+    if threading.current_thread() is threading.main_thread():
+        signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
+        signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
+
+    # Refer to the notes in
+    # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
+    backend.run_on_head(handle,
+                        code,
+                        stream_logs=True,
+                        process_stream=False,
+                        ssh_mode=command_runner.SshMode.INTERACTIVE,
+                        stdin=subprocess.DEVNULL)

@@ -28,6 +28,7 @@ REGIONS = [
     'asia-northeast-2',
     'us-east-1',
     'us-east-2',
+    'us-east-3',
     'us-west-2',
     'us-west-1',
     'us-south-1',
@@ -46,6 +47,7 @@ GPU_TO_MEMORY = {
     'RTX6000': 24576,
     'V100': 16384,
     'H100': 81920,
+    'GH200': 98304,
     'GENERAL': None
 }
 

@@ -5,6 +5,8 @@ import types
 from typing import Callable, Iterator, List, Optional, TextIO, Type
 
 import colorama
+# slow due to https://github.com/python-pendulum/pendulum/issues/808
+# FIXME(aylei): bump pendulum if it get fixed
 import pendulum
 import prettytable
 
@@ -251,7 +253,8 @@ def readable_time_duration(start: Optional[float],
           e.g. "1h 2m 23s"
     """
     # start < 0 means that the starting time is not specified yet.
-    # It is only used in spot_utils.show_jobs() for job duration calculation.
+    # It is only used in jobs_utils.format_job_table() for job duration
+    # calculation.
     if start is None or start < 0:
         return '-'
     if end == start == 0:

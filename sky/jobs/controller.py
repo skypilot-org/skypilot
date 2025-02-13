@@ -1,4 +1,7 @@
-"""Controller: handles the life cycle of a managed job."""
+"""Controller: handles the life cycle of a managed job.
+
+TODO(cooperc): Document lifecycle, and multiprocess layout.
+"""
 import argparse
 import multiprocessing
 import os
@@ -6,7 +9,7 @@ import pathlib
 import time
 import traceback
 import typing
-from typing import Tuple
+from typing import Optional, Tuple
 
 import filelock
 
@@ -16,6 +19,7 @@ from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
 from sky.jobs import recovery_strategy
+from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
@@ -46,12 +50,10 @@ def _get_dag_and_name(dag_yaml: str) -> Tuple['sky.Dag', str]:
 class JobsController:
     """Each jobs controller manages the life cycle of one managed job."""
 
-    def __init__(self, job_id: int, dag_yaml: str,
-                 retry_until_up: bool) -> None:
+    def __init__(self, job_id: int, dag_yaml: str) -> None:
         self._job_id = job_id
         self._dag, self._dag_name = _get_dag_and_name(dag_yaml)
         logger.info(self._dag)
-        self._retry_until_up = retry_until_up
         # TODO(zhwu): this assumes the specific backend.
         self._backend = cloud_vm_ray_backend.CloudVmRayBackend()
 
@@ -66,7 +68,7 @@ class JobsController:
             else:
                 assert task.name is not None, task
                 task_name = task.name
-                # This is guaranteed by the spot_launch API, where we fill in
+                # This is guaranteed by the jobs.launch API, where we fill in
                 # the task.name with
                 # dag_utils.maybe_infer_and_fill_dag_and_task_names.
                 assert task_name is not None, self._dag
@@ -87,18 +89,28 @@ class JobsController:
             task.update_envs(task_envs)
 
     def _download_log_and_stream(
-            self,
-            handle: cloud_vm_ray_backend.CloudVmRayResourceHandle) -> None:
-        """Downloads and streams the logs of the latest job.
+        self, task_id: Optional[int],
+        handle: Optional[cloud_vm_ray_backend.CloudVmRayResourceHandle]
+    ) -> None:
+        """Downloads and streams the logs of the current job with given task ID.
 
         We do not stream the logs from the cluster directly, as the
         donwload and stream should be faster, and more robust against
         preemptions or ssh disconnection during the streaming.
         """
+        if handle is None:
+            logger.info(f'Cluster for job {self._job_id} is not found. '
+                        'Skipping downloading and streaming the logs.')
+            return
         managed_job_logs_dir = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                             'managed_jobs')
-        controller_utils.download_and_stream_latest_job_log(
+        log_file = controller_utils.download_and_stream_latest_job_log(
             self._backend, handle, managed_job_logs_dir)
+        if log_file is not None:
+            # Set the path of the log file for the current task, so it can be
+            # accessed even after the job is finished
+            managed_job_state.set_local_log_file(self._job_id, task_id,
+                                                 log_file)
         logger.info(f'\n== End of logs (ID: {self._job_id}) ==')
 
     def _run_one_task(self, task_id: int, task: 'sky.Task') -> bool:
@@ -125,8 +137,8 @@ class JobsController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when
-                all prechecks passed but the maximum number of retries is
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
                 due to:
                 1. Any of the underlying failover exceptions is due to resources
@@ -164,7 +176,7 @@ class JobsController:
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, self._job_id)
         self._strategy_executor = recovery_strategy.StrategyExecutor.make(
-            cluster_name, self._backend, task, self._retry_until_up)
+            cluster_name, self._backend, task, self._job_id)
         managed_job_state.set_submitted(
             self._job_id,
             task_id,
@@ -192,6 +204,7 @@ class JobsController:
                                       task_id=task_id,
                                       start_time=remote_job_submitted_at,
                                       callback_func=callback_func)
+
         while True:
             time.sleep(managed_job_utils.JOB_STATUS_CHECK_GAP_SECONDS)
 
@@ -211,9 +224,10 @@ class JobsController:
                 self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = managed_job_utils.get_job_timestamp(
-                    self._backend, cluster_name, get_end_time=True)
-                # The job is done.
+                end_time = managed_job_utils.try_to_get_job_end_time(
+                    self._backend, cluster_name)
+                # The job is done. Set the job to SUCCEEDED first before start
+                # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
                                                 task_id,
                                                 end_time=end_time,
@@ -221,12 +235,29 @@ class JobsController:
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
+                try:
+                    clusters = backend_utils.get_clusters(
+                        cluster_names=[cluster_name],
+                        refresh=False,
+                        include_controller=False)
+                    if clusters:
+                        assert len(clusters) == 1, (clusters, cluster_name)
+                        handle = clusters[0].get('handle')
+                        # Best effort to download and stream the logs.
+                        self._download_log_and_stream(task_id, handle)
+                except Exception as e:  # pylint: disable=broad-except
+                    # We don't want to crash here, so just log and continue.
+                    logger.warning(
+                        f'Failed to download and stream logs: '
+                        f'{common_utils.format_exception(e)}',
+                        exc_info=True)
+
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
-                recovery_strategy.terminate_cluster(cluster_name=cluster_name)
+                managed_job_utils.terminate_cluster(cluster_name=cluster_name)
                 return True
 
-            # For single-node jobs, nonterminated job_status indicates a
+            # For single-node jobs, non-terminated job_status indicates a
             # healthy cluster. We can safely continue monitoring.
             # For multi-node jobs, since the job may not be set to FAILED
             # immediately (depending on user program) when only some of the
@@ -236,9 +267,7 @@ class JobsController:
                     task.num_nodes == 1):
                 continue
 
-            if job_status in [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-            ]:
+            if job_status in job_lib.JobStatus.user_code_failure_states():
                 # Add a grace period before the check of preemption to avoid
                 # false alarm for job failure.
                 time.sleep(5)
@@ -268,17 +297,15 @@ class JobsController:
                 if job_status is not None and not job_status.is_terminal():
                     # The multi-node job is still running, continue monitoring.
                     continue
-                elif job_status in [
-                        job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-                ]:
+                elif job_status in job_lib.JobStatus.user_code_failure_states():
                     # The user code has probably crashed, fail immediately.
-                    end_time = managed_job_utils.get_job_timestamp(
-                        self._backend, cluster_name, get_end_time=True)
+                    end_time = managed_job_utils.try_to_get_job_end_time(
+                        self._backend, cluster_name)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
-                    self._download_log_and_stream(handle)
+                    self._download_log_and_stream(task_id, handle)
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
                     if job_status == job_lib.JobStatus.FAILED_SETUP:
@@ -326,7 +353,7 @@ class JobsController:
                     # those clusters again may fail.
                     logger.info('Cleaning up the preempted or failed cluster'
                                 '...')
-                    recovery_strategy.terminate_cluster(cluster_name)
+                    managed_job_utils.terminate_cluster(cluster_name)
 
             # Try to recover the managed jobs, when the cluster is preempted or
             # failed or the job status is failed to be fetched.
@@ -408,11 +435,11 @@ class JobsController:
                 task=self._dag.tasks[task_id]))
 
 
-def _run_controller(job_id: int, dag_yaml: str, retry_until_up: bool):
+def _run_controller(job_id: int, dag_yaml: str):
     """Runs the controller in a remote process for interruption."""
     # The controller needs to be instantiated in the remote process, since
     # the controller is not serializable.
-    jobs_controller = JobsController(job_id, dag_yaml, retry_until_up)
+    jobs_controller = JobsController(job_id, dag_yaml)
     jobs_controller.run()
 
 
@@ -455,24 +482,23 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
-    # NOTE: The code to get cluster name is same as what we did in the spot
-    # controller, we should keep it in sync with JobsController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
-        recovery_strategy.terminate_cluster(cluster_name)
+        managed_job_utils.terminate_cluster(cluster_name)
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
         backend.teardown_ephemeral_storage(task)
 
 
-def start(job_id, dag_yaml, retry_until_up):
+def start(job_id, dag_yaml):
     """Start the controller."""
     controller_process = None
     cancelling = False
+    task_id = None
     try:
         _handle_signal(job_id)
         # TODO(suquark): In theory, we should make controller process a
@@ -482,8 +508,7 @@ def start(job_id, dag_yaml, retry_until_up):
         #  So we can only enable daemon after we no longer need to
         #  start daemon processes like Ray.
         controller_process = multiprocessing.Process(target=_run_controller,
-                                                     args=(job_id, dag_yaml,
-                                                           retry_until_up))
+                                                     args=(job_id, dag_yaml))
         controller_process.start()
         while controller_process.is_alive():
             _handle_signal(job_id)
@@ -491,6 +516,7 @@ def start(job_id, dag_yaml, retry_until_up):
     except exceptions.ManagedJobUserCancelledError:
         dag, _ = _get_dag_and_name(dag_yaml)
         task_id, _ = managed_job_state.get_latest_task_id_status(job_id)
+        assert task_id is not None, job_id
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
         managed_job_state.set_cancelling(
@@ -522,6 +548,7 @@ def start(job_id, dag_yaml, retry_until_up):
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
         if cancelling:
+            assert task_id is not None, job_id  # Since it's set with cancelling
             managed_job_state.set_cancelled(
                 job_id=job_id,
                 callback_func=managed_job_utils.event_callback_func(
@@ -543,6 +570,8 @@ def start(job_id, dag_yaml, retry_until_up):
                 failure_reason=('Unexpected error occurred. For details, '
                                 f'run: sky jobs logs --controller {job_id}'))
 
+        scheduler.job_done(job_id)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -550,9 +579,6 @@ if __name__ == '__main__':
                         required=True,
                         type=int,
                         help='Job id for the controller job.')
-    parser.add_argument('--retry-until-up',
-                        action='store_true',
-                        help='Retry until the cluster is up.')
     parser.add_argument('dag_yaml',
                         type=str,
                         help='The path to the user job yaml file.')
@@ -560,4 +586,4 @@ if __name__ == '__main__':
     # We start process with 'spawn', because 'fork' could result in weird
     # behaviors; 'spawn' is also cross-platform.
     multiprocessing.set_start_method('spawn', force=True)
-    start(args.job_id, args.dag_yaml, args.retry_until_up)
+    start(args.job_id, args.dag_yaml)

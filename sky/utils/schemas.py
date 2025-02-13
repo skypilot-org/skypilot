@@ -86,11 +86,6 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
-            # Deprecated: use 'job_recovery' instead. This is for backward
-            # compatibility, and can be removed in 0.8.0.
-            'spot_recovery': {
-                'type': 'string',
-            },
             'job_recovery': {
                 # Either a string or a dict.
                 'anyOf': [{
@@ -256,8 +251,6 @@ def get_resources_schema():
                 'items': multi_resources_schema,
             }
         },
-        # Avoid job_recovery and spot_recovery being present at the same time.
-        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -298,6 +291,12 @@ def get_storage_schema():
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
+            },
+            '_is_sky_managed': {
+                'type': 'boolean',
+            },
+            '_bucket_sub_path': {
+                'type': 'string',
             },
             '_force_delete': {
                 'type': 'boolean',
@@ -383,6 +382,9 @@ def get_service_schema():
                     },
                 }
             },
+            'ports': {
+                'type': 'integer',
+            },
             'replicas': {
                 'type': 'integer',
             },
@@ -409,6 +411,19 @@ def get_service_schema():
             },
             'route53_hosted_zone': {
                 'type': 'string',
+            },
+            'tls': {
+                'type': 'object',
+                'required': ['keyfile', 'certfile'],
+                'additionalProperties': False,
+                'properties': {
+                    'keyfile': {
+                        'type': 'string',
+                    },
+                    'certfile': {
+                        'type': 'string',
+                    },
+                },
             },
         }
     }
@@ -629,15 +644,6 @@ _NETWORK_CONFIG_SCHEMA = {
 }
 
 _LABELS_SCHEMA = {
-    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.8.0.
-    'instance_tags': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': {
-            'type': 'string',
-        },
-    },
     'labels': {
         'type': 'object',
         'required': [],
@@ -683,6 +689,7 @@ class RemoteIdentityOptions(enum.Enum):
     """
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+    NO_UPLOAD = 'NO_UPLOAD'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -703,7 +710,14 @@ _REMOTE_IDENTITY_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     'remote_identity': {
-        'type': 'string'
+        'anyOf': [{
+            'type': 'string'
+        }, {
+            'type': 'object',
+            'additionalProperties': {
+                'type': 'string'
+            }
+        }]
     },
 }
 
@@ -733,6 +747,11 @@ def get_config_schema():
                     'resources': resources_schema,
                 }
             },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            }
         }
     }
     cloud_configs = {
@@ -887,6 +906,9 @@ def get_config_schema():
                     'image_tag_gpu': {
                         'type': 'string',
                     },
+                    'vcn_ocid': {
+                        'type': 'string',
+                    },
                     'vcn_subnet': {
                         'type': 'string',
                     },
@@ -956,7 +978,6 @@ def get_config_schema():
         'additionalProperties': False,
         'properties': {
             'jobs': controller_resources_schema,
-            'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
@@ -964,6 +985,4 @@ def get_config_schema():
             'nvidia_gpus': gpu_configs,
             **cloud_configs,
         },
-        # Avoid spot and jobs being present at the same time.
-        **_check_not_both_fields_present('spot', 'jobs')
     }

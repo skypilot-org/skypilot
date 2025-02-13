@@ -2,23 +2,32 @@
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
+JOBS_CONTROLLER_LOGS_DIR = '~/sky_logs/jobs_controller'
 
 JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 
 # Resources as a dict for the jobs controller.
-# Use default CPU instance type for jobs controller with >= 24GB, i.e.
-# m6i.2xlarge (8vCPUs, 32 GB) for AWS, Standard_D8s_v4 (8vCPUs, 32 GB)
-# for Azure, and n1-standard-8 (8 vCPUs, 32 GB) for GCP, etc.
-# Based on profiling, memory should be at least 3x (in GB) as num vCPUs to avoid
-# OOM (each vCPU can have 4 jobs controller processes as we set the CPU
-# requirement to 0.25, and 3 GB is barely enough for 4 job processes).
+# Use smaller CPU instance type for jobs controller, but with more memory, i.e.
+# r6i.xlarge (4vCPUs, 32 GB) for AWS, Standard_E4s_v5 (4vCPUs, 32 GB) for Azure,
+# and n2-highmem-4 (4 vCPUs, 32 GB) for GCP, etc.
+# Concurrently limits are set based on profiling. 4x num vCPUs is the launch
+# parallelism limit, and memory / 350MB is the limit to concurrently running
+# jobs. See _get_launch_parallelism and _get_job_parallelism in scheduler.py.
 # We use 50 GB disk size to reduce the cost.
-CONTROLLER_RESOURCES = {'cpus': '8+', 'memory': '3x', 'disk_size': 50}
+CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8x', 'disk_size': 50}
 
+# TODO(zhwu): This is no longer accurate, after #4592, which increases the
+# length of user hash appended to the cluster name from 4 to 8 chars. This makes
+# the cluster name on GCP being wrapped twice. However, we cannot directly
+# update this constant, because the job cluster cleanup and many other logic
+# in managed jobs depends on this constant, i.e., updating this constant will
+# break backward compatibility and existing jobs.
+#
 # Max length of the cluster name for GCP is 35, the user hash to be attached is
-# 4+1 chars, and we assume the maximum length of the job id is 4+1, so the max
-# length of the cluster name prefix is 25 to avoid the cluster name being too
-# long and truncated twice during the cluster creation.
+# 4(now 8)+1 chars, and we assume the maximum length of the job id is
+# 4(now 8)+1, so the max length of the cluster name prefix is 25(should be 21
+# now) to avoid the cluster name being too long and truncated twice during the
+# cluster creation.
 JOBS_CLUSTER_NAME_PREFIX_LENGTH = 25
 
 # The version of the lib files that jobs/utils use. Whenever there is an API

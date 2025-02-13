@@ -43,6 +43,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
 from sky.adaptors import runpod
+from sky.adaptors import vast
 from sky.provision.fluidstack import fluidstack_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.provision.lambda_cloud import lambda_utils
@@ -288,7 +289,7 @@ def setup_lambda_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
 
     # TODO(zhwu): we need to avoid uploading the public ssh key to the
-    # nodes, as that will cause problem when the node is used as spot
+    # nodes, as that will cause problem when the node is used as jobs
     # controller, i.e., the public and private key on the node may
     # not match.
     file_mounts = config['file_mounts']
@@ -380,8 +381,8 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
     secret_field_name = clouds.Kubernetes().ssh_key_secret_field_name
     context = config['provider'].get(
         'context', kubernetes_utils.get_current_kube_config_context_name())
-    if context == kubernetes_utils.IN_CLUSTER_REGION:
-        # If the context is set to IN_CLUSTER_REGION, we are running in a pod
+    if context == kubernetes.in_cluster_context_name():
+        # If the context is an in-cluster context name, we are running in a pod
         # with in-cluster configuration. We need to set the context to None
         # to use the mounted service account.
         context = None
@@ -408,14 +409,26 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         secret = k8s.client.V1Secret(
             metadata=k8s.client.V1ObjectMeta(**secret_metadata),
             string_data={secret_field_name: public_key})
-    if kubernetes_utils.check_secret_exists(secret_name, namespace, context):
-        logger.debug(f'Key {secret_name} exists in the cluster, patching it...')
-        kubernetes.core_api(context).patch_namespaced_secret(
-            secret_name, namespace, secret)
-    else:
-        logger.debug(
-            f'Key {secret_name} does not exist in the cluster, creating it...')
-        kubernetes.core_api(context).create_namespaced_secret(namespace, secret)
+    try:
+        if kubernetes_utils.check_secret_exists(secret_name, namespace,
+                                                context):
+            logger.debug(f'Key {secret_name} exists in the cluster, '
+                         'patching it...')
+            kubernetes.core_api(context).patch_namespaced_secret(
+                secret_name, namespace, secret)
+        else:
+            logger.debug(f'Key {secret_name} does not exist in the cluster, '
+                         'creating it...')
+            kubernetes.core_api(context).create_namespaced_secret(
+                namespace, secret)
+    except kubernetes.api_exception() as e:
+        if e.status == 409 and e.reason == 'AlreadyExists':
+            logger.debug(f'Key {secret_name} was created concurrently, '
+                         'patching it...')
+            kubernetes.core_api(context).patch_namespaced_secret(
+                secret_name, namespace, secret)
+        else:
+            raise e
 
     private_key_path, _ = get_or_generate_keys()
     if network_mode == nodeport_mode:
@@ -470,6 +483,23 @@ def setup_runpod_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         public_key = pub_key_file.read().strip()
         runpod.runpod.cli.groups.ssh.functions.add_ssh_key(public_key)
 
+    return configure_ssh_info(config)
+
+
+def setup_vast_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
+    """Sets up SSH authentication for Vast.
+    - Generates a new SSH key pair if one does not exist.
+    - Adds the public SSH key to the user's Vast account.
+    """
+    _, public_key_path = get_or_generate_keys()
+    with open(public_key_path, 'r', encoding='UTF-8') as pub_key_file:
+        public_key = pub_key_file.read().strip()
+        current_key_list = vast.vast().show_ssh_keys()  # pylint: disable=assignment-from-no-return
+        # Only add an ssh key if it hasn't already been added
+        if not any(x['public_key'] == public_key for x in current_key_list):
+            vast.vast().create_ssh_key(ssh_key=public_key)
+
+    config['auth']['ssh_public_key'] = PUBLIC_SSH_KEY_PATH
     return configure_ssh_info(config)
 
 

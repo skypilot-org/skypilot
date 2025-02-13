@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import dataclasses
 import enum
 import os
 import pathlib
@@ -46,8 +47,14 @@ NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
-_SKYPILOT_PROVISION_LOG_PATTERN = r'.*tail -n100 -f (.*provision\.log).*'
-_SKYPILOT_LOG_PATTERN = r'.*tail -n100 -f (.*\.log).*'
+# NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
+# and always appear after a space. Be careful when changing UX as this
+# assumption is used to expand some log files while ignoring others.
+_SKYPILOT_LOG_DIRS = r'~/(sky_logs|\.sky)'
+_SKYPILOT_PROVISION_LOG_PATTERN = (
+    fr'.* ({_SKYPILOT_LOG_DIRS}/.*provision\.log)')
+_SKYPILOT_LOG_PATTERN = fr'.* ({_SKYPILOT_LOG_DIRS}/.*\.log)'
+
 # TODO(tian): Find all existing replica id and print here.
 _FAILED_TO_FIND_REPLICA_MSG = (
     f'{colorama.Fore.RED}Failed to find replica '
@@ -88,6 +95,19 @@ class UpdateMode(enum.Enum):
     BLUE_GREEN = 'blue_green'
 
 
+@dataclasses.dataclass
+class TLSCredential:
+    """TLS credential for the service."""
+    keyfile: str
+    certfile: str
+
+    def dump_uvicorn_kwargs(self) -> Dict[str, str]:
+        return {
+            'ssl_keyfile': os.path.expanduser(self.keyfile),
+            'ssl_certfile': os.path.expanduser(self.certfile),
+        }
+
+
 DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
 
 _SIGNAL_TO_ERROR = {
@@ -106,7 +126,7 @@ ValueType = TypeVar('ValueType')
 class ThreadSafeDict(Generic[KeyType, ValueType]):
     """A thread-safe dict."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
         self._lock = threading.Lock()
 
@@ -244,6 +264,18 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
     dir_name = os.path.expanduser(dir_name)
     return os.path.join(dir_name, f'replica_{replica_id}.log')
+
+
+def generate_remote_tls_keyfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'tls_keyfile')
+
+
+def generate_remote_tls_certfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'tls_certfile')
 
 
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
@@ -390,7 +422,7 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    service_statuses = []
+    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
@@ -407,7 +439,7 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
     service_statuses_encoded = common_utils.decode_payload(payload)
-    service_statuses = []
+    service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
@@ -439,7 +471,7 @@ def _terminate_failed_services(
         A message indicating potential resource leak (if any). If no
         resource leak is detected, return None.
     """
-    remaining_replica_clusters = []
+    remaining_replica_clusters: List[str] = []
     # The controller should have already attempted to terminate those
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
@@ -466,8 +498,8 @@ def _terminate_failed_services(
 
 def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
-    terminated_service_names = []
-    messages = []
+    terminated_service_names: List[str] = []
+    messages: List[str] = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False,
@@ -514,7 +546,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     f.write(UserSignal.TERMINATE.value)
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
-    if len(terminated_service_names) == 0:
+    if not terminated_service_names:
         messages.append('No service to terminate.')
     else:
         identity_str = f'Service {terminated_service_names[0]} is'
@@ -612,7 +644,7 @@ def get_latest_version_with_min_replicas(
     return active_versions[-1] if active_versions else None
 
 
-def _follow_replica_logs(
+def _follow_logs_with_provision_expanding(
     file: TextIO,
     cluster_name: str,
     *,
@@ -620,7 +652,7 @@ def _follow_replica_logs(
     stop_on_eof: bool = False,
     idle_timeout_seconds: Optional[int] = None,
 ) -> Iterator[str]:
-    """Follows logs for a replica, handling nested log files.
+    """Follows logs and expands any provision.log references found.
 
     Args:
         file: Log file to read from.
@@ -631,7 +663,7 @@ def _follow_replica_logs(
             new content.
 
     Yields:
-        Log lines from the main file and any nested log files.
+        Log lines, including expanded content from referenced provision logs.
     """
 
     def cluster_is_up() -> bool:
@@ -641,36 +673,35 @@ def _follow_replica_logs(
         return cluster_record['status'] == status_lib.ClusterStatus.UP
 
     def process_line(line: str) -> Iterator[str]:
-        # Tailing detailed progress for user. All logs in skypilot is
-        # of format `To view detailed progress: tail -n100 -f *.log`.
-        # Check if the line is directing users to view logs
+        # The line might be directing users to view logs, like
+        # `✓ Cluster launched: new-http.  View logs at: *.log`
+        # We should tail the detailed logs for user.
         provision_log_prompt = re.match(_SKYPILOT_PROVISION_LOG_PATTERN, line)
-        other_log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
+        log_prompt = re.match(_SKYPILOT_LOG_PATTERN, line)
 
         if provision_log_prompt is not None:
             nested_log_path = os.path.expanduser(provision_log_prompt.group(1))
-            with open(nested_log_path, 'r', newline='', encoding='utf-8') as f:
-                # We still exit if more than 10 seconds without new content
-                # to avoid any internal bug that causes the launch to fail
-                # while cluster status remains INIT.
-                # Originally, we output the next line first before printing
-                # the launching logs. Since the next line is always
-                # `Launching on <cloud> <region> (<zone>)`, we output it first
-                # to indicate the process is starting.
-                # TODO(andyl): After refactor #4323, the above logic is broken,
-                # but coincidentally with the new UX 3.0, the `Cluster launched`
-                # message is printed first, making the output appear correct.
-                # Explaining this since it's technically a breaking change
-                # for this refactor PR #4323. Will remove soon in a fix PR
-                # for adapting the serve.follow_logs to the new UX.
-                yield from _follow_replica_logs(f,
-                                                cluster_name,
-                                                should_stop=cluster_is_up,
-                                                stop_on_eof=stop_on_eof,
-                                                idle_timeout_seconds=10)
+
+            try:
+                with open(nested_log_path, 'r', newline='',
+                          encoding='utf-8') as f:
+                    # We still exit if more than 10 seconds without new content
+                    # to avoid any internal bug that causes the launch to fail
+                    # while cluster status remains INIT.
+                    yield from log_utils.follow_logs(f,
+                                                     should_stop=cluster_is_up,
+                                                     stop_on_eof=stop_on_eof,
+                                                     idle_timeout_seconds=10)
+            except FileNotFoundError:
+                yield line
+
+                yield (f'{colorama.Fore.YELLOW}{colorama.Style.BRIGHT}'
+                       f'Try to expand log file {nested_log_path} but not '
+                       f'found. Skipping...{colorama.Style.RESET_ALL}')
+                pass
             return
 
-        if other_log_prompt is not None:
+        if log_prompt is not None:
             # Now we skip other logs (file sync logs) since we lack
             # utility to determine when these log files are finished
             # writing.
@@ -723,7 +754,7 @@ def stream_replica_logs(service_name: str, replica_id: int,
     replica_provisioned = (
         lambda: _get_replica_status() != serve_state.ReplicaStatus.PROVISIONING)
     with open(launch_log_file_name, 'r', newline='', encoding='utf-8') as f:
-        for line in _follow_replica_logs(
+        for line in _follow_logs_with_provision_expanding(
                 f,
                 replica_cluster_name,
                 should_stop=replica_provisioned,
@@ -804,9 +835,9 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     # Don't use backend_utils.is_controller_accessible since it is too slow.
     handle = global_user_state.get_handle_from_cluster_name(
         SKY_SERVE_CONTROLLER_NAME)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
     if handle is None:
         return '-'
+    assert isinstance(handle, backends.CloudVmRayResourceHandle)
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
@@ -819,7 +850,8 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     if endpoint is None:
         return '-'
     assert isinstance(endpoint, str), endpoint
-    return endpoint
+    protocol = 'https' if service_record['tls_encrypted'] else 'http'
+    return f'{protocol}://{endpoint}'
 
 
 def format_service_table(service_records: List[Dict[str, Any]],
@@ -831,11 +863,13 @@ def format_service_table(service_records: List[Dict[str, Any]],
         'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
     ]
     if show_all:
-        service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
+        service_columns.extend([
+            'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
+        ])
     service_table = log_utils.create_table(service_columns)
 
-    replica_infos = []
-    external_lb_infos = []
+    replica_infos: List[Dict[str, Any]] = []
+    external_lb_infos: List[Dict[str, Any]] = []
     for record in service_records:
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
@@ -856,6 +890,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         endpoint = get_endpoint(record)
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
+        load_balancing_policy = record['load_balancing_policy']
 
         service_values = [
             service_name,
@@ -866,7 +901,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            service_values.extend([policy, requested_resources_str])
+            service_values.extend(
+                [policy, load_balancing_policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
@@ -918,7 +954,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         region = '-'
         zone = '-'
 
-        replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
+        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
+            'handle']
         if replica_handle is not None:
             resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)
