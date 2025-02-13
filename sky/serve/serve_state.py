@@ -94,27 +94,6 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
                                  'TEXT DEFAULT NULL')
     conn.commit()
 
-    # Backward compatibility.
-    db_utils.add_column_to_table(cursor, conn, 'services',
-                                 'requested_resources_str', 'TEXT')
-    # Deprecated: switched to `active_versions` below for the version
-    # considered active by the load balancer. The
-    # authscaler/replica_manager version can be found in the
-    # version_specs table.
-    db_utils.add_column_to_table(
-        cursor, conn, 'services', 'current_version',
-        f'INTEGER DEFAULT {constants.INITIAL_VERSION}')
-    # The versions that is activated for the service. This is a list
-    # of integers in json format.
-    db_utils.add_column_to_table(cursor, conn, 'services', 'active_versions',
-                                 f'TEXT DEFAULT {json.dumps([])!r}')
-    db_utils.add_column_to_table(cursor, conn, 'services',
-                                 'load_balancing_policy', 'TEXT DEFAULT NULL')
-    # Whether the service's load balancer is encrypted with TLS.
-    db_utils.add_column_to_table(cursor, conn, 'services', 'tls_encrypted',
-                                 'INTEGER DEFAULT 0')
-    conn.commit()
-
 
 db_utils.SQLiteConn(_DB_PATH, create_table)
 _UNIQUE_CONSTRAINT_FAILED_ERROR_MSG = 'UNIQUE constraint failed: services.name'
