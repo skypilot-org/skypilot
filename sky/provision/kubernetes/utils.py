@@ -1400,11 +1400,6 @@ def is_serve_controller(cluster_name_on_cloud: str) -> bool:
         cluster_name_on_cloud)
 
 
-def get_head_pod_name_template_from_deployment(cluster_name: str) -> str:
-    """Get the name of the head pod from the deployment."""
-    return f'{cluster_name}-deployment-*'
-
-
 def construct_ssh_jump_command(
         private_key_path: str,
         ssh_jump_ip: str,

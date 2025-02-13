@@ -37,7 +37,7 @@ TAG_POD_INITIALIZED = 'skypilot-initialized'
 # to root:root.
 # pylint: disable=line-too-long
 # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
-DEPLOYMENT_VOLUME_MOUNTS = {
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS = {
     # volume name -> mount path
     'sky-data': '/home/sky',
 }
@@ -521,14 +521,15 @@ def _create_serve_controller_deployment(
     spec = pod_spec.pop('spec')
     container = spec['containers'][0]
 
-    if DEPLOYMENT_VOLUME_MOUNTS:
+    if HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS:
         # TODO(andyl): use defaultdict
         if spec.get('volumes') is None:
             spec['volumes'] = []
         if container.get('volumeMounts') is None:
             container['volumeMounts'] = []
 
-    for volume_name, mount_path in DEPLOYMENT_VOLUME_MOUNTS.items():
+    for volume_name, mount_path in (
+            HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS.items()):
         pvc_name = _get_pvc_name(cluster_name_on_cloud, volume_name)
         _create_persistent_volume_claim(namespace, context, pvc_name)
         spec['volumes'].append({
@@ -715,8 +716,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec_copy['metadata']['labels'].update(constants.HEAD_NODE_TAGS)
             head_selector = head_service_selector(cluster_name_on_cloud)
             pod_spec_copy['metadata']['labels'].update(head_selector)
-            pod_spec_copy['metadata'][
-                'name'] = f'{cluster_name_on_cloud}-head'  #!
+            pod_spec_copy['metadata']['name'] = f'{cluster_name_on_cloud}-head'
         else:
             # Worker pods
             pod_spec_copy['metadata']['labels'].update(
@@ -956,7 +956,7 @@ def _terminate_deployment(cluster_name: str, namespace: str,
                                     resource_name=deployment_name)
 
     # Delete PVCs
-    for volume_name in DEPLOYMENT_VOLUME_MOUNTS:
+    for volume_name in HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS:
         pvc_name = _get_pvc_name(cluster_name, volume_name)
         # pylint: disable=cell-var-from-loop
         _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(

@@ -6,7 +6,6 @@ import argparse
 import multiprocessing
 import os
 import pathlib
-from pathlib import Path
 import shutil
 import time
 import traceback
@@ -296,7 +295,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.delete_all_versions(service_name)
             logger.info(f'Service {service_name} terminated successfully.')
 
-        task_run_dir = Path(
+        task_run_dir = pathlib.Path(
             skylet_constants.PERSISTENT_RUN_SCRIPT_DIR).expanduser()
         if task_run_dir.exists():
             # Please see `kubernetes-ray.yml.j2` for more details.
