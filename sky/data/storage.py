@@ -2306,23 +2306,24 @@ class AzureBlobStore(AbstractStore):
             An instance of AzureBlobStore.
         """
         assert isinstance(metadata, AzureBlobStore.AzureBlobStoreMetadata)
-                # TODO: this needs to be kept in sync with the abstract
+        # TODO: this needs to be kept in sync with the abstract
         # AbstractStore.from_metadata.
-        return cls(name=override_args.get('name', metadata.name),
-                   storage_account_name=override_args.get(
-                       'storage_account', metadata.storage_account_name),
-                   source=override_args.get('source', metadata.source),
-                   region=override_args.get('region', metadata.region),
-                   is_sky_managed=override_args.get('is_sky_managed',
-                                                    metadata.is_sky_managed),
-                   sync_on_reconstruction=override_args.get(
-                       'sync_on_reconstruction', True),
-                    # Backward compatibility
-                    # TODO: remove the hasattr check after v0.11.0
-                    _bucket_sub_path=override_args.get(
-                        '_bucket_sub_path',
-                        metadata._bucket_sub_path  # pylint: disable=protected-access
-                    ) if hasattr(metadata, '_bucket_sub_path') else None)
+        return cls(
+            name=override_args.get('name', metadata.name),
+            storage_account_name=override_args.get(
+                'storage_account', metadata.storage_account_name),
+            source=override_args.get('source', metadata.source),
+            region=override_args.get('region', metadata.region),
+            is_sky_managed=override_args.get('is_sky_managed',
+                                             metadata.is_sky_managed),
+            sync_on_reconstruction=override_args.get('sync_on_reconstruction',
+                                                     True),
+            # Backward compatibility
+            # TODO: remove the hasattr check after v0.11.0
+            _bucket_sub_path=override_args.get(
+                '_bucket_sub_path',
+                metadata._bucket_sub_path  # pylint: disable=protected-access
+            ) if hasattr(metadata, '_bucket_sub_path') else None)
 
     def get_metadata(self) -> AzureBlobStoreMetadata:
         return self.AzureBlobStoreMetadata(
@@ -2803,7 +2804,7 @@ class AzureBlobStore(AbstractStore):
                 contents are uploaded to it.
         """
         container_path = (f'{self.container_name}/{self._bucket_sub_path}'
-                            if self._bucket_sub_path else self.container_name)
+                          if self._bucket_sub_path else self.container_name)
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
             # shlex.quote is not used for file_names as 'az storage blob sync'
@@ -3781,7 +3782,8 @@ class IBMCosStore(AbstractStore):
 
         log_path = sky_logging.generate_tmp_logging_file_path(
             _STORAGE_LOG_FILE_NAME)
-        sync_path = f'{source_message} -> cos://{self.region}/{self.name}{sub_path}/'
+        sync_path = (
+            f'{source_message} -> cos://{self.region}/{self.name}{sub_path}/')
         with rich_utils.safe_status(
                 ux_utils.spinner_message(f'Syncing {sync_path}',
                                          log_path=log_path)):
@@ -4187,11 +4189,14 @@ class OciStore(AbstractStore):
         def get_file_sync_command(base_dir_path, file_names):
             includes = ' '.join(
                 [f'--include "{file_name}"' for file_name in file_names])
+            prefix_arg = ''
+            if sub_path:
+                prefix_arg = f'--object-prefix "{sub_path.strip("/")}"'
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
                 f'--region {self.region} --src-dir "{base_dir_path}" '
-                f'--object-prefix "{sub_path}" '
+                f'{prefix_arg} '
                 f'{includes}')
 
             return sync_command
@@ -4212,7 +4217,8 @@ class OciStore(AbstractStore):
             sync_command = (
                 'oci os object bulk-upload --no-follow-symlinks --overwrite '
                 f'--bucket-name {self.name} --namespace-name {self.namespace} '
-                f'--region {self.region} --object-prefix "{sub_path}{dest_dir_name}" '
+                f'--region {self.region} '
+                f'--object-prefix "{sub_path}{dest_dir_name}" '
                 f'--src-dir "{src_dir_path}" {excludes}')
 
             return sync_command
