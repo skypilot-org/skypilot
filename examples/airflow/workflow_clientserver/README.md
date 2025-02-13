@@ -4,9 +4,12 @@ In this guide, we show how a training workflow involving data preprocessing, tra
 
 This example uses a remote SkyPilot API Server to manage shared state across invocations, and includes a failure callback to tear down the SkyPilot cluster on task failure.
 
+<!-- Source: https://docs.google.com/drawings/d/1Di_KIOlxQEUib_RhMKysXBc6u-5WW9FnbougVWRiGF0/edit?usp=sharing -->
+
 <p align="center">
-  <img src="https://i.imgur.com/TXn5eKI.png" width="800">
+  <img src="https://i.imgur.com/IiPYQTW.png" width="400">
 </p>
+
 
 **💡 Tip:**  SkyPilot also supports defining and running pipelines without Airflow. Check out [Jobs Pipelines](https://skypilot.readthedocs.io/en/latest/examples/managed-jobs.html#job-pipelines) for more information. 
 
@@ -34,8 +37,25 @@ Here's how you can use SkyPilot to take your dev workflows to production in Airf
 
 * Airflow installed [locally](https://airflow.apache.org/docs/apache-airflow/stable/start.html) (`SequentialExecutor`)
 * SkyPilot API server endpoint to send requests to.
-  * If you do not have one, deploy with TODO: Add instructions.
+  * If you do not have one, refer to the [API server docs](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) to deploy one.
   * This API server should have AWS/GCS access to create buckets to store intermediate task outputs.
+
+## Configuring the API server endpoint
+
+Once your API server is deployed, you will need to configure your Airflow worker to use it. Set the `SKYPILOT_API_SERVER_ENDPOINT` environment variable in your Airflow worker environment to the endpoint of the SkyPilot API server:
+
+```bash
+# In your bashrc/zshrc
+export SKYPILOT_API_SERVER_ENDPOINT=<api-server-endpoint>
+```
+
+Alternatively, you can also set the endpoint in the `~/.sky/config.yaml` file on your Airflow workers:
+
+```yaml
+# In ~/.sky/config.yaml on your Airflow worker
+api_server:
+  endpoint: http://<api-server-endpoint>
+```
 
 ## Defining the tasks
 
@@ -122,7 +142,7 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
 
 1. Copy the DAG file to the Airflow DAGs directory.
    ```bash
-   cp sky_k8s_train_pipeline.py /path/to/airflow/dags                                              
+   cp sky_k8s_train_pipeline.py /path/to/airflow/dags                                               
    # If your Airflow is running on Kubernetes, you may use kubectl cp to copy the file to the pod
    # kubectl cp sky_k8s_example.py <airflow-pod-name>:/opt/airflow/dags 
    ```
@@ -131,8 +151,9 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
 4. Trigger the DAG from the Airflow UI using the `Trigger DAG` button.
 5. Navigate to the run in the Airflow UI to see the DAG progress and logs of each task.
 
+
 <p align="center">
-  <img src="https://i.imgur.com/Z1iEikn.png" width="800">
+  <img src="https://i.imgur.com/TXn5eKI.png" width="800">
 </p>
 <p align="center">
   <img src="https://i.imgur.com/D89N5xt.png" width="800">
