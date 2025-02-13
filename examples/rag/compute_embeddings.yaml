@@ -26,6 +26,7 @@ setup: |
   
   # Install dependencies for embedding computation
   pip install numpy pandas requests tqdm datasets 
+  pip install nltk
 
 run: |
   # Start vLLM service in background

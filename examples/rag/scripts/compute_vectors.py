@@ -16,10 +16,20 @@ import numpy as np
 import pandas as pd
 import requests
 from tqdm import tqdm
+import nltk
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Initialize NLTK data
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    logger.info('Downloading NLTK punkt tokenizer...')
+    nltk.download('punkt')
+    nltk.download('punkt_tab')
+    logger.info('Download complete')
 
 def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
     """Load documents from Pile of Law dataset."""
@@ -44,11 +54,11 @@ def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
     return documents
 
 def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
-    """Split document into overlapping chunks.
+    """Split document into overlapping chunks using sentence-aware splitting.
     
     Args:
         document: The document to chunk
-        chunk_size: Maximum size of each chunk
+        chunk_size: Maximum size of each chunk in characters
         overlap: Number of characters to overlap between chunks
         start_chunk_idx: Starting index for global chunk counting
         
@@ -57,42 +67,54 @@ def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
     """
     text = document['text']
     chunks = []
+    chunk_idx = start_chunk_idx
+
+    # Split into sentences first
+    sentences = nltk.sent_tokenize(text)
     
-    # Split into paragraphs first
-    paragraphs = text.split('\n\n')
+    current_chunk = []
+    current_length = 0
     
-    current_chunk = ''
-    chunk_idx = start_chunk_idx  # Use the provided starting index
-    for para in paragraphs:
-        # If adding this paragraph would exceed chunk size, save current chunk
-        if len(current_chunk) + len(para) > chunk_size and current_chunk:
+    for sentence in sentences:
+        sentence_len = len(sentence)
+        
+        # If adding this sentence would exceed chunk size, save current chunk
+        if current_length + sentence_len > chunk_size and current_chunk:
+            chunk_text = ' '.join(current_chunk)
             chunks.append({
-                'id': str(chunk_idx),  # Use global index as ID
+                'id': str(chunk_idx),
                 'name': document['name'],
-                'content': current_chunk.strip(),
+                'content': document['text'],  # Store full document content
+                'chunk_text': chunk_text.strip(),  # Store the specific chunk
+                'chunk_start': len(' '.join(current_chunk[:-(2 if overlap > 0 else 0)])) if overlap > 0 else 0,  # Approximate start position
                 'split': document['split'],
                 'source': document['source'],
-                # Add original document metadata
                 'document_id': document['id'],
                 'document_url': document['url'],
                 'document_created_timestamp': document['created_timestamp'],
                 'document_downloaded_timestamp': document['downloaded_timestamp']
             })
-            chunk_idx += 1  # Increment global index
-            # Keep last part for overlap
-            current_chunk = current_chunk[-overlap:] if overlap > 0 else ''
+            chunk_idx += 1
+            
+            # Keep last few sentences for overlap
+            overlap_text = ' '.join(current_chunk[-2:])  # Keep last 2 sentences
+            current_chunk = [overlap_text] if overlap > 0 else []
+            current_length = len(overlap_text) if overlap > 0 else 0
         
-        current_chunk += '\n\n' + para
+        current_chunk.append(sentence)
+        current_length += sentence_len + 1  # +1 for space
     
     # Add the last chunk if it's not empty
-    if current_chunk.strip():
+    if current_chunk:
+        chunk_text = ' '.join(current_chunk)
         chunks.append({
-            'id': str(chunk_idx),  # Use global index as ID
+            'id': str(chunk_idx),
             'name': document['name'],
-            'content': current_chunk.strip(),
+            'content': document['text'],  # Store full document content
+            'chunk_text': chunk_text.strip(),  # Store the specific chunk
+            'chunk_start': len(' '.join(current_chunk[:-(2 if overlap > 0 else 0)])) if overlap > 0 else 0,  # Approximate start position
             'split': document['split'],
             'source': document['source'],
-            # Add original document metadata
             'document_id': document['id'],
             'document_url': document['url'],
             'document_created_timestamp': document['created_timestamp'],
@@ -100,7 +122,7 @@ def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
         })
         chunk_idx += 1
     
-    return chunks, chunk_idx  # Return both chunks and next available index
+    return chunks, chunk_idx
 
 def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str,output_path: str, batch_size: int = 32, 
                             partition_size: int = 1000) -> None:
@@ -144,6 +166,8 @@ def compute_embeddings_batch(chunks: List[Dict], vllm_endpoint: str,output_path:
                     'id': chunk['id'],
                     'name': chunk['name'],
                     'content': chunk['content'],
+                    'chunk_text': chunk['chunk_text'],
+                    'chunk_start': chunk['chunk_start'],
                     'split': chunk['split'],
                     'source': chunk['source'],
                     'embedding': pickle.dumps(np.array(embedding)),
