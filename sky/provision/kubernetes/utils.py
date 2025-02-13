@@ -2581,8 +2581,7 @@ def process_skypilot_pods(
             # because hash is different across users
             if 'sky-jobs-controller' in cluster_name_on_cloud:
                 jobs_controllers.append(cluster_info)
-            elif common_utils.is_cluster_name_indicating_serve_controller(
-                    cluster_name_on_cloud):
+            elif 'sky-serve-controller' in cluster_name_on_cloud:
                 serve_controllers.append(cluster_info)
         else:
             # Update start_time if this pod started earlier

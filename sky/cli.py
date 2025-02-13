@@ -1516,10 +1516,7 @@ def _status_kubernetes(show_all: bool):
                    f'{colorama.Style.RESET_ALL}')
         msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
         click.echo(msg)
-    if any([
-            common_utils.is_cluster_name_indicating_serve_controller(
-                c.cluster_name) for c in all_clusters
-    ]):
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
         #  Currently we show a hint that services are shown as clusters.
         click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
