@@ -28,6 +28,7 @@ REGIONS = [
     'asia-northeast-2',
     'us-east-1',
     'us-east-2',
+    'us-east-3',
     'us-west-2',
     'us-west-1',
     'us-south-1',
