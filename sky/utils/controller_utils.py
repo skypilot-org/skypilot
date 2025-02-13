@@ -76,11 +76,10 @@ class _ControllerSpec:
     @property
     def cluster_name(self) -> str:
         """The name in candidate_cluster_names that exists, else the first."""
-        for candidate_name in self.candidate_cluster_names:
-            record = global_user_state.get_cluster_from_name(candidate_name)
-            if record is not None:
-                return candidate_name
-        return self.candidate_cluster_names[0]
+        return next(
+            (name for name in self.candidate_cluster_names
+             if global_user_state.get_cluster_from_name(name) is not None),
+            self.candidate_cluster_names[0])
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -435,8 +434,9 @@ def shared_controller_vars_to_fill(
     return vars_to_fill
 
 
-def get_controller_high_availability_supported(
-    controller: Controllers,) -> bool:
+def get_controller_high_availability_supported(controller: Controllers,
+                                               skip_warning: bool = True
+                                              ) -> bool:
     """Check if the controller high availability is supported.
     """
     if skypilot_config.loaded():
@@ -445,10 +445,11 @@ def get_controller_high_availability_supported(
              'high_availability'), False)
         if high_availability_specified:
             if controller != Controllers.SKY_SERVE_CONTROLLER:
-                print(f'{colorama.Fore.RED}High availability controller is only'
-                      'supported for SkyServe controller. It cannot be enabled '
-                      f'for {controller.value.name}. Skipping this flag.'
-                      f'{colorama.Style.RESET_ALL}')
+                if not skip_warning:
+                    print(f'{colorama.Fore.RED}High availability controller is'
+                          'only supported for SkyServe controller. It cannot'
+                          f'be enabled for {controller.value.name}.'
+                          f'Skipping this flag.{colorama.Style.RESET_ALL}')
             else:
                 return True
     return False

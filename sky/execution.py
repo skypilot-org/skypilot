@@ -207,7 +207,7 @@ def _execute(
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
         if controller_utils.get_controller_high_availability_supported(
-                controller):
+                controller, skip_warning=False):
             requested_features.add(clouds.CloudImplementationFeatures.
                                    HIGH_AVAILABILITY_CONTROLLERS)
             # If we provision a cluster that supports high availability
