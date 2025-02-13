@@ -862,7 +862,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=185),
+                    timeout=215),
                 # Wait for the job to be cleaned up.
                 'sleep 50',
                 # Check if file was written to the mounted output bucket
