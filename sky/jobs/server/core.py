@@ -127,7 +127,7 @@ def launch(
 
                 first_hop_file_mounts = (
                     controller_utils.translate_local_file_mounts_to_two_hop(
-                        task_, task_type='jobs'))
+                        task_))
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:

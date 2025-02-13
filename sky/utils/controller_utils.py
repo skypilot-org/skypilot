@@ -660,12 +660,14 @@ def replace_skypilot_config_path_in_file_mounts(
         logger.debug(f'Replaced {_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX} '
                      f'with the real path in file mounts: {file_mounts}')
 
+
 def _generate_run_uuid() -> str:
     """Generates a unique run id for the job."""
     return common_utils.base36_encode(uuid.uuid4().hex)[:8]
 
-def translate_local_file_mounts_to_two_hop(task: 'task_lib.Task',
-                                          task_type: str) -> Dict[str, str]:
+
+def translate_local_file_mounts_to_two_hop(
+        task: 'task_lib.Task') -> Dict[str, str]:
     """Translates local->VM mounts into two-hop file mounts.
 
     This strategy will upload the local files to the controller first, using
@@ -685,7 +687,8 @@ def translate_local_file_mounts_to_two_hop(task: 'task_lib.Task',
     second_hop_file_mounts = {}
 
     run_id = _generate_run_uuid()
-    base_tmp_dir = os.path.join(constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH, run_id)
+    base_tmp_dir = os.path.join(constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH,
+                                run_id)
 
     # Use a simple counter to create unique paths within the base_tmp_dir for
     # each mount.
@@ -697,7 +700,8 @@ def translate_local_file_mounts_to_two_hop(task: 'task_lib.Task',
         task.workdir = None
 
     for job_cluster_path, local_path in file_mounts_to_translate.items():
-        if data_utils.is_cloud_store_url(local_path) or data_utils.is_cloud_store_url(job_cluster_path):
+        if data_utils.is_cloud_store_url(
+                local_path) or data_utils.is_cloud_store_url(job_cluster_path):
             raise exceptions.NotSupportedError(
                 'Cloud-based file_mounts are specified, but no cloud storage '
                 'is available. Please specify local file_mounts only.')
@@ -713,6 +717,7 @@ def translate_local_file_mounts_to_two_hop(task: 'task_lib.Task',
     # Return the first hop info so that it can be added to the jobs-controller
     # YAML.
     return first_hop_file_mounts
+
 
 # (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
