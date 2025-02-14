@@ -144,5 +144,10 @@ service:
     max_replicas: 2
 ```
 
+And run the [SkyPilot YAML](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml) with a single command:
+```bash
+sky serve up -n r1-serve deepseek-r1-671B.yaml
+```
+
 
 
