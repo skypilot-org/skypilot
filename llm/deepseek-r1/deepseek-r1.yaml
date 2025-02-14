@@ -17,10 +17,14 @@ setup: |
 
 run: |
   # Launch the server with appropriate configuration
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # TP should be number of GPUs per node times number of nodes
+  TP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
   python -m sglang.launch_server \
     --model deepseek-ai/DeepSeek-R1 \
-    --tp 16 \
-    --dist-init-addr ${SKYPILOT_HEAD_IP}:5000 \
+    --tp $TP \
+    --dist-init-addr ${MASTER_ADDR}:5000 \
     --nnodes ${SKYPILOT_NUM_NODES} \
     --node-rank ${SKYPILOT_NODE_RANK} \
     --trust-remote-code \
