@@ -113,7 +113,7 @@ To launch this YAML as a managed job, use :code:`sky jobs launch`:
 
   $ sky jobs launch -n bert-qa-job bert_qa.yaml
 
-:code:`sky jobs launch` has a similar interface to :code:`sky launch` - you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
+To see all flags, you can run :code:`sky jobs launch --help` or see the :ref:`CLI reference <sky-job-launch>` for more information.
 
 SkyPilot will launch and start monitoring the job.
 
@@ -139,8 +139,8 @@ SkyPilot will launch and start monitoring the job.
      - Dedicated auto-managed cluster for each job
    * - Spot preemptions must be manually recovered
      - Spot preemptions are auto-recovered
-   * - Useful for launching and working with a single cluster/job
-     - Much easier to launch hundreds or thousands of jobs
+   * - Job parallelism limited by cluster resources
+     - Easily manage hundreds or thousands of jobs at once
    * - Good for interactive dev
      - Good for scaling out production jobs
 
