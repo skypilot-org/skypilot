@@ -895,9 +895,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
+        assert storage_obj.stores, (storage_obj.__dict__, task.to_yaml_config())
         curr_store_type = list(storage_obj.stores.keys())[0]
         store_object = storage_obj.stores[curr_store_type]
-        assert store_object is not None
+        assert store_object is not None, (storage_obj.__dict__,
+                                          task.to_yaml_config())
         bucket_url = storage_lib.StoreType.get_endpoint_url(
             store_object, bucket_name)
         bucket_url += f'/{file_mounts_tmp_subpath}'
