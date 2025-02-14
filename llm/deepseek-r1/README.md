@@ -86,7 +86,7 @@ Considered resources (2 nodes):
 Launching a new cluster 'r1'. Proceed? [Y/n]: 
 ```
 
-It may take a while (20-30 minutes) for SGLang to download the model weights, compile, and start the server.
+It may take a while (30-40 minutes) for SGLang to download the model weights, compile, and start the server.
 
 ## Query the endpoint
 
