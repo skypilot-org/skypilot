@@ -12,7 +12,7 @@ DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning b
 We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distributedly with high throughput in this example, and according to HuggingFace's [report](https://huggingface.co/blog/open-r1/update-2), SGLang offers 2x performance than vLLM for serving the large DeepSeek-R1.
 
 
-**Note**: This example is for the original DeepSeek-R1 671B model. For the smaller size distilled model, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
+**Note**: This example is for the original DeepSeek-R1 671B model. For smaller size distilled models, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
 
 ## Run 671B DeepSeek-R1 on Kubernetes or any Cloud
 
@@ -113,9 +113,9 @@ Okay, let's figure out how many times the letter \"r\" appears in the word \"str
 
 
 ## Speed for Generation
-You can find the generation speed in the log of the server:
+You can find the generation speed in the log of the server.
 
-Example speed for 2 H100:8 nodes on GCP:
+Example speed for 2 H100:8 nodes on GCP with a single request (you may get better performance with gvnic enabled):
 ```
 (head, rank=0, pid=18260) [2025-02-14 00:42:22 DP2 TP2] Decode batch. #running-req: 1, #token: 210, token usage: 0.00, gen throughput (token/s): 11.45, #queue-req: 0
 (head, rank=0, pid=18260) [2025-02-14 00:42:25 DP2 TP2] Decode batch. #running-req: 1, #token: 250, token usage: 0.00, gen throughput (token/s): 11.53, #queue-req: 0

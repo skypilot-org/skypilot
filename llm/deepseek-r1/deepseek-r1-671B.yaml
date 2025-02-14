@@ -13,7 +13,7 @@ num_nodes: 2 # Specify number of nodes to launch
 
 setup: |
   # Install sglang with all dependencies using uv
-  uv pip install "sglang[all]>=0.4.2.post4" --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer
+  uv pip install "sglang[all]==0.4.2.post4" --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer
 
   # Set up shared memory for better performance
   sudo bash -c "echo 'vm.max_map_count=655300' >> /etc/sysctl.conf"
