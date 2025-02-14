@@ -14,7 +14,7 @@ We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distri
 
 **Note**: This example is for the original DeepSeek-R1 671B model. For the smaller size distilled model, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
 
-## Find resources on Kubernetes or any Cloud
+## Run 671B DeepSeek-R1 on Kubernetes or any Cloud
 
 SkyPilot allows you to run the model distributedly with a single command with the framework [SGLang](https://github.com/sgl-project/sglang).
 
