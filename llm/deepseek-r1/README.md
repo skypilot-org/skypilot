@@ -9,7 +9,7 @@ On Jan 20, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deeps
 
 DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning behaviors. It outperforms **state-of-the-art proprietary models** such as OpenAI-o1-mini and becomes **the first time** an open LLM closely rivals like OpenAI-o1.
 
-We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distributedly with high throughput in this example, and according to HuggingFace's [report](https://huggingface.co/blog/open-r1/update-2), SGLang offers 2x performance than vLLM for serving the large DeepSeek-R1.
+We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distributedly with high throughput in this example.
 
 
 **Note**: This example is for the original DeepSeek-R1 671B model. For smaller size distilled models, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
