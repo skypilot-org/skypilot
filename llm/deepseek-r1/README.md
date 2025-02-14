@@ -14,7 +14,7 @@ We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distri
 
 **Note**: This example is for the original DeepSeek-R1 671B model. For the smaller size distilled model, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
 
-## Run the model
+## Find resources on Kubernetes or any Cloud
 
 SkyPilot allows you to run the model distributedly with a single command with the framework [SGLang](https://github.com/sgl-project/sglang).
 
@@ -63,28 +63,14 @@ run: |
 ```
 
 
-```console
-$ sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up
-
-YAML to run: llm/deepseek-r1/deepseek-r1-671B.yaml
-Considered resources (2 nodes):
------------------------------------------------------------------------------------------------------------------
- CLOUD   INSTANCE                          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE      COST ($)   CHOSEN   
------------------------------------------------------------------------------------------------------------------
- Azure   Standard_ND96amsr_A100_v4[Spot]   96      1800      A100-80GB:8    eastus           7.21          ✔     
- AWS     p5.48xlarge[Spot]                 192     2048      H100:8         us-east-1a       21.04               
- GCP     a2-ultragpu-8g[Spot]              96      1360      A100-80GB:8    us-east5-b       27.89               
- AWS     p5en.48xlarge[Spot]               192     2048      H200:8         us-east-2c       33.43               
- GCP     a2-ultragpu-8g                    96      1360      A100-80GB:8    us-central1-a    47.13               
- GCP     a3-highgpu-8g[Spot]               208     1872      H100:8         europe-west4-b   62.62               
- Azure   Standard_ND96amsr_A100_v4         96      1800      A100-80GB:8    eastus           65.54               
- AWS     p4de.24xlarge                     96      1152      A100-80GB:8    us-east-1        81.93               
- GCP     a3-highgpu-8g                     208     1872      H100:8         us-central1-a    92.04               
- AWS     p5en.48xlarge                     192     2048      H200:8         us-east-2        169.60              
- AWS     p5.48xlarge                       192     2048      H100:8         us-east-1        196.64              
------------------------------------------------------------------------------------------------------------------
-Launching a new cluster 'r1'. Proceed? [Y/n]: 
+```bash
+sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up
 ```
+
+![Find any cheapest candidate resources](https://i.imgur.com/FpAV6Ok.png)
+
+SkyPilot finds the cheapest candidate resources for you, and automatically failover through different regions,
+clouds, or Kubernetes clusters to find the resources to launch the model.
 
 It may take a while (30-40 minutes) for SGLang to download the model weights, compile, and start the server.
 
