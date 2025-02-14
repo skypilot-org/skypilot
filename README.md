@@ -18,6 +18,13 @@
     <img alt="Join Slack" src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack">
   </a>
 
+  <a href="https://github.com/skypilot-org/skypilot/releases">
+    <img alt="Downloads" src="https://img.shields.io/github/downloads/skypilot-org/skypilot/total">
+  </a>
+  <a href="https://github.com/skypilot-org/skypilot/releases">
+    <img alt="Downloads" src="https://img.shields.io/pypi/dm/skypilot">
+  </a>
+
 </p>
 
 <h3 align="center">
