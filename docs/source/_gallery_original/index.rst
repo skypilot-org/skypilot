@@ -35,6 +35,7 @@ Contents
    :caption: LLM Models
 
    DeepSeek-R1 (DeepSeek) <llms/deepseek-r1>
+   DeepSeek-R1 Distilled (DeepSeek) <llms/deepseek-r1-distilled>
    Vision Llama 3.2 (Meta) <llms/llama-3_2>
    Llama 3.1 (Meta) <llms/llama-3_1>
    Llama 3 (Meta) <llms/llama-3>

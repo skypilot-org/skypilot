@@ -16,7 +16,7 @@ Skypilot supports a variety of LLM frameworks and models. In this guide, we use 
 
 **New**: We added a new SkyPilot YAML for running [DeepSeek-R1 685B with SGLang](https://github.com/skypilot/tree/master/deepseek-r1).
 
-### Step 0: Bring any infra
+## Step 0: Bring any infra
 
 Install SkyPilot on your local machine:
 
@@ -40,7 +40,7 @@ sky check
 See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html) for details.
 
 
-### Step 1: Run it with SkyPilot
+## Step 1: Run it with SkyPilot
 
 Now it's time to run deepseek with SkyPilot. The instruction can be dependent on your existing hardware.  
 
@@ -71,7 +71,7 @@ replace the command with your own huggingface token and the GPU that you wish to
 | **A100:8**      	| ✅                            	| ✅                      	| ❌                            	|
 | **A100-80GB:12** 	| ✅                            	| ✅                      	| ✅, with `--max-model-len 4096` 	|
 
-### Step 2: Get Results 
+## Step 2: Get Results 
 Get a single endpoint that load-balances across replicas:
 
 ```
@@ -255,7 +255,7 @@ Answer: There are 3 Rs in "strawberry."
 </details>
 
 
-### Shutdown 
+## Shutdown 
 To shutdown, run 
 ```
 sky down deepseek
