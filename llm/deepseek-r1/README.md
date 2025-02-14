@@ -1,4 +1,4 @@
-# Launch DeepSeek-R1 distributed high-throughput serving with SGLang and SkyPilot
+# Distribute Serving DeepSeek-R1 with high throughput using SGLang and SkyPilot
 
 
 <p align="center">
@@ -16,7 +16,52 @@ We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distri
 
 ## Run the model
 
-SkyPilot allows you to run the model distributedly with a single command with the framework [SGLang](https://github.com/sgl-project/sglang):
+SkyPilot allows you to run the model distributedly with a single command with the framework [SGLang](https://github.com/sgl-project/sglang).
+
+The SkyPilot YAML for DeepSeek-R1 671B, or see [here](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml):
+```yaml
+name: deepseek-r1
+
+resources:
+  accelerators: {H200:8, H100:8, A100-80GB:8}
+  disk_size: 1024 # Large disk for model weights
+  disk_tier: best
+  ports: 30000
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+num_nodes: 2 # Specify number of nodes to launch
+
+setup: |
+  # Install sglang with all dependencies using uv
+  uv pip install "sglang[all]>=0.4.2.post4" --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer
+
+  # Set up shared memory for better performance
+  sudo bash -c "echo 'vm.max_map_count=655300' >> /etc/sysctl.conf"
+  sudo sysctl -p
+
+run: |
+  # Launch the server with appropriate configuration
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # TP should be number of GPUs per node times number of nodes
+  TP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+  python -m sglang.launch_server \
+    --model deepseek-ai/DeepSeek-R1 \
+    --tp $TP \
+    --dist-init-addr ${MASTER_ADDR}:5000 \
+    --nnodes ${SKYPILOT_NUM_NODES} \
+    --node-rank ${SKYPILOT_NODE_RANK} \
+    --trust-remote-code \
+    --enable-dp-attention \
+    --enable-torch-compile \
+    --torch-compile-max-bs 8 \
+    --host 0.0.0.0 \
+    --port 30000
+
+```
+
 
 ```console
 $ sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up
