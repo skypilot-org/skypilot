@@ -51,6 +51,7 @@ Contents
    :maxdepth: 1
    :caption: Applications
 
+   Image Vector Database <applications/vector_database>
    Tabby: Coding Assistant <applications/tabby>
    LocalGPT: Chat with PDF <applications/localgpt>
 

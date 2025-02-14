@@ -4,7 +4,7 @@
 <img src="https://i.imgur.com/xNyKyxK.png" alt="VectorDB with SkyPilot" style="width: 70%;">
 </p>
 
-### Large-Scale Image Search
+## Large-Scale Image Search
 As the volume of image data grows, the need for efficient and powerful search methods becomes critical. Traditional keyword-based or metadata-based search often fails to capture the full semantic meaning in images. A vector database enables semantic search: you can find images that conceptually match a query (e.g., "a photo of a cloud") rather than relying on textual tags.
 
 In particular:
@@ -17,7 +17,7 @@ SkyPilot streamlines the process of running such large-scale jobs in the cloud. 
 
 Please find the complete blog post [here](https://blog.skypilot.co/large-scale-vector-database/)
 
-### Step 0: Set Up The Environment
+## Step 0: Set Up The Environment
 Install the following Prerequisites:  
 * SkyPilot: Make sure you have SkyPilot installed and `sky check` should succeed. Refer to [SkyPilot’s documentation](https://docs.skypilot.co/en/latest/getting-started/installation.html) for instructions.
 * Hugging Face Token: To download dataset from Hugging Face Hub, you will need your token. Follow the steps below to configure your token.
@@ -28,7 +28,7 @@ HF_TOKEN=hf_xxxxx
 ```
 or set up the environment variable `HF_TOKEN`. 
 
-### Step 1: Compute Vectors from Image Data with OpenAI CLIP
+## Step 1: Compute Vectors from Image Data with OpenAI CLIP
 You need to convert images into vector representations (embeddings) so they can be stored in a vector database. Models like [CLIP by OpenAI](https://openai.com/index/clip/) learn powerful representations that map images and text into the same embedding space. This allows for semantic similarity calculations, making queries like “a photo of a cloud” match relevant images.
 
 Use the following command to launch a job that processes your image dataset and computes the CLIP embeddings: 
@@ -51,7 +51,7 @@ You can also use `sky jobs queue` and `sky jobs dashboard` to see the status of 
 <img src="https://i.imgur.com/2CyQADY.png" alt="SkyPilot Dashboard" style="width: 70%;">
 </p>
 
-### Step 2: Construct the Vector Database from Computed Embeddings
+## Step 2: Construct the Vector Database from Computed Embeddings
 Once you have the image embeddings, you need a specialized engine to perform rapid similarity searches at scale. In this example, we use [ChromaDB](https://docs.trychroma.com/getting-started) to store and query the embeddings. This step ingests the embeddings from Step 1 into a vector database to enable real-time or near real-time search over millions of vectors. 
 
 To construct the database from embeddings: 
@@ -68,7 +68,7 @@ Processing batches: 100%|██████████| 1/1 [00:02<00:00,  2.39
 Processing files: 100%|██████████| 12/12 [00:05<00:00,  2.04it/s]/1 [00:00<?, ?it/s]
 ```
 
-### Step 3: Serve the Constructed Vector Database
+## Step 3: Serve the Constructed Vector Database
 
 To serve the constructed database, you expose an API endpoint that other applications (or your local client) can call to perform semantic search. Querying allows you to confirm that your database is working and retrieve semantic matches for a given text query. You can integrate this endpoint into larger applications (like an image search engine or recommendation system).
 
