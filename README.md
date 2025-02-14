@@ -26,7 +26,7 @@
 
 ----
 :fire: *News* :fire:
-- [Jan 2025] Prepare and Serve Large-Scale Image Search with **Vector Database**: [**blog post**](https://blog.skypilot.co/large-scale-vector-database/) [**example**](./examples/vector_database/) 
+- [Jan 2025] Prepare and Serve Large-Scale Image Search with **Vector Database**: [**blog post**](https://blog.skypilot.co/large-scale-vector-database/) [**example**](./examples/vector_database/)
 - [Jan 2025] Launch and Serve **[DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1)** and **[Janus](https://github.com/deepseek-ai/DeepSeek-Janus)** on Kubernetes or Any Cloud: [**R1 example**](./llm/deepseek-r1/) and [**Janus example**](./llm/deepseek-janus/)
 - [Oct 2024] :tada: **SkyPilot crossed 1M+ downloads** :tada:: Thank you to our community! [**Twitter/X**](https://x.com/skypilot_org/status/1844770841718067638)
 - [Sep 2024] Point, Launch and Serve **Llama 3.2** on Kubernetes or Any Cloud: [**example**](./llm/llama-3_2/)
@@ -34,35 +34,16 @@
 - [Jun 2024] Reproduce **GPT** with [llm.c](https://github.com/karpathy/llm.c/discussions/481) on any cloud: [**guide**](./llm/gpt-2/)
 - [Apr 2024] Serve [**Qwen-110B**](https://qwenlm.github.io/blog/qwen1.5-110b/) on your infra: [**example**](./llm/qwen/)
 - [Apr 2024] Using [**Ollama**](https://github.com/ollama/ollama) to deploy quantized LLMs on CPUs and GPUs: [**example**](./llm/ollama/)
-- [Feb 2024] Deploying and scaling [**Gemma**](https://blog.google/technology/developers/gemma-open-models/) with SkyServe: [**example**](./llm/gemma/)
-- [Feb 2024] Serving [**Code Llama 70B**](https://ai.meta.com/blog/code-llama-large-language-model-coding/) with vLLM and SkyServe: [**example**](./llm/codellama/)
-- [Dec 2023] [**Mixtral 8x7B**](https://mistral.ai/news/mixtral-of-experts/), a high quality sparse mixture-of-experts model, was released by Mistral AI! Deploy via SkyPilot on any cloud: [**example**](./llm/mixtral/)
-- [Nov 2023] Using [**Axolotl**](https://github.com/OpenAccess-AI-Collective/axolotl) to finetune Mistral 7B on the cloud (on-demand and spot): [**example**](./llm/axolotl/)
+
 
 **LLM Finetuning Cookbooks**: Finetuning Llama 2 / Llama 3.1 in your own cloud environment, privately: Llama 2 [**example**](./llm/vicuna-llama-2/) and [**blog**](https://blog.skypilot.co/finetuning-llama2-operational-guide/); Llama 3.1 [**example**](./llm/llama-3_1-finetuning/) and [**blog**](https://blog.skypilot.co/finetune-llama-3_1-on-your-infra/)
-
-<details>
-  <summary>Archived</summary>
-
-- [Jul 2024] [**Finetune**](./llm/llama-3_1-finetuning/) and [**serve**](./llm/llama-3_1/) **Llama 3.1** on your infra
-- [Apr 2024] Serve and finetune [**Llama 3**](https://docs.skypilot.co/en/latest/gallery/llms/llama-3.html) on any cloud or Kubernetes: [**example**](./llm/llama-3/)
-- [Mar 2024] Serve and deploy [**Databricks DBRX**](https://www.databricks.com/blog/introducing-dbrx-new-state-art-open-llm) on your infra: [**example**](./llm/dbrx/)
-- [Feb 2024] Speed up your LLM deployments with [**SGLang**](https://github.com/sgl-project/sglang) for 5x throughput on SkyServe: [**example**](./llm/sglang/)
-- [Dec 2023] Using [**LoRAX**](https://github.com/predibase/lorax) to serve 1000s of finetuned LLMs on a single instance in the cloud: [**example**](./llm/lorax/)
-- [Sep 2023] [**Mistral 7B**](https://mistral.ai/news/announcing-mistral-7b/), a high-quality open LLM, was released! Deploy via SkyPilot on any cloud: [**Mistral docs**](https://docs.mistral.ai/self-deployment/skypilot)
-- [Sep 2023] Case study: [**Covariant**](https://covariant.ai/) transformed AI development on the cloud using SkyPilot, delivering models 4x faster cost-effectively: [**read the case study**](https://blog.skypilot.co/covariant/)
-- [Jul 2023] Self-Hosted **Llama-2 Chatbot** on Any Cloud: [**example**](./llm/llama-2/)
-- [Jun 2023] Serving LLM 24x Faster On the Cloud [**with vLLM**](https://vllm.ai/) and SkyPilot: [**example**](./llm/vllm/), [**blog post**](https://blog.skypilot.co/serving-llm-24x-faster-on-the-cloud-with-vllm-and-skypilot/)
-- [Apr 2023] [SkyPilot YAMLs](./llm/vicuna/) for finetuning & serving the [Vicuna LLM](https://lmsys.org/blog/2023-03-30-vicuna/) with a single command!
-
-</details>
 
 ----
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
 SkyPilot **abstracts away infra burdens**:
-- Launch [dev clusters](https://docs.skypilot.co/en/latest/examples/interactive-development.html), [jobs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html), and [serving](https://docs.skypilot.co/en/latest/serving/sky-serve.html) on any infra
+- Launch [clusters](https://docs.skypilot.co/en/latest/examples/interactive-development.html), [jobs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html), and [serving](https://docs.skypilot.co/en/latest/serving/sky-serve.html) on any infra
 - Easy job management: queue, run, and auto-recover many jobs
 
 SkyPilot **supports multiple clusters, clouds, and hardware** ([the Sky](https://arxiv.org/abs/2205.07147)):
@@ -157,7 +138,7 @@ SkyPilot then performs the heavy-lifting for you, including:
 Refer to [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
 ## More Information
-To learn more, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
+To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overview.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
 
 <!-- Keep this section in sync with index.rst in SkyPilot Docs -->
 Runnable examples:
@@ -203,7 +184,7 @@ Read the research:
 - [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
 - [Policy for Managed Spot Jobs](https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao)  (NSDI 2024)
 
-SkyPilot was initially started at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley and has since gained many industry contributors. Read more about the project's origin [here](https://docs.skypilot.co/en/latest/sky-computing.html).
+SkyPilot was initially started at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley and has since gained many industry contributors. To read about the project's origin and vision, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html).
 
 ## Support and Questions
 We are excited to hear your feedback!
