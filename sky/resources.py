@@ -45,7 +45,7 @@ class Resources:
     """
     # If any fields changed, increment the version. For backward compatibility,
     # modify the __setstate__ method to handle the old version.
-    _VERSION = 21
+    _VERSION = 22
 
     def __init__(
         self,
@@ -1664,5 +1664,9 @@ class Resources:
 
         if version < 21:
             self._cached_repr = None
+
+        if version < 22:
+            self._docker_username_for_runpod = state.pop(
+                '_docker_username_for_runpod', None)
 
         self.__dict__.update(state)
