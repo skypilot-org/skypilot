@@ -734,9 +734,22 @@ def hash_file(path: str, hash_alg: str) -> 'hashlib._Hash':
         return file_hash
 
 
-def is_port_available(port: int) -> bool:
-    """Check if the given port is available."""
+def is_port_available(port: int, reuse_addr: bool = True) -> bool:
+    """Check if a TCP port is available for binding on localhost.
+
+    Args:
+        port: The port number to check.
+        reuse_addr: If True, sets SO_REUSEADDR socket option to allow reusing
+            ports in TIME_WAIT state. Servers like multiprocessing.Manager set
+            SO_REUSEADDR by default to accelerate restart. The option should be
+            coordinated in check.
+
+    Returns:
+        bool: True if the port is available for binding, False otherwise.
+    """
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        if reuse_addr:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(('localhost', port))
             return True
