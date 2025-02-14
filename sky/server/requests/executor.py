@@ -412,7 +412,8 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         # port automatically.
         port = mp_queue.DEFAULT_QUEUE_MANAGER_PORT
         if not common_utils.is_port_available(port):
-            raise RuntimeError(f'Queue manager port {port} is already in use.')
+            raise RuntimeError(f'SkyPilot API server fails to start as port {port!r} is already in use '
+                                              'by another process.')
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
