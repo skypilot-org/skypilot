@@ -385,8 +385,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                         serve_utils.
                         generate_remote_external_load_balancer_log_file_name(
                             service_name, lb_id))
-                    lb_cluster_name = (_get_external_lb_cluster_name(
-                        service_name, lb_id))
+                    lb_cluster_name = _get_external_lb_cluster_name(
+                        service_name, lb_id)
                     lbid2cluster[lb_id] = lb_cluster_name
                     lb_policy = lb_config['load_balancing_policy']
                     lb_resources = lb_config['resources']
