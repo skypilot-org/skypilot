@@ -1,4 +1,4 @@
-# Distribute Serving DeepSeek-R1 with high throughput using SGLang and SkyPilot
+# Distributed DeepSeek-R1 Serving with high throughput using SGLang and SkyPilot
 
 
 <p align="center">
