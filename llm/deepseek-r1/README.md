@@ -272,7 +272,7 @@ The original DeepSeek-R1 685B model is a large model that can only fit in 8 H200
 SkyPilot allows you to run the model with a single command:
 
 ```console
-$ sky launch -c test-r2 llm/deepseek-r1/deepseek-r1-685B.yaml --retry-until-up
+$ sky launch -c r1 llm/deepseek-r1/deepseek-r1-685B.yaml --retry-until-up
 
 YAML to run: llm/deepseek-r1/deepseek-r1-685B.yaml
 Considered resources (2 nodes):
@@ -291,7 +291,7 @@ Considered resources (2 nodes):
  AWS     p5en.48xlarge                     192     2048      H200:8         us-east-2        169.60              
  AWS     p5.48xlarge                       192     2048      H100:8         us-east-1        196.64              
 -----------------------------------------------------------------------------------------------------------------
-Launching a new cluster 'test-r2'. Proceed? [Y/n]: 
+Launching a new cluster 'r1'. Proceed? [Y/n]: 
 ```
 
 It may take a while (20-30 minutes) for SGLang to download the model weights, compile, and start the server.
