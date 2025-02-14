@@ -19,9 +19,6 @@
   </a>
 
   <a href="https://github.com/skypilot-org/skypilot/releases">
-    <img alt="Downloads" src="https://img.shields.io/github/downloads/skypilot-org/skypilot/total">
-  </a>
-  <a href="https://github.com/skypilot-org/skypilot/releases">
     <img alt="Downloads" src="https://img.shields.io/pypi/dm/skypilot">
   </a>
 
