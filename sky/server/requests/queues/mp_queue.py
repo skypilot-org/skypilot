@@ -8,6 +8,8 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
+# The default port used by SkyPilot API server's request queue.
+# We avoid 50010, as it might be taken by HDFS.
 DEFAULT_QUEUE_MANAGER_PORT = 50011
 
 
