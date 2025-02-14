@@ -846,7 +846,7 @@ def test_managed_jobs_storage(generic_cloud: str):
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f:
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(yaml_str)
         f.flush()
         file_path = f.name
