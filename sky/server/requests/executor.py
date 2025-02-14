@@ -408,10 +408,18 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_names = [
             schedule_type.value for schedule_type in api_requests.ScheduleType
         ]
+        # TODO(aylei): make queue manager port configurable or pick an available
+        # port automatically.
+        port = mp_queue.DEFAULT_QUEUE_MANAGER_PORT
+        if not common_utils.is_port_available(port):
+            raise RuntimeError(
+                f'SkyPilot API server fails to start as port {port!r} is '
+                'already in use by another process.')
         queue_server = multiprocessing.Process(
-            target=mp_queue.start_queue_manager, args=(queue_names,))
+            target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
-        mp_queue.wait_for_queues_to_be_ready(queue_names)
+
+        mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
 
     logger.info('Request queues created')
 

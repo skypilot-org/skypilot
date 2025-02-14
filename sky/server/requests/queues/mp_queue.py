@@ -8,7 +8,9 @@ from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
 
-DEFAULT_QUEUE_MANAGER_PORT = 50010
+# The default port used by SkyPilot API server's request queue.
+# We avoid 50010, as it might be taken by HDFS.
+DEFAULT_QUEUE_MANAGER_PORT = 50011
 
 
 # Have to create custom manager to handle different processes connecting to the
@@ -32,7 +34,16 @@ def start_queue_manager(queue_names: List[str],
         QueueManager.register(name, callable=queue_getter(q_obj))
 
     # Start long-running manager server.
-    manager = QueueManager(address=('', port), authkey=b'skypilot')
+    # Manager will set socket.SO_REUSEADDR, but BSD and Linux have different
+    # behaviors on this option:
+    # - BSD(e.g. MacOS): * (0.0.0.0) does not conflict with other addresses on
+    #   the same port
+    # - Linux: in the contrary, * conflicts with any other addresses
+    # So on BSD systems, binding to * while the port is already bound to
+    # localhost (127.0.0.1) will succeed, but the Manager won't actually be able
+    # to accept connections on localhost.
+    # For portability, we use the loopback address instead of *.
+    manager = QueueManager(address=('localhost', port), authkey=b'skypilot')
     server = manager.get_server()
     server.serve_forever()
 
