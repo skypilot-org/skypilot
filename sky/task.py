@@ -1,4 +1,5 @@
 """Task: a coarse-grained stage in an application."""
+import collections
 import inspect
 import json
 import os
@@ -1007,27 +1008,41 @@ class Task:
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
         """
+        # The same storage can be used multiple times, and we should construct
+        # the storage with stores first, so that the storage will be created on
+        # the correct cloud.
+        name_to_storage = collections.defaultdict(list)
         for storage in self.storage_mounts.values():
-            storage.construct()
-            assert storage.name is not None, storage
-            if not storage.stores:
-                store_type, store_region = self._get_preferred_store()
-                self.storage_plans[storage] = store_type
-                storage.add_store(store_type, store_region)
-                storage.sync_all_stores()
-            else:
-                # We don't need to sync the storage here as if the stores are
-                # not empty, it measn the storage has been synced during
-                # construct() above
-                # We will download the first store that is added to remote.
-                assert all(store is not None
-                           for store in storage.stores.values()), storage
-                self.storage_plans[storage] = list(storage.stores.keys())[0]
-            assert (storage.stores and all(store is not None for store in storage.stores.values())), storage.__dict__
+            name_to_storage[storage.name].append(storage)
+        for storages in name_to_storage.values():
+            # Place the storage with most stores first, so that the storage will
+            # be created on the correct cloud.
+            storage_to_construct = sorted(storages,
+                                          key=lambda x: len(x.stores),
+                                          reverse=True)
+            for storage in storage_to_construct:
+                storage.construct()
+                assert storage.name is not None, storage
+                if not storage.stores:
+                    store_type, store_region = self._get_preferred_store()
+                    self.storage_plans[storage] = store_type
+                    storage.add_store(store_type, store_region)
+                else:
+                    # We don't need to sync the storage here as if the stores
+                    # are not empty, it measn the storage has been synced during
+                    # construct() above.
+                    # We will download the first store that is added to remote.
+                    assert all(store is not None
+                               for store in storage.stores.values()), storage
+                    self.storage_plans[storage] = list(storage.stores.keys())[0]
 
-        # TODO(zhwu): investigate if the following is needed, as we have to
-        # keep the storage mounts for handling the lifecycle of the storage
-        # mounts.
+        # The following logic converts the storage mounts with COPY mode into
+        # inline file mounts with cloud URIs, so that the _execute_file_mounts()
+        # in cloud_vm_ray_backend.py can correctly download from the specific
+        # cloud storage on the remote cluster.
+        # Note that this will cause duplicate destination paths in file_mounts,
+        # and storage_mounts, which should be fine as our to_yaml_config() will
+        # only dump the storage mount version, i.e. what user specified.
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
