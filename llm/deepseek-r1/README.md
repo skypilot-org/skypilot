@@ -74,13 +74,15 @@ clouds, or Kubernetes clusters to find the resources to launch the model.
 
 It may take a while (30-40 minutes) for SGLang to download the model weights, compile, and start the server.
 
+![DeepSeek-R1 on SkyPilot](https://i.imgur.com/N51TU86.gif)
+
 ## Query the endpoint
 
 After the initialization, you can access the model with the endpoint:
 ```
 ENDPOINT=$(sky status --endpoint 30000 deepseek)
 
-curl http://$ENDPOINT:30000/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "deepseek-ai/DeepSeek-R1-671B",
@@ -121,3 +123,26 @@ Example speed for 2 H100:8 nodes on GCP with a single request (you may get bette
 (head, rank=0, pid=18260) [2025-02-14 00:42:25 DP2 TP2] Decode batch. #running-req: 1, #token: 250, token usage: 0.00, gen throughput (token/s): 11.53, #queue-req: 0
 (head, rank=0, pid=18260) [2025-02-14 00:42:29 DP2 TP2] Decode batch. #running-req: 1, #token: 290, token usage: 0.00, gen throughput (token/s): 11.42, #queue-req: 0
 ```
+
+
+## Deploy the Service with Multiple Replicas
+
+The lauching command above only starts a single replica (with 2 nodes) for the service. SkyServe helps deploy the service with multiple replicas with out-of-the-box load balancing, autoscaling and automatic recovering.
+Importantly, it also enables serving on spot instances resulting in 30\% lower cost.
+
+The only difference you have to do is to add a service section for serving specific configuration:
+
+```yaml
+service:
+  # Specifying the path to the endpoint to check the readiness of the service.
+  readiness_probe: /health
+  # Allow 1 hour for code start.
+  initial_delay_seconds: 3600
+  # Autoscaling from 0 to 2 replicas
+  replica_policy:
+    min_replicas: 0
+    max_replicas: 2
+```
+
+
+
