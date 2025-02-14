@@ -267,6 +267,10 @@ sky down deepseek
 
 The original DeepSeek-R1 685B model is a large model that can only fit in 8 H200 GPUs with a single node, but luckily, we can use SGLang and SkyPilot to run it on multiple GPU nodes distributedly.
 
+### Run the model
+
+SkyPilot allows you to run the model with a single command:
+
 ```console
 $ sky launch -c test-r2 llm/deepseek-r1/deepseek-r1-685B.yaml --retry-until-up
 
@@ -291,6 +295,9 @@ Launching a new cluster 'test-r2'. Proceed? [Y/n]:
 ```
 
 It may take a while (20-30 minutes) for SGLang to download the model weights, compile, and start the server.
+
+### Query the endpoint
+
 After the initialization, you can access the model with the endpoint:
 ```
 ENDPOINT=$(sky status --endpoint 30000 deepseek)
@@ -311,13 +318,28 @@ curl http://$ENDPOINT:30000/v1/chat/completions \
     ]
   }' | jq .
 ```
-
-You will get both the chain of thoughts within `<think>` tags and the final results. 
+ 
+You will get the following answer, which interestingly does not trigger any chain of thoughts.
 
 <details>
-    <summary>How many Rs are in strawberry: There are 3 Rs in strawberry.</summary>
+    <summary>How many Rs are in strawberry: So, the answer is **3**. 🍓</summary>
+
+Okay, let's figure out how many times the letter \"r\" appears in the word \"strawberry.\" First, I need to make sure I'm spelling \"strawberry\" correctly. Sometimes people might miss letters or add extra ones. Let me write it out: S-T-R-A-W-B-E-R-R-Y. Wait, is that right? Let's double-check. Strawberry is spelled S-T-R-A-W-B-E-R-R-Y. Yes, that's correct. Now, I need to go through each letter one by one and count the number of \"r\"s.\n\nStarting with the first letter: S (no), T (no), R (yes, that's one). Then A (no), W (no), B (no), E (no), R (that's two), R (that's three), Y (no). Wait, wait, hold on. Let me write out the letters with their positions to be precise.\n\nBreaking down \"strawberry\" letter by letter:\n1. S\n2. T\n3. R\n4. A\n5. W\n6. B\n7. E\n8. R\n9. R\n10. Y\n\nSo, looking at positions 3, 8, and 9: that's three \"r\"s. But wait, does that match the actual spelling? Let me confirm again. The word is strawberry. Sometimes people might think it's \"strawberry\" with two \"r\"s, but actually, according to correct spelling, it's S-T-R-A-W-B-E-R-R-Y. So after the B and E, there are two R's, right? Let me check a dictionary or maybe think of the pronunciation. Straw-ber-ry. The \"ber\" part is one R, but the correct spelling includes two R's after the E. So yes, that makes three R's in total. Hmm, but let me make sure I'm not miscounting. So positions 3, 8, 9: R, then two R's at the end before Y. That's three R's. Wait, actually, in the breakdown above, position 3 is R, then positions 8 and 9 are the two R's. So total three. Yes, that's right. So the answer should be three. Let me see if I can find any source that confirms this. Alternatively, I can write the word again and count: S T R A W B E R R Y. So R appears once at the beginning (third letter) and then twice towards the end (8th and 9th letters). So total of three times. Therefore, the correct answer is three.\n</think>\n\nThe word \"strawberry\" contains **3** instances of the letter \"r\". Here's the breakdown:\n\n1. **S**  \n2. **T**  \n3. **R** (1st \"r\")  \n4. **A**  \n5. **W**  \n6. **B**  \n7. **E**  \n8. **R** (2nd \"r\")  \n9. **R** (3rd \"r\")  \n10. **Y**  \n\nSo, the answer is **3**. 🍓
 
     ```console
-    
+    {"id":"01add72820794f5c884c4d5c126d2a62","object":"chat.completion","created":1739493784,"model":"deepseek-ai/DeepSeek-R1-685B","choices":[{"index":0,"message":{"role":"assistant","content":"Okay, let's figure out how many times the letter \"r\" appears in the word \"strawberry.\" First, I need to make sure I'm spelling \"strawberry\" correctly. Sometimes people might miss letters or add extra ones. Let me write it out: S-T-R-A-W-B-E-R-R-Y. Wait, is that right? Let's double-check. Strawberry is spelled S-T-R-A-W-B-E-R-R-Y. Yes, that's correct. Now, I need to go through each letter one by one and count the number of \"r\"s.\n\nStarting with the first letter: S (no), T (no), R (yes, that's one). Then A (no), W (no), B (no), E (no), R (that's two), R (that's three), Y (no). Wait, wait, hold on. Let me write out the letters with their positions to be precise.\n\nBreaking down \"strawberry\" letter by letter:\n1. S\n2. T\n3. R\n4. A\n5. W\n6. B\n7. E\n8. R\n9. R\n10. Y\n\nSo, looking at positions 3, 8, and 9: that's three \"r\"s. But wait, does that match the actual spelling? Let me confirm again. The word is strawberry. Sometimes people might think it's \"strawberry\" with two \"r\"s, but actually, according to correct spelling, it's S-T-R-A-W-B-E-R-R-Y. So after the B and E, there are two R's, right? Let me check a dictionary or maybe think of the pronunciation. Straw-ber-ry. The \"ber\" part is one R, but the correct spelling includes two R's after the E. So yes, that makes three R's in total. Hmm, but let me make sure I'm not miscounting. So positions 3, 8, 9: R, then two R's at the end before Y. That's three R's. Wait, actually, in the breakdown above, position 3 is R, then positions 8 and 9 are the two R's. So total three. Yes, that's right. So the answer should be three. Let me see if I can find any source that confirms this. Alternatively, I can write the word again and count: S T R A W B E R R Y. So R appears once at the beginning (third letter) and then twice towards the end (8th and 9th letters). So total of three times. Therefore, the correct answer is three.\n</think>\n\nThe word \"strawberry\" contains **3** instances of the letter \"r\". Here's the breakdown:\n\n1. **S**  \n2. **T**  \n3. **R** (1st \"r\")  \n4. **A**  \n5. **W**  \n6. **B**  \n7. **E**  \n8. **R** (2nd \"r\")  \n9. **R** (3rd \"r\")  \n10. **Y**  \n\nSo, the answer is **3**. 🍓","tool_calls":null},"logprobs":null,"finish_reason":"stop","matched_stop":1}],"usage":{"prompt_tokens":17,"total_tokens":688,"completion_tokens":671,"prompt_tokens_details":null}}
     ```
+
 </details>
+
+
+
+### Speed for Generation
+You can find the generation speed in the log of the server:
+
+Example speed for 2 A100-80GB:8 nodes on GCP:
+```
+(head, rank=0, pid=18260) [2025-02-14 00:42:22 DP2 TP2] Decode batch. #running-req: 1, #token: 210, token usage: 0.00, gen throughput (token/s): 11.45, #queue-req: 0
+(head, rank=0, pid=18260) [2025-02-14 00:42:25 DP2 TP2] Decode batch. #running-req: 1, #token: 250, token usage: 0.00, gen throughput (token/s): 11.53, #queue-req: 0
+(head, rank=0, pid=18260) [2025-02-14 00:42:29 DP2 TP2] Decode batch. #running-req: 1, #token: 290, token usage: 0.00, gen throughput (token/s): 11.42, #queue-req: 0
+```
