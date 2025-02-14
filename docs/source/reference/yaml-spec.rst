@@ -285,6 +285,10 @@ Available fields:
     # Values set here can be overridden by a CLI flag:
     # `sky launch/exec --env ENV=val` (if ENV is present).
     #
+    # For costumized non-root docker image in RunPod, you need to set
+    # `SKYPILOT_RUNPOD_DOCKER_USERNAME` to specify the login username for the
+    # docker image. See :ref:`docker-containers-as-runtime-environments` for more.
+    #
     # If you want to use a docker image as runtime environment in a private
     # registry, you can specify your username, password, and registry server as
     # task environment variable.  For example:
