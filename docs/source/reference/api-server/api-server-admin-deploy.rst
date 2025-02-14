@@ -24,12 +24,14 @@ Prerequisites
 Step 1: Create a namespace for the API server
 ---------------------------------------------
 
-Create a namespace in your Kubernetes cluster. This namespace will be used to deploy the API server pods, services and secrets.
+The API server will be deployed in a namespace of your choice. You can either create the namespace manually:
 
 .. code-block:: console
 
     $ NAMESPACE=skypilot
     $ kubectl create namespace $NAMESPACE
+
+Or let Helm create it automatically by adding the ``--create-namespace`` flag to the helm install command in Step 3.
 
 Step 2: Configure cloud accounts
 --------------------------------
@@ -142,7 +144,7 @@ Following tabs describe how to configure credentials for different clouds on the
 Step 3: Deploy the API Server Helm Chart
 ----------------------------------------
 
-Install the SkyPilot Helm chart with the following command. 
+Install the SkyPilot Helm chart with the following command:
 
 .. code-block:: console
 
@@ -153,7 +155,10 @@ Install the SkyPilot Helm chart with the following command.
     $ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
     $ helm upgrade --install skypilot skypilot/skypilot \
     --namespace $NAMESPACE \
+    --create-namespace \
     --set ingress.auth=$AUTH_STRING
+
+The ``--namespace`` flag specifies which namespace to deploy the API server in, and ``--create-namespace`` will create the namespace if it doesn't exist.
 
 To install a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
 

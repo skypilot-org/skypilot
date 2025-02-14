@@ -2,7 +2,7 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: basic-auth
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.namespace }}
 type: Opaque
 stringData:
   auth: {{ .Values.ingress.auth | quote }}

@@ -3,7 +3,7 @@ apiVersion: v1
 kind: ServiceAccount
 metadata:
   name: skypilot-api-sa
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.namespace }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -21,7 +21,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: skypilot-api-sa
-  namespace: {{ .Values.namespace }}
+  namespace: {{ .Release.namespace }}
 roleRef:
   kind: ClusterRole
   name: skypilot-api-role
