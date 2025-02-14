@@ -1,5 +1,4 @@
-
-## Launch DeepSeek-R1 distributed high-throughput serving with SGLang and SkyPilot
+# Launch DeepSeek-R1 distributed high-throughput serving with SGLang and SkyPilot
 
 
 <p align="center">
@@ -13,9 +12,9 @@ DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning b
 We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distributedly with high throughput in this example, and according to HuggingFace's [report](https://huggingface.co/blog/open-r1/update-2), SGLang offers 2x performance than vLLM for serving the large DeepSeek-R1.
 
 
-**Note**: This example is for the original DeepSeek-R1 671B model. For the smaller size distilled model, please refer to [deepseek-r1-distilled](../deepseek-r1-distilled/).
+**Note**: This example is for the original DeepSeek-R1 671B model. For the smaller size distilled model, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
 
-### Run the model
+## Run the model
 
 SkyPilot allows you to run the model distributedly with a single command with the framework [SGLang](https://github.com/sgl-project/sglang):
 
@@ -44,7 +43,7 @@ Launching a new cluster 'r1'. Proceed? [Y/n]:
 
 It may take a while (20-30 minutes) for SGLang to download the model weights, compile, and start the server.
 
-### Query the endpoint
+## Query the endpoint
 
 After the initialization, you can access the model with the endpoint:
 ```
@@ -82,7 +81,7 @@ Okay, let's figure out how many times the letter \"r\" appears in the word \"str
 
 
 
-### Speed for Generation
+## Speed for Generation
 You can find the generation speed in the log of the server:
 
 Example speed for 2 H100:8 nodes on GCP:
