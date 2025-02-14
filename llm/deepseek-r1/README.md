@@ -337,7 +337,7 @@ Okay, let's figure out how many times the letter \"r\" appears in the word \"str
 ### Speed for Generation
 You can find the generation speed in the log of the server:
 
-Example speed for 2 A100-80GB:8 nodes on GCP:
+Example speed for 2 H100:8 nodes on GCP:
 ```
 (head, rank=0, pid=18260) [2025-02-14 00:42:22 DP2 TP2] Decode batch. #running-req: 1, #token: 210, token usage: 0.00, gen throughput (token/s): 11.45, #queue-req: 0
 (head, rank=0, pid=18260) [2025-02-14 00:42:25 DP2 TP2] Decode batch. #running-req: 1, #token: 250, token usage: 0.00, gen throughput (token/s): 11.53, #queue-req: 0
