@@ -231,7 +231,7 @@ Answer: There are 3 Rs in "strawberry."
   "object": "chat.completion",
   "created": 1737507945,
   "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
-  "choices": [c
+  "choices": [
     {
       "index": 0,
       "message": {
