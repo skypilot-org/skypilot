@@ -1023,7 +1023,11 @@ class Task:
                 assert all(store is not None
                            for store in storage.stores.values()), storage
                 self.storage_plans[storage] = list(storage.stores.keys())[0]
+            assert (storage.stores and all(store is not None for store in storage.stores.values())), storage.__dict__
 
+        # TODO(zhwu): investigate if the following is needed, as we have to
+        # keep the storage mounts for handling the lifecycle of the storage
+        # mounts.
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
