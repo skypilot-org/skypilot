@@ -761,7 +761,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         region_flag = f' --region {region}'
         region_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_region_cmd(
             storage_lib.StoreType.S3, bucket_name=output_storage_name)
-        region_validation_cmd = f'{region_cmd} | grep {region}'
+        region_validation_cmd = f's=$({region_cmd}) && echo "$s" && echo; echo "$s" | grep {region}'
         region_validation_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, region_validation_cmd)
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
@@ -846,7 +846,7 @@ def test_managed_jobs_storage(generic_cloud: str):
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
-    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w', delete=False) as f:
         f.write(yaml_str)
         f.flush()
         file_path = f.name
