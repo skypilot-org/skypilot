@@ -14,6 +14,9 @@ This guide walks through how to run and host DeepSeek-R1 models **on any infrast
 
 Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
 
+**New**: We added a new SkyPilot YAML for running [DeepSeek-R1 685B with SGLang](#run-deepseek-r1-685b-with-sglang).
+
+## Run DeepSeek-R1 distilled models with vLLM
 
 ### Step 0: Bring any infra
 
@@ -228,7 +231,7 @@ Answer: There are 3 Rs in "strawberry."
   "object": "chat.completion",
   "created": 1737507945,
   "model": "deepseek-ai/DeepSeek-R1-Distill-Llama-70B",
-  "choices": [
+  "choices": [c
     {
       "index": 0,
       "message": {
@@ -259,3 +262,62 @@ To shutdown, run
 ```
 sky down deepseek
 ```
+
+## Run DeepSeek-R1 685B with SGLang
+
+The original DeepSeek-R1 685B model is a large model that can only fit in 8 H200 GPUs with a single node, but luckily, we can use SGLang and SkyPilot to run it on multiple GPU nodes distributedly.
+
+```console
+$ sky launch -c test-r2 llm/deepseek-r1/deepseek-r1-685B.yaml --retry-until-up
+
+YAML to run: llm/deepseek-r1/deepseek-r1-685B.yaml
+Considered resources (2 nodes):
+-----------------------------------------------------------------------------------------------------------------
+ CLOUD   INSTANCE                          vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE      COST ($)   CHOSEN   
+-----------------------------------------------------------------------------------------------------------------
+ Azure   Standard_ND96amsr_A100_v4[Spot]   96      1800      A100-80GB:8    eastus           7.21          ✔     
+ AWS     p5.48xlarge[Spot]                 192     2048      H100:8         us-east-1a       21.04               
+ GCP     a2-ultragpu-8g[Spot]              96      1360      A100-80GB:8    us-east5-b       27.89               
+ AWS     p5en.48xlarge[Spot]               192     2048      H200:8         us-east-2c       33.43               
+ GCP     a2-ultragpu-8g                    96      1360      A100-80GB:8    us-central1-a    47.13               
+ GCP     a3-highgpu-8g[Spot]               208     1872      H100:8         europe-west4-b   62.62               
+ Azure   Standard_ND96amsr_A100_v4         96      1800      A100-80GB:8    eastus           65.54               
+ AWS     p4de.24xlarge                     96      1152      A100-80GB:8    us-east-1        81.93               
+ GCP     a3-highgpu-8g                     208     1872      H100:8         us-central1-a    92.04               
+ AWS     p5en.48xlarge                     192     2048      H200:8         us-east-2        169.60              
+ AWS     p5.48xlarge                       192     2048      H100:8         us-east-1        196.64              
+-----------------------------------------------------------------------------------------------------------------
+Launching a new cluster 'test-r2'. Proceed? [Y/n]: 
+```
+
+It may take a while (20-30 minutes) for SGLang to download the model weights, compile, and start the server.
+After the initialization, you can access the model with the endpoint:
+```
+ENDPOINT=$(sky status --endpoint 30000 deepseek)
+
+curl http://$ENDPOINT:30000/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "deepseek-ai/DeepSeek-R1-685B",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "how many rs are in strawberry"
+      }
+    ]
+  }' | jq .
+```
+
+You will get both the chain of thoughts within `<think>` tags and the final results. 
+
+<details>
+    <summary>How many Rs are in strawberry: There are 3 Rs in strawberry.</summary>
+
+    ```console
+    
+    ```
+</details>

@@ -4,6 +4,10 @@ resources:
   accelerators: {H200:8, H100:8, A100-80GB:8}
   disk_size: 1024 # Large disk for model weights
   disk_tier: best
+  ports: 30000
+  any_of:
+    - use_spot: true
+    - use_spot: false
 
 num_nodes: 2 # Specify number of nodes to launch
 
