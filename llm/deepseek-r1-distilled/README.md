@@ -14,7 +14,7 @@ This guide walks through how to run and host DeepSeek-R1 models **on any infrast
 
 Skypilot supports a variety of LLM frameworks and models. In this guide, we use [vLLM](https://github.com/vllm-project/vllm), an open-source library for fast LLM inference and serving, as an example. 
 
-**New**: We added a new SkyPilot YAML for running [DeepSeek-R1 685B with SGLang](https://github.com/skypilot/tree/master/deepseek-r1).
+**New**: We added a new SkyPilot YAML for running [DeepSeek-R1 671B with SGLang](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1).
 
 ## Step 0: Bring any infra
 
