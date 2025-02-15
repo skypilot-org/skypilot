@@ -1,7 +1,6 @@
 """Kubernetes utilities for SkyPilot."""
 import dataclasses
 import functools
-import inspect
 import json
 import math
 import os
@@ -138,13 +137,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             # try to capture the kubernetes context from parameters
             if context_param:
                 context = kwargs.get(context_param)
-                if context is None and len(args) > 0:
-                    sig = inspect.signature(func)
-                    param_names = list(sig.parameters.keys())
-                    if context_param in param_names:
-                        context_idx = param_names.index(context_param)
-                        if context_idx < len(args):
-                            context = args[context_idx]
+                assert context is not None, f'{context_param} is required'
 
             for attempt in range(max_retries):
                 try:
@@ -542,7 +535,7 @@ def detect_gpu_label_formatter(
     """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -577,7 +570,7 @@ def detect_accelerator_resource(
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_accelerator = (get_gpu_resource_key() in cluster_resources or
@@ -692,7 +685,7 @@ def check_instance_fits(context: Optional[str],
                        f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
                        'podslices are currently not unsupported.')
 
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -2120,7 +2113,7 @@ def get_spot_label(
     """
     # Check if the cluster supports spot instances by checking nodes for known
     # spot label keys and values
-    for node in get_kubernetes_nodes(context):
+    for node in get_kubernetes_nodes(context=context):
         for _, (key, value) in SPOT_LABEL_MAP.items():
             if key in node.metadata.labels and node.metadata.labels[
                     key] == value:
@@ -2180,10 +2173,10 @@ def get_kubernetes_node_info(
         Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
             key and the KubernetesNodeInfo object as value
     """
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     # Get the pods to get the real-time resource usage
     try:
-        pods = get_all_pods_in_kubernetes_cluster(context)
+        pods = get_all_pods_in_kubernetes_cluster(context=context)
     except kubernetes.api_exception() as e:
         if e.status == 403:
             pods = None
@@ -2490,7 +2483,7 @@ def is_multi_host_tpu(node_metadata_labels: dict) -> bool:
 
 def multi_host_tpu_exists_in_cluster(context: Optional[str] = None) -> bool:
     """Checks if there exists a multi-host TPU within the cluster."""
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         if is_multi_host_tpu(node.metadata.labels):
             return True

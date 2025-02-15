@@ -183,8 +183,7 @@ class Kubernetes(clouds.Cloud):
     @classmethod
     def _log_unavailable_context(cls,
                                  context: str,
-                                 reason: Optional[str] = None,
-                                 silent: bool = False) -> None:
+                                 reason: Optional[str] = None) -> None:
         """log a Kubernetes context as unavailable.
 
         Args:
@@ -197,20 +196,19 @@ class Kubernetes(clouds.Cloud):
             return
 
         cls.logged_unavailable_contexts.add(context)
-        if not silent:
-            msg = f'Excluding Kubernetes context {context}'
-            if reason is not None:
-                msg += f': {reason}'
-            logger.info(msg)
+        msg = f'Excluding Kubernetes context {context}'
+        if reason is not None:
+            msg += f': {reason}'
+        logger.info(msg)
 
-            # Check if all existing allowed contexts are now unavailable
-            existing_contexts = cls.existing_allowed_contexts()
-            if existing_contexts and all(ctx in cls.logged_unavailable_contexts
-                                         for ctx in existing_contexts):
-                logger.warning(
-                    'All Kubernetes contexts have reported as unavailable. '
-                    'Retry if it is a transient error, or run sky check to '
-                    'refresh Kubernetes availability if permanent.')
+        # Check if all existing allowed contexts are now unavailable
+        existing_contexts = cls.existing_allowed_contexts()
+        if existing_contexts and all(ctx in cls.logged_unavailable_contexts
+                                     for ctx in existing_contexts):
+            logger.warning(
+                'All Kubernetes contexts have reported as unavailable. '
+                'Retry if it is a transient error, or run sky check to '
+                'refresh Kubernetes availability if permanent.')
 
     @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
