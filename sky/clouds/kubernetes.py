@@ -184,7 +184,7 @@ class Kubernetes(clouds.Cloud):
     def _log_unavailable_context(cls,
                                  context: str,
                                  reason: Optional[str] = None) -> None:
-        """log a Kubernetes context as unavailable.
+        """Logs a Kubernetes context as unavailable.
 
         Args:
             context: The Kubernetes context to mark as unavailable.
