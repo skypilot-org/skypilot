@@ -309,9 +309,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
 
 if __name__ == '__main__':
-    assert (
-        pathlib.Path('/home/sky/.sky/k8s_container_ready').exists()
-    ), 'k8s_container_ready not found, exiting'
+    assert (pathlib.Path('/home/sky/.sky/k8s_container_ready').exists()
+           ), 'k8s_container_ready not found, exiting'
 
     logger.info('k8s_container_ready found, starting service')
 

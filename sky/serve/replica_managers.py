@@ -632,11 +632,11 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
 
-        self._recover_replica_operations()
-
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
+
+        self._recover_replica_operations()
 
     def _recover_replica_operations(self):
         """Let's see are there something to do for ReplicaManager in a
