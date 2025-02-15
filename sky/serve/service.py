@@ -143,7 +143,6 @@ def is_recovery_mode(service_name: str) -> bool:
     service = serve_state.get_service_from_name(service_name)
     return service is not None
 
-
 def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     """Starts the service."""
     # Generate ssh key pair to avoid race condition when multiple sky.launch
@@ -155,9 +154,13 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # Already checked before submit to controller.
     assert task.service is not None, task
     service_spec = task.service
+    service_dir = os.path.expanduser(
+            serve_utils.generate_remote_service_dir_name(service_name))
+    task_yaml = serve_utils.generate_task_yaml_file_name(
+            service_name, constants.INITIAL_VERSION)
 
     is_recovery = is_recovery_mode(service_name)
-    logger.info(f'It\'s a {"first" if not is_recovery else "recovery"} run')
+    logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
     if not is_recovery:
         if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
@@ -184,24 +187,16 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                                           constants.INITIAL_VERSION,
                                           service_spec)
 
-    # Create the service working directory.
-    service_dir = os.path.expanduser(
-        serve_utils.generate_remote_service_dir_name(service_name))
-    os.makedirs(service_dir, exist_ok=True)
+        # Create the service working directory.
+        os.makedirs(service_dir, exist_ok=True)
 
-    # Copy the tmp task yaml file to the final task yaml file.
-    # This is for the service name conflict case. The _execute will
-    # sync file mounts first and then realized a name conflict. We
-    # don't want the new file mounts to overwrite the old one, so we
-    # sync to a tmp file first and then copy it to the final name
-    # if there is no name conflict.
-    task_yaml = serve_utils.generate_task_yaml_file_name(
-        service_name, constants.INITIAL_VERSION)
-    shutil.copy(tmp_task_yaml, task_yaml)
-
-    # Generate load balancer log file name.
-    load_balancer_log_file = os.path.expanduser(
-        serve_utils.generate_remote_load_balancer_log_file_name(service_name))
+        # Copy the tmp task yaml file to the final task yaml file.
+        # This is for the service name conflict case. The _execute will
+        # sync file mounts first and then realized a name conflict. We
+        # don't want the new file mounts to overwrite the old one, so we
+        # sync to a tmp file first and then copy it to the final name
+        # if there is no name conflict.
+        shutil.copy(tmp_task_yaml, task_yaml)
 
     controller_process = None
     load_balancer_process = None
@@ -217,6 +212,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             else:
                 controller_port = common_utils.find_free_port(
                     constants.CONTROLLER_PORT_START)
+                load_balancer_port = common_utils.find_free_port(
+                    constants.LOAD_BALANCER_PORT_START)
 
             # We expose the controller to the public network when running
             # inside a kubernetes cluster to allow external load balancers
@@ -245,12 +242,13 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
             controller_addr = f'http://{controller_host}:{controller_port}'
 
-            if not is_recovery:
-                load_balancer_port = common_utils.find_free_port(
-                    constants.LOAD_BALANCER_PORT_START)
 
             # Extract the load balancing policy from the service spec
             policy_name = service_spec.load_balancing_policy
+
+            # Generate load balancer log file name.
+            load_balancer_log_file = os.path.expanduser(
+                serve_utils.generate_remote_load_balancer_log_file_name(service_name))
 
             # Start the load balancer.
             # TODO(tian): Probably we could enable multiple ports specified in
