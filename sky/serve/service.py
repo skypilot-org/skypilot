@@ -309,11 +309,11 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
 
 
 if __name__ == '__main__':
-    if not pathlib.Path('/home/sky/.sky/k8s_container_ready').exists():
-        print('k8s_container_ready not found, exiting')
-        exit(0)
+    assert (
+        pathlib.Path('/home/sky/.sky/k8s_container_ready').exists()
+    ), 'k8s_container_ready not found, exiting'
 
-    print('k8s_container_ready found, starting service')
+    logger.info('k8s_container_ready found, starting service')
 
     parser = argparse.ArgumentParser(description='Sky Serve Service')
     parser.add_argument('--service-name',
