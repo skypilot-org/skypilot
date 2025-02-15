@@ -1,0 +1,94 @@
+# Serving Meta Llama 3.2 on your own infra.
+#
+# Usage:
+#
+#  HF_TOKEN=xxx sky launch llama3_2.yaml -c llama3_2 --env HF_TOKEN
+#
+# curl /v1/chat/completions:
+#
+#   ENDPOINT=$(sky status --endpoint 8081 llama3_2)
+#  
+#   # We need to manually specify the stop_token_ids to make sure the model finish
+#   # on <|eot_id|>.
+#   curl http://$ENDPOINT/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "model": "meta-llama/Meta-Llama-3-8B-Instruct",
+#       "messages": [
+#         {
+#           "role": "system",
+#           "content": "You are a helpful assistant."
+#         },
+#         {
+#           "role": "user",
+#           "content": "Who are you?"
+#         }
+#       ],
+#       "stop_token_ids": [128009,  128001]
+#     }'
+#
+# Chat with model with Gradio UI:
+#
+#   Running on local URL:  http://127.0.0.1:8811
+#   Running on public URL: https://<hash>.gradio.live
+#
+# Scale up with SkyServe:
+#  HF_TOKEN=xxx sky serve up llama3_2.yaml -n llama3_2 --env HF_TOKEN
+#
+# curl /v1/chat/completions:
+#
+#   ENDPOINT=$(sky serve status --endpoint llama3_2)
+#   curl -L $ENDPOINT/v1/models
+#   curl -L http://$ENDPOINT/v1/chat/completions \
+#     -H "Content-Type: application/json" \
+#     -d '{
+#       "model": "databricks/llama3-instruct",
+#       "messages": [
+#         {
+#           "role": "system",
+#           "content": "You are a helpful assistant."
+#         },
+#         {
+#           "role": "user",
+#           "content": "Who are you?"
+#         }
+#       ]
+#     }'
+
+
+envs:
+  MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
+  # MODEL_NAME: meta-llama/Llama-3.2-3B-Vision
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
+service:
+  replicas: 2
+  # An actual request for readiness probe.
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+
+resources:
+  accelerators: {L4:1, L40S:1, L40:1, A10g:1, A10:1, A100:1, H100:1}
+  # accelerators: {L4, A10g, A10, L40, A40, A100, A100-80GB} # We can use cheaper accelerators for 8B model.
+  cpus: 8+
+  disk_size: 512  # Ensure model checkpoints can fit.
+  disk_tier: best
+  ports: 8081  # Expose to internet traffic.
+
+setup: |
+  pip install vllm==0.6.2
+
+
+run: |
+  echo 'Starting vllm api server...'
+
+  vllm serve $MODEL_NAME \
+    --port 8081 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 4096

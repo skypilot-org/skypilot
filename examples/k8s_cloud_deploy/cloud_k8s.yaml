@@ -1,0 +1,96 @@
+resources:
+  cloud: lambda
+  accelerators: A10:1
+#  Uncomment the following line to expose ports on a different cloud
+#  ports: 6443
+
+num_nodes: 2
+
+envs:
+  SKY_K3S_TOKEN: mytoken # Can be any string, used to join worker nodes to the cluster
+
+run: |
+  wait_for_gpu_operator_installation() {
+      echo "Starting wait for GPU operator installation..."
+  
+      SECONDS=0
+      TIMEOUT=600  # 10 minutes in seconds
+  
+      while true; do
+          if kubectl describe nodes --kubeconfig ~/.kube/config | grep -q 'nvidia.com/gpu:'; then
+              echo "GPU operator installed."
+              break
+          elif [ $SECONDS -ge $TIMEOUT ]; then
+              echo "Timed out waiting for GPU operator installation."
+              exit 1
+          else
+              echo "Waiting for GPU operator installation..."
+              echo "To check status, see Nvidia GPU operator pods:"
+              echo "kubectl get pods -n gpu-operator --kubeconfig ~/.kube/config"
+              sleep 5
+          fi
+      done
+  }
+  
+  if [ ${SKYPILOT_NODE_RANK} -ne 0 ]; then
+    # Worker nodes
+    MASTER_ADDR=`echo "$SKYPILOT_NODE_IPS" | head -n1`
+    echo "Worker joining k3s cluster @ ${MASTER_ADDR}"
+    curl -sfL https://get.k3s.io | K3S_URL=https://${MASTER_ADDR}:6443 K3S_TOKEN=${SKY_K3S_TOKEN} sh -
+    exit 0  
+  fi 
+
+  # Head node
+  curl -sfL https://get.k3s.io | K3S_TOKEN=${SKY_K3S_TOKEN} sh -
+  
+  # Copy over kubeconfig file
+  echo "Copying kubeconfig file"
+  mkdir -p $HOME/.kube
+  sudo cp /etc/rancher/k3s/k3s.yaml $HOME/.kube/config
+  sudo chown $(id -u):$(id -g) $HOME/.kube/config
+
+  # Wait for k3s to be ready
+  echo "Waiting for k3s to be ready"
+  sleep 5
+  kubectl wait --for=condition=ready node --all --timeout=5m --kubeconfig ~/.kube/config
+
+  # =========== GPU support ===========
+  # Install helm
+  echo "Installing helm"
+  curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3
+  chmod 700 get_helm.sh
+  ./get_helm.sh
+
+  helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update
+
+  # Create namespace if it doesn't exist
+  echo "Creating namespace gpu-operator"
+  kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true
+
+  # Patch ldconfig
+  echo "Patching ldconfig"
+  sudo ln -s /sbin/ldconfig /sbin/ldconfig.real
+
+  # Install GPU operator
+  echo "Installing GPU operator"
+  helm install gpu-operator -n gpu-operator --create-namespace \
+  nvidia/gpu-operator $HELM_OPTIONS \
+    --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
+    --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \
+    --set 'toolkit.env[1].name=CONTAINERD_SOCKET' \
+    --set 'toolkit.env[1].value=/run/k3s/containerd/containerd.sock' \
+    --set 'toolkit.env[2].name=CONTAINERD_RUNTIME_CLASS' \
+    --set 'toolkit.env[2].value=nvidia'
+
+  wait_for_gpu_operator_installation
+
+  # Create RuntimeClass
+  sleep 5
+  echo "Creating RuntimeClass"
+  kubectl apply --kubeconfig ~/.kube/config -f - <<EOF
+  apiVersion: node.k8s.io/v1
+  kind: RuntimeClass
+  metadata:
+    name: nvidia
+  handler: nvidia
+  EOF

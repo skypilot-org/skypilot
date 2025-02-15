@@ -2,13 +2,14 @@
 import enum
 import fnmatch
 import functools
+import hashlib
 import json
 import os
 import re
 import subprocess
 import time
 import typing
-from typing import Any, Dict, Iterator, List, Optional, Set, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
@@ -17,6 +18,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
 from sky.clouds import service_catalog
+from sky.clouds.service_catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
 from sky.utils import common_utils
@@ -31,6 +33,14 @@ if typing.TYPE_CHECKING:
     from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
+
+# Image ID tags
+_DEFAULT_CPU_IMAGE_ID = 'skypilot:custom-cpu-ubuntu'
+# For GPU-related package version,
+# see sky/clouds/service_catalog/images/provisioners/cuda.sh
+_DEFAULT_GPU_IMAGE_ID = 'skypilot:custom-gpu-ubuntu'
+_DEFAULT_GPU_K80_IMAGE_ID = 'skypilot:k80-ubuntu-2004'
+_DEFAULT_NEURON_IMAGE_ID = 'skypilot:neuron-ubuntu-2204'
 
 # This local file (under ~/.aws/) will be uploaded to remote nodes (any
 # cloud), if all of the following conditions hold:
@@ -85,6 +95,10 @@ class AWSIdentityType(enum.Enum):
 
     CONTAINER_ROLE = 'container-role'
 
+    CUSTOM_PROCESS = 'custom-process'
+
+    ASSUME_ROLE = 'assume-role'
+
     #       Name                    Value             Type    Location
     #       ----                    -----             ----    --------
     #    profile                <not set>             None    None
@@ -92,6 +106,24 @@ class AWSIdentityType(enum.Enum):
     # secret_key     ****************abcd shared-credentials-file
     #     region                us-east-1      config-file    ~/.aws/config
     SHARED_CREDENTIALS_FILE = 'shared-credentials-file'
+
+    def can_credential_expire(self) -> bool:
+        """Check if the AWS identity type can expire.
+
+        SSO,IAM_ROLE and CONTAINER_ROLE are temporary credentials and refreshed
+        automatically. ENV and SHARED_CREDENTIALS_FILE are short-lived
+        credentials without refresh.
+        IAM ROLE:
+        https://boto3.amazonaws.com/v1/documentation/api/latest/guide/credentials.html
+        SSO/Container-role refresh token:
+        https://docs.aws.amazon.com/solutions/latest/dea-api/auth-refreshtoken.html
+        """
+        # TODO(hong): Add a CLI based check for the expiration of the temporary
+        #  credentials
+        expirable_types = {
+            AWSIdentityType.ENV, AWSIdentityType.SHARED_CREDENTIALS_FILE
+        }
+        return self in expirable_types
 
 
 @clouds.CLOUD_REGISTRY.register
@@ -217,14 +249,20 @@ class AWS(clouds.Cloud):
     @classmethod
     def _get_default_ami(cls, region_name: str, instance_type: str) -> str:
         acc = cls.get_accelerators_from_instance_type(instance_type)
-        image_id = service_catalog.get_image_id_from_tag(
-            'skypilot:gpu-ubuntu-2004', region_name, clouds='aws')
+        image_id = service_catalog.get_image_id_from_tag(_DEFAULT_CPU_IMAGE_ID,
+                                                         region_name,
+                                                         clouds='aws')
         if acc is not None:
+            image_id = service_catalog.get_image_id_from_tag(
+                _DEFAULT_GPU_IMAGE_ID, region_name, clouds='aws')
             assert len(acc) == 1, acc
             acc_name = list(acc.keys())[0]
             if acc_name == 'K80':
                 image_id = service_catalog.get_image_id_from_tag(
-                    'skypilot:k80-ubuntu-2004', region_name, clouds='aws')
+                    _DEFAULT_GPU_K80_IMAGE_ID, region_name, clouds='aws')
+            if acc_name in ['Trainium', 'Inferentia']:
+                image_id = service_catalog.get_image_id_from_tag(
+                    _DEFAULT_NEURON_IMAGE_ID, region_name, clouds='aws')
         if image_id is not None:
             return image_id
         # Raise ResourcesUnavailableError to make sure the failover in
@@ -267,12 +305,12 @@ class AWS(clouds.Cloud):
         if image_id.startswith('skypilot:'):
             return DEFAULT_AMI_GB
         assert region is not None, (image_id, region)
-        client = aws.client('ec2', region_name=region)
         image_not_found_message = (
             f'Image {image_id!r} not found in AWS region {region}.\n'
             f'\nTo find AWS AMI IDs: https://docs.aws.amazon.com/cli/latest/reference/ec2/describe-images.html#examples\n'  # pylint: disable=line-too-long
             'Example: ami-0729d913a335efca7')
         try:
+            client = aws.client('ec2', region_name=region)
             image_info = client.describe_images(ImageIds=[image_id])
             image_info = image_info.get('Images', [])
             if not image_info:
@@ -281,7 +319,8 @@ class AWS(clouds.Cloud):
             image_info = image_info[0]
             image_size = image_info['BlockDeviceMappings'][0]['Ebs'][
                 'VolumeSize']
-        except aws.botocore_exceptions().NoCredentialsError:
+        except (aws.botocore_exceptions().NoCredentialsError,
+                aws.botocore_exceptions().ProfileNotFound):
             # Fallback to default image size if no credentials are available.
             # The credentials issue will be caught when actually provisioning
             # the instance and appropriate errors will be raised there.
@@ -296,7 +335,10 @@ class AWS(clouds.Cloud):
         # The command for getting the current zone is from:
         # https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/instance-identity-documents.html  # pylint: disable=line-too-long
         command_str = (
-            'curl -s http://169.254.169.254/latest/dynamic/instance-identity/document'  # pylint: disable=line-too-long
+            'TOKEN=`curl -X PUT "http://169.254.169.254/latest/api/token" '
+            '-H "X-aws-ec2-metadata-token-ttl-seconds: 21600"` && '
+            'curl -H "X-aws-ec2-metadata-token: $TOKEN" -s '
+            'http://169.254.169.254/latest/dynamic/instance-identity/document'
             f' | {constants.SKY_PYTHON_CMD} -u -c "import sys, json; '
             'print(json.load(sys.stdin)[\'availabilityZone\'])"')
         return command_str
@@ -366,7 +408,7 @@ class AWS(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='aws')
 
@@ -384,6 +426,7 @@ class AWS(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Any]:
         del dryrun  # unused
         assert zones is not None, (region, zones)
@@ -394,10 +437,8 @@ class AWS(clouds.Cloud):
         r = resources
         # r.accelerators is cleared but .instance_type encodes the info.
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         if r.extract_docker_image() is not None:
             image_id_to_use = None
@@ -547,7 +588,7 @@ class AWS(clouds.Cloud):
         # Checks if AWS credentials 1) exist and 2) are valid.
         # https://stackoverflow.com/questions/53548737/verify-aws-credentials-with-boto3
         try:
-            identity_str = cls.get_current_user_identity_str()
+            identity_str = cls.get_active_user_identity_str()
         except exceptions.CloudUserIdentityError as e:
             return False, str(e)
 
@@ -577,14 +618,31 @@ class AWS(clouds.Cloud):
             hints = f'AWS IAM role is set.{single_cloud_hint}'
         elif identity_type == AWSIdentityType.CONTAINER_ROLE:
             # Similar to the IAM ROLE, an ECS container may not store credentials
-            # in the~/.aws/credentials file. So we don't check for the existence of
+            # in the ~/.aws/credentials file. So we don't check for the existence of
             # the file. i.e. the container will be assigned the IAM role of the
             # task: skypilot-v1.
             hints = f'AWS container-role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.CUSTOM_PROCESS:
+            # Similar to the IAM ROLE, a custom process may not store credentials
+            # in the ~/.aws/credentials file. So we don't check for the existence of
+            # the file. i.e. the custom process will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS custom-process is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.ASSUME_ROLE:
+            # When using ASSUME ROLE, the credentials are coming from a different
+            # source profile. So we don't check for the existence of ~/.aws/credentials.
+            # i.e. the assumed role will be assigned the IAM role of the
+            # task: skypilot-v1.
+            hints = f'AWS assume-role is set.{single_cloud_hint}'
+        elif identity_type == AWSIdentityType.ENV:
+            # When using ENV vars, the credentials are coming from the environment
+            # variables. So we don't check for the existence of ~/.aws/credentials.
+            # i.e. the identity is not determined by the file.
+            hints = f'AWS env is set.{single_cloud_hint}'
         else:
             # This file is required because it is required by the VMs launched on
             # other clouds to access private s3 buckets and resources like EC2.
-            # `get_current_user_identity` does not guarantee this file exists.
+            # `get_active_user_identity` does not guarantee this file exists.
             if not static_credential_exists:
                 return (False, '~/.aws/credentials does not exist. ' +
                         cls._STATIC_CREDENTIAL_HELP_STR)
@@ -601,21 +659,17 @@ class AWS(clouds.Cloud):
                 'Failed to fetch the availability zones for the account '
                 f'{identity_str}. It is likely due to permission issues, please'
                 ' check the minimal permission required for AWS: '
-                'https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
+                'https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/aws.html'  # pylint: disable=
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
-        proc = subprocess.run('aws configure list',
-                              shell=True,
-                              check=False,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE)
-        if proc.returncode != 0:
+        stdout = cls._aws_configure_list()
+        if stdout is None:
             return None
-        stdout = proc.stdout.decode()
+        output = stdout.decode()
 
         # We determine the identity type by looking at the output of
         # `aws configure list`. The output looks like:
@@ -630,56 +684,34 @@ class AWS(clouds.Cloud):
 
         def _is_access_key_of_type(type_str: str) -> bool:
             # The dot (.) does not match line separators.
-            results = re.findall(fr'access_key.*{type_str}', stdout)
+            results = re.findall(fr'access_key.*{type_str}', output)
             if len(results) > 1:
                 raise RuntimeError(
-                    f'Unexpected `aws configure list` output:\n{stdout}')
+                    f'Unexpected `aws configure list` output:\n{output}')
             return len(results) == 1
 
-        if _is_access_key_of_type(AWSIdentityType.SSO.value):
-            return AWSIdentityType.SSO
-        elif _is_access_key_of_type(AWSIdentityType.IAM_ROLE.value):
-            return AWSIdentityType.IAM_ROLE
-        elif _is_access_key_of_type(AWSIdentityType.CONTAINER_ROLE.value):
-            return AWSIdentityType.CONTAINER_ROLE
-        elif _is_access_key_of_type(AWSIdentityType.ENV.value):
-            return AWSIdentityType.ENV
-        else:
-            return AWSIdentityType.SHARED_CREDENTIALS_FILE
+        for identity_type in AWSIdentityType:
+            if _is_access_key_of_type(identity_type.value):
+                return identity_type
+        return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
-        """Returns a [UserId, Account] list that uniquely identifies the user.
+    @functools.lru_cache(maxsize=1)
+    def _aws_configure_list(cls) -> Optional[bytes]:
+        proc = subprocess.run('aws configure list',
+                              shell=True,
+                              check=False,
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE)
+        if proc.returncode != 0:
+            return None
+        return proc.stdout
 
-        These fields come from `aws sts get-caller-identity`. We permit the same
-        actual user to:
-
-          - switch between different root accounts (after which both elements
-            of the list will be different) and have their clusters owned by
-            each account be protected; or
-
-          - within the same root account, switch between different IAM
-            users, and treat [user_id=1234, account=A] and
-            [user_id=4567, account=A] to be the *same*. Namely, switching
-            between these IAM roles within the same root account will cause
-            the first element of the returned list to differ, and will allow
-            the same actual user to continue to interact with their clusters.
-            Note: this is not 100% safe, since the IAM users can have very
-            specific permissions, that disallow them to access the clusters
-            but it is a reasonable compromise as that could be rare.
-
-        Returns:
-            A list of strings that uniquely identifies the user on this cloud.
-            For identity check, we will fallback through the list of strings
-            until we find a match, and print a warning if we fail for the
-            first string.
-
-        Raises:
-            exceptions.CloudUserIdentityError: if the user identity cannot be
-                retrieved.
-        """
+    @classmethod
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
-            sts = aws.client('sts')
+            sts = aws.client('sts', check_credentials=False)
             # The caller identity contains 3 fields: UserId, Account, Arn.
             # 1. 'UserId' is unique across all AWS entity, which looks like
             # "AROADBQP57FF2AEXAMPLE:role-session-name"
@@ -752,11 +784,79 @@ class AWS(clouds.Cloud):
                     f'Failed to get AWS user.\n'
                     f'  Reason: {common_utils.format_exception(e, use_bracket=True)}.'
                 ) from None
-        return user_ids
+        # TODO: Return a list of identities in the profile when we support
+        #   automatic switching for AWS. Currently we only support one identity.
+        return [user_ids]
 
     @classmethod
-    def get_current_user_identity_str(cls) -> Optional[str]:
-        user_identity = cls.get_current_user_identity()
+    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        """Returns a [UserId, Account] list that uniquely identifies the user.
+
+        These fields come from `aws sts get-caller-identity` and are cached
+        locally by `aws configure list` output. The identities are assumed to
+        be stable for the duration of the `sky` process. Modifying the
+        credentials while the `sky` process is running will not affect the
+        identity returned by this function.
+
+        We permit the same actual user to:
+
+          - switch between different root accounts (after which both elements
+            of the list will be different) and have their clusters owned by
+            each account be protected; or
+
+          - within the same root account, switch between different IAM
+            users, and treat [user_id=1234, account=A] and
+            [user_id=4567, account=A] to be the *same*. Namely, switching
+            between these IAM roles within the same root account will cause
+            the first element of the returned list to differ, and will allow
+            the same actual user to continue to interact with their clusters.
+            Note: this is not 100% safe, since the IAM users can have very
+            specific permissions, that disallow them to access the clusters
+            but it is a reasonable compromise as that could be rare.
+
+        Returns:
+            A list of strings that uniquely identifies the user on this cloud.
+            For identity check, we will fallback through the list of strings
+            until we find a match, and print a warning if we fail for the
+            first string.
+
+        Raises:
+            exceptions.CloudUserIdentityError: if the user identity cannot be
+                retrieved.
+        """
+        stdout = cls._aws_configure_list()
+        if stdout is None:
+            # `aws configure list` is not available, possible reasons:
+            # - awscli is not installed but credentials are valid, e.g. run from
+            #   an EC2 instance with IAM role
+            # - aws credentials are not set, proceed anyway to get unified error
+            #   message for users
+            return cls._sts_get_caller_identity()
+        config_hash = hashlib.md5(stdout).hexdigest()[:8]
+        # Getting aws identity cost ~1s, so we cache the result with the output of
+        # `aws configure list` as cache key. Different `aws configure list` output
+        # can have same aws identity, our assumption is the output would be stable
+        # in real world, so the number of cache files would be limited.
+        # TODO(aylei): consider using a more stable cache key and evalute eviction.
+        cache_path = catalog_common.get_catalog_path(
+            f'aws/.cache/user-identity-{config_hash}.txt')
+        if os.path.exists(cache_path):
+            try:
+                with open(cache_path, 'r', encoding='utf-8') as f:
+                    return json.loads(f.read())
+            except json.JSONDecodeError:
+                # cache is invalid, ignore it and fetch identity again
+                pass
+
+        result = cls._sts_get_caller_identity()
+        with open(cache_path, 'w', encoding='utf-8') as f:
+            f.write(json.dumps(result))
+        return result
+
+    @classmethod
+    def get_active_user_identity_str(cls) -> Optional[str]:
+        user_identity = cls.get_active_user_identity()
         if user_identity is None:
             return None
         identity_str = f'{user_identity[0]} [account={user_identity[1]}]'
@@ -792,6 +892,12 @@ class AWS(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
+
+    @functools.lru_cache(maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._current_identity_type()
+        return identity_type is not None and identity_type.can_credential_expire(
+        )
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
@@ -854,6 +960,12 @@ class AWS(clouds.Cloud):
 
         if quota_code is None:
             # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            return True
+
+        if aws_utils.use_reservations():
+            # When reservations are used, it is possible that a user has
+            # reservations for an instance type, but does not have the quota
+            # for that instance type. Skipping the quota check in this case.
             return True
 
         client = aws.client('service-quotas', region_name=region)

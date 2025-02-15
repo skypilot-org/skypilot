@@ -1,0 +1,10 @@
+envs:
+  model_name: llama-2
+  tokenizer_path: /home/gcpuser/sky_workdir/ckpt/llama2-7b/original/tokenizer.model
+
+run: |
+  cd JetStream
+  python benchmarks/benchmark_serving.py \
+    --tokenizer=$tokenizer_path --num-prompts=100 \
+    --dataset openorca --save-request-outputs \
+    --warmup-mode=sampled --model=$model_name

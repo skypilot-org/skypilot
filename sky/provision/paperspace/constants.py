@@ -19,6 +19,12 @@ INSTANCE_TO_TEMPLATEID = {
     'V100-32Gx2': 'twnlo3zj',
     'V100-32G': 'twnlo3zj',
     'V100': 'twnlo3zj',
+    'GPU+': 'twnlo3zj',
+    'P4000': 'twnlo3zj',
+    'P4000x2': 'twnlo3zj',
+    'A4000': 'twnlo3zj',
+    'A4000x2': 'twnlo3zj',
+    'A4000x4': 'twnlo3zj',
     **CPU_INSTANCES_TEMPLATEID
 }
 NVLINK_INSTANCES = {

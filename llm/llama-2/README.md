@@ -1,7 +1,7 @@
 <!-- $REMOVE -->
-# Self-Hosted Llama-2 Chatbot on Any Cloud
+# Self-Hosted Llama 2 Chatbot on Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Llama-2: Open LLM from Meta -->
+<!-- $UNCOMMENT# Llama 2: Open LLM from Meta -->
 
 [Llama-2](https://github.com/facebookresearch/llama/tree/main) is the top open-source models on the [Open LLM leaderboard](https://huggingface.co/spaces/HuggingFaceH4/open_llm_leaderboard) today. It has been released with a license that authorizes commercial use. You can deploy a private Llama-2 chatbot with SkyPilot in your own cloud with just one simple command.
 

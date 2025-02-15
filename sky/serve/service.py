@@ -9,7 +9,7 @@ import pathlib
 import shutil
 import time
 import traceback
-from typing import Dict, List
+from typing import Dict
 
 import filelock
 
@@ -116,15 +116,17 @@ def _cleanup(service_name: str) -> bool:
             logger.error(f'Replica {info.replica_id} failed to terminate.')
     versions = serve_state.get_service_versions(service_name)
     serve_state.remove_service_versions(service_name)
-    success = True
-    for version in versions:
+
+    def cleanup_version_storage(version: int) -> bool:
         task_yaml: str = serve_utils.generate_task_yaml_file_name(
             service_name, version)
         logger.info(f'Cleaning up storage for version {version}, '
                     f'task_yaml: {task_yaml}')
-        success = success and cleanup_storage(task_yaml)
-    if not success:
+        return cleanup_storage(task_yaml)
+
+    if not all(map(cleanup_version_storage, versions)):
         failed = True
+
     return failed
 
 
@@ -148,7 +150,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         controller_job_id=job_id,
         policy=service_spec.autoscaling_policy_str(),
         requested_resources_str=backend_utils.get_task_resources_str(task),
-        status=serve_state.ServiceStatus.CONTROLLER_INIT)
+        load_balancing_policy=service_spec.load_balancing_policy,
+        status=serve_state.ServiceStatus.CONTROLLER_INIT,
+        tls_encrypted=service_spec.tls_credential is not None)
     # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
     if not success:
@@ -211,10 +215,13 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.set_service_controller_port(service_name,
                                                     controller_port)
 
-            # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
+
             load_balancer_port = common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
+
+            # Extract the load balancing policy from the service spec
+            policy_name = service_spec.load_balancing_policy
 
             # Start the load balancer.
             # TODO(tian): Probably we could enable multiple ports specified in
@@ -224,7 +231,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port))
+                args=(controller_addr, load_balancer_port, policy_name,
+                      service_spec.tls_credential))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)
@@ -236,13 +244,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         serve_state.set_service_status_and_active_versions(
             service_name, serve_state.ServiceStatus.SHUTTING_DOWN)
     finally:
-        process_to_kill: List[multiprocessing.Process] = []
-        if load_balancer_process is not None:
-            process_to_kill.append(load_balancer_process)
-        if controller_process is not None:
-            process_to_kill.append(controller_process)
         # Kill load balancer process first since it will raise errors if failed
         # to connect to the controller. Then the controller process.
+        process_to_kill = [
+            proc for proc in [load_balancer_process, controller_process]
+            if proc is not None
+        ]
         subprocess_utils.kill_children_processes(
             [process.pid for process in process_to_kill], force=True)
         for process in process_to_kill:

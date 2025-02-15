@@ -1,7 +1,9 @@
 """Exceptions."""
 import enum
 import typing
-from typing import List, Optional
+from typing import List, Optional, Sequence
+
+from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
     from sky import status_lib
@@ -61,12 +63,12 @@ class ProvisionPrechecksError(Exception):
     the error will be raised.
 
     Args:
-        reasons: (List[Exception]) The reasons why the prechecks failed.
+        reasons: (Sequence[Exception]) The reasons why the prechecks failed.
     """
 
-    def __init__(self, reasons: List[Exception]) -> None:
+    def __init__(self, reasons: Sequence[Exception]) -> None:
         super().__init__()
-        self.reasons = list(reasons)
+        self.reasons = reasons
 
 
 class ManagedJobReachedMaxRetriesError(Exception):
@@ -75,6 +77,14 @@ class ManagedJobReachedMaxRetriesError(Exception):
     Developer note: For now this should only be used by managed jobs code
     path. Please refer to the docstring of `jobs.recovery_strategy._launch`
     for more details about when the error will be raised.
+    """
+    pass
+
+
+class ManagedJobStatusError(Exception):
+    """Raised when a managed job task status update is invalid.
+
+    For instance, a RUNNING job cannot become SUBMITTED.
     """
     pass
 
@@ -104,7 +114,8 @@ class CommandError(Exception):
         if not command:
             message = error_msg
         else:
-            if len(command) > 100:
+            if (len(command) > 100 and
+                    not env_options.Options.SHOW_DEBUG_INFO.get()):
                 # Chunck the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
@@ -126,6 +137,13 @@ class ClusterNotUpError(Exception):
 
 class ClusterSetUpError(Exception):
     """Raised when a cluster has setup error."""
+    pass
+
+
+class ClusterDoesNotExist(ValueError):
+    """Raise when trying to operate on a cluster that does not exist."""
+    # This extends ValueError for compatibility reasons - we used to throw
+    # ValueError instead of this.
     pass
 
 
@@ -286,3 +304,13 @@ class ServeUserTerminatedError(Exception):
 
 class PortDoesNotExistError(Exception):
     """Raised when the port does not exist."""
+
+
+class UserRequestRejectedByPolicy(Exception):
+    """Raised when a user request is rejected by an admin policy."""
+    pass
+
+
+class NoClusterLaunchedError(Exception):
+    """No cluster launched, so cleanup can be skipped during failover."""
+    pass

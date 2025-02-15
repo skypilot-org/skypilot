@@ -82,6 +82,9 @@ _set_http_proxy_env_vars()
 from sky import backends
 from sky import benchmark
 from sky import clouds
+from sky.admin_policy import AdminPolicy
+from sky.admin_policy import MutatedUserRequest
+from sky.admin_policy import UserRequest
 from sky.clouds.service_catalog import list_accelerators
 from sky.core import autostop
 from sky.core import cancel
@@ -102,16 +105,12 @@ from sky.data import StorageMode
 from sky.data import StoreType
 from sky.execution import exec  # pylint: disable=redefined-builtin
 from sky.execution import launch
-# TODO (zhwu): These imports are for backward compatibility, and spot APIs
-# should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
-from sky.jobs.core import spot_cancel
-from sky.jobs.core import spot_launch
-from sky.jobs.core import spot_queue
-from sky.jobs.core import spot_tail_logs
+from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
 from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
+from sky.skypilot_config import Config
 from sky.status_lib import ClusterStatus
 from sky.task import Task
 
@@ -124,9 +123,11 @@ GCP = clouds.GCP
 Lambda = clouds.Lambda
 SCP = clouds.SCP
 Kubernetes = clouds.Kubernetes
+K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
+Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 optimize = Optimizer.optimize
@@ -139,10 +140,12 @@ __all__ = [
     'GCP',
     'IBM',
     'Kubernetes',
+    'K8s',
     'Lambda',
     'OCI',
     'Paperspace',
     'RunPod',
+    'Vast',
     'SCP',
     'Vsphere',
     'Fluidstack',
@@ -157,6 +160,7 @@ __all__ = [
     'StoreType',
     'ClusterStatus',
     'JobStatus',
+    'ManagedJobStatus',
     # APIs
     'Dag',
     'Task',
@@ -164,7 +168,6 @@ __all__ = [
     # execution APIs
     'launch',
     'exec',
-    'spot_launch',
     # core APIs
     'status',
     'start',
@@ -176,13 +179,14 @@ __all__ = [
     'queue',
     'cancel',
     'tail_logs',
-    'spot_tail_logs',
     'download_logs',
     'job_status',
-    # core APIs Spot Job Management
-    'spot_queue',
-    'spot_cancel',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # Admin Policy
+    'UserRequest',
+    'MutatedUserRequest',
+    'AdminPolicy',
+    'Config',
 ]

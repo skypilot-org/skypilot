@@ -1,7 +1,7 @@
 
 .. _reservation:
 
-Reserved, Capacity Blocks, DWS
+Using Reservations
 ===================================
 
 
@@ -79,7 +79,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
     resources:
       cloud: aws
       accelerators: A100:8
-    
+
     num_nodes: 2
 
 
@@ -166,9 +166,9 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
     resources:
       cloud: gcp
       accelerators: A100:8
-    
+
     num_nodes: 4
-    
+
 Using DWS on GKE with Kueue
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -187,7 +187,7 @@ To launch a SkyPilot cluster or job on GKE with DWS, you can specify the DWS con
                 provreq.kueue.x-k8s.io/maxRunDurationSeconds: "3600"
           provision_timeout: 900
 
-    resourcse:
+    resources:
       cloud: kubernetes
       accelerators: A100:8
       labels:
@@ -204,5 +204,5 @@ Unlike short-term reservations above, long-term reservations are typically more 
 
 SkyPilot supports long-term reservations and on-premise clusters through Kubernetes, i.e., you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
 
-See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`kubernetes-overview`.
+See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`Using Existing Machines <existing-machines>` or :ref:`bring your existing Kubernetes cluster <kubernetes-overview>`.
 

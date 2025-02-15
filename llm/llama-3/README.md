@@ -1,7 +1,7 @@
 <!-- $REMOVE -->
-# Scale Serving Llama-3 on Any Cloud or Kubernetes with SkyPilot
+# Scale Serving Llama 3 on Any Cloud or Kubernetes with SkyPilot
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Llama-3: Open LLM from Meta -->
+<!-- $UNCOMMENT# Llama 3: Open LLM from Meta -->
 
 
 <p align="center">
@@ -12,8 +12,6 @@
 
 * [Llama-3 release](https://github.com/meta-llama/llama3)
 * [Llama-3 blog](https://ai.meta.com/blog/meta-llama-3/)
-
-
 
 
 
@@ -31,7 +29,7 @@
 ## Prerequisites
 
 - Go to the [HuggingFace model page](https://huggingface.co/meta-llama/Meta-Llama-3-70B-Instruct) and request access to the model `meta-llama/Meta-Llama-3-70B-Instruct`.
-- Check that you have installed SkyPilot ([docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)).
+- Check that you have installed SkyPilot ([docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
 ## SkyPilot YAML
@@ -328,7 +326,7 @@ To shut down all resources:
 sky serve down llama3
 ```
 
-See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
+See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
 
 
 ### **Optional**: Connect a GUI to your Llama-3 endpoint
@@ -351,4 +349,4 @@ sky launch -c llama3-gui ./gui.yaml --env ENDPOINT=$(sky serve status --endpoint
 
 ## Finetuning Llama-3
 
-You can finetune Llama-3 on your own data. We have an tutorial for finetunning Llama-2 for Vicuna on SkyPilot, which can be adapted for Llama-3. You can find the tutorial [here](https://skypilot.readthedocs.io/en/latest/gallery/tutorials/finetuning.html) and a detailed blog post [here](https://blog.skypilot.co/finetuning-llama2-operational-guide/).
+You can finetune Llama-3 on your own data. We have an tutorial for finetunning Llama-2 for Vicuna on SkyPilot, which can be adapted for Llama-3. You can find the tutorial [here](https://docs.skypilot.co/en/latest/gallery/tutorials/finetuning.html) and a detailed blog post [here](https://blog.skypilot.co/finetuning-llama2-operational-guide/).

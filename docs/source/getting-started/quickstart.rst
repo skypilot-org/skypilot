@@ -12,6 +12,8 @@ This guide will walk you through:
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
+.. _hello-skypilot:
+
 Hello, SkyPilot!
 ------------------
 
@@ -31,8 +33,8 @@ Copy the following YAML into a ``hello_sky.yaml`` file:
   resources:
     # Optional; if left out, automatically pick the cheapest cloud.
     cloud: aws
-    # 1x NVIDIA V100 GPU
-    accelerators: V100:1
+    # 8x NVIDIA A100 GPU
+    accelerators: A100:8
 
   # Working directory (optional) containing the project codebase.
   # Its contents are synced to ~/sky_workdir/ on the cluster.
@@ -106,7 +108,7 @@ Bash commands are also supported, such as:
 .. code-block:: console
 
   $ sky exec mycluster python train_cpu.py
-  $ sky exec mycluster --gpus=V100:1 python train_gpu.py
+  $ sky exec mycluster --gpus=A100:8 python train_gpu.py
 
 For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
@@ -124,9 +126,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       LAUNCHED     RESOURCES             COMMAND                            STATUS
-  mygcp      1 day ago    1x GCP(n1-highmem-8)  sky launch -c mygcp --cloud gcp    STOPPED
-  mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
+  NAME       LAUNCHED     RESOURCES                          COMMAND                            STATUS
+  mygcp      1 day ago    1x GCP(n1-highmem-8)               sky launch -c mygcp --cloud gcp    STOPPED
+  mycluster  4 mins ago   1x AWS(p4d.24xlarge, {'A100': 8})  sky exec mycluster hello_sky.yaml  UP
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
@@ -200,17 +202,21 @@ Scaling out
 =========================
 
 So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
-When you are ready to scale out (e.g., run 10s or 100s of jobs), SkyPilot supports two options:
-
-- Queue many jobs on your cluster(s) with ``sky exec`` (see :ref:`Job Queue <job-queue>`);
-- Use :ref:`Managed Spot Jobs <spot-jobs>` to run on auto-managed spot instances
-  (users need not interact with the underlying clusters)
-
-Managed spot jobs run on much cheaper spot instances, with automatic preemption recovery. Try it out with:
+When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**, or even spot instances.
 
 .. code-block:: console
 
-  $ sky jobs launch --use-spot hello_sky.yaml
+  $ for i in $(seq 100) # launch 100 jobs
+      do sky jobs launch --use-spot --detach-run --yes -n hello-$i hello_sky.yaml
+    done
+  ...
+  $ sky jobs dashboard # check the jobs status
+
+.. image:: ../images/managed-jobs-dashboard.png
+  :width: 800
+  :alt: Managed jobs dashboard
+
+SkyPilot can support :ref:`thousands of managed jobs <many-jobs>` running at once.
 
 Next steps
 -----------

@@ -1,8 +1,7 @@
 """Cudo Compute"""
-import json
 import subprocess
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky.clouds import service_catalog
@@ -43,8 +42,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX}  $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
         # pylint: disable=line-too-long
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
-    )
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _PROJECT_HINT = (
         'Create a project and then set it as the default project,:\n'
@@ -52,8 +50,7 @@ class Cudo(clouds.Cloud):
         f'{_INDENT_PREFIX} $ cudoctl init\n'
         f'{_INDENT_PREFIX}For more info: '
         # pylint: disable=line-too-long
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html'
-    )
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html')
 
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
@@ -183,7 +180,7 @@ class Cudo(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='cudo')
 
@@ -197,15 +194,14 @@ class Cudo(clouds.Cloud):
         cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         del zones, cluster_name  # unused
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': resources.instance_type,
@@ -328,7 +324,7 @@ class Cudo(clouds.Cloud):
         }
 
     @classmethod
-    def get_current_user_identity(cls) -> Optional[List[str]]:
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
         # NOTE: used for very advanced SkyPilot functionality
         # Can implement later if desired
         return None

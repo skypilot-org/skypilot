@@ -55,7 +55,7 @@ _RESUME_PER_INSTANCE_TIMEOUT = 120  # 2 minutes
 # https://aws.amazon.com/ec2/pricing/on-demand/#Data_Transfer_within_the_same_AWS_Region
 
 
-def _default_ec2_resource(region: str) -> Any:
+def _default_ec2_resource(region: str, check_credentials: bool = True) -> Any:
     if not hasattr(aws, 'version'):
         # For backward compatibility, reload the module if the aws module was
         # imported before and stale. Used for, e.g., a live jobs controller
@@ -95,7 +95,8 @@ def _default_ec2_resource(region: str) -> Any:
         importlib.reload(aws)
     return aws.resource('ec2',
                         region_name=region,
-                        max_attempts=BOTO_MAX_RETRIES)
+                        max_attempts=BOTO_MAX_RETRIES,
+                        check_credentials=check_credentials)
 
 
 def _cluster_name_filter(cluster_name_on_cloud: str) -> List[Dict[str, Any]]:

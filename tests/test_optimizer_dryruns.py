@@ -663,7 +663,8 @@ def test_infer_cloud_from_region_or_zone(monkeypatch):
     _test_resources_launch(monkeypatch, zone='us-west2-a')
 
     # Maps to AWS.
-    _test_resources_launch(monkeypatch, region='us-east-2')
+    # Not use us-east-2 or us-west-1 as it is also supported by Lambda.
+    _test_resources_launch(monkeypatch, region='eu-south-1')
     _test_resources_launch(monkeypatch, zone='us-west-2a')
 
     # `sky launch`
@@ -765,12 +766,12 @@ def test_optimize_disk_tier(enable_all_clouds):
         map(clouds.CLOUD_REGISTRY.get,
             ['aws', 'gcp', 'azure', 'oci'])), low_tier_candidates
 
-    # Only AWS, GCP, OCI supports HIGH disk tier.
+    # Only AWS, GCP, Azure, OCI supports HIGH disk tier.
     high_tier_resources = sky.Resources(disk_tier=resources_utils.DiskTier.HIGH)
     high_tier_candidates = _get_all_candidate_cloud(high_tier_resources)
     assert high_tier_candidates == set(
         map(clouds.CLOUD_REGISTRY.get,
-            ['aws', 'gcp', 'oci'])), high_tier_candidates
+            ['aws', 'gcp', 'azure', 'oci'])), high_tier_candidates
 
     # Only AWS, GCP supports ULTRA disk tier.
     ultra_tier_resources = sky.Resources(

@@ -46,6 +46,7 @@ from rich import progress as rich_progress
 import yaml
 
 import sky
+from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds as sky_clouds
@@ -67,6 +68,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -112,7 +114,7 @@ def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
     glob_clusters = []
     for cluster in clusters:
         glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-        if len(glob_cluster) == 0 and not silent:
+        if not glob_cluster and not silent:
             click.echo(f'Cluster {cluster} not found.')
         glob_clusters.extend(glob_cluster)
     return list(set(glob_clusters))
@@ -123,7 +125,7 @@ def _get_glob_storages(storages: List[str]) -> List[str]:
     glob_storages = []
     for storage_object in storages:
         glob_storage = global_user_state.get_glob_storage_name(storage_object)
-        if len(glob_storage) == 0:
+        if not glob_storage:
             click.echo(f'Storage {storage_object} not found.')
         glob_storages.extend(glob_storage)
     return list(set(glob_storages))
@@ -339,7 +341,6 @@ def _get_shell_complete_args(complete_fn):
 
 
 _RELOAD_ZSH_CMD = 'source ~/.zshrc'
-_RELOAD_FISH_CMD = 'source ~/.config/fish/config.fish'
 _RELOAD_BASH_CMD = 'source ~/.bashrc'
 
 
@@ -378,7 +379,9 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
         cmd = '_SKY_COMPLETE=fish_source sky > \
                 ~/.config/fish/completions/sky.fish'
 
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         install_cmd = f'_SKY_COMPLETE=zsh_source sky > \
@@ -398,9 +401,10 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
                        check=True,
                        executable=shutil.which('bash'))
         click.secho(f'Shell completion installed for {value}', fg='green')
-        click.echo(
-            'Completion will take effect once you restart the terminal: ' +
-            click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Completion will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Installation failed with code {e.returncode}', fg='red')
     ctx.exit()
@@ -431,7 +435,9 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
 
     elif value == 'fish':
         cmd = 'rm -f ~/.config/fish/completions/sky.fish'
-        reload_cmd = _RELOAD_FISH_CMD
+        # Fish does not need to be reloaded and will automatically pick up
+        # completions.
+        reload_cmd = None
 
     elif value == 'zsh':
         cmd = 'sed -i"" -e "/# For SkyPilot shell completion/d" ~/.zshrc && \
@@ -447,8 +453,10 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     try:
         subprocess.run(cmd, shell=True, check=True)
         click.secho(f'Shell completion uninstalled for {value}', fg='green')
-        click.echo('Changes will take effect once you restart the terminal: ' +
-                   click.style(f'{reload_cmd}', bold=True))
+        if reload_cmd is not None:
+            click.echo(
+                'Changes will take effect once you restart the terminal: ' +
+                click.style(f'{reload_cmd}', bold=True))
     except subprocess.CalledProcessError as e:
         click.secho(f'> Uninstallation failed with code {e.returncode}',
                     fg='red')
@@ -478,7 +486,7 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -531,7 +539,14 @@ def _parse_override_params(
         else:
             override_params['disk_tier'] = disk_tier
     if ports:
-        override_params['ports'] = ports
+        if any(p.lower() == 'none' for p in ports):
+            if len(ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError('Cannot specify both "none" and other '
+                                     'ports.')
+            override_params['ports'] = None
+        else:
+            override_params['ports'] = ports
     return override_params
 
 
@@ -549,6 +564,7 @@ def _launch_with_confirm(
     retry_until_up: bool = False,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
+    fast: bool = False,
 ):
     """Launch a cluster with a Task."""
     if cluster is None:
@@ -575,6 +591,15 @@ def _launch_with_confirm(
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
                                    f'{colorama.Style.RESET_ALL}') from e
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            request_options=admin_policy.RequestOptions(
+                cluster_name=cluster,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                down=down,
+                dryrun=dryrun,
+            ),
+        )
         dag = sky.optimize(dag)
     task = dag.tasks[0]
 
@@ -598,7 +623,8 @@ def _launch_with_confirm(
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     if not confirm_shown:
-        click.secho(f'Running task on cluster {cluster}...', fg='yellow')
+        click.secho('Running on cluster: ', fg='cyan', nl=False)
+        click.secho(cluster)
 
     sky.launch(
         dag,
@@ -613,6 +639,7 @@ def _launch_with_confirm(
         retry_until_up=retry_until_up,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
+        fast=fast,
     )
 
 
@@ -696,7 +723,6 @@ def _pop_and_ignore_fields_in_override_params(
 def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Tuple[str, ...],
     *,
-    entrypoint_name: str = 'Task',
     name: Optional[str] = None,
     workdir: Optional[str] = None,
     cloud: Optional[str] = None,
@@ -711,7 +737,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     image_id: Optional[str] = None,
     disk_size: Optional[int] = None,
     disk_tier: Optional[str] = None,
-    ports: Optional[Tuple[str]] = None,
+    ports: Optional[Tuple[str, ...]] = None,
     env: Optional[List[Tuple[str, str]]] = None,
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
@@ -728,19 +754,15 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     entrypoint: Optional[str]
     if is_yaml:
         # Treat entrypoint as a yaml.
-        click.secho(f'{entrypoint_name} from YAML spec: ',
-                    fg='yellow',
-                    nl=False)
-        click.secho(entrypoint, bold=True)
+        click.secho('YAML to run: ', fg='cyan', nl=False)
+        click.secho(entrypoint)
     else:
         if not entrypoint:
             entrypoint = None
         else:
             # Treat entrypoint as a bash command.
-            click.secho(f'{entrypoint_name} from command: ',
-                        fg='yellow',
-                        nl=False)
-            click.secho(entrypoint, bold=True)
+            click.secho('Command to run: ', fg='cyan', nl=False)
+            click.secho(entrypoint)
 
     override_params = _parse_override_params(cloud=cloud,
                                              region=region,
@@ -804,7 +826,7 @@ class _NaturalOrderGroup(click.Group):
     Reference: https://github.com/pallets/click/issues/513
     """
 
-    def list_commands(self, ctx):
+    def list_commands(self, ctx):  # pylint: disable=unused-argument
         return self.commands.keys()
 
     @usage_lib.entrypoint('sky.cli', fallback=True)
@@ -972,8 +994,10 @@ def cli():
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
-              default=False,
-              help='If used, runs locally inside a docker container.')
+              hidden=True,
+              help=('(Deprecated) Local docker support is deprecated. '
+                    'To run locally, create a local Kubernetes cluster with '
+                    '``sky local up``.'))
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
@@ -1034,6 +1058,13 @@ def cli():
     help=('[Experimental] Clone disk from an existing cluster to launch '
           'a new one. This is useful when the new cluster needs to have '
           'the same data on the boot disk as an existing cluster.'))
+@click.option(
+    '--fast',
+    is_flag=True,
+    default=False,
+    required=False,
+    help=('[Experimental] If the cluster is already up and available, skip '
+          'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
     entrypoint: Tuple[str, ...],
@@ -1058,13 +1089,14 @@ def launch(
     env: List[Tuple[str, str]],
     disk_size: Optional[int],
     disk_tier: Optional[str],
-    ports: Tuple[str],
+    ports: Tuple[str, ...],
     idle_minutes_to_autostop: Optional[int],
     down: bool,  # pylint: disable=redefined-outer-name
     retry_until_up: bool,
     yes: bool,
     no_setup: bool,
     clone_disk_from: Optional[str],
+    fast: bool,
 ):
     """Launch a cluster or task.
 
@@ -1108,6 +1140,11 @@ def launch(
     backend: backends.Backend
     if backend_name == backends.LocalDockerBackend.NAME:
         backend = backends.LocalDockerBackend()
+        click.secho(
+            'WARNING: LocalDockerBackend is deprecated and will be '
+            'removed in a future release. To run locally, create a local '
+            'Kubernetes cluster with `sky local up`.',
+            fg='yellow')
     elif backend_name == backends.CloudVmRayBackend.NAME:
         backend = backends.CloudVmRayBackend()
     else:
@@ -1133,7 +1170,8 @@ def launch(
                          down=down,
                          retry_until_up=retry_until_up,
                          no_setup=no_setup,
-                         clone_disk_from=clone_disk_from)
+                         clone_disk_from=clone_disk_from,
+                         fast=fast)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1291,7 +1329,8 @@ def exec(
                                'supports a single task only.')
     task = task_or_dag
 
-    click.secho(f'Executing task on cluster {cluster}...', fg='yellow')
+    click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
+    click.secho(cluster)
     sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
 
 
@@ -1438,7 +1477,7 @@ def _get_services(service_names: Optional[List[str]],
             if len(service_records) != 1:
                 plural = 's' if len(service_records) > 1 else ''
                 service_num = (str(len(service_records))
-                               if len(service_records) > 0 else 'No')
+                               if service_records else 'No')
                 raise click.UsageError(
                     f'{service_num} service{plural} found. Please specify '
                     'an existing service to show its endpoint. Usage: '
@@ -1456,6 +1495,33 @@ def _get_services(service_names: Optional[List[str]],
             if service_not_found_msg:
                 msg += f'\n{service_not_found_msg}'
     return num_services, msg
+
+
+def _status_kubernetes(show_all: bool):
+    """Show all SkyPilot resources in the current Kubernetes context.
+
+    Args:
+        show_all (bool): Show all job information (e.g., start time, failures).
+    """
+    all_clusters, unmanaged_clusters, all_jobs, context = (
+        core.status_kubernetes())
+    click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+               f'Kubernetes cluster state (context: {context})'
+               f'{colorama.Style.RESET_ALL}')
+    status_utils.show_kubernetes_cluster_status_table(unmanaged_clusters,
+                                                      show_all)
+    if all_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs'
+                   f'{colorama.Style.RESET_ALL}')
+        msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
+        click.echo(msg)
+    if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
+        # TODO: Parse serve controllers and show services separately.
+        #  Currently we show a hint that services are shown as clusters.
+        click.echo(f'\n{colorama.Style.DIM}Hint: SkyServe replica pods are '
+                   'shown in the "SkyPilot clusters" section.'
+                   f'{colorama.Style.RESET_ALL}')
 
 
 @cli.command()
@@ -1503,6 +1569,14 @@ def _get_services(service_names: Optional[List[str]],
               is_flag=True,
               required=False,
               help='Also show sky serve services, if any.')
+@click.option(
+    '--kubernetes',
+    '--k8s',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='[Experimental] Show all SkyPilot resources (including from other '
+    'users) in the current Kubernetes context.')
 @click.argument('clusters',
                 required=False,
                 type=str,
@@ -1512,7 +1586,7 @@ def _get_services(service_names: Optional[List[str]],
 # pylint: disable=redefined-builtin
 def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, clusters: List[str]):
+           show_services: bool, kubernetes: bool, clusters: List[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1571,6 +1645,9 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    if kubernetes:
+        _status_kubernetes(all)
+        return
     # Using a pool with 2 worker to run the managed job query and sky serve
     # service query in parallel to speed up. The pool provides a AsyncResult
     # object that can be used as a future.
@@ -1623,8 +1700,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
             if len(clusters) != 1:
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(clusters) > 1 else ''
-                    cluster_num = (str(len(clusters))
-                                   if len(clusters) > 0 else 'No')
+                    cluster_num = (str(len(clusters)) if clusters else 'No')
                     cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
@@ -1649,9 +1725,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 with ux_utils.print_exception_no_traceback():
                     plural = 's' if len(cluster_records) > 1 else ''
                     cluster_num = (str(len(cluster_records))
-                                   if len(cluster_records) > 0 else
-                                   f'{clusters[0]!r}')
-                    verb = 'found' if len(cluster_records) > 0 else 'not found'
+                                   if cluster_records else f'{clusters[0]!r}')
+                    verb = 'found' if cluster_records else 'not found'
                     cause = 'a single' if len(clusters) > 1 else 'an existing'
                     raise ValueError(
                         _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
@@ -1730,7 +1805,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
         if show_managed_jobs:
             click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                        f'Managed jobs{colorama.Style.RESET_ALL}')
-            with rich_utils.safe_status('[cyan]Checking managed jobs[/]'):
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message('Checking managed jobs')):
                 managed_jobs_query_interrupted, result = _try_get_future_result(
                     managed_jobs_future)
                 if managed_jobs_query_interrupted:
@@ -1771,7 +1847,8 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
                 # The pool is terminated, so we cannot run the service query.
                 msg = 'KeyboardInterrupt'
             else:
-                with rich_utils.safe_status('[cyan]Checking services[/]'):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message('Checking services')):
                     interrupted, result = _try_get_future_result(
                         services_future)
                     if interrupted:
@@ -1902,7 +1979,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
-    click.secho('Fetching and parsing job queue...', fg='yellow')
+    click.secho('Fetching and parsing job queue...', fg='cyan')
     if clusters:
         clusters = _get_glob_clusters(clusters)
     else:
@@ -1954,6 +2031,12 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     help=('Follow the logs of a job. '
           'If --no-follow is specified, print the log so far and exit. '
           '[default: --follow]'))
+@click.option(
+    '--tail',
+    default=0,
+    type=int,
+    help=('The number of lines to display from the end of the log file. '
+          'Default is 0, which means print all lines.'))
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -1967,6 +2050,7 @@ def logs(
     sync_down: bool,
     status: bool,  # pylint: disable=redefined-outer-name
     follow: bool,
+    tail: int,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail the log of a job.
@@ -2033,7 +2117,7 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow)
+    core.tail_logs(cluster, job_id, follow, tail)
 
 
 @cli.command()
@@ -2388,7 +2472,7 @@ def start(
                 '(see `sky status`), or the -a/--all flag.')
 
     if all:
-        if len(clusters) > 0:
+        if clusters:
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
@@ -2467,8 +2551,8 @@ def start(
                                'is currently not supported.\n'
                                'Please start the former independently.')
     if controllers:
-        bold = backend_utils.BOLD
-        reset_bold = backend_utils.RESET_BOLD
+        bold = ux_utils.BOLD
+        reset_bold = ux_utils.RESET_BOLD
         if len(controllers) != 1:
             raise click.UsageError(
                 'Starting multiple controllers is currently not supported.\n'
@@ -2589,7 +2673,7 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
     assert controller is not None, controller_name
 
     with rich_utils.safe_status(
-            '[bold cyan]Checking for in-progress managed jobs[/]'):
+            ux_utils.spinner_message('Checking for in-progress managed jobs')):
         try:
             managed_jobs_ = managed_jobs.queue(refresh=False,
                                                skip_finished=True)
@@ -2641,7 +2725,8 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
     """
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    with rich_utils.safe_status('[bold cyan]Checking for live services[/]'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking for live services')):
         try:
             services = serve_lib.status()
         except exceptions.ClusterNotUpError as e:
@@ -2717,7 +2802,7 @@ def _down_or_stop_clusters(
             option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
-    if len(names) > 0:
+    if names:
         controllers = [
             name for name in names
             if controller_utils.Controllers.from_name(name) is not None
@@ -2731,7 +2816,7 @@ def _down_or_stop_clusters(
         # Make sure the controllers are explicitly specified without other
         # normal clusters.
         if controllers:
-            if len(names) != 0:
+            if names:
                 names_str = ', '.join(map(repr, names))
                 raise click.UsageError(
                     f'{operation} controller(s) '
@@ -2784,7 +2869,7 @@ def _down_or_stop_clusters(
 
     if apply_to_all:
         all_clusters = global_user_state.get_clusters()
-        if len(names) > 0:
+        if names:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
                 'Letting --all take effect.')
@@ -2811,7 +2896,7 @@ def _down_or_stop_clusters(
         click.echo('Cluster(s) not found (tip: see `sky status`).')
         return
 
-    if not no_confirm and len(clusters) > 0:
+    if not no_confirm and clusters:
         cluster_str = 'clusters' if len(clusters) > 1 else 'cluster'
         cluster_list = ', '.join(clusters)
         click.confirm(
@@ -2825,9 +2910,9 @@ def _down_or_stop_clusters(
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
-        total=len(clusters))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'{operation} {len(clusters)} cluster{plural}'),
+                             total=len(clusters))
 
     def _down_or_stop(name: str):
         success_progress = False
@@ -2920,7 +3005,7 @@ def check(clouds: Tuple[str], verbose: bool):
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
     """
-    clouds_arg = clouds if len(clouds) > 0 else None
+    clouds_arg = clouds if clouds else None
     sky_check.check(verbose=verbose, clouds=clouds_arg)
 
 
@@ -2978,9 +3063,9 @@ def show_gpus(
     and spot instances. There may be multiple regions with the same lowest
     price.
 
-    If ``--cloud kubernetes`` is specified, it will show the maximum quantities
-    of the GPU available on a single node and the real-time availability of
-    the GPU across all nodes in the Kubernetes cluster.
+    If ``--cloud kubernetes`` or ``--cloud k8s`` is specified, it will show the
+    maximum quantities of the GPU available on a single node and the real-time
+    availability of the GPU across all nodes in the Kubernetes cluster.
 
     Definitions of certain fields:
 
@@ -3015,7 +3100,8 @@ def show_gpus(
 
     # This will validate 'cloud' and raise if not found.
     cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-    service_catalog.validate_region_zone(region, None, clouds=cloud)
+    cloud_name = cloud_obj.canonical_name() if cloud_obj is not None else None
+    service_catalog.validate_region_zone(region, None, clouds=cloud_name)
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
@@ -3025,22 +3111,20 @@ def show_gpus(
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
     kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
         sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
-
-    if cloud_is_kubernetes and region is not None:
-        raise click.UsageError(
-            'The --region flag cannot be set with --cloud kubernetes.')
+    no_permissions_str = '<no permissions>'
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
     def _get_kubernetes_realtime_gpu_table(
+            context: Optional[str] = None,
             name_filter: Optional[str] = None,
             quantity_filter: Optional[int] = None):
         if quantity_filter:
             qty_header = 'QTY_FILTER'
             free_header = 'FILTERED_FREE_GPUS'
         else:
-            qty_header = 'QTY_PER_NODE'
+            qty_header = 'REQUESTABLE_QTY_PER_NODE'
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
@@ -3048,7 +3132,7 @@ def show_gpus(
             gpus_only=True,
             clouds='kubernetes',
             name_filter=name_filter,
-            region_filter=region,
+            region_filter=context,
             quantity_filter=quantity_filter,
             case_sensitive=False)
         assert (set(counts.keys()) == set(capacity.keys()) == set(
@@ -3056,7 +3140,7 @@ def show_gpus(
                                  f'capacity ({list(capacity.keys())}), '
                                  f'and available ({list(available.keys())}) '
                                  'must be same.')
-        if len(counts) == 0:
+        if not counts:
             err_msg = 'No GPUs found in Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check '
             if name_filter is not None:
@@ -3068,26 +3152,31 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg + kubernetes_utils.NO_GPU_HELP_MESSAGE +
+            full_err_msg = (err_msg +
+                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
         for gpu, _ in sorted(counts.items()):
+            available_qty = available[gpu] if available[gpu] != -1 else (
+                no_permissions_str)
             realtime_gpu_table.add_row([
                 gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available[gpu]
+                _list_to_str(counts.pop(gpu)), capacity[gpu], available_qty
             ])
         return realtime_gpu_table
 
-    def _get_kubernetes_node_info_table():
+    def _get_kubernetes_node_info_table(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        node_info_dict = kubernetes_utils.get_kubernetes_node_info()
+        node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
         for node_name, node_info in node_info_dict.items():
+            available = node_info.free[
+                'accelerators_available'] if node_info.free[
+                    'accelerators_available'] != -1 else no_permissions_str
             node_table.add_row([
-                node_name, node_info.gpu_type,
-                node_info.total['nvidia.com/gpu'],
-                node_info.free['nvidia.com/gpu']
+                node_name, node_info.accelerator_type,
+                node_info.total['accelerator_count'], available
             ])
         return node_table
 
@@ -3104,8 +3193,8 @@ def show_gpus(
         # Optimization - do not poll for Kubernetes API for fetching
         # common GPUs because that will be fetched later for the table after
         # common GPUs.
-        clouds_to_list = cloud
-        if cloud is None:
+        clouds_to_list = cloud_name
+        if cloud_name is None:
             clouds_to_list = [
                 c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
             ]
@@ -3115,12 +3204,20 @@ def show_gpus(
             # Collect k8s related messages in k8s_messages and print them at end
             print_section_titles = False
             # If cloud is kubernetes, we want to show real-time capacity
-            if kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes):
+            if kubernetes_is_enabled and (cloud_name is None or
+                                          cloud_is_kubernetes):
+                if region:
+                    context = region
+                else:
+                    # If region is not specified, we use the current context
+                    context = (
+                        kubernetes_utils.get_current_kube_config_context_name())
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
                     # print the warning at the end.
-                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table()
+                    k8s_realtime_table = _get_kubernetes_realtime_gpu_table(
+                        context)
                 except ValueError as e:
                     if not cloud_is_kubernetes:
                         # Make it a note if cloud is not kubernetes
@@ -3129,12 +3226,23 @@ def show_gpus(
                 else:
                     print_section_titles = True
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs{colorama.Style.RESET_ALL}\n')
+                           f'Kubernetes GPUs (context: {context})'
+                           f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
-                    k8s_node_table = _get_kubernetes_node_info_table()
+                    k8s_node_table = _get_kubernetes_node_info_table(context)
                     yield '\n\n'
+                    # TODO(Doyoung): Update the message with the multi-host TPU
+                    # support.
+                    k8s_per_node_acc_message = (
+                        'Kubernetes per node accelerator availability ')
+                    if kubernetes_utils.multi_host_tpu_exists_in_cluster(
+                            context):
+                        k8s_per_node_acc_message += (
+                            '(Note: Multi-host TPUs are detected and excluded '
+                            'from the display as multi-host TPUs are not '
+                            'supported.)')
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes per node GPU availability'
+                           f'{k8s_per_node_acc_message}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_node_table.get_string()
                 if kubernetes_autoscaling:
@@ -3176,7 +3284,7 @@ def show_gpus(
             for tpu in service_catalog.get_tpus():
                 if tpu in result:
                     tpu_table.add_row([tpu, _list_to_str(result.pop(tpu))])
-            if len(tpu_table.get_string()) > 0:
+            if tpu_table.get_string():
                 yield '\n\n'
             yield from tpu_table.get_string()
 
@@ -3217,8 +3325,8 @@ def show_gpus(
                 name, quantity = accelerator_str, None
 
         print_section_titles = False
-        if (kubernetes_is_enabled and (cloud is None or cloud_is_kubernetes) and
-                not show_all):
+        if (kubernetes_is_enabled and
+            (cloud_name is None or cloud_is_kubernetes) and not show_all):
             # Print section title if not showing all and instead a specific
             # accelerator is requested
             print_section_titles = True
@@ -3287,10 +3395,10 @@ def show_gpus(
             yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Cloud GPUs{colorama.Style.RESET_ALL}\n')
 
-        if len(result) == 0:
+        if not result:
             quantity_str = (f' with requested quantity {quantity}'
                             if quantity else '')
-            cloud_str = f' on {cloud_obj}.' if cloud else ' in cloud catalogs.'
+            cloud_str = f' on {cloud_obj}.' if cloud_name else ' in cloud catalogs.'
             yield f'Resources \'{name}\'{quantity_str} not found{cloud_str} '
             yield 'To show available accelerators, run: sky show-gpus --all'
             return
@@ -3416,14 +3524,14 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
         # Delete all storage objects.
         sky storage delete -a
     """
-    if sum([len(names) > 0, all]) != 1:
+    if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        storages = sky.storage_ls()
-        if not storages:
+        # Use '*' to get all storages.
+        names = global_user_state.get_glob_storage_name(storage_name='*')
+        if not names:
             click.echo('No storage(s) to delete.')
             return
-        names = [s['name'] for s in storages]
     else:
         names = _get_glob_storages(names)
     if names:
@@ -3437,7 +3545,13 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    subprocess_utils.run_in_parallel(sky.storage_delete, names)
+    def delete_storage(name: str) -> None:
+        try:
+            sky.storage_delete(name)
+        except Exception as e:  # pylint: disable=broad-except
+            click.secho(f'Error deleting storage {name}: {e}', fg='red')
+
+    subprocess_utils.run_in_parallel(delete_storage, names)
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -3465,7 +3579,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the spot job.'))
+              help=('Alias for --name, the name of the managed job.'))
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -3477,18 +3591,6 @@ def jobs():
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@click.option(
-    '--retry-until-up/--no-retry-until-up',
-    '-r/-no-r',
-    default=None,
-    is_flag=True,
-    required=False,
-    help=(
-        '(Default: True; this flag is deprecated and will be removed in a '
-        'future release.) Whether to retry provisioning infinitely until the '
-        'cluster is up, if unavailability errors are encountered. This '  # pylint: disable=bad-docstring-quotes
-        'applies to launching all managed jobs (both the initial and '
-        'any recovery attempts), not the jobs controller.'))
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -3519,7 +3621,6 @@ def jobs_launch(
     disk_tier: Optional[str],
     ports: Tuple[str],
     detach_run: bool,
-    retry_until_up: bool,
     yes: bool,
 ):
     """Launch a managed job from a YAML or a command.
@@ -3562,19 +3663,6 @@ def jobs_launch(
         ports=ports,
         job_recovery=job_recovery,
     )
-    # Deprecation. We set the default behavior to be retry until up, and the
-    # flag `--retry-until-up` is deprecated. We can remove the flag in 0.8.0.
-    if retry_until_up is not None:
-        flag_str = '--retry-until-up'
-        if not retry_until_up:
-            flag_str = '--no-retry-until-up'
-        click.secho(
-            f'Flag {flag_str} is deprecated and will be removed in a '
-            'future release (managed jobs will always be retried). '
-            'Please file an issue if this does not work for you.',
-            fg='yellow')
-    else:
-        retry_until_up = True
 
     if not isinstance(task_or_dag, sky.Dag):
         assert isinstance(task_or_dag, sky.Task), task_or_dag
@@ -3590,21 +3678,31 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
-    dag = sky.optimize(dag)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
 
-    if not yes:
+    if yes:
+        # Skip resource preview if -y is set, since we are probably running in
+        # a script and the user won't have a chance to review it anyway.
+        # This can save a couple of seconds.
+        click.secho(
+            f'Resources for managed job {dag.name!r} will be computed on the '
+            'managed jobs controller, since --yes is set.',
+            fg='cyan')
+
+    else:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='cyan')
+        dag = sky.optimize(dag)
+
         prompt = f'Launching a managed job {dag.name!r}. Proceed?'
         if prompt is not None:
             click.confirm(prompt, default=True, abort=True, show_default=True)
 
     common_utils.check_cluster_name_is_valid(name)
 
-    managed_jobs.launch(dag,
-                        name,
-                        detach_run=detach_run,
-                        retry_until_up=retry_until_up)
+    managed_jobs.launch(dag, name, detach_run=detach_run)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -3684,8 +3782,9 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky jobs queue
 
     """
-    click.secho('Fetching managed job statuses...', fg='yellow')
-    with rich_utils.safe_status('[cyan]Checking managed jobs[/]'):
+    click.secho('Fetching managed jobs...', fg='cyan')
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
         _, msg = _get_managed_jobs(refresh=refresh,
                                    skip_finished=skip_finished,
                                    show_all=all,
@@ -3736,14 +3835,16 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message='All managed jobs should have finished.',
-        exit_if_not_accessible=True)
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking managed jobs')):
+        backend_utils.is_controller_accessible(
+            controller=controller_utils.Controllers.JOBS_CONTROLLER,
+            stopped_message='All managed jobs should have finished.',
+            exit_if_not_accessible=True)
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([len(job_ids) > 0, name is not None, all]) != 1:
-        argument_str = f'--job-ids {job_id_str}' if len(job_ids) > 0 else ''
+    if sum([bool(job_ids), name is not None, all]) != 1:
+        argument_str = f'--job-ids {job_id_str}' if job_ids else ''
         argument_str += f' --name {name}' if name is not None else ''
         argument_str += ' --all' if all else ''
         raise click.UsageError(
@@ -3781,16 +3882,37 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
     default=False,
     help=('Show the controller logs of this job; useful for debugging '
           'launching/recoveries, etc.'))
+@click.option(
+    '--refresh',
+    '-r',
+    default=False,
+    is_flag=True,
+    required=False,
+    help='Query the latest job logs, restarting the jobs controller if stopped.'
+)
+@click.option('--sync-down',
+              '-s',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Download logs for all jobs shown in the queue.')
 @click.argument('job_id', required=False, type=int)
 @usage_lib.entrypoint
 def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool):
-    """Tail the log of a managed job."""
+              controller: bool, refresh: bool, sync_down: bool):
+    """Tail or sync down the log of a managed job."""
     try:
-        managed_jobs.tail_logs(name=name,
-                               job_id=job_id,
-                               follow=follow,
-                               controller=controller)
+        if sync_down:
+            managed_jobs.sync_down_logs(name=name,
+                                        job_id=job_id,
+                                        controller=controller,
+                                        refresh=refresh)
+        else:
+            managed_jobs.tail_logs(name=name,
+                                   job_id=job_id,
+                                   follow=follow,
+                                   controller=controller,
+                                   refresh=refresh)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
@@ -3813,7 +3935,7 @@ def jobs_dashboard(port: Optional[int]):
     # see if the controller is UP first, which is slow; (2) not have to run SSH
     # port forwarding first (we'd just launch a local dashboard which would make
     # REST API calls to the controller dashboard server).
-    click.secho('Checking if jobs controller is up...', fg='yellow')
+    click.secho('Checking if jobs controller is up...', fg='cyan')
     hint = ('Dashboard is not available if jobs controller is not up. Run a '
             'managed job first.')
     backend_utils.is_controller_accessible(
@@ -3853,25 +3975,6 @@ def jobs_dashboard(port: Optional[int]):
                 pass
         finally:
             click.echo('Exiting.')
-
-
-# TODO(zhwu): Backward compatibility for the old `sky spot launch` command.
-# It is now renamed to `sky jobs launch` and the old command is deprecated.
-# Remove in v0.8.0.
-@cli.group(cls=_NaturalOrderGroup)
-def spot():
-    """Alias for Managed Jobs CLI (default to managed spot jobs)."""
-    pass
-
-
-_add_command_alias(jobs,
-                   jobs_launch,
-                   new_group=spot,
-                   override_command_argument={'use_spot': True})
-_add_command_alias(jobs, jobs_queue, new_group=spot)
-_add_command_alias(jobs, jobs_logs, new_group=spot)
-_add_command_alias(jobs, jobs_cancel, new_group=spot)
-_add_command_alias(jobs, jobs_dashboard, new_group=spot)
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -3926,7 +4029,6 @@ def _generate_task_with_service(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
-        entrypoint_name='Service',
     )
     if isinstance(task, sky.Dag):
         raise click.UsageError(
@@ -3936,32 +4038,64 @@ def _generate_task_with_service(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Service section not found in the YAML file. '
                              'To fix, add a valid `service` field.')
-    service_port: Optional[int] = None
-    for requested_resources in list(task.resources):
-        if requested_resources.ports is None or len(
-                requested_resources.ports) != 1:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Must only specify one port in resources. Each replica '
-                    'will use the port specified as application ingress port.')
-        service_port_str = requested_resources.ports[0]
-        if not service_port_str.isdigit():
-            # For the case when the user specified a port range like 10000-10010
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Port {service_port_str!r} is not a valid '
-                                 'port number. Please specify a single port '
-                                 f'instead. Got: {service_port_str!r}')
-        # We request all the replicas using the same port for now, but it
-        # should be fine to allow different replicas to use different ports
-        # in the future.
-        resource_port = int(service_port_str)
-        if service_port is None:
-            service_port = resource_port
-        if service_port != resource_port:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(f'Got multiple ports: {service_port} and '
-                                 f'{resource_port} in different resources. '
-                                 'Please specify single port instead.')
+
+    # NOTE(yi): we only allow one service port now.
+    service_port: Optional[int] = int(
+        task.service.ports) if task.service.ports is not None else None
+    if service_port is None:
+        for requested_resources in list(task.resources):
+            if requested_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Must specify at least one ports in resources. Each '
+                        'replica will use the port specified as application '
+                        'ingress port if only one port is specified in the '
+                        'replica resources. If there are multiple ports opened '
+                        'in the replica, please set the `service.ports` field '
+                        'in the service config.')
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) > 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Multiple ports specified in resources. Please '
+                        'specify the main port in the `service.ports` field.')
+            # We request all the replicas using the same port for now, but it
+            # should be fine to allow different replicas to use different ports
+            # in the future.
+            resource_port = requested_ports[0]
+            if service_port is None:
+                service_port = resource_port
+            if service_port != resource_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{resource_port} in different resources. '
+                        'Please specify the same port in all replicas, or '
+                        'explicitly set the service port in the '
+                        '`service.ports` section.')
+        assert service_port is not None
+        task.service.set_ports(str(service_port))
+    else:
+        for requested_resources in list(task.resources):
+            if requested_resources.ports is None:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Must specify at least one ports in every replica '
+                        'resources.')
+            ports_set = resources_utils.port_ranges_to_set(
+                requested_resources.ports)
+            if service_port not in ports_set:
+                with ux_utils.print_exception_no_traceback():
+                    # TODO(tian): Automatically infer resource port from
+                    # service port if none of them is specified in the
+                    # replica resources.
+                    raise ValueError(
+                        f'The service port {service_port} specified in the '
+                        'service section is not found in some resources. '
+                        'Please check if the service port is correct or add '
+                        'the service port to replica resources.')
+
     return task
 
 
@@ -4059,13 +4193,15 @@ def serve_up(
         ports=ports,
         not_supported_cmd='sky serve up',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4175,13 +4311,15 @@ def serve_update(
         ports=ports,
         not_supported_cmd='sky serve update',
     )
-    click.secho('Service Spec:', fg='cyan')
+    click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
+    dag, _ = admin_policy_utils.apply(
+        dag, use_mutated_config_in_current_request=False)
     sky.optimize(dag)
 
     if not yes:
@@ -4301,7 +4439,7 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       sky serve status my-service
     """
     # This won't pollute the output of --endpoint.
-    with rich_utils.safe_status('[cyan]Checking services[/]'):
+    with rich_utils.safe_status(ux_utils.spinner_message('Checking services')):
         _, msg = _get_services(service_names,
                                show_all=all,
                                show_endpoint=endpoint,
@@ -4331,9 +4469,14 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--replica-id',
+              default=None,
+              type=int,
+              help='Tear down a given replica')
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
-    """Teardown service(s).
+def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
+               replica_id: Optional[int]):
+    """Teardown service(s) or a replica.
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
@@ -4359,14 +4502,31 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         \b
         # Forcefully tear down a service in failed status.
         sky serve down failed-service --purge
+        \b
+        # Tear down a specific replica
+        sky serve down my-service --replica-id 1
+        \b
+        # Forcefully tear down a specific replica, even in failed status.
+        sky serve down my-service --replica-id 1 --purge
     """
-    if sum([len(service_names) > 0, all]) != 1:
-        argument_str = f'SERVICE_NAMES={",".join(service_names)}' if len(
-            service_names) > 0 else ''
+    if sum([bool(service_names), all]) != 1:
+        argument_str = (f'SERVICE_NAMES={",".join(service_names)}'
+                        if service_names else '')
         argument_str += ' --all' if all else ''
         raise click.UsageError(
             'Can only specify one of SERVICE_NAMES or --all. '
             f'Provided {argument_str!r}.')
+
+    replica_id_is_defined = replica_id is not None
+    if replica_id_is_defined:
+        if len(service_names) != 1:
+            service_names_str = ', '.join(service_names)
+            raise click.UsageError(f'The --replica-id option can only be used '
+                                   f'with a single service name. Got: '
+                                   f'{service_names_str}.')
+        if all:
+            raise click.UsageError('The --replica-id option cannot be used '
+                                   'with the --all option.')
 
     backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
@@ -4374,16 +4534,28 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool):
         exit_if_not_accessible=True)
 
     if not yes:
-        quoted_service_names = [f'{name!r}' for name in service_names]
-        service_identity_str = f'service(s) {", ".join(quoted_service_names)}'
-        if all:
-            service_identity_str = 'all services'
-        click.confirm(f'Terminating {service_identity_str}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
+        if replica_id_is_defined:
+            click.confirm(
+                f'Terminating replica ID {replica_id} in '
+                f'{service_names[0]!r}. Proceed?',
+                default=True,
+                abort=True,
+                show_default=True)
+        else:
+            quoted_service_names = [f'{name!r}' for name in service_names]
+            service_identity_str = (f'service(s) '
+                                    f'{", ".join(quoted_service_names)}')
+            if all:
+                service_identity_str = 'all services'
+            click.confirm(f'Terminating {service_identity_str}. Proceed?',
+                          default=True,
+                          abort=True,
+                          show_default=True)
 
-    serve_lib.down(service_names=service_names, all=all, purge=purge)
+    if replica_id_is_defined:
+        serve_lib.terminate_replica(service_names[0], replica_id, purge)
+    else:
+        serve_lib.down(service_names=service_names, all=all, purge=purge)
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4591,7 +4763,7 @@ def benchmark_launch(
             'Please provide a YAML file.')
     assert config is not None, (is_yaml, config)
 
-    click.secho('Benchmarking a task from YAML spec: ', fg='yellow', nl=False)
+    click.secho('Benchmarking a task from YAML: ', fg='cyan', nl=False)
     click.secho(entrypoint, bold=True)
 
     candidates = _get_candidate_configs(entrypoint)
@@ -4712,7 +4884,7 @@ def benchmark_launch(
     if idle_minutes_to_autostop is None:
         idle_minutes_to_autostop = 5
     commandline_args['idle-minutes-to-autostop'] = idle_minutes_to_autostop
-    if len(env) > 0:
+    if env:
         commandline_args['env'] = [f'{k}={v}' for k, v in env]
 
     # Launch the benchmarking clusters in detach mode in parallel.
@@ -4725,11 +4897,11 @@ def benchmark_launch(
             f'\n{colorama.Fore.CYAN}Benchmark name: '
             f'{colorama.Style.BRIGHT}{benchmark}{colorama.Style.RESET_ALL}'
             '\nTo see the benchmark results: '
-            f'{backend_utils.BOLD}sky bench show '
-            f'{benchmark}{backend_utils.RESET_BOLD}'
+            f'{ux_utils.BOLD}sky bench show '
+            f'{benchmark}{ux_utils.RESET_BOLD}'
             '\nTo teardown the clusters: '
-            f'{backend_utils.BOLD}sky bench down '
-            f'{benchmark}{backend_utils.RESET_BOLD}')
+            f'{ux_utils.BOLD}sky bench down '
+            f'{benchmark}{ux_utils.RESET_BOLD}')
         subprocess_utils.run('sky bench ls')
     else:
         logger.error('No benchmarking clusters are created.')
@@ -4991,7 +5163,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
         raise click.BadParameter(
             'Either specify benchmarks or use --all to delete all benchmarks.')
     to_delete = []
-    if len(benchmarks) > 0:
+    if benchmarks:
         for benchmark in benchmarks:
             record = benchmark_state.get_benchmark_from_name(benchmark)
             if record is None:
@@ -5000,7 +5172,7 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
                 to_delete.append(record)
     if all:
         to_delete = benchmark_state.get_benchmarks()
-        if len(benchmarks) > 0:
+        if benchmarks:
             print('Both --all and benchmark(s) specified '
                   'for sky bench delete. Letting --all take effect.')
 
@@ -5020,9 +5192,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(
-        f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
-        total=len(to_delete))
+    task = progress.add_task(ux_utils.spinner_message(
+        f'Deleting {len(to_delete)} benchmark{plural}'),
+                             total=len(to_delete))
 
     def _delete_benchmark(benchmark: str) -> None:
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
@@ -5037,8 +5209,8 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
             message = (f'{colorama.Fore.YELLOW}Benchmark {benchmark} '
                        f'has {num_clusters} un-terminated cluster{plural}. '
                        f'Terminate the cluster{plural} with '
-                       f'{backend_utils.BOLD} sky bench down {benchmark} '
-                       f'{backend_utils.RESET_BOLD} '
+                       f'{ux_utils.BOLD} sky bench down {benchmark} '
+                       f'{ux_utils.RESET_BOLD} '
                        'before deleting the benchmark report.')
             success = False
         else:
@@ -5072,15 +5244,7 @@ def local():
     pass
 
 
-@click.option('--gpus/--no-gpus',
-              default=True,
-              is_flag=True,
-              help='Launch cluster without GPU support even '
-              'if GPUs are detected on the host.')
-@local.command('up', cls=_DocumentedCodeCommand)
-@usage_lib.entrypoint
-def local_up(gpus: bool):
-    """Creates a local cluster."""
+def _deploy_local_cluster(gpus: bool):
     cluster_created = False
 
     # Check if GPUs are available on the host
@@ -5105,11 +5269,12 @@ def local_up(gpus: bool):
 
     # Get directory of script and run it from there
     cwd = os.path.dirname(os.path.abspath(up_script_path))
-    run_command = up_script_path + ' --gpus' if gpus else up_script_path
+    run_command = up_script_path + f' {common_utils.get_user_hash()}'
+    run_command = run_command + ' --gpus' if gpus else run_command
     run_command = shlex.split(run_command)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_up.log')
     tail_cmd = 'tail -n100 -f ' + log_path
@@ -5146,7 +5311,7 @@ def local_up(gpus: bool):
                 f'Full log: {log_path}'
                 f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     # Run sky check
-    with rich_utils.safe_status('[bold cyan]Running sky check...'):
+    with rich_utils.safe_status(ux_utils.spinner_message('Running sky check')):
         sky_check.check(clouds=['kubernetes'], quiet=True)
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
@@ -5206,6 +5371,124 @@ def local_up(gpus: bool):
             f'{gpu_hint}')
 
 
+def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
+                           cleanup: bool):
+    success = False
+    path_to_package = os.path.dirname(os.path.dirname(__file__))
+    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
+                                  'deploy_remote_cluster.sh')
+    # Get directory of script and run it from there
+    cwd = os.path.dirname(os.path.abspath(up_script_path))
+
+    deploy_command = f'{up_script_path} {ip_file} {ssh_user} {ssh_key_path}'
+    if cleanup:
+        deploy_command += ' --cleanup'
+
+    # Convert the command to a format suitable for subprocess
+    deploy_command = shlex.split(deploy_command)
+
+    # Setup logging paths
+    run_timestamp = sky_logging.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'local_up.log')
+    tail_cmd = 'tail -n100 -f ' + log_path
+
+    # Check if ~/.kube/config exists:
+    if os.path.exists(os.path.expanduser('~/.kube/config')):
+        click.echo('Found existing kube config. '
+                   'It will be backed up to ~/.kube/config.bak.')
+    style = colorama.Style
+    click.echo('To view detailed progress: '
+               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
+    if cleanup:
+        msg_str = 'Cleaning up remote cluster...'
+    else:
+        msg_str = 'Deploying remote cluster...'
+    with rich_utils.safe_status(f'[bold cyan]{msg_str}'):
+        returncode, _, stderr = log_lib.run_with_log(
+            cmd=deploy_command,
+            log_path=log_path,
+            require_outputs=True,
+            stream_logs=False,
+            line_processor=log_utils.SkyRemoteUpLineProcessor(),
+            cwd=cwd)
+    if returncode == 0:
+        success = True
+    else:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(
+                'Failed to deploy remote cluster. '
+                f'Full log: {log_path}'
+                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
+
+    if success:
+        if cleanup:
+            click.echo(f'{colorama.Fore.GREEN}'
+                       '🎉 Remote cluster cleaned up successfully.'
+                       f'{style.RESET_ALL}')
+        else:
+            click.echo('Cluster deployment done. You can now run tasks on '
+                       'this cluster.\nE.g., run a task with: '
+                       'sky launch --cloud kubernetes -- echo hello world.'
+                       f'\n{colorama.Fore.GREEN}🎉 Remote cluster deployed '
+                       f'successfully. {style.RESET_ALL}')
+
+
+@click.option('--gpus/--no-gpus',
+              default=True,
+              is_flag=True,
+              help='Launch cluster without GPU support even '
+              'if GPUs are detected on the host.')
+@click.option(
+    '--ips',
+    type=str,
+    required=False,
+    help='Path to the file containing IP addresses of remote machines.')
+@click.option('--ssh-user',
+              type=str,
+              required=False,
+              help='SSH username for accessing remote machines.')
+@click.option('--ssh-key-path',
+              type=str,
+              required=False,
+              help='Path to the SSH private key.')
+@click.option('--cleanup',
+              is_flag=True,
+              help='Clean up the remote cluster instead of deploying it.')
+@local.command('up', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
+             cleanup: bool):
+    """Creates a local or remote cluster."""
+
+    def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
+        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
+        # all must be specified
+        if bool(ips) or bool(ssh_user) or bool(ssh_key_path):
+            if not (ips and ssh_user and ssh_key_path):
+                raise click.BadParameter(
+                    'All --ips, --ssh-user, and --ssh-key-path '
+                    'must be specified together.')
+
+        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
+        # are all provided
+        if cleanup and not (ips and ssh_user and ssh_key_path):
+            raise click.BadParameter('--cleanup can only be used with '
+                                     '--ips, --ssh-user and --ssh-key-path.')
+
+    _validate_args(ips, ssh_user, ssh_key_path, cleanup)
+
+    # If remote deployment arguments are specified, run remote up script
+    if ips and ssh_user and ssh_key_path:
+        # Convert ips and ssh_key_path to absolute paths
+        ips = os.path.abspath(ips)
+        ssh_key_path = os.path.abspath(ssh_key_path)
+        _deploy_remote_cluster(ips, ssh_user, ssh_key_path, cleanup)
+    else:
+        # Run local deployment (kind) if no remote args are specified
+        _deploy_local_cluster(gpus)
+
+
 @local.command('down', cls=_DocumentedCodeCommand)
 @usage_lib.entrypoint
 def local_down():
@@ -5220,12 +5503,13 @@ def local_down():
     run_command = shlex.split(down_script_path)
 
     # Setup logging paths
-    run_timestamp = backend_utils.get_run_timestamp()
+    run_timestamp = sky_logging.get_run_timestamp()
     log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                             'local_down.log')
     tail_cmd = 'tail -n100 -f ' + log_path
 
-    with rich_utils.safe_status('[bold cyan]Removing local cluster...'):
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Removing local cluster')):
         style = colorama.Style
         click.echo('To view detailed progress: '
                    f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
@@ -5248,7 +5532,8 @@ def local_down():
                     f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
     if cluster_removed:
         # Run sky check
-        with rich_utils.safe_status('[bold cyan]Running sky check...'):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Running sky check')):
             sky_check.check(clouds=['kubernetes'], quiet=True)
         click.echo(
             f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')

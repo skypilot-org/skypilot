@@ -1,4 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import os
 import traceback
 from types import ModuleType
 from typing import Dict, Iterable, List, Optional, Tuple, Union
@@ -44,7 +45,7 @@ def check(
         if ok:
             enabled_clouds.append(cloud_repr)
             if verbose and cloud is not cloudflare:
-                activated_account = cloud.get_current_user_identity_str()
+                activated_account = cloud.get_active_user_identity_str()
                 if activated_account is not None:
                     echo(f'    Activated account: {activated_account}')
             if reason is not None:
@@ -126,7 +127,7 @@ def check(
             '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
-    if len(all_enabled_clouds) == 0:
+    if not all_enabled_clouds:
         echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -145,7 +146,7 @@ def check(
                 dim=True) + click.style(f'sky check{clouds_arg}', bold=True) +
             '\n' + click.style(
                 'If any problems remain, refer to detailed docs at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html',  # pylint: disable=line-too-long
                 dim=True))
 
         if disallowed_clouds_hint:
@@ -154,7 +155,8 @@ def check(
         # Pretty print for UX.
         if not quiet:
             enabled_clouds_str = '\n  :heavy_check_mark: '.join(
-                [''] + sorted(all_enabled_clouds))
+                [''] +
+                [_format_enabled_cloud(c) for c in sorted(all_enabled_clouds)])
             rich.print('\n[green]:tada: Enabled clouds :tada:'
                        f'{enabled_clouds_str}[/green]')
 
@@ -194,19 +196,25 @@ def get_cached_enabled_clouds_or_refresh(
 def get_cloud_credential_file_mounts(
         excluded_clouds: Optional[Iterable[sky_clouds.Cloud]]
 ) -> Dict[str, str]:
-    """Returns the files necessary to access all enabled clouds.
+    """Returns the files necessary to access all clouds.
 
     Returns a dictionary that will be added to a task's file mounts
     and a list of patterns that will be excluded (used as rsync_exclude).
     """
-    enabled_clouds = get_cached_enabled_clouds_or_refresh()
+    # Uploading credentials for all clouds instead of only sky check
+    # enabled clouds because users may have partial credentials for some
+    # clouds to access their specific resources (e.g. cloud storage) but
+    # not have the complete credentials to pass sky check.
+    clouds = sky_clouds.CLOUD_REGISTRY.values()
     file_mounts = {}
-    for cloud in enabled_clouds:
+    for cloud in clouds:
         if (excluded_clouds is not None and
                 sky_clouds.cloud_in_iterable(cloud, excluded_clouds)):
             continue
         cloud_file_mounts = cloud.get_credential_file_mounts()
-        file_mounts.update(cloud_file_mounts)
+        for remote_path, local_path in cloud_file_mounts.items():
+            if os.path.exists(os.path.expanduser(local_path)):
+                file_mounts[remote_path] = local_path
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.
@@ -215,3 +223,32 @@ def get_cloud_credential_file_mounts(
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
     return file_mounts
+
+
+def _format_enabled_cloud(cloud_name: str) -> str:
+    if cloud_name == repr(sky_clouds.Kubernetes()):
+        # Get enabled contexts for Kubernetes
+        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        if not existing_contexts:
+            return cloud_name
+
+        # Check if allowed_contexts is explicitly set in config
+        allowed_contexts = skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'), None)
+
+        # Format the context info with consistent styling
+        if allowed_contexts is not None:
+            contexts_formatted = []
+            for i, context in enumerate(existing_contexts):
+                # TODO: We should use ux_utils.INDENT_SYMBOL and
+                # INDENT_LAST_SYMBOL but, they are formatted for colorama, while
+                # here we are using rich. We should migrate this file to
+                # use colorama as we do in the rest of the codebase.
+                symbol = ('└── ' if i == len(existing_contexts) - 1 else '├── ')
+                contexts_formatted.append(f'\n    {symbol}{context}')
+            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+        else:
+            context_info = f'Active context: {existing_contexts[0]}'
+
+        return f'{cloud_name}[/green][dim]\n    {context_info}[/dim][green]'
+    return cloud_name

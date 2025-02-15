@@ -11,6 +11,7 @@ from sky.utils import resources_utils
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 5
+QUERY_PORTS_TIMEOUT_SECONDS = 30
 
 logger = sky_logging.init_logger(__name__)
 
@@ -82,13 +83,19 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         node_type = 'head' if head_instance_id is None else 'worker'
         try:
             instance_id = utils.launch(
-                name=f'{cluster_name_on_cloud}-{node_type}',
+                cluster_name=cluster_name_on_cloud,
+                node_type=node_type,
                 instance_type=config.node_config['InstanceType'],
                 region=region,
                 disk_size=config.node_config['DiskSize'],
                 image_name=config.node_config['ImageId'],
                 ports=config.ports_to_open_on_launch,
-                public_key=config.node_config['PublicKey'])
+                public_key=config.node_config['PublicKey'],
+                preemptible=config.node_config['Preemptible'],
+                bid_per_gpu=config.node_config['BidPerGPU'],
+                docker_login_config=config.provider_config.get(
+                    'docker_login_config'),
+            )
         except Exception as e:  # pylint: disable=broad-except
             logger.warning(f'run_instances error: {e}')
             raise
@@ -141,6 +148,8 @@ def terminate_instances(
     """See sky/provision/__init__.py"""
     del provider_config  # unused
     instances = _filter_instances(cluster_name_on_cloud, None)
+    template_name, registry_auth_id = utils.get_registry_auth_resources(
+        cluster_name_on_cloud)
     for inst_id, inst in instances.items():
         logger.debug(f'Terminating instance {inst_id}: {inst}')
         if worker_only and inst['name'].endswith('-head'):
@@ -153,6 +162,10 @@ def terminate_instances(
                     f'Failed to terminate instance {inst_id}: '
                     f'{common_utils.format_exception(e, use_bracket=False)}'
                 ) from e
+    if template_name is not None:
+        utils.delete_pod_template(template_name)
+    if registry_auth_id is not None:
+        utils.delete_register_auth(registry_auth_id)
 
 
 def get_cluster_info(
@@ -224,11 +237,30 @@ def query_ports(
 ) -> Dict[int, List[common.Endpoint]]:
     """See sky/provision/__init__.py"""
     del head_ip, provider_config  # Unused.
-    instances = _filter_instances(cluster_name_on_cloud, None, head_only=True)
-    assert len(instances) == 1
-    head_inst = list(instances.values())[0]
-    return {
-        port: [common.SocketEndpoint(**endpoint)]
-        for port, endpoint in head_inst['port2endpoint'].items()
-        if port in resources_utils.port_ranges_to_set(ports)
-    }
+    # RunPod ports sometimes take a while to be ready.
+    start_time = time.time()
+    ports_to_query = resources_utils.port_ranges_to_set(ports)
+    while True:
+        instances = _filter_instances(cluster_name_on_cloud,
+                                      None,
+                                      head_only=True)
+        assert len(instances) <= 1
+        # It is possible that the instance is terminated on console by
+        # the user. In this case, the instance will not be found and we
+        # should return an empty dict.
+        if not instances:
+            return {}
+        head_inst = list(instances.values())[0]
+        ready_ports: Dict[int, List[common.Endpoint]] = {
+            port: [common.SocketEndpoint(**endpoint)]
+            for port, endpoint in head_inst['port2endpoint'].items()
+            if port in ports_to_query
+        }
+        not_ready_ports = ports_to_query - set(ready_ports.keys())
+        if not not_ready_ports:
+            return ready_ports
+        if time.time() - start_time > QUERY_PORTS_TIMEOUT_SECONDS:
+            logger.warning(f'Querying ports {ports} timed out. Ports '
+                           f'{not_ready_ports} are not ready.')
+            return ready_ports
+        time.sleep(1)

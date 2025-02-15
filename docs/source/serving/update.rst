@@ -13,10 +13,9 @@ During an update, the service will remain accessible with no downtime and its
 endpoint will remain the same. By default, :ref:`rolling update <rolling-update>`
 is applied, while you can also specify a :ref:`blue-green update <blue-green-update>`.
 
-
 .. _rolling-update:
 
-Rolling Update
+Rolling update
 ---------------
 
 To update an existing service, use ``sky serve update``:
@@ -69,7 +68,7 @@ the task yaml ``examples/serve/http_server/task.yaml``, by changing the ``replic
 field:
 
 .. code-block:: yaml
-    :emphasize-lines: 10
+    :emphasize-lines: 6
 
     # examples/serve/http_server/task.yaml
     service:
@@ -168,7 +167,7 @@ Eventually, we will only have new replicas ready to serve user requests.
 
 .. _blue-green-update:
 
-Blue-Green Update
+Blue-green update
 ------------------
 
 SkyServe also supports blue-green updates, by the following command:
@@ -177,7 +176,7 @@ SkyServe also supports blue-green updates, by the following command:
 
     $ sky serve update --mode blue_green service-name new_service.yaml
 
-  
+
 In this update mode, SkyServe will launch new replicas described by ``new_service.yaml`` with the following behavior:
 
 * An update is initiated, and traffic will continue to be redirected to existing (old) replicas.
