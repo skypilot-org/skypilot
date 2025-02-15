@@ -139,7 +139,7 @@ SkyPilot will launch and start monitoring the job.
      - Dedicated auto-managed cluster for each job
    * - Spot preemptions must be manually recovered
      - Spot preemptions are auto-recovered
-   * - Job parallelism limited by cluster resources
+   * - Number of parallel jobs limited by cluster resources
      - Easily manage hundreds or thousands of jobs at once
    * - Good for interactive dev
      - Good for scaling out production jobs
