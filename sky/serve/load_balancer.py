@@ -173,16 +173,25 @@ class SkyServeLoadBalancer:
         while True:
             retry_cnt += 1
             with self._client_pool_lock:
-                # If all replicas are failed, clear the record and retry them
-                # again as some of them might be transient networking issues.
-                # Note that `ready_replicas` may shrink due to the sync with
-                # controller. We use the set difference to prevent concurrency
-                # issues.
-                if not (
-                    set(self._load_balancing_policy.ready_replicas) -
-                    failed_replica_urls
-                ):
+
+                def _should_reset_failed_replicas_for_retry(
+                    failed_replica_urls: Set[str],) -> bool:
+                    """Check if all currently available replicas have failed
+                    and need retry.
+
+                    The ready replicas set may shrink during controller sync, so
+                    we use set difference to handle concurrent updates safely.
+                    """
+                    currently_ready_replicas = set(
+                        self._load_balancing_policy.ready_replicas)
+                    remaining_healthy_replicas = currently_ready_replicas - failed_replica_urls
+                    return not remaining_healthy_replicas
+
+                # Reset failed replicas when all are failed, allowing retry for
+                # transient network issues.
+                if _should_reset_failed_replicas_for_retry(failed_replica_urls):
                     failed_replica_urls.clear()
+
                 ready_replica_url = self._load_balancing_policy.select_replica(
                     request, failed_replica_urls)
             if ready_replica_url is None:
