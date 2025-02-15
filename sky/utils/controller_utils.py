@@ -214,7 +214,8 @@ def _get_cloud_dependencies_installation_commands(
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
-    for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+    for cloud in enabled_clouds:
         cloud_python_dependencies: List[str] = copy.deepcopy(
             dependencies.extras_require[cloud.canonical_name()])
 
@@ -251,6 +252,14 @@ def _get_cloud_dependencies_installation_commands(
                 '/bin/linux/amd64/kubectl" && '
                 'sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
+            if clouds.cloud_in_iterable(clouds.GCP(), enabled_clouds):
+                # Install GKE auth plugin and symlink to /usr/local/bin
+                # This assumes the gcloud CLI is already installed by the if
+                # condition above.
+                commands.append(
+                    '(command -v gke-gcloud-auth-plugin &>/dev/null || '
+                    '(gcloud components install gke-gcloud-auth-plugin --quiet && '
+                    'find /opt/conda -name \'gke-gcloud-auth-plugin\' -type f -exec ln -s {} /usr/local/bin/gke-gcloud-auth-plugin \;))')
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(

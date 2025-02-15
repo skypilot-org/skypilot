@@ -18,6 +18,7 @@ from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
+from sky.utils.kubernetes import exec_kubeconfig_converter
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -27,6 +28,7 @@ logger = sky_logging.init_logger(__name__)
 
 # Check if KUBECONFIG is set, and use it if it is.
 DEFAULT_KUBECONFIG_PATH = '~/.kube/config'
+TMP_KUBECONFIG_PATH = '~/.sky/tmp_kubeconfig'
 CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 
 # Namespace for SkyPilot resources shared across multiple tenants on the
@@ -623,9 +625,13 @@ class Kubernetes(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):
+            # Strip auth plugin paths from the kubeconfig file before uploading
+            exec_kubeconfig_converter.strip_auth_plugin_paths(
+                    os.path.expanduser(CREDENTIAL_PATH), 
+                    os.path.expanduser(TMP_KUBECONFIG_PATH))
             # Upload kubeconfig to the default path to avoid having to set
             # KUBECONFIG in the environment.
-            return {DEFAULT_KUBECONFIG_PATH: CREDENTIAL_PATH}
+            return {DEFAULT_KUBECONFIG_PATH: TMP_KUBECONFIG_PATH}
         else:
             return {}
 
