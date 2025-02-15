@@ -39,9 +39,6 @@ class LoadBalancingPolicy:
                            f'{_request_repr(request)}')
         return replica
 
-    def num_ready_replicas(self) -> int:
-        return len(self.ready_replicas)
-
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
     def _select_replica(self, request: 'fastapi.Request',

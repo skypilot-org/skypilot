@@ -175,8 +175,13 @@ class SkyServeLoadBalancer:
             with self._client_pool_lock:
                 # If all replicas are failed, clear the record and retry them
                 # again as some of them might be transient networking issues.
-                if (len(failed_replica_urls) ==
-                        self._load_balancing_policy.num_ready_replicas()):
+                # Note that `ready_replicas` may shrink due to the sync with
+                # controller. We use the set difference to prevent concurrency
+                # issues.
+                if not (
+                    set(self._load_balancing_policy.ready_replicas) -
+                    failed_replica_urls
+                ):
                     failed_replica_urls.clear()
                 ready_replica_url = self._load_balancing_policy.select_replica(
                     request, failed_replica_urls)
