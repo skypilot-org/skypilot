@@ -76,11 +76,10 @@ class _ControllerSpec:
     @property
     def cluster_name(self) -> str:
         """The name in candidate_cluster_names that exists, else the first."""
-        for candidate_name in self.candidate_cluster_names:
-            record = global_user_state.get_cluster_from_name(candidate_name)
-            if record is not None:
-                return candidate_name
-        return self.candidate_cluster_names[0]
+        return next(
+            (name for name in self.candidate_cluster_names
+             if global_user_state.get_cluster_from_name(name) is not None),
+            self.candidate_cluster_names[0])
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:

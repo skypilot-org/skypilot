@@ -2026,6 +2026,8 @@ class RetryingVmProvisioner(object):
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
                 common_utils.check_cluster_name_is_valid(cluster_name)
+
+                assert to_provision.cloud is not None
                 if dryrun:
                     cloud_user = None
                 else:
@@ -2414,6 +2416,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
+        assert self.launched_resources.cloud is not None, self
         updated_to_skypilot_provisioner_after_provisioned = (
             self.launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
@@ -2452,6 +2455,20 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
+        # For Kubernetes, `KubernetesCommandRunner` want to get the pod names
+        # to run the command. But for high availability serve controller,
+        # the controller pod is part of a deployment, and once the pod is
+        # killed and a new one is created, the pod name changes, so we need
+        # to manually update the cluster info here.
+        # TODO(andy): See if we can prevent this refresh. Like pass in
+        # deployment name as identifier for KubernetesCommandRunner.
+        # TODO(andyl): Should also check through the cluster config. Same as
+        # the TODO in kubernetes/instance.py:terminate_instances
+        if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
+                common_utils.high_availability_specified(
+                    self.cluster_name_on_cloud)):
+            self._update_cluster_info()
+
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
@@ -2659,6 +2676,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._optimize_target) or optimizer.OptimizeTarget.COST
         self._requested_features = kwargs.pop('requested_features',
                                               self._requested_features)
+        self._dump_final_script = kwargs.pop('dump_final_script', False)
         assert not kwargs, f'Unexpected kwargs: {kwargs}'
 
     def check_resources_fit_cluster(
@@ -3233,22 +3251,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
 
-            def _dump_setup_script(setup_script: str) -> None:
+            def _dump_final_script(
+                    setup_script: str,
+                    target_dir: str = remote_setup_file_name) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
                     setup_sh_path = f.name
                     runner.rsync(source=setup_sh_path,
-                                 target=remote_setup_file_name,
+                                 target=target_dir,
                                  up=True,
                                  stream_logs=False)
 
             if detach_setup or _is_command_length_over_limit(encoded_script):
-                _dump_setup_script(setup_script)
+                _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
                                       f'{remote_setup_file_name}; }}')
+
+            if self._dump_final_script:
+                _dump_final_script(setup_script,
+                                   constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
             if detach_setup:
                 return
@@ -3296,7 +3320,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to run setup command inline due to '
                         'command length limit. Dumping setup script to '
                         'file and running it with SSH.')
-                    _dump_setup_script(setup_script)
+                    _dump_final_script(setup_script)
                     returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
@@ -3390,14 +3414,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        def _dump_code_to_file(codegen: str) -> None:
+        def _dump_code_to_file(codegen: str,
+                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(SKY_REMOTE_APP_DIR,
-                                           f'sky_job_{job_id}')
+                script_path = os.path.join(target_dir, f'sky_job_{job_id}')
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
                 # execute the script. Happens for AWS.
@@ -3422,6 +3446,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # (jobs-controller.yaml.j2), as it may need to wait for the run
             # commands to be scheduled on the job controller in high-load cases.
             job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
+
+        if self._dump_final_script:
+            _dump_code_to_file(job_submit_cmd,
+                               constants.PERSISTENT_RUN_SCRIPT_DIR)
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,

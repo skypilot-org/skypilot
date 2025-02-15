@@ -45,6 +45,8 @@ class CloudImplementationFeatures(enum.Enum):
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
+    HIGH_AVAILABILITY_CONTROLLERS = ('high_availability_controllers'
+                                    )  # Controller can auto-restart
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
 
 
@@ -604,6 +606,15 @@ class Cloud:
         """
         unsupported_features2reason = cls._unsupported_features_for_resources(
             resources)
+
+        # pylint: disable=import-outside-toplevel
+        from sky.clouds import kubernetes
+        if cls is not kubernetes.Kubernetes:
+            unsupported_features2reason.update({
+                CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                    ('Currently, for all clouds except Kubernetes, '
+                     'high availability controllers are not supported.')
+            })
 
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_nested(

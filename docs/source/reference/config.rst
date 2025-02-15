@@ -14,6 +14,8 @@ Such configurations apply to all new clusters and do not affect existing cluster
 Spec: ``~/.sky/config.yaml``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+For details about SkyServe controller and its customization, see :ref:`customizing-sky-serve-controller-resources`.
+
 Available fields and semantics:
 
 .. code-block:: yaml

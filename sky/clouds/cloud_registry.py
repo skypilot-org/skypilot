@@ -1,12 +1,15 @@
 """Clouds need to be registered in CLOUD_REGISTRY to be discovered"""
 
 import typing
-from typing import Callable, Dict, List, Optional, overload, Type, Union
+from typing import (Callable, Dict, List, Optional, overload, Type, TypeVar,
+                    Union)
 
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
+
+T = TypeVar('T', bound='cloud.Cloud')
 
 
 class _CloudRegistry(dict):
@@ -34,7 +37,7 @@ class _CloudRegistry(dict):
                              f'{[*self.keys(), *self.aliases.keys()]}')
 
     @overload
-    def register(self, cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
+    def register(self, cloud_cls: Type[T]) -> Type[T]:
         ...
 
     @overload
@@ -42,17 +45,16 @@ class _CloudRegistry(dict):
         self,
         cloud_cls: None = None,
         aliases: Optional[List[str]] = None,
-    ) -> Callable[[Type['cloud.Cloud']], Type['cloud.Cloud']]:
+    ) -> Callable[[Type[T]], Type[T]]:
         ...
 
     def register(
         self,
-        cloud_cls: Optional[Type['cloud.Cloud']] = None,
+        cloud_cls: Optional[Type[T]] = None,
         aliases: Optional[List[str]] = None,
-    ) -> Union[Type['cloud.Cloud'], Callable[[Type['cloud.Cloud']],
-                                             Type['cloud.Cloud']]]:
+    ) -> Union[Type[T], Callable[[Type[T]], Type[T]]]:
 
-        def _register(cloud_cls: Type['cloud.Cloud']) -> Type['cloud.Cloud']:
+        def _register(cloud_cls: Type[T]) -> Type[T]:
             name = cloud_cls.canonical_name()
             assert name not in self, f'{name} already registered'
             self[name] = cloud_cls()
