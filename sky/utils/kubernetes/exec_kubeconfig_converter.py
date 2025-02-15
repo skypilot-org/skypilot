@@ -18,7 +18,7 @@ import os
 import yaml
 
 
-def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
+def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str) -> bool:
     """Strip path information from exec plugin commands in a kubeconfig file.
 
     Args:
@@ -40,13 +40,10 @@ def strip_auth_plugin_paths(kubeconfig_path: str, output_path: str):
                 exec_info['command'] = executable
                 updated = True
 
-    if updated:
-        with open(output_path, 'w', encoding='utf-8') as file:
-            yaml.safe_dump(config, file)
-        print('Kubeconfig updated with path-less exec auth. '
-              f'Saved to {output_path}')
-    else:
-        print('No updates made. No exec-based auth commands paths found.')
+    with open(output_path, 'w', encoding='utf-8') as file:
+        yaml.safe_dump(config, file)
+    
+    return updated
 
 
 def main():
@@ -66,7 +63,11 @@ def main():
         help='Output kubeconfig file path (default: %(default)s)')
 
     args = parser.parse_args()
-    strip_auth_plugin_paths(args.input, args.output)
+    updated = strip_auth_plugin_paths(args.input, args.output)
+    if updated:
+        print(f'Kubeconfig updated with path-less exec auth. Saved to {args.output}')
+    else:
+        print('No updates made. No exec-based auth commands paths found.')
 
 
 if __name__ == '__main__':
