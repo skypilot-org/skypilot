@@ -1,5 +1,6 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
+import contextlib
 import logging
 import threading
 from typing import Dict, Set, Union
@@ -184,7 +185,8 @@ class SkyServeLoadBalancer:
                     """
                     currently_ready_replicas = set(
                         self._load_balancing_policy.ready_replicas)
-                    remaining_healthy_replicas = currently_ready_replicas - failed_replica_urls
+                    remaining_healthy_replicas = (currently_ready_replicas -
+                                                  failed_replica_urls)
                     return not remaining_healthy_replicas
 
                 # Reset failed replicas when all are failed, allowing retry for
@@ -238,15 +240,15 @@ class SkyServeLoadBalancer:
                                 self._proxy_with_retries,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
 
-        @self._app.on_event('startup')
-        async def startup():
-            # Configure logger
+        @contextlib.asynccontextmanager
+        async def lifespan(self):
             uvicorn_access_logger = logging.getLogger('uvicorn.access')
             for handler in uvicorn_access_logger.handlers:
                 handler.setFormatter(sky_logging.FORMATTER)
 
             # Register controller synchronization task
             asyncio.create_task(self._sync_with_controller())
+            yield
 
         logger.info('SkyServe Load Balancer started on '
                     f'http://0.0.0.0:{self._load_balancer_port}')
