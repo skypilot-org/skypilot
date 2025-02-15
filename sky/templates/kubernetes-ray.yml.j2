@@ -415,6 +415,7 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
+
                 VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -518,6 +519,26 @@ available_node_types:
                   sleep 0.1
                 done
               }
+
+              mkdir -p ~/.sky/task_run
+              if [ -f ~/.sky/k8s_container_ready ]; then
+                # ! Keep this aligned with `CloudVmRayBackend._setup()`
+                # Suppose all `task.setup` are the same for skyserve controller task.
+                # So be careful for compatibility issue once you change it.
+                chmod +x ~/.sky/setup_commands.sh
+                /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && ~/.sky/setup_commands.sh > /tmp/setup_commands.log 2>&1"
+                echo "=== Controller setup commands completed for recovery ==="
+
+                for file in ~/.sky/task_run/*; do
+                  # ! Keep this aligned with `CloudVmRayBackend._execute()`
+                  chmod +x $file
+                  /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
+                  echo "=== Controller task run for service (file: $file) completed for recovery ==="
+                done
+              fi
+
+              touch ~/.sky/k8s_container_ready
+
               trap : TERM INT; log_tail || sleep infinity & wait
 
           ports:

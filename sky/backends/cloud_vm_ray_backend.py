@@ -2026,6 +2026,8 @@ class RetryingVmProvisioner(object):
                 # Recheck cluster name as the 'except:' block below may
                 # change the cloud assignment.
                 common_utils.check_cluster_name_is_valid(cluster_name)
+
+                assert to_provision.cloud is not None
                 if dryrun:
                     cloud_user = None
                 else:
@@ -2041,6 +2043,10 @@ class RetryingVmProvisioner(object):
                             in requested_features), requested_features
                     requested_features.remove(
                         clouds.CloudImplementationFeatures.STOP)
+
+                if isinstance(to_provision.cloud, clouds.Kubernetes):
+                    # TODO(andyl): a proper way to pass task.run
+                    setattr(to_provision, 'task', task)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -2452,6 +2458,10 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
                     'Tried to use cached cluster info, but it\'s missing for '
                     f'cluster "{self.cluster_name}"')
             self._update_cluster_info()
+        # TODO(andyl): must force refresh here?
+        if self.cluster_name.startswith('sky-serve-controller'):
+            self._update_cluster_info()
+
         assert self.cached_cluster_info is not None, self
         runners = provision_lib.get_command_runners(
             self.cached_cluster_info.provider_name, self.cached_cluster_info,
@@ -3209,8 +3219,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._set_storage_mounts_metadata(handle.cluster_name,
                                               storage_mounts)
 
-    def _setup(self, handle: CloudVmRayResourceHandle, task: task_lib.Task,
-               detach_setup: bool) -> None:
+    def _setup(self,
+               handle: CloudVmRayResourceHandle,
+               task: task_lib.Task,
+               detach_setup: bool,
+               dump_final_script: bool = False) -> None:
         start = time.time()
 
         if task.setup is None:
@@ -3233,22 +3246,28 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                                          env_vars=setup_envs)
             encoded_script = shlex.quote(setup_script)
 
-            def _dump_setup_script(setup_script: str) -> None:
+            def _dump_final_script(
+                    setup_script: str,
+                    target_dir: str = remote_setup_file_name) -> None:
                 with tempfile.NamedTemporaryFile('w', prefix='sky_setup_') as f:
                     f.write(setup_script)
                     f.flush()
                     setup_sh_path = f.name
                     runner.rsync(source=setup_sh_path,
-                                 target=remote_setup_file_name,
+                                 target=target_dir,
                                  up=True,
                                  stream_logs=False)
 
             if detach_setup or _is_command_length_over_limit(encoded_script):
-                _dump_setup_script(setup_script)
+                _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
                                       f'{remote_setup_file_name}; }}')
+
+            if dump_final_script:
+                _dump_final_script(setup_script,
+                                   constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
             if detach_setup:
                 return
@@ -3296,7 +3315,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed to run setup command inline due to '
                         'command length limit. Dumping setup script to '
                         'file and running it with SSH.')
-                    _dump_setup_script(setup_script)
+                    _dump_final_script(setup_script)
                     returncode = _run_setup(setup_cmd)
 
             def error_message() -> str:
@@ -3363,6 +3382,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         job_id: int,
         detach_run: bool = False,
         managed_job_dag: Optional['dag.Dag'] = None,
+        dump_final_script: bool = False,
     ) -> None:
         """Executes generated code on the head node."""
         style = colorama.Style
@@ -3390,14 +3410,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         code = job_lib.JobLibCodeGen.queue_job(job_id, job_submit_cmd)
         job_submit_cmd = ' && '.join([mkdir_code, create_script_code, code])
 
-        def _dump_code_to_file(codegen: str) -> None:
+        def _dump_code_to_file(codegen: str,
+                               target_dir: str = SKY_REMOTE_APP_DIR) -> None:
             runners = handle.get_command_runners()
             head_runner = runners[0]
             with tempfile.NamedTemporaryFile('w', prefix='sky_app_') as fp:
                 fp.write(codegen)
                 fp.flush()
-                script_path = os.path.join(SKY_REMOTE_APP_DIR,
-                                           f'sky_job_{job_id}')
+                script_path = os.path.join(target_dir, f'sky_job_{job_id}')
                 # We choose to sync code + exec, because the alternative of 'ray
                 # submit' may not work as it may use system python (python2) to
                 # execute the script. Happens for AWS.
@@ -3422,6 +3442,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # (jobs-controller.yaml.j2), as it may need to wait for the run
             # commands to be scheduled on the job controller in high-load cases.
             job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
+
+        if dump_final_script:
+            _dump_code_to_file(job_submit_cmd,
+                               constants.PERSISTENT_RUN_SCRIPT_DIR)
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
@@ -3541,6 +3565,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         task: task_lib.Task,
         detach_run: bool,
         dryrun: bool = False,
+        is_high_avail_controller: bool = False,
     ) -> Optional[int]:
         """Executes the task on the cluster.
 
@@ -3589,13 +3614,26 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
 
         job_id = self._add_job(handle, task_copy.name, resources_str)
 
+        # That's because we want to do `task.run` again when K8S pod
+        # is recovered after a crash.
+        # See `kubernetes-ray.yml.j2` for more details.
+        dump_final_script = is_high_avail_controller
+
         num_actual_nodes = task.num_nodes * handle.num_ips_per_node
         # Case: task_lib.Task(run, num_nodes=N) or TPU VM Pods
         if num_actual_nodes > 1:
-            self._execute_task_n_nodes(handle, task_copy, job_id, detach_run)
+            self._execute_task_n_nodes(handle,
+                                       task_copy,
+                                       job_id,
+                                       detach_run,
+                                       dump_final_script=dump_final_script)
         else:
             # Case: task_lib.Task(run, num_nodes=1)
-            self._execute_task_one_node(handle, task_copy, job_id, detach_run)
+            self._execute_task_one_node(handle,
+                                        task_copy,
+                                        job_id,
+                                        detach_run,
+                                        dump_final_script=dump_final_script)
 
         return job_id
 
@@ -5009,9 +5047,12 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         env_vars.update(self._skypilot_predefined_env_vars(handle))
         return env_vars
 
-    def _execute_task_one_node(self, handle: CloudVmRayResourceHandle,
-                               task: task_lib.Task, job_id: int,
-                               detach_run: bool) -> None:
+    def _execute_task_one_node(self,
+                               handle: CloudVmRayResourceHandle,
+                               task: task_lib.Task,
+                               job_id: int,
+                               detach_run: bool,
+                               dump_final_script: bool = False) -> None:
         # Launch the command as a Ray task.
         log_dir = os.path.join(self.log_dir, 'tasks')
 
@@ -5051,11 +5092,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                dump_final_script=dump_final_script)
 
-    def _execute_task_n_nodes(self, handle: CloudVmRayResourceHandle,
-                              task: task_lib.Task, job_id: int,
-                              detach_run: bool) -> None:
+    def _execute_task_n_nodes(self,
+                              handle: CloudVmRayResourceHandle,
+                              task: task_lib.Task,
+                              job_id: int,
+                              detach_run: bool,
+                              dump_final_script: bool = False) -> None:
         # Strategy:
         #   ray.init(...)
         #   for node:
@@ -5107,4 +5152,5 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                 codegen.build(),
                                 job_id,
                                 detach_run=detach_run,
-                                managed_job_dag=task.managed_job_dag)
+                                managed_job_dag=task.managed_job_dag,
+                                dump_final_script=dump_final_script)

@@ -457,13 +457,29 @@ def setup_kubernetes_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         #   SSHConfigHelper to use a different ProxyCommand for each pod.
         #   This optimization can reduce SSH time from ~0.35s to ~0.25s, tested
         #   on GKE.
-        ssh_target = config['cluster_name'] + '-head'
+
+        # TODO(andyl): Maybe we should do the same thing for job controller
+        is_serve_controller = kubernetes_utils.is_serve_controller(
+            config['cluster_name'])
+        if is_serve_controller:
+            ssh_target = kubernetes_utils.get_head_pod_name_from_deployment(
+                config['cluster_name'])
+        else:
+            ssh_target = config['cluster_name'] + '-head'
+
         ssh_proxy_cmd = kubernetes_utils.get_ssh_proxy_command(
             ssh_target,
             port_forward_mode,
             private_key_path=private_key_path,
             context=context,
-            namespace=namespace)
+            namespace=namespace,
+            # For high-availability server controller, we want to
+            # ssh into the controller pod (i.e. the head pod) even
+            # after the pod crashed and restarted. Thus, instead of
+            # a fake 127.0.0.1 as the first layer and a fixed pod_ip
+            # as the second layer, we use a single-layer proxy command
+            # that directly connects to running pod's IP.
+            use_single_layer=is_serve_controller)
     else:
         # This should never happen because we check for this in from_str above.
         raise ValueError(f'Unsupported networking mode: {network_mode_str}')

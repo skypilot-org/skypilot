@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 import os
 import pathlib
+from pathlib import Path
 import shutil
 import time
 import traceback
@@ -130,6 +131,19 @@ def _cleanup(service_name: str) -> bool:
     return failed
 
 
+def is_recovery_mode(service_name: str) -> bool:
+    """Check if service exists in database to determine recovery mode.
+
+    Args:
+        service_name: Name of the service to check
+
+    Returns:
+        True if service exists in database, indicating recovery mode
+    """
+    service = serve_state.get_service_from_name(service_name)
+    return service is not None
+
+
 def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     """Starts the service."""
     # Generate ssh key pair to avoid race condition when multiple sky.launch
@@ -141,28 +155,34 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # Already checked before submit to controller.
     assert task.service is not None, task
     service_spec = task.service
-    if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
-        cleanup_storage(tmp_task_yaml)
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Max number of services reached.')
-    success = serve_state.add_service(
-        service_name,
-        controller_job_id=job_id,
-        policy=service_spec.autoscaling_policy_str(),
-        requested_resources_str=backend_utils.get_task_resources_str(task),
-        load_balancing_policy=service_spec.load_balancing_policy,
-        status=serve_state.ServiceStatus.CONTROLLER_INIT,
-        tls_encrypted=service_spec.tls_credential is not None)
-    # Directly throw an error here. See sky/serve/api.py::up
-    # for more details.
-    if not success:
-        cleanup_storage(tmp_task_yaml)
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name} already exists.')
 
-    # Add initial version information to the service state.
-    serve_state.add_or_update_version(service_name, constants.INITIAL_VERSION,
-                                      service_spec)
+    is_recovery = is_recovery_mode(service_name)
+    logger.info(f'It\'s a {"first" if not is_recovery else "recovery"} run')
+
+    if not is_recovery:
+        if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
+            cleanup_storage(tmp_task_yaml)
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Max number of services reached.')
+        success = serve_state.add_service(
+            service_name,
+            controller_job_id=job_id,
+            policy=service_spec.autoscaling_policy_str(),
+            requested_resources_str=backend_utils.get_task_resources_str(task),
+            load_balancing_policy=service_spec.load_balancing_policy,
+            status=serve_state.ServiceStatus.CONTROLLER_INIT,
+            tls_encrypted=service_spec.tls_credential is not None)
+        # Directly throw an error here. See sky/serve/api.py::up
+        # for more details.
+        if not success:
+            cleanup_storage(tmp_task_yaml)
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(f'Service {service_name} already exists.')
+
+        # Add initial version information to the service state.
+        serve_state.add_or_update_version(service_name,
+                                          constants.INITIAL_VERSION,
+                                          service_spec)
 
     # Create the service working directory.
     service_dir = os.path.expanduser(
@@ -188,8 +208,15 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     try:
         with filelock.FileLock(
                 os.path.expanduser(constants.PORT_SELECTION_FILE_LOCK_PATH)):
-            controller_port = common_utils.find_free_port(
-                constants.CONTROLLER_PORT_START)
+            if is_recovery:
+                # In recovery mode, use the ports from the database
+                controller_port = serve_state.get_service_controller_port(
+                    service_name)
+                load_balancer_port = serve_state.get_service_load_balancer_port(
+                    service_name)
+            else:
+                controller_port = common_utils.find_free_port(
+                    constants.CONTROLLER_PORT_START)
 
             # We expose the controller to the public network when running
             # inside a kubernetes cluster to allow external load balancers
@@ -212,13 +239,15 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 args=(service_name, service_spec, task_yaml, controller_host,
                       controller_port))
             controller_process.start()
-            serve_state.set_service_controller_port(service_name,
-                                                    controller_port)
+            if not is_recovery:
+                serve_state.set_service_controller_port(service_name,
+                                                        controller_port)
 
             controller_addr = f'http://{controller_host}:{controller_port}'
 
-            load_balancer_port = common_utils.find_free_port(
-                constants.LOAD_BALANCER_PORT_START)
+            if not is_recovery:
+                load_balancer_port = common_utils.find_free_port(
+                    constants.LOAD_BALANCER_PORT_START)
 
             # Extract the load balancing policy from the service spec
             policy_name = service_spec.load_balancing_policy
@@ -234,8 +263,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 args=(controller_addr, load_balancer_port, policy_name,
                       service_spec.tls_credential))
             load_balancer_process.start()
-            serve_state.set_service_load_balancer_port(service_name,
-                                                       load_balancer_port)
+            if not is_recovery:
+                serve_state.set_service_load_balancer_port(
+                    service_name, load_balancer_port)
 
         while True:
             _handle_signal(service_name)
@@ -265,8 +295,25 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.delete_all_versions(service_name)
             logger.info(f'Service {service_name} terminated successfully.')
 
+        task_run_dir = Path('~/.sky/task_run').expanduser()
+        if task_run_dir.exists():
+            # Please see `kubernetes-ray.yml.j2` for more details.
+            this_task_run_script = task_run_dir / f'sky_job_{job_id}'
+            if this_task_run_script.exists():
+                this_task_run_script.unlink()
+                logger.info(f'Task run script {this_task_run_script} removed')
+            else:
+                logger.warning(
+                    f'Task run script {this_task_run_script} not found')
+
 
 if __name__ == '__main__':
+    if not pathlib.Path('/home/sky/.sky/k8s_container_ready').exists():
+        print('k8s_container_ready not found, exiting')
+        exit(0)
+
+    print('k8s_container_ready found, starting service')
+
     parser = argparse.ArgumentParser(description='Sky Serve Service')
     parser.add_argument('--service-name',
                         type=str,

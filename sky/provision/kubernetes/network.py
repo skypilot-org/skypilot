@@ -78,7 +78,7 @@ def _open_ports_using_ingress(
             'https://github.com/kubernetes/ingress-nginx/blob/main/docs/deploy/index.md.'  # pylint: disable=line-too-long
         )
 
-    # Prepare service names, ports,  for template rendering
+    # Prepare service names, ports, for template rendering
     service_details = [
         (f'{cluster_name_on_cloud}--skypilot-svc--{port}', port,
          _PATH_PREFIX.format(
