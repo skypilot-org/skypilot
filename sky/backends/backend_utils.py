@@ -3006,7 +3006,7 @@ def get_endpoints(cluster: str,
     def filter_endpoints_by_protocol(
             port_details: Dict[int, List['common.Endpoint']]) -> Dict[int, str]:
         if protocol == 'https':
-            results = {
+            port_details = {
                 port: [
                     endpoint for endpoint in endpoints
                     if isinstance(endpoint, common.HTTPSEndpoint)
@@ -3022,7 +3022,7 @@ def get_endpoints(cluster: str,
         return {
             port:
             add_prefix(endpoints[0])  # TODO(andyl): handle multiple endpoints
-            for port, endpoints in results.items()
+            for port, endpoints in port_details.items()
         }
 
     # Validation before returning the endpoints
