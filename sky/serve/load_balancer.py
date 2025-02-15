@@ -44,7 +44,7 @@ class SkyServeLoadBalancer:
             tls_credentials: The TLS credentials for HTTPS endpoint. Defaults
                 to None.
         """
-        self._app = fastapi.FastAPI()
+        self._app = fastapi.FastAPI(lifespan=self.lifespan)
         self._controller_url: str = controller_url
         self._load_balancer_port: int = load_balancer_port
         # Use the registry to create the load balancing policy
@@ -69,6 +69,16 @@ class SkyServeLoadBalancer:
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
         self._client_pool_lock: threading.Lock = threading.Lock()
+
+    @contextlib.asynccontextmanager
+    async def lifespan(self):
+        uvicorn_access_logger = logging.getLogger('uvicorn.access')
+        for handler in uvicorn_access_logger.handlers:
+            handler.setFormatter(sky_logging.FORMATTER)
+
+        # Register controller synchronization task
+        asyncio.create_task(self._sync_with_controller())
+        yield
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -259,16 +269,6 @@ class SkyServeLoadBalancer:
         self._app.add_api_route('/{path:path}',
                                 self._proxy_with_retries,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])
-
-        @contextlib.asynccontextmanager
-        async def lifespan(self):
-            uvicorn_access_logger = logging.getLogger('uvicorn.access')
-            for handler in uvicorn_access_logger.handlers:
-                handler.setFormatter(sky_logging.FORMATTER)
-
-            # Register controller synchronization task
-            asyncio.create_task(self._sync_with_controller())
-            yield
 
         uvicorn_tls_kwargs = ({} if self._tls_credential is None else
                               self._tls_credential.dump_uvicorn_kwargs())

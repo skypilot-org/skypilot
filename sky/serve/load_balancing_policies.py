@@ -136,7 +136,8 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_replicas: Set[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
