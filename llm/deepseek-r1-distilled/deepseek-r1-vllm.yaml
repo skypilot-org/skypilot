@@ -10,8 +10,8 @@ resources:
   disk_tier: best
 
 setup: |
-  pip install transformers==4.48.1
-  pip install vllm==0.6.6.post1
+  uv pip install transformers==4.48.1
+  uv pip install vllm==0.6.6.post1
 
   python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
