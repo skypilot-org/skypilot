@@ -68,7 +68,7 @@ class JobsController:
             else:
                 assert task.name is not None, task
                 task_name = task.name
-                # This is guaranteed by the spot_launch API, where we fill in
+                # This is guaranteed by the jobs.launch API, where we fill in
                 # the task.name with
                 # dag_utils.maybe_infer_and_fill_dag_and_task_names.
                 assert task_name is not None, self._dag
@@ -137,8 +137,8 @@ class JobsController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when
-                all prechecks passed but the maximum number of retries is
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
                 due to:
                 1. Any of the underlying failover exceptions is due to resources
@@ -224,8 +224,8 @@ class JobsController:
                 self._backend, cluster_name)
 
             if job_status == job_lib.JobStatus.SUCCEEDED:
-                end_time = managed_job_utils.get_job_timestamp(
-                    self._backend, cluster_name, get_end_time=True)
+                end_time = managed_job_utils.try_to_get_job_end_time(
+                    self._backend, cluster_name)
                 # The job is done. Set the job to SUCCEEDED first before start
                 # downloading and streaming the logs to make it more responsive.
                 managed_job_state.set_succeeded(self._job_id,
@@ -235,15 +235,23 @@ class JobsController:
                 logger.info(
                     f'Managed job {self._job_id} (task: {task_id}) SUCCEEDED. '
                     f'Cleaning up the cluster {cluster_name}.')
-                clusters = backend_utils.get_clusters(
-                    cluster_names=[cluster_name],
-                    refresh=False,
-                    include_controller=False)
-                if clusters:
-                    assert len(clusters) == 1, (clusters, cluster_name)
-                    handle = clusters[0].get('handle')
-                    # Best effort to download and stream the logs.
-                    self._download_log_and_stream(task_id, handle)
+                try:
+                    clusters = backend_utils.get_clusters(
+                        cluster_names=[cluster_name],
+                        refresh=False,
+                        include_controller=False)
+                    if clusters:
+                        assert len(clusters) == 1, (clusters, cluster_name)
+                        handle = clusters[0].get('handle')
+                        # Best effort to download and stream the logs.
+                        self._download_log_and_stream(task_id, handle)
+                except Exception as e:  # pylint: disable=broad-except
+                    # We don't want to crash here, so just log and continue.
+                    logger.warning(
+                        f'Failed to download and stream logs: '
+                        f'{common_utils.format_exception(e)}',
+                        exc_info=True)
+
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 managed_job_utils.terminate_cluster(cluster_name=cluster_name)
@@ -291,8 +299,8 @@ class JobsController:
                     continue
                 elif job_status in job_lib.JobStatus.user_code_failure_states():
                     # The user code has probably crashed, fail immediately.
-                    end_time = managed_job_utils.get_job_timestamp(
-                        self._backend, cluster_name, get_end_time=True)
+                    end_time = managed_job_utils.try_to_get_job_end_time(
+                        self._backend, cluster_name)
                     logger.info(
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
@@ -474,8 +482,6 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
-    # NOTE: The code to get cluster name is same as what we did in the spot
-    # controller, we should keep it in sync with JobsController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task

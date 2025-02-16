@@ -257,6 +257,12 @@ class DO(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Verify that the user has valid credentials for DO."""
+
+        try:
+            do.exceptions()
+        except ImportError as err:
+            return False, str(err)
+
         try:
             # attempt to make a CURL request for listing instances
             do_utils.client().droplets.list()

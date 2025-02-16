@@ -67,6 +67,7 @@ class Resources:
         # Internal use only.
         # pylint: disable=invalid-name
         _docker_login_config: Optional[docker_utils.DockerLoginConfig] = None,
+        _docker_username_for_runpod: Optional[str] = None,
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
@@ -148,6 +149,9 @@ class Resources:
           _docker_login_config: the docker configuration to use. This includes
             the docker username, password, and registry server. If None, skip
             docker login.
+          _docker_username_for_runpod: the login username for the docker
+            containers. This is used by RunPod to set the ssh user for the
+            docker containers.
           _requires_fuse: whether the task requires FUSE mounting support. This
             is used internally by certain cloud implementations to do additional
             setup for FUSE mounting. This flag also safeguards against using
@@ -233,6 +237,12 @@ class Resources:
         self._labels = labels
 
         self._docker_login_config = _docker_login_config
+
+        # TODO(andyl): This ctor param seems to be unused.
+        # We always use `Task.set_resources` and `Resources.copy` to set the
+        # `docker_username_for_runpod`. But to keep the consistency with
+        # `_docker_login_config`, we keep it here.
+        self._docker_username_for_runpod = _docker_username_for_runpod
 
         self._requires_fuse = _requires_fuse
 
@@ -478,6 +488,10 @@ class Resources:
     @requires_fuse.setter
     def requires_fuse(self, value: Optional[bool]) -> None:
         self._requires_fuse = value
+
+    @property
+    def docker_username_for_runpod(self) -> Optional[str]:
+        return self._docker_username_for_runpod
 
     def _set_cpus(
         self,
@@ -1065,6 +1079,10 @@ class Resources:
         cloud_specific_variables = self.cloud.make_deploy_resources_variables(
             self, cluster_name, region, zones, num_nodes, dryrun)
 
+        # TODO(andyl): Should we print some warnings if users' envs share
+        # same names with the cloud specific variables, but not enabled
+        # since it's not on the particular cloud?
+
         # Docker run options
         docker_run_options = skypilot_config.get_nested(
             ('docker', 'run_options'),
@@ -1277,6 +1295,9 @@ class Resources:
             labels=override.pop('labels', self.labels),
             _docker_login_config=override.pop('_docker_login_config',
                                               self._docker_login_config),
+            _docker_username_for_runpod=override.pop(
+                '_docker_username_for_runpod',
+                self._docker_username_for_runpod),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
@@ -1438,6 +1459,8 @@ class Resources:
         resources_fields['labels'] = config.pop('labels', None)
         resources_fields['_docker_login_config'] = config.pop(
             '_docker_login_config', None)
+        resources_fields['_docker_username_for_runpod'] = config.pop(
+            '_docker_username_for_runpod', None)
         resources_fields['_is_image_managed'] = config.pop(
             '_is_image_managed', None)
         resources_fields['_requires_fuse'] = config.pop('_requires_fuse', None)
@@ -1486,6 +1509,9 @@ class Resources:
         if self._docker_login_config is not None:
             config['_docker_login_config'] = dataclasses.asdict(
                 self._docker_login_config)
+        if self._docker_username_for_runpod is not None:
+            config['_docker_username_for_runpod'] = (
+                self._docker_username_for_runpod)
         add_if_not_none('_cluster_config_overrides',
                         self._cluster_config_overrides)
         if self._is_image_managed is not None:

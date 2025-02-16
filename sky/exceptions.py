@@ -81,6 +81,14 @@ class ManagedJobReachedMaxRetriesError(Exception):
     pass
 
 
+class ManagedJobStatusError(Exception):
+    """Raised when a managed job task status update is invalid.
+
+    For instance, a RUNNING job cannot become SUBMITTED.
+    """
+    pass
+
+
 class ResourcesMismatchError(Exception):
     """Raised when resources are mismatched."""
     pass

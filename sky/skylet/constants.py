@@ -86,7 +86,7 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '11'
+SKYLET_VERSION = '12'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -109,6 +109,8 @@ DOCKER_LOGIN_ENV_VARS = {
     DOCKER_PASSWORD_ENV_VAR,
     DOCKER_SERVER_ENV_VAR,
 }
+
+RUNPOD_DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_RUNPOD_DOCKER_USERNAME'
 
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
@@ -278,7 +280,7 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
-# The default idle timeout for SkyPilot controllers. This include spot
+# The default idle timeout for SkyPilot controllers. This include jobs
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10

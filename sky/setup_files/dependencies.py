@@ -52,15 +52,12 @@ local_ray = [
 
 remote = [
     # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
     # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
     # fails to start when ray start is called (#2054).
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < \'3.10\' and sys_platform == \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
-    'grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= \'3.10\' and sys_platform == \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
-    # Original issue: https://github.com/ray-project/ray/issues/33833
-    'grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < \'3.10\' and sys_platform != \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
-    'grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= \'3.10\' and sys_platform != \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
+    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
+    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
@@ -131,6 +128,7 @@ extras_require: Dict[str, List[str]] = {
     'cudo': ['cudo-compute>=0.1.10'],
     'paperspace': [],  # No dependencies needed for paperspace
     'do': ['pydo>=0.3.0', 'azure-core>=1.24.0', 'azure-common'],
+    'vast': ['vastai-sdk>=0.1.12'],
     'vsphere': [
         'pyvmomi==8.0.1.0.2',
         # vsphere-automation-sdk is also required, but it does not have

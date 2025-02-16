@@ -1,5 +1,23 @@
 #!/bin/bash
 
+# Function to check if file exists and is less than 24 hours old
+check_file_age() {
+    if [ -f "$1" ] && [ $(( $(date +%s) - $(stat -f %m "$1" 2>/dev/null || stat -c %Y "$1" 2>/dev/null) )) -lt 86400 ]; then
+        return 0  # File exists and is recent
+    fi
+    return 1  # File doesn't exist or is old
+}
+
+# Only run sky show-gpus commands if output files don't exist or are old
+if ! check_file_age "source/compute/show-gpus-all.txt"; then
+    sky show-gpus -a > source/compute/show-gpus-all.txt
+    sed -i '' '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt && echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
+fi
+
+if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
+    sky show-gpus H100:8 > source/compute/show-gpus-h100-8.txt
+fi
+
 rm -rf build docs
 
 # MacOS and GNU `script` have different usages

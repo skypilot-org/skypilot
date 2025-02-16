@@ -47,6 +47,7 @@ from sky.data.data_utils import Rclone
 
 
 # ---------- file_mounts ----------
+@pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -104,6 +105,7 @@ def test_oci_mounts():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -318,6 +320,8 @@ def test_kubernetes_context_switch():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_vast  # Requires AWS
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize(
     'image_id',
     [
@@ -850,16 +854,18 @@ class TestStorageWithCredentials:
                                           persistent=persistent,
                                           mode=mode,
                                           _bucket_sub_path=_bucket_sub_path)
-        yield storage_obj
-        handle = global_user_state.get_handle_from_storage_name(
-            storage_obj.name)
-        if handle:
-            # If handle exists, delete manually
-            # TODO(romilb): This is potentially risky - if the delete method has
-            #   bugs, this can cause resource leaks. Ideally we should manually
-            #   eject storage from global_user_state and delete the bucket using
-            #   boto3 directly.
-            storage_obj.delete()
+        try:
+            yield storage_obj
+        finally:
+            handle = global_user_state.get_handle_from_storage_name(
+                storage_obj.name)
+            if handle:
+                # If handle exists, delete manually
+                # TODO(romilb): This is potentially risky - if the delete method has
+                #   bugs, this can cause resource leaks. Ideally we should manually
+                #   eject storage from global_user_state and delete the bucket using
+                #   boto3 directly.
+                storage_obj.delete()
 
     @pytest.fixture
     def tmp_scratch_storage_obj(self, tmp_bucket_name):
@@ -877,17 +883,19 @@ class TestStorageWithCredentials:
             timestamp = str(time.time()).replace('.', '')
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}')
             storage_mult_obj.append(store_obj)
-        yield storage_mult_obj
-        for storage_obj in storage_mult_obj:
-            handle = global_user_state.get_handle_from_storage_name(
-                storage_obj.name)
-            if handle:
-                # If handle exists, delete manually
-                # TODO(romilb): This is potentially risky - if the delete method has
-                # bugs, this can cause resource leaks. Ideally we should manually
-                # eject storage from global_user_state and delete the bucket using
-                # boto3 directly.
-                storage_obj.delete()
+        try:
+            yield storage_mult_obj
+        finally:
+            for storage_obj in storage_mult_obj:
+                handle = global_user_state.get_handle_from_storage_name(
+                    storage_obj.name)
+                if handle:
+                    # If handle exists, delete manually
+                    # TODO(romilb): This is potentially risky - if the delete method has
+                    # bugs, this can cause resource leaks. Ideally we should manually
+                    # eject storage from global_user_state and delete the bucket using
+                    # boto3 directly.
+                    storage_obj.delete()
 
     @pytest.fixture
     def tmp_multiple_custom_source_storage_obj(self):
@@ -903,12 +911,14 @@ class TestStorageWithCredentials:
             store_obj = storage_lib.Storage(name=f'sky-test-{timestamp}',
                                             source=src_path)
             storage_mult_obj.append(store_obj)
-        yield storage_mult_obj
-        for storage_obj in storage_mult_obj:
-            handle = global_user_state.get_handle_from_storage_name(
-                storage_obj.name)
-            if handle:
-                storage_obj.delete()
+        try:
+            yield storage_mult_obj
+        finally:
+            for storage_obj in storage_mult_obj:
+                handle = global_user_state.get_handle_from_storage_name(
+                    storage_obj.name)
+                if handle:
+                    storage_obj.delete()
 
     @pytest.fixture
     def tmp_local_storage_obj(self, tmp_bucket_name, tmp_source):
@@ -1056,6 +1066,7 @@ class TestStorageWithCredentials:
         # This does not require any deletion logic because it is a public bucket
         # and should not get added to global_user_state.
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1081,6 +1092,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_local_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         pytest.param(storage_lib.StoreType.S3, marks=pytest.mark.aws),
@@ -1093,7 +1105,14 @@ class TestStorageWithCredentials:
                              store_type):
         # Creates a new bucket with a local source, uploads files to it
         # and deletes it.
-        tmp_local_storage_obj_with_sub_path.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        tmp_local_storage_obj_with_sub_path.add_store(store_type,
+                                                      **region_kwargs)
 
         # Check files under bucket and filter by prefix
         files = self.list_all_files(store_type,
@@ -1134,6 +1153,7 @@ class TestStorageWithCredentials:
         assert tmp_local_storage_obj_with_sub_path.name not in out.decode(
             'utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.xdist_group('multiple_bucket_deletion')
     @pytest.mark.parametrize('store_type', [
@@ -1176,6 +1196,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item not in out for item in storage_obj_name])
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1202,6 +1223,7 @@ class TestStorageWithCredentials:
         ]
         assert all([item in out for item in storage_obj_names])
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1233,6 +1255,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_scratch_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1252,6 +1275,7 @@ class TestStorageWithCredentials:
         output = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_bulk_del_storage_obj.name not in output.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'tmp_public_storage_obj, store_type',
@@ -1272,6 +1296,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert tmp_public_storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'nonexist_bucket_url',
@@ -1353,6 +1378,7 @@ class TestStorageWithCredentials:
                     source=nonexist_bucket_url.format(
                         random_name=nonexist_bucket_name))
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'private_bucket',
@@ -1379,6 +1405,7 @@ class TestStorageWithCredentials:
                     name=private_bucket_name)):
             storage_obj = storage_lib.Storage(source=private_bucket)
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
@@ -1398,7 +1425,13 @@ class TestStorageWithCredentials:
         # sky) and verifies that files are written.
         bucket_name, _ = request.getfixturevalue(ext_bucket_fixture)
         storage_obj = storage_lib.Storage(name=bucket_name, source=tmp_source)
-        storage_obj.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        storage_obj.add_store(store_type, **region_kwargs)
 
         # Check if tmp_source/tmp-file exists in the bucket using aws cli
         out = subprocess.check_output(self.cli_ls_cmd(store_type, bucket_name),
@@ -1420,6 +1453,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls'])
         assert storage_obj.name not in out.decode('utf-8')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     def test_copy_mount_existing_storage(self,
                                          tmp_copy_mnt_existing_storage_obj):
@@ -1432,6 +1466,7 @@ class TestStorageWithCredentials:
         out = subprocess.check_output(['sky', 'storage', 'ls']).decode('utf-8')
         assert storage_name in out, f'Storage {storage_name} not found in sky storage ls.'
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('store_type', [
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
@@ -1442,7 +1477,13 @@ class TestStorageWithCredentials:
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
-        tmp_local_list_storage_obj.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        tmp_local_list_storage_obj.add_store(store_type, **region_kwargs)
 
         # Check if tmp-file exists in the bucket root using cli
         out = subprocess.check_output(self.cli_ls_cmd(
@@ -1460,6 +1501,7 @@ class TestStorageWithCredentials:
             'File not found in bucket - output was : {}'.format(out.decode
                                                                 ('utf-8'))
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('invalid_name_list, store_type',
                              [(AWS_INVALID_NAMES, storage_lib.StoreType.S3),
@@ -1481,6 +1523,7 @@ class TestStorageWithCredentials:
                 storage_obj = storage_lib.Storage(name=name)
                 storage_obj.add_store(store_type)
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize(
         'gitignore_structure, store_type',
@@ -1495,7 +1538,13 @@ class TestStorageWithCredentials:
                                                      tmp_gitignore_storage_obj):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
-        tmp_gitignore_storage_obj.add_store(store_type)
+        region_kwargs = {}
+        if store_type == storage_lib.StoreType.AZURE:
+            # We have to specify the region for Azure storage, as the default
+            # Azure storage account is in centralus region.
+            region_kwargs['region'] = 'centralus'
+
+        tmp_gitignore_storage_obj.add_store(store_type, **region_kwargs)
         upload_file_name = 'included'
         # Count the number of files with the given file name
         up_cmd = self.cli_count_name_in_bucket(store_type, \
@@ -1518,6 +1567,7 @@ class TestStorageWithCredentials:
         assert '4' in cnt_output.decode('utf-8'), \
                'Some items listed in .gitignore and .git/info/exclude are not excluded.'
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
                              [('tmp_awscli_bucket', storage_lib.StoreType.S3),
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
@@ -1556,6 +1606,7 @@ class TestStorageWithCredentials:
         if handle:
             storage_obj.delete()
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('region', [
         'ap-northeast-1', 'ap-northeast-2', 'ap-northeast-3', 'ap-south-1',
@@ -1588,6 +1639,7 @@ class TestStorageWithCredentials:
         assert 'tmp-file' in output, (
             f'tmp-file not found in bucket - output of {ls_cmd} was: {output}')
 
+    @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
     @pytest.mark.parametrize('region', [
         'northamerica-northeast1', 'northamerica-northeast2', 'us-central1',
