@@ -1,0 +1,27 @@
+resources:
+  cpus: 1
+  # Add GPUs here
+
+envs:
+  DATA_BUCKET_NAME: sky-demo-data-test
+  DATA_BUCKET_STORE_TYPE: s3
+
+file_mounts:
+  /data:
+    name: $DATA_BUCKET_NAME
+    store: $DATA_BUCKET_STORE_TYPE
+
+setup: |
+  echo "Setting up dependencies for eval..."
+
+run: |
+  echo "Evaluating the trained model..."
+  
+  # Run a mock evaluation job that reads the trained model from /data/trained_model.txt
+  cat /data/trained_model.txt || true
+  # Generate a mock accuracy
+  ACCURACY=$(shuf -i 90-100 -n 1)
+  echo "Metric - accuracy: $ACCURACY%"
+  echo "Evaluation report" > /data/evaluation_report.txt
+  
+  echo "Evaluation completed, report written to $DATA_BUCKET_NAME"

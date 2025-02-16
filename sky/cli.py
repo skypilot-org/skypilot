@@ -26,62 +26,66 @@ each other.
 import copy
 import datetime
 import functools
-import multiprocessing
+import getpass
 import os
 import shlex
 import shutil
-import signal
 import subprocess
 import sys
 import textwrap
-import time
+import traceback
 import typing
-from typing import Any, Dict, List, Optional, Tuple, Union
-import webbrowser
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 
 import click
 import colorama
 import dotenv
+import requests as requests_lib
 from rich import progress as rich_progress
 import yaml
 
 import sky
-from sky import admin_policy
 from sky import backends
-from sky import check as sky_check
-from sky import clouds as sky_clouds
-from sky import core
+from sky import clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import jobs as managed_jobs
+from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import common as adaptors_common
-from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
+from sky.client import sdk
 from sky.clouds import service_catalog
 from sky.data import storage_utils
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
+from sky.server import common as server_common
+from sky.server import constants as server_constants
+from sky.server.requests import requests
 from sky.skylet import constants
 from sky.skylet import job_lib
-from sky.skylet import log_lib
 from sky.usage import usage_lib
-from sky.utils import admin_policy_utils
+from sky.utils import annotations
+from sky.utils import cluster_utils
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import log_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 from sky.utils.cli_utils import status_utils
 
 if typing.TYPE_CHECKING:
-    from sky.backends import backend as backend_lib
+    import types
 
 pd = adaptors_common.LazyImport('pandas')
 logger = sky_logging.init_logger(__name__)
@@ -101,23 +105,92 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
     '{cluster_num} cluster{plural} {verb}. Please specify {cause} '
     'cluster to show its {property}.\nUsage: `sky status --{flag} <cluster>`')
 
-_ENDPOINTS_RETRY_MESSAGE = ('If the cluster was recently started, '
-                            'please retry after a while.')
-
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
 
 
-def _get_glob_clusters(clusters: List[str], silent: bool = False) -> List[str]:
-    """Returns a list of clusters that match the glob pattern."""
-    glob_clusters = []
-    for cluster in clusters:
-        glob_cluster = global_user_state.get_glob_cluster_names(cluster)
-        if not glob_cluster and not silent:
-            click.echo(f'Cluster {cluster} not found.')
-        glob_clusters.extend(glob_cluster)
-    return list(set(glob_clusters))
+def _get_cluster_records_and_set_ssh_config(
+    clusters: Optional[List[str]],
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
+    all_users: bool = False,
+) -> List[dict]:
+    """Returns a list of clusters that match the glob pattern.
+
+    Args:
+        clusters: A list of cluster names to query. If None, query all clusters.
+        refresh: The refresh mode for the status command.
+        all_users: Whether to query clusters from all users.
+            If clusters is not None, this field is ignored because cluster list
+            can include other users' clusters.
+    """
+    # TODO(zhwu): we should move this function into SDK.
+    # TODO(zhwu): this additional RTT makes CLIs slow. We should optimize this.
+    if clusters is not None:
+        all_users = True
+    request_id = sdk.status(clusters, refresh=refresh, all_users=all_users)
+    cluster_records = sdk.stream_and_get(request_id)
+    # Update the SSH config for all clusters
+    for record in cluster_records:
+        handle = record['handle']
+        if handle is not None and handle.cached_external_ips is not None:
+            credentials = record['credentials']
+            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+                # Replace the proxy command to proxy through the SkyPilot API
+                # server with websocket.
+                key_path = (
+                    cluster_utils.SSHConfigHelper.generate_local_key_file(
+                        handle.cluster_name, credentials))
+                # Instead of directly use websocket_proxy.py, we add an
+                # additional proxy, so that ssh can use the head pod in the
+                # cluster to jump to worker pods.
+                proxy_command = (
+                    f'ssh -tt -i {key_path} '
+                    '-o StrictHostKeyChecking=no '
+                    '-o UserKnownHostsFile=/dev/null '
+                    '-o IdentitiesOnly=yes '
+                    '-W %h:%p '
+                    f'{handle.ssh_user}@127.0.0.1 '
+                    '-o ProxyCommand='
+                    # TODO(zhwu): write the template to a temp file, don't use
+                    # the one in skypilot repo, to avoid changing the file when
+                    # updating skypilot.
+                    f'\'{sys.executable} {sky.__root_dir__}/templates/'
+                    f'websocket_proxy.py '
+                    f'{server_common.get_server_url().split("://")[1]} '
+                    f'{handle.cluster_name}\'')
+                credentials['ssh_proxy_command'] = proxy_command
+            cluster_utils.SSHConfigHelper.add_cluster(
+                handle.cluster_name,
+                handle.cached_external_ips,
+                credentials,
+                handle.cached_external_ssh_ports,
+                handle.docker_user,
+                handle.ssh_user,
+            )
+        else:
+            # If the cluster is not UP or does not have IPs, we need to remove
+            # the cluster from the SSH config.
+            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+
+    # Clean up SSH configs for clusters that do not exist.
+    #
+    # We do this in a conservative way: only when a query is made for all users
+    # or specific clusters. Without those, the table returned only contains the
+    # current user's clusters, and the information is not enough for
+    # removing clusters, because SkyPilot has no idea whether to remove
+    # ssh config of a cluster from another user.
+    clusters_exists = set(record['name'] for record in cluster_records)
+    if clusters is not None:
+        for cluster in clusters:
+            if cluster not in clusters_exists:
+                cluster_utils.SSHConfigHelper.remove_cluster(cluster)
+    elif all_users:
+        for cluster_name in cluster_utils.SSHConfigHelper.list_cluster_names():
+            if cluster_name not in clusters_exists:
+                cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
+
+    return cluster_records
 
 
 def _get_glob_storages(storages: List[str]) -> List[str]:
@@ -147,6 +220,44 @@ def _parse_env_var(env_var: str) -> Tuple[str, str]:
     return ret[0], ret[1]
 
 
+def _async_call_or_wait(request_id: str, async_call: bool,
+                        request_name: str) -> Any:
+    short_request_id = request_id[:8]
+    if not async_call:
+        try:
+            return sdk.stream_and_get(request_id)
+        except KeyboardInterrupt:
+            logger.info(
+                ux_utils.starting_message('Request will continue running '
+                                          'asynchronously.') +
+                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}View logs: '
+                f'{ux_utils.BOLD}sky api logs {short_request_id}'
+                f'{colorama.Style.RESET_ALL}'
+                f'\n{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, '
+                'visit: '
+                f'{server_common.get_server_url()}/api/stream?'
+                f'request_id={short_request_id}'
+                f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
+                'the request, run: '
+                f'{ux_utils.BOLD}sky api cancel {short_request_id}'
+                f'{colorama.Style.RESET_ALL}'
+                f'\n{colorama.Style.RESET_ALL}')
+            raise
+    else:
+        click.secho(f'Submitted {request_name} request: {request_id}',
+                    fg='green')
+        click.echo(
+            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
+            f'sky api logs {short_request_id}{colorama.Style.RESET_ALL}\n'
+            f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
+            f'{server_common.get_server_url()}/api/stream?'
+            f'request_id={short_request_id}'
+            f'\n{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}To cancel '
+            'the request, run: '
+            f'{ux_utils.BOLD}sky api cancel {short_request_id}'
+            f'{colorama.Style.RESET_ALL}\n')
+
+
 def _merge_env_vars(env_dict: Optional[Dict[str, str]],
                     env_list: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
     """Merges all values from env_list into env_dict."""
@@ -156,6 +267,15 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
         env_dict[key] = value
     return list(env_dict.items())
 
+
+_COMMON_OPTIONS = [
+    click.option('--async/--no-async',
+                 'async_call',
+                 required=False,
+                 is_flag=True,
+                 default=False,
+                 help=('Run the command asynchronously.'))
+]
 
 _TASK_OPTIONS = [
     click.option(
@@ -308,14 +428,28 @@ def _complete_cluster_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for cluster names."""
     del ctx, param  # Unused.
-    return global_user_state.get_cluster_names_start_with(incomplete)
+    # TODO(zhwu): we send requests to API server for completion, which can cause
+    # large latency. We should investigate caching mechanism if needed.
+    response = requests_lib.get(
+        f'{server_common.get_server_url()}'
+        f'/api/completion/cluster_name?incomplete={incomplete}',
+        timeout=2.0,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def _complete_storage_name(ctx: click.Context, param: click.Parameter,
                            incomplete: str) -> List[str]:
     """Handle shell completion for storage names."""
     del ctx, param  # Unused.
-    return global_user_state.get_storage_names_start_with(incomplete)
+    response = requests_lib.get(
+        f'{server_common.get_server_url()}'
+        f'/api/completion/storage_name?incomplete={incomplete}',
+        timeout=2.0,
+    )
+    response.raise_for_status()
+    return response.json()
 
 
 def _complete_file_name(ctx: click.Context, param: click.Parameter,
@@ -493,7 +627,7 @@ def _parse_override_params(
         if cloud.lower() == 'none':
             override_params['cloud'] = None
         else:
-            override_params['cloud'] = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
+            override_params['cloud'] = registry.CLOUD_REGISTRY.from_str(cloud)
     if region is not None:
         if region.lower() == 'none':
             override_params['region'] = None
@@ -548,99 +682,6 @@ def _parse_override_params(
         else:
             override_params['ports'] = ports
     return override_params
-
-
-def _launch_with_confirm(
-    task: sky.Task,
-    backend: backends.Backend,
-    cluster: Optional[str],
-    *,
-    dryrun: bool,
-    detach_run: bool,
-    detach_setup: bool = False,
-    no_confirm: bool = False,
-    idle_minutes_to_autostop: Optional[int] = None,
-    down: bool = False,  # pylint: disable=redefined-outer-name
-    retry_until_up: bool = False,
-    no_setup: bool = False,
-    clone_disk_from: Optional[str] = None,
-    fast: bool = False,
-):
-    """Launch a cluster with a Task."""
-    if cluster is None:
-        cluster = backend_utils.generate_cluster_name()
-
-    clone_source_str = ''
-    if clone_disk_from is not None:
-        clone_source_str = f' from the disk of {clone_disk_from!r}'
-        task, _ = backend_utils.check_can_clone_disk_and_override_task(
-            clone_disk_from, cluster, task)
-
-    with sky.Dag() as dag:
-        dag.add(task)
-
-    maybe_status, handle = backend_utils.refresh_cluster_status_handle(cluster)
-    if maybe_status is None:
-        # Show the optimize log before the prompt if the cluster does not exist.
-        try:
-            sky_check.get_cached_enabled_clouds_or_refresh(
-                raise_if_no_cloud_access=True)
-        except exceptions.NoCloudAccessError as e:
-            # Catch the exception where the public cloud is not enabled, and
-            # make it yellow for better visibility.
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(f'{colorama.Fore.YELLOW}{e}'
-                                   f'{colorama.Style.RESET_ALL}') from e
-        dag, _ = admin_policy_utils.apply(
-            dag,
-            request_options=admin_policy.RequestOptions(
-                cluster_name=cluster,
-                idle_minutes_to_autostop=idle_minutes_to_autostop,
-                down=down,
-                dryrun=dryrun,
-            ),
-        )
-        dag = sky.optimize(dag)
-    task = dag.tasks[0]
-
-    if handle is not None:
-        backend.check_resources_fit_cluster(handle, task)
-
-    confirm_shown = False
-    if not no_confirm:
-        # Prompt if (1) --cluster is None, or (2) cluster doesn't exist, or (3)
-        # it exists but is STOPPED.
-        prompt = None
-        if maybe_status is None:
-            cluster_str = '' if cluster is None else f' {cluster!r}'
-            prompt = (
-                f'Launching a new cluster{cluster_str}{clone_source_str}. '
-                'Proceed?')
-        elif maybe_status == status_lib.ClusterStatus.STOPPED:
-            prompt = f'Restarting the stopped cluster {cluster!r}. Proceed?'
-        if prompt is not None:
-            confirm_shown = True
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    if not confirm_shown:
-        click.secho('Running on cluster: ', fg='cyan', nl=False)
-        click.secho(cluster)
-
-    sky.launch(
-        dag,
-        dryrun=dryrun,
-        stream_logs=True,
-        cluster_name=cluster,
-        detach_setup=detach_setup,
-        detach_run=detach_run,
-        backend=backend,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        retry_until_up=retry_until_up,
-        no_setup=no_setup,
-        clone_disk_from=clone_disk_from,
-        fast=fast,
-    )
 
 
 def _check_yaml(entrypoint: str) -> Tuple[bool, Optional[Dict[str, Any]]]:
@@ -953,6 +994,7 @@ def _deprecate_and_hide_command(group, command_to_deprecate,
                       prog_name='skypilot',
                       message='%(prog)s, commit %(version)s',
                       help='Show the commit hash and exit')
+@annotations.client_api
 def cli():
     pass
 
@@ -974,19 +1016,8 @@ def cli():
               is_flag=True,
               help='If True, do not actually run the job.')
 @click.option(
-    '--detach-setup',
-    '-s',
-    default=False,
-    is_flag=True,
-    help=
-    ('If True, run setup in non-interactive mode as part of the job itself. '
-     'You can safely ctrl-c to detach from logging, and it will not interrupt '
-     'the setup process. To see the logs again after detaching, use `sky logs`.'
-     ' To cancel setup, cancel the job via `sky cancel`. Useful for long-'
-     'running setup commands.'))
-@click.option(
     '--detach-run',
-    '-d',
+    '-d/-no-d',
     default=False,
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
@@ -994,11 +1025,13 @@ def cli():
 @click.option('--docker',
               'backend_name',
               flag_value=backends.LocalDockerBackend.NAME,
+              default=False,
               hidden=True,
               help=('(Deprecated) Local docker support is deprecated. '
                     'To run locally, create a local Kubernetes cluster with '
                     '``sky local up``.'))
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
+                    _COMMON_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1067,37 +1100,36 @@ def cli():
           'provisioning and setup steps.'))
 @usage_lib.entrypoint
 def launch(
-    entrypoint: Tuple[str, ...],
-    cluster: Optional[str],
-    dryrun: bool,
-    detach_setup: bool,
-    detach_run: bool,
-    backend_name: Optional[str],
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    gpus: Optional[str],
-    cpus: Optional[str],
-    memory: Optional[str],
-    instance_type: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    ports: Tuple[str, ...],
-    idle_minutes_to_autostop: Optional[int],
-    down: bool,  # pylint: disable=redefined-outer-name
-    retry_until_up: bool,
-    yes: bool,
-    no_setup: bool,
-    clone_disk_from: Optional[str],
-    fast: bool,
-):
+        entrypoint: Tuple[str, ...],
+        cluster: Optional[str],
+        dryrun: bool,
+        detach_run: bool,
+        backend_name: Optional[str],
+        name: Optional[str],
+        workdir: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        zone: Optional[str],
+        gpus: Optional[str],
+        cpus: Optional[str],
+        memory: Optional[str],
+        instance_type: Optional[str],
+        num_nodes: Optional[int],
+        use_spot: Optional[bool],
+        image_id: Optional[str],
+        env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]],
+        disk_size: Optional[int],
+        disk_tier: Optional[str],
+        ports: Tuple[str, ...],
+        idle_minutes_to_autostop: Optional[int],
+        down: bool,  # pylint: disable=redefined-outer-name
+        retry_until_up: bool,
+        yes: bool,
+        no_setup: bool,
+        clone_disk_from: Optional[str],
+        fast: bool,
+        async_call: bool):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1107,6 +1139,14 @@ def launch(
     and they undergo job queue scheduling.
     """
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    # TODO(zhwu): the current --async is a bit inconsistent with the direct
+    # sky launch, as `sky api logs` does not contain the logs for the actual job
+    # submitted, while the synchronous way of `sky launch` does. We should
+    # consider having the job logs available in `sky api logs` as well.
+    # Reason for not doing it right now: immediately tailing the logs for the
+    # job can take up resources on the API server. When there are a lot of
+    # `launch` submitted asynchronously, the log tailing may overwhelm the API
+    # server, if the jobs are long running.
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Launching tasks on it')
@@ -1159,19 +1199,35 @@ def launch(
             f'{colorama.Style.RESET_ALL}{colorama.Style.BRIGHT}sky serve up'
             f'{colorama.Style.RESET_ALL}')
 
-    _launch_with_confirm(task,
-                         backend,
-                         cluster,
-                         dryrun=dryrun,
-                         detach_setup=detach_setup,
-                         detach_run=detach_run,
-                         no_confirm=yes,
-                         idle_minutes_to_autostop=idle_minutes_to_autostop,
-                         down=down,
-                         retry_until_up=retry_until_up,
-                         no_setup=no_setup,
-                         clone_disk_from=clone_disk_from,
-                         fast=fast)
+    request_id = sdk.launch(
+        task,
+        dryrun=dryrun,
+        cluster_name=cluster,
+        backend=backend,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        retry_until_up=retry_until_up,
+        no_setup=no_setup,
+        clone_disk_from=clone_disk_from,
+        fast=fast,
+        _need_confirmation=not yes,
+    )
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
+    if not async_call:
+        job_id, handle = job_id_handle
+        if not handle:
+            assert dryrun, 'handle should only be None when dryrun is true'
+            return
+        # Add ssh config for the cluster
+        _get_cluster_records_and_set_ssh_config(
+            clusters=[handle.get_cluster_name()])
+        # job_id will be None if no job was submitted (e.g. no entrypoint
+        # provided)
+        if not detach_run and job_id is not None:
+            sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
+        click.secho(
+            ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
+                                           job_id, handle.get_cluster_name()))
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1199,32 +1255,19 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
+                    _COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(
-    cluster: Optional[str],
-    cluster_option: Optional[str],
-    entrypoint: Tuple[str, ...],
-    detach_run: bool,
-    name: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    workdir: Optional[str],
-    gpus: Optional[str],
-    ports: Tuple[str],
-    instance_type: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-):
+def exec(cluster: Optional[str], cluster_option: Optional[str],
+         entrypoint: Tuple[str, ...], detach_run: bool, name: Optional[str],
+         cloud: Optional[str], region: Optional[str], zone: Optional[str],
+         workdir: Optional[str], gpus: Optional[str], ports: Tuple[str],
+         instance_type: Optional[str], num_nodes: Optional[int],
+         use_spot: Optional[bool], image_id: Optional[str],
+         env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
+         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
+         disk_tier: Optional[str], async_call: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1297,11 +1340,6 @@ def exec(
     env = _merge_env_vars(env_file, env)
     controller_utils.check_cluster_name_not_controller(
         cluster, operation_str='Executing task on it')
-    handle = global_user_state.get_handle_from_cluster_name(cluster)
-    if handle is None:
-        raise click.BadParameter(f'Cluster {cluster!r} not found. '
-                                 'Use `sky launch` to provision first.')
-    backend = backend_utils.get_backend_from_handle(handle)
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -1331,21 +1369,21 @@ def exec(
 
     click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
     click.secho(cluster)
-    sky.exec(task, backend=backend, cluster_name=cluster, detach_run=detach_run)
+    request_id = sdk.exec(task, cluster_name=cluster)
+    job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
+    if not async_call and not detach_run:
+        job_id, _ = job_id_handle
+        sdk.tail_logs(cluster, job_id, follow=True)
 
 
-def _get_managed_jobs(
-        refresh: bool,
-        skip_finished: bool,
+def _handle_jobs_queue_request(
+        request_id: str,
         show_all: bool,
         limit_num_jobs_to_show: bool = False,
         is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
     Args:
-        refresh: Query the latest statuses, restarting the jobs controller if
-            stopped.
-        skip_finished: Show only in-progress jobs.
         show_all: Show all information of each job (e.g., region, price).
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
@@ -1359,14 +1397,13 @@ def _get_managed_jobs(
         msg contains the error message. Otherwise, msg contains the formatted
         managed job table.
     """
+    # TODO(SKY-980): remove unnecessary fallbacks on the client side.
     num_in_progress_jobs = None
+    msg = ''
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        with sky_logging.silent():
-            # Make the call silent
-            managed_jobs_ = managed_jobs.queue(refresh=refresh,
-                                               skip_finished=skip_finished)
+        managed_jobs_ = sdk.get(request_id)
         num_in_progress_jobs = len(set(job['job_id'] for job in managed_jobs_))
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
@@ -1379,16 +1416,18 @@ def _get_managed_jobs(
             msg += (f' (See finished managed jobs: {colorama.Style.BRIGHT}'
                     f'sky jobs queue --refresh{colorama.Style.RESET_ALL})')
     except RuntimeError as e:
-        msg = ''
         try:
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the jobs.
             controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-            record = backend_utils.refresh_cluster_record(
-                controller_type.value.cluster_name,
-                cluster_status_lock_timeout=0)
-            if (record is None or
-                    record['status'] == status_lib.ClusterStatus.STOPPED):
+            # Query status of the controller cluster. We add a wildcard because
+            # the controller cluster name can have a suffix like
+            # '-remote-<hash>' when using remote API server.
+            records = sdk.get(
+                sdk.status(
+                    cluster_names=[controller_type.value.cluster_name + '*']))
+            if (not records or
+                    records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
@@ -1402,8 +1441,12 @@ def _get_managed_jobs(
                 f'Details: {common_utils.format_exception(e, use_bracket=True)}'
             )
     except Exception as e:  # pylint: disable=broad-except
-        msg = ('Failed to query managed jobs: '
-               f'{common_utils.format_exception(e, use_bracket=True)}')
+        msg = ''
+        if env_options.Options.SHOW_DEBUG_INFO.get():
+            msg += traceback.format_exc()
+            msg += '\n'
+        msg += ('Failed to query managed jobs: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
     else:
         max_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS
                             if limit_num_jobs_to_show else None)
@@ -1413,10 +1456,12 @@ def _get_managed_jobs(
     return num_in_progress_jobs, msg
 
 
-def _get_services(service_names: Optional[List[str]],
-                  show_all: bool,
-                  show_endpoint: bool,
-                  is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
+def _handle_services_request(
+        request_id: str,
+        service_names: Optional[List[str]],
+        show_all: bool,
+        show_endpoint: bool,
+        is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
     Args:
@@ -1435,12 +1480,8 @@ def _get_services(service_names: Optional[List[str]],
     try:
         if not is_called_by_user:
             usage_lib.messages.usage.set_internal()
-        with sky_logging.silent():
-            if not service_names:
-                # Change empty list to None
-                service_names = None
-            service_records = serve_lib.status(service_names)
-            num_services = len(service_records)
+        service_records = sdk.get(request_id)
+        num_services = len(service_records)
     except exceptions.ClusterNotUpError as e:
         controller_status = e.cluster_status
         msg = str(e)
@@ -1454,11 +1495,14 @@ def _get_services(service_names: Optional[List[str]],
             # due to the controller being autostopped when querying the
             # services.
             controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-            record = backend_utils.refresh_cluster_record(
-                controller_type.value.cluster_name,
-                cluster_status_lock_timeout=0)
-            if (record is None or
-                    record['status'] == status_lib.ClusterStatus.STOPPED):
+            # Query status of the controller cluster. We add a wildcard because
+            # the controller cluster name can have a suffix like
+            # '-remote-<hash>' when using remote API server.
+            records = sdk.get(
+                sdk.status(
+                    cluster_names=[controller_type.value.cluster_name + '*']))
+            if (not records or
+                    records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
@@ -1482,7 +1526,8 @@ def _get_services(service_names: Optional[List[str]],
                     f'{service_num} service{plural} found. Please specify '
                     'an existing service to show its endpoint. Usage: '
                     'sky serve status --endpoint <service-name>')
-            msg = serve_lib.get_endpoint(service_records[0])
+            endpoint = service_records[0]['endpoint']
+            msg = '-' if endpoint is None else endpoint
         else:
             msg = serve_lib.format_service_table(service_records, show_all)
             service_not_found_msg = ''
@@ -1503,8 +1548,8 @@ def _status_kubernetes(show_all: bool):
     Args:
         show_all (bool): Show all job information (e.g., start time, failures).
     """
-    all_clusters, unmanaged_clusters, all_jobs, context = (
-        core.status_kubernetes())
+    all_clusters, unmanaged_clusters, all_jobs, context = (sdk.stream_and_get(
+        sdk.status_kubernetes()))
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Kubernetes cluster state (context: {context})'
                f'{colorama.Style.RESET_ALL}')
@@ -1524,9 +1569,76 @@ def _status_kubernetes(show_all: bool):
                    f'{colorama.Style.RESET_ALL}')
 
 
+def _show_endpoint(query_clusters: Optional[List[str]],
+                   cluster_records: List[Dict[str, Any]], ip: bool,
+                   endpoints: bool, endpoint: Optional[int]) -> None:
+    show_endpoints = endpoints or endpoint is not None
+    show_single_endpoint = endpoint is not None
+    if len(cluster_records) != 1:
+        with ux_utils.print_exception_no_traceback():
+            plural = 's' if len(cluster_records) > 1 else ''
+            if cluster_records:
+                cluster_num = str(len(cluster_records))
+            else:
+                cluster_num = (f'{query_clusters[0]!r}'
+                               if query_clusters else 'No')
+            verb = 'found' if cluster_records else 'not found'
+            cause = 'a single'
+            if query_clusters and len(query_clusters) > 1:
+                cause = 'an existing'
+            raise ValueError(
+                _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
+                    cluster_num=cluster_num,
+                    plural=plural,
+                    verb=verb,
+                    cause=cause,
+                    property='IP address' if ip else 'endpoint(s)',
+                    flag='ip' if ip else
+                    ('endpoint port' if show_single_endpoint else 'endpoints')))
+
+    cluster_record = cluster_records[0]
+    if cluster_record['status'] != status_lib.ClusterStatus.UP:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
+                               'is not in UP status.')
+    handle = cluster_record['handle']
+    if not isinstance(handle, backends.CloudVmRayResourceHandle):
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Querying IP address is not supported '
+                             'for local clusters.')
+
+    head_ip = handle.external_ips()[0]
+    # The endpoint request is relatively fast, so we don't add special handling
+    # for keyboard interrupt and abort the request to avoid additional latency.
+    if show_endpoints:
+        if endpoint:
+            request_id = sdk.endpoints(cluster_record['name'], endpoint)
+            cluster_endpoints = sdk.stream_and_get(request_id)
+            cluster_endpoint = cluster_endpoints.get(str(endpoint), None)
+            if not cluster_endpoint:
+                raise click.Abort(f'Endpoint {endpoint} not found for cluster '
+                                  f'{cluster_record["name"]!r}.')
+            click.echo(cluster_endpoint)
+        else:
+            request_id = sdk.endpoints(cluster_record['name'])
+            cluster_endpoints = sdk.stream_and_get(request_id)
+            assert isinstance(cluster_endpoints, dict)
+            if not cluster_endpoints:
+                raise click.Abort(f'No endpoint found for cluster '
+                                  f'{cluster_record["name"]!r}.')
+            for port, port_endpoint in cluster_endpoints.items():
+                click.echo(f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
+                           f'{colorama.Style.RESET_ALL}: '
+                           f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                           f'{port_endpoint}{colorama.Style.RESET_ALL}')
+        return
+    click.echo(head_ip)
+    return
+
+
 @cli.command()
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
@@ -1582,11 +1694,19 @@ def _status_kubernetes(show_all: bool):
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_cluster_name))
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all clusters, including those not owned by the '
+              'current user.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
+def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
-           show_services: bool, kubernetes: bool, clusters: List[str]):
+           show_services: bool, kubernetes: bool, clusters: List[str],
+           all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1601,11 +1721,15 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
     ``sky status --endpoints mycluster``. To query a single endpoint, you
     can use ``sky status mycluster --endpoint 8888``.
 
+    Running `sky status` will update the ssh config for the clusters locally, so
+    that you can directly ssh into the clusters or connect to the clusters with
+    vscode.
+
     The following fields for each cluster are recorded: cluster name, time
     since last launch, resources, region, zone, hourly price, status, autostop,
     command.
 
-    Display all fields using ``sky status -a``.
+    Display all fields using ``sky status -v``.
 
     Each cluster can have one of the following statuses:
 
@@ -1646,245 +1770,160 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
       cluster statuses from the cloud providers.
     """
     if kubernetes:
-        _status_kubernetes(all)
+        _status_kubernetes(verbose)
         return
-    # Using a pool with 2 worker to run the managed job query and sky serve
-    # service query in parallel to speed up. The pool provides a AsyncResult
-    # object that can be used as a future.
-    with multiprocessing.Pool(2) as pool:
-        # Do not show job queue if user specifies clusters, and if user
-        # specifies --ip or --endpoint(s).
-        show_managed_jobs = show_managed_jobs and not any(
-            [clusters, ip, endpoints])
-        show_endpoints = endpoints or endpoint is not None
-        show_single_endpoint = endpoint is not None
-        if show_managed_jobs:
-            # Run managed job query in parallel to speed up the status query.
-            managed_jobs_future = pool.apply_async(
-                _get_managed_jobs,
-                kwds=dict(refresh=False,
-                          skip_finished=True,
-                          show_all=False,
-                          limit_num_jobs_to_show=not all,
-                          is_called_by_user=False))
+    # Do not show job queue if user specifies clusters, and if user
+    # specifies --ip or --endpoint(s).
+    show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
+    if show_managed_jobs:
+        managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
+                                                           skip_finished=True)
+    show_endpoints = endpoints or endpoint is not None
+    show_single_endpoint = endpoint is not None
+    show_services = show_services and not any([clusters, ip, endpoints])
+    if show_services:
+        # Run the sky serve service query in parallel to speed up the
+        # status query.
+        service_status_request_id = serve_lib.status(service_names=None)
 
-        show_services = show_services and not clusters and not ip
-        if show_services:
-            # Run the sky serve service query in parallel to speed up the
-            # status query.
-            services_future = pool.apply_async(_get_services,
-                                               kwds=dict(
-                                                   service_names=None,
-                                                   show_all=False,
-                                                   show_endpoint=False,
-                                                   is_called_by_user=False))
-        if ip or show_endpoints:
-            if refresh:
-                raise click.UsageError(
-                    'Using --ip or --endpoint(s) with --refresh is not'
-                    'supported for now. To fix, refresh first, '
-                    'then query the IP or endpoint.')
+    if ip or show_endpoints:
+        if refresh:
+            raise click.UsageError(
+                'Using --ip or --endpoint(s) with --refresh is not'
+                'supported for now. To fix, refresh first, '
+                'then query the IP or endpoint.')
 
-            if ip and show_endpoints:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify both --ip and --endpoint(s) '
-                        'at the same time.')
+        if ip and show_endpoints:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('Cannot specify both --ip and --endpoint(s) '
+                                 'at the same time.')
 
-            if endpoint is not None and endpoints:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'Cannot specify both --endpoint and --endpoints '
-                        'at the same time.')
+        if endpoint is not None and endpoints:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Cannot specify both --endpoint and --endpoints '
+                    'at the same time.')
 
-            if len(clusters) != 1:
-                with ux_utils.print_exception_no_traceback():
-                    plural = 's' if len(clusters) > 1 else ''
-                    cluster_num = (str(len(clusters)) if clusters else 'No')
-                    cause = 'a single' if len(clusters) > 1 else 'an existing'
-                    raise ValueError(
-                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=cluster_num,
-                            plural=plural,
-                            verb='specified',
-                            cause=cause,
-                            property='IP address' if ip else 'endpoint(s)',
-                            flag='ip' if ip else
-                            ('endpoint port'
-                             if show_single_endpoint else 'endpoints')))
+        if len(clusters) != 1:
+            with ux_utils.print_exception_no_traceback():
+                plural = 's' if len(clusters) > 1 else ''
+                cluster_num = (str(len(clusters)) if clusters else 'No')
+                cause = 'a single' if len(clusters) > 1 else 'an existing'
+                raise ValueError(
+                    _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
+                        cluster_num=cluster_num,
+                        plural=plural,
+                        verb='specified',
+                        cause=cause,
+                        property='IP address' if ip else 'endpoint(s)',
+                        flag='ip' if ip else
+                        ('endpoint port'
+                         if show_single_endpoint else 'endpoints')))
+    else:
+        click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
+                   f'{colorama.Style.RESET_ALL}')
+    query_clusters: Optional[List[str]] = None if not clusters else clusters
+    refresh_mode = common.StatusRefreshMode.NONE
+    if refresh:
+        refresh_mode = common.StatusRefreshMode.FORCE
+    cluster_records = _get_cluster_records_and_set_ssh_config(
+        query_clusters, refresh_mode, all_users)
+
+    # TOOD(zhwu): setup the ssh config for status
+    if ip or show_endpoints:
+        _show_endpoint(query_clusters, cluster_records, ip, endpoints, endpoint)
+        return
+    hints = []
+    normal_clusters = []
+    controllers = []
+    for cluster_record in cluster_records:
+        cluster_name = cluster_record['name']
+        controller = controller_utils.Controllers.from_name(cluster_name)
+        if controller is not None:
+            controllers.append(cluster_record)
         else:
-            click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
-                       f'{colorama.Style.RESET_ALL}')
-        query_clusters: Optional[List[str]] = None
-        if clusters:
-            query_clusters = _get_glob_clusters(clusters, silent=ip)
-        cluster_records = core.status(cluster_names=query_clusters,
-                                      refresh=refresh)
-        if ip or show_endpoints:
-            if len(cluster_records) != 1:
-                with ux_utils.print_exception_no_traceback():
-                    plural = 's' if len(cluster_records) > 1 else ''
-                    cluster_num = (str(len(cluster_records))
-                                   if cluster_records else f'{clusters[0]!r}')
-                    verb = 'found' if cluster_records else 'not found'
-                    cause = 'a single' if len(clusters) > 1 else 'an existing'
-                    raise ValueError(
-                        _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE.format(
-                            cluster_num=cluster_num,
-                            plural=plural,
-                            verb=verb,
-                            cause=cause,
-                            property='IP address' if ip else 'endpoint(s)',
-                            flag='ip' if ip else
-                            ('endpoint port'
-                             if show_single_endpoint else 'endpoints')))
+            normal_clusters.append(cluster_record)
 
-            cluster_record = cluster_records[0]
-            if cluster_record['status'] != status_lib.ClusterStatus.UP:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(f'Cluster {cluster_record["name"]!r} '
-                                       'is not in UP status.')
-            handle = cluster_record['handle']
-            if not isinstance(handle, backends.CloudVmRayResourceHandle):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError('Querying IP address is not supported '
-                                     'for local clusters.')
+    num_pending_autostop = 0
+    num_pending_autostop += status_utils.show_status_table(
+        normal_clusters + controllers, verbose, all_users, query_clusters)
 
-            head_ip = handle.external_ips()[0]
-            if show_endpoints:
-                if endpoint:
-                    cluster_endpoint = core.endpoints(cluster_record['name'],
-                                                      endpoint).get(
-                                                          endpoint, None)
-                    if not cluster_endpoint:
-                        raise click.Abort(
-                            f'Endpoint {endpoint} not found for cluster '
-                            f'{cluster_record["name"]!r}.')
-                    click.echo(cluster_endpoint)
-                else:
-                    cluster_endpoints = core.endpoints(cluster_record['name'])
-                    assert isinstance(cluster_endpoints, dict)
-                    if not cluster_endpoints:
-                        raise click.Abort(f'No endpoint found for cluster '
-                                          f'{cluster_record["name"]!r}.')
-                    for port, port_endpoint in cluster_endpoints.items():
-                        click.echo(
-                            f'{colorama.Fore.BLUE}{colorama.Style.BRIGHT}{port}'
-                            f'{colorama.Style.RESET_ALL}: '
-                            f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                            f'{port_endpoint}{colorama.Style.RESET_ALL}')
-                return
-            click.echo(head_ip)
-            return
-        hints = []
-        normal_clusters = []
-        controllers = []
-        for cluster_record in cluster_records:
-            cluster_name = cluster_record['name']
-            controller = controller_utils.Controllers.from_name(cluster_name)
-            if controller is not None:
-                controllers.append(cluster_record)
-            else:
-                normal_clusters.append(cluster_record)
-
-        num_pending_autostop = 0
-        num_pending_autostop += status_utils.show_status_table(
-            normal_clusters + controllers, all)
-
-        def _try_get_future_result(future) -> Tuple[bool, Any]:
-            result = None
-            interrupted = False
+    managed_jobs_query_interrupted = False
+    if show_managed_jobs:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Managed jobs{colorama.Style.RESET_ALL}')
+        with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
             try:
-                result = future.get()
+                num_in_progress_jobs, msg = _handle_jobs_queue_request(
+                    managed_jobs_queue_request_id,
+                    show_all=False,
+                    limit_num_jobs_to_show=not all,
+                    is_called_by_user=False)
             except KeyboardInterrupt:
-                pool.terminate()
-                interrupted = True
-            return interrupted, result
-
-        managed_jobs_query_interrupted = False
-        if show_managed_jobs:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Managed jobs{colorama.Style.RESET_ALL}')
-            with rich_utils.safe_status(
-                    ux_utils.spinner_message('Checking managed jobs')):
-                managed_jobs_query_interrupted, result = _try_get_future_result(
-                    managed_jobs_future)
-                if managed_jobs_query_interrupted:
-                    # Set to -1, so that the controller is not considered
-                    # down, and the hint for showing sky jobs queue
-                    # will still be shown.
-                    num_in_progress_jobs = -1
-                    msg = 'KeyboardInterrupt'
-                else:
-                    num_in_progress_jobs, msg = result
-
-            click.echo(msg)
-            if num_in_progress_jobs is not None:
-                # jobs controller is UP.
-                job_info = ''
-                if num_in_progress_jobs > 0:
-                    plural_and_verb = ' is'
-                    if num_in_progress_jobs > 1:
-                        plural_and_verb = 's are'
-                    job_info = (
-                        f'{num_in_progress_jobs} managed job{plural_and_verb} '
-                        'in progress')
-                    if (num_in_progress_jobs >
-                            _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS):
-                        job_info += (
-                            f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
-                            'ones shown)')
-                    job_info += '. '
-                hints.append(
-                    controller_utils.Controllers.JOBS_CONTROLLER.value.
-                    in_progress_hint.format(job_info=job_info))
-
-        if show_services:
-            click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                       f'Services{colorama.Style.RESET_ALL}')
-            num_services = None
-            if managed_jobs_query_interrupted:
-                # The pool is terminated, so we cannot run the service query.
+                sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
+                managed_jobs_query_interrupted = True
+                # Set to -1, so that the controller is not considered
+                # down, and the hint for showing sky jobs queue
+                # will still be shown.
+                num_in_progress_jobs = -1
                 msg = 'KeyboardInterrupt'
-            else:
-                with rich_utils.safe_status(
-                        ux_utils.spinner_message('Checking services')):
-                    interrupted, result = _try_get_future_result(
-                        services_future)
-                    if interrupted:
-                        num_services = -1
-                        msg = 'KeyboardInterrupt'
-                    else:
-                        num_services, msg = result
-            click.echo(msg)
-            if num_services is not None:
-                hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                             value.in_progress_hint)
 
-        if show_managed_jobs or show_services:
-            try:
-                pool.close()
-                pool.join()
-            except SystemExit as e:
-                # This is to avoid a "Exception ignored" problem caused by
-                # ray worker setting the sigterm handler to sys.exit(15)
-                # (see ray/_private/worker.py).
-                # TODO (zhwu): Remove any importing of ray in SkyPilot.
-                if e.code != 15:
-                    raise
+        click.echo(msg)
+        if num_in_progress_jobs is not None:
+            # jobs controller is UP.
+            job_info = ''
+            if num_in_progress_jobs > 0:
+                plural_and_verb = ' is'
+                if num_in_progress_jobs > 1:
+                    plural_and_verb = 's are'
+                job_info = (
+                    f'{num_in_progress_jobs} managed job{plural_and_verb} '
+                    'in progress')
+                if num_in_progress_jobs > _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS:
+                    job_info += (
+                        f' ({_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} latest '
+                        'ones shown)')
+                job_info += '. '
+            hints.append(
+                controller_utils.Controllers.JOBS_CONTROLLER.value.
+                in_progress_hint.format(job_info=job_info))
 
-        if num_pending_autostop > 0 and not refresh:
-            # Don't print this hint if there's no pending autostop or user has
-            # already passed --refresh.
-            plural_and_verb = ' has'
-            if num_pending_autostop > 1:
-                plural_and_verb = 's have'
-            hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
-                         'auto{stop,down} scheduled. Refresh statuses with: '
-                         f'{colorama.Style.BRIGHT}sky status --refresh'
-                         f'{colorama.Style.RESET_ALL}')
-        if hints:
-            click.echo('\n' + '\n'.join(hints))
+    if show_services:
+        click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Services{colorama.Style.RESET_ALL}')
+        num_services = None
+        if managed_jobs_query_interrupted:
+            msg = 'KeyboardInterrupt'
+        else:
+            with rich_utils.client_status('[cyan]Checking services[/]'):
+                try:
+                    num_services, msg = _handle_services_request(
+                        service_status_request_id,
+                        service_names=None,
+                        show_all=False,
+                        show_endpoint=False,
+                        is_called_by_user=False)
+                except KeyboardInterrupt:
+                    sdk.api_cancel(service_status_request_id, silent=True)
+                    num_services = -1
+                    msg = 'KeyboardInterrupt'
+        click.echo(msg)
+        if num_services is not None:
+            hints.append(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
+                         value.in_progress_hint)
+
+    if num_pending_autostop > 0 and not refresh:
+        # Don't print this hint if there's no pending autostop or user has
+        # already passed --refresh.
+        plural_and_verb = ' has'
+        if num_pending_autostop > 1:
+            plural_and_verb = 's have'
+        hints.append(f'* {num_pending_autostop} cluster{plural_and_verb} '
+                     'auto{stop,down} scheduled. Refresh statuses with: '
+                     f'{colorama.Style.BRIGHT}sky status --refresh'
+                     f'{colorama.Style.RESET_ALL}')
+    if hints:
+        click.echo('\n' + '\n'.join(hints))
 
 
 @cli.command()
@@ -1893,7 +1932,7 @@ def status(all: bool, refresh: bool, ip: bool, endpoints: bool,
               default=False,
               is_flag=True,
               required=False,
-              help='Show all information in full.')
+              help='Show all cluster information.')
 @usage_lib.entrypoint
 def cost_report(all: bool):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
@@ -1914,7 +1953,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
     - Clusters that were terminated/stopped on the cloud console.
     """
-    cluster_records = core.cost_report()
+    cluster_records = sdk.get(sdk.cost_report())
 
     normal_cluster_records = []
     controllers = dict()
@@ -1959,7 +1998,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 @cli.command()
 @click.option('--all-users',
-              '-a',
+              '-u',
               default=False,
               is_flag=True,
               required=False,
@@ -1980,17 +2019,20 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show the job queue for cluster(s)."""
     click.secho('Fetching and parsing job queue...', fg='cyan')
-    if clusters:
-        clusters = _get_glob_clusters(clusters)
-    else:
-        cluster_infos = global_user_state.get_clusters()
-        clusters = [c['name'] for c in cluster_infos]
+    if not clusters:
+        cluster_records = _get_cluster_records_and_set_ssh_config(
+            None, all_users=all_users)
+        clusters = [cluster['name'] for cluster in cluster_records]
 
     unsupported_clusters = []
-    for cluster in clusters:
+    logger.info(f'Fetching job queue for {clusters}')
+    job_tables = {}
+
+    def _get_job_queue(cluster):
         try:
-            job_table = core.queue(cluster, skip_finished, all_users)
-        except (exceptions.CommandError, ValueError,
+            job_table = sdk.stream_and_get(
+                sdk.queue(cluster, skip_finished, all_users))
+        except (RuntimeError, exceptions.CommandError, ValueError,
                 exceptions.NotSupportedError, exceptions.ClusterNotUpError,
                 exceptions.CloudUserIdentityError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
@@ -1999,9 +2041,14 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
             click.echo(f'{colorama.Fore.YELLOW}Failed to get the job queue for '
                        f'cluster {cluster!r}.{colorama.Style.RESET_ALL}\n'
                        f'  {common_utils.format_exception(e)}')
-            continue
-        job_table = job_lib.format_job_queue(job_table)
-        click.echo(f'\nJob queue of cluster {cluster}\n{job_table}')
+            return
+        job_tables[cluster] = job_lib.format_job_queue(job_table)
+
+    subprocess_utils.run_in_parallel(_get_job_queue, clusters)
+    user_str = 'all users' if all_users else 'current user'
+    for cluster, job_table in job_tables.items():
+        click.echo(f'\nJob queue of {user_str} on cluster {cluster}\n'
+                   f'{job_table}')
 
     if unsupported_clusters:
         click.secho(
@@ -2081,25 +2128,34 @@ def logs(
     job_ids = None if not job_ids else job_ids
 
     if sync_down:
-        core.download_logs(cluster, job_ids)
+        with rich_utils.client_status(
+                ux_utils.spinner_message('Downloading logs')):
+            log_local_path_dict = sdk.download_logs(cluster, job_ids)
+        style = colorama.Style
+        fore = colorama.Fore
+        for job, log_local_path in log_local_path_dict.items():
+            logger.info(f'{fore.CYAN}Job {job} logs: {log_local_path}'
+                        f'{style.RESET_ALL}')
         return
 
     assert job_ids is None or len(job_ids) <= 1, job_ids
-    job_id = None
+    job_id: Optional[int] = None
     job_ids_to_query: Optional[List[int]] = None
     if job_ids:
         # Already check that len(job_ids) <= 1. This variable is used later
-        # in core.tail_logs.
-        job_id = job_ids[0]
-        if not job_id.isdigit():
-            raise click.UsageError(f'Invalid job ID {job_id}. '
+        # in sdk.tail_logs.
+        cur_job_id = job_ids[0]
+        if not cur_job_id.isdigit():
+            raise click.UsageError(f'Invalid job ID {cur_job_id}. '
                                    'Job ID must be integers.')
-        job_ids_to_query = [int(job_id)]
+        job_id = int(cur_job_id)
+        job_ids_to_query = [int(job_ids[0])]
     else:
         # job_ids is either None or empty list, so it is safe to cast it here.
         job_ids_to_query = typing.cast(Optional[List[int]], job_ids)
     if status:
-        job_statuses = core.job_status(cluster, job_ids_to_query)
+        job_statuses = sdk.stream_and_get(
+            sdk.job_status(cluster, job_ids_to_query))
         job_id = list(job_statuses.keys())[0]
         # If job_ids is None and no job has been submitted to the cluster,
         # it will return {None: None}.
@@ -2117,7 +2173,15 @@ def logs(
                 click.secho(f'Job {id_str}not found', fg='red')
             sys.exit(1)
 
-    core.tail_logs(cluster, job_id, follow, tail)
+    job_str = f'job {job_id}'
+    if job_id is None:
+        job_str = 'the last job'
+    logger.info(f'{colorama.Fore.YELLOW}'
+                f'Tailing logs of {job_str} on cluster {cluster!r}...'
+                f'{colorama.Style.RESET_ALL}')
+
+    # Stream logs from the server.
+    sdk.tail_logs(cluster, job_id, follow, tail=tail)
 
 
 @cli.command()
@@ -2130,16 +2194,31 @@ def logs(
               default=False,
               is_flag=True,
               required=False,
-              help='Cancel all jobs on the specified cluster.')
+              help='Cancel all jobs from current user on the specified cluster.'
+             )
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Cancel all jobs on the specified cluster for all users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
 @click.argument('jobs', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
-def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disable=redefined-builtin, redefined-outer-name
+def cancel(
+    cluster: str,
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
+    jobs: List[int],  # pylint: disable=redefined-outer-name
+    yes: bool,
+    async_call: bool,
+):  # pylint: disable=redefined-builtin
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancel job(s).
 
@@ -2152,30 +2231,36 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
       sky cancel cluster_name 1
       sky cancel cluster_name 1 2 3
       \b
-      # Cancel all jobs on a cluster.
+      # Cancel all your jobs on a cluster.
       sky cancel cluster_name -a
+      \b
+      # Cancel all users' jobs on a cluster.
+      sky cancel cluster_name -u
       \b
       # Cancel the latest running job on a cluster.
       sky cancel cluster_name
 
     Job IDs can be looked up by ``sky queue cluster_name``.
     """
-    job_identity_str = None
+    job_identity_str = ''
     job_ids_to_cancel = None
-    if not jobs and not all:
-        click.echo(f'{colorama.Fore.YELLOW}No job IDs or --all provided; '
-                   'cancelling the latest running job.'
-                   f'{colorama.Style.RESET_ALL}')
+    if not jobs and not all and not all_users:
+        click.echo(
+            f'{colorama.Fore.YELLOW}No job IDs or --all/--all-users provided; '
+            'cancelling the latest running job.'
+            f'{colorama.Style.RESET_ALL}')
         job_identity_str = 'the latest running job'
+    elif all_users:
+        job_identity_str = 'all users\' jobs'
     else:
-        # Cancelling specific jobs or --all.
-        job_ids = ' '.join(map(str, jobs))
-        plural = 's' if len(job_ids) > 1 else ''
-        job_identity_str = f'job{plural} {job_ids}'
-        job_ids_to_cancel = jobs
         if all:
-            job_identity_str = 'all jobs'
-            job_ids_to_cancel = None
+            job_identity_str = 'all your jobs'
+        if jobs:
+            jobs_str = ' '.join(map(str, jobs))
+            plural = 's' if len(jobs) > 1 else ''
+            connector = ' and ' if job_identity_str else ''
+            job_identity_str += f'{connector}job{plural} {jobs_str}'
+            job_ids_to_cancel = jobs
     job_identity_str += f' on cluster {cluster!r}'
 
     if not yes:
@@ -2185,7 +2270,11 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                       show_default=True)
 
     try:
-        core.cancel(cluster, all=all, job_ids=job_ids_to_cancel)
+        request_id = sdk.cancel(cluster,
+                                all=all,
+                                all_users=all_users,
+                                job_ids=job_ids_to_cancel)
+        _async_call_or_wait(request_id, async_call, 'sky.cancel')
     except exceptions.NotSupportedError as e:
         controller = controller_utils.Controllers.from_name(cluster)
         assert controller is not None, cluster
@@ -2205,20 +2294,28 @@ def cancel(cluster: str, all: bool, jobs: List[int], yes: bool):  # pylint: disa
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
               help='Stop all existing clusters.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              help='Stop all existing clusters for all users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def stop(
     clusters: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
     yes: bool,
+    async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Stop cluster(s).
@@ -2251,8 +2348,10 @@ def stop(
     """
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
+                           all_users=all_users,
                            down=False,
-                           no_confirm=yes)
+                           no_confirm=yes,
+                           async_call=async_call)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2262,9 +2361,14 @@ def stop(
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
-              help='Apply this command to all existing clusters.')
+              help='Autostop all existing clusters.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              help='Autostop all existing clusters for all users.')
 @click.option('--idle-minutes',
               '-i',
               type=int,
@@ -2292,14 +2396,17 @@ def stop(
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def autostop(
     clusters: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
     idle_minutes: Optional[int],
     cancel: bool,  # pylint: disable=redefined-outer-name
     down: bool,  # pylint: disable=redefined-outer-name
     yes: bool,
+    async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Schedule an autostop or autodown for cluster(s).
@@ -2352,9 +2459,11 @@ def autostop(
         idle_minutes = 5
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
+                           all_users=all_users,
                            down=down,
                            no_confirm=yes,
-                           idle_minutes_to_autostop=idle_minutes)
+                           idle_minutes_to_autostop=idle_minutes,
+                           async_call=async_call)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2417,16 +2526,19 @@ def autostop(
     required=False,
     help=('Force start the cluster even if it is already UP. Useful for '
           'upgrading the SkyPilot runtime on the cluster.'))
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def start(
-        clusters: List[str],
-        all: bool,
-        yes: bool,
-        idle_minutes_to_autostop: Optional[int],
-        down: bool,  # pylint: disable=redefined-outer-name
-        retry_until_up: bool,
-        force: bool):
+    clusters: List[str],
+    all: bool,
+    yes: bool,
+    idle_minutes_to_autostop: Optional[int],
+    down: bool,  # pylint: disable=redefined-outer-name
+    retry_until_up: bool,
+    force: bool,
+    async_call: bool,
+):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Restart cluster(s).
 
@@ -2460,12 +2572,14 @@ def start(
             '--idle-minutes-to-autostop must be set if --down is set.')
     to_start = []
 
+    cluster_records = None
     if not clusters and not all:
         # UX: frequently users may have only 1 cluster. In this case, be smart
         # and default to that unique choice.
-        all_cluster_names = global_user_state.get_cluster_names_start_with('')
-        if len(all_cluster_names) <= 1:
-            clusters = all_cluster_names
+        all_clusters = _get_cluster_records_and_set_ssh_config(
+            clusters=None, refresh=common.StatusRefreshMode.AUTO)
+        if len(all_clusters) <= 1:
+            cluster_records = all_clusters
         else:
             raise click.UsageError(
                 '`sky start` requires either a cluster name or glob '
@@ -2476,24 +2590,27 @@ def start(
             click.echo('Both --all and cluster(s) specified for sky start. '
                        'Letting --all take effect.')
 
+        all_clusters = _get_cluster_records_and_set_ssh_config(
+            clusters=None, refresh=common.StatusRefreshMode.AUTO)
+
         # Get all clusters that are not controllers.
-        clusters = [
-            cluster['name']
-            for cluster in global_user_state.get_clusters()
+        cluster_records = [
+            cluster for cluster in all_clusters
             if controller_utils.Controllers.from_name(cluster['name']) is None
         ]
+    if cluster_records is None:
+        # Get GLOB cluster names
+        cluster_records = _get_cluster_records_and_set_ssh_config(
+            clusters, refresh=common.StatusRefreshMode.AUTO)
 
-    if not clusters:
+    if not cluster_records:
         click.echo('Cluster(s) not found (tip: see `sky status`). Do you '
                    'mean to use `sky launch` to provision a new cluster?')
         return
     else:
-        # Get GLOB cluster names
-        clusters = _get_glob_clusters(clusters)
-
-        for name in clusters:
-            cluster_status, _ = backend_utils.refresh_cluster_status_handle(
-                name)
+        for cluster in cluster_records:
+            name = cluster['name']
+            cluster_status = cluster['status']
             # A cluster may have one of the following states:
             #
             #  STOPPED - ok to restart
@@ -2573,18 +2690,25 @@ def start(
             abort=True,
             show_default=True)
 
-    for name in to_start:
+    request_ids = subprocess_utils.run_in_parallel(
+        lambda name: sdk.start(name,
+                               idle_minutes_to_autostop,
+                               retry_until_up,
+                               down=down,
+                               force=force), to_start)
+
+    for name, request_id in zip(to_start, request_ids):
         try:
-            core.start(name,
-                       idle_minutes_to_autostop,
-                       retry_until_up,
-                       down=down,
-                       force=force)
+            _async_call_or_wait(request_id, async_call, 'sky.start')
+            if not async_call:
+                # Add ssh config for the cluster
+                _get_cluster_records_and_set_ssh_config(clusters=[name])
         except (exceptions.NotSupportedError,
                 exceptions.ClusterOwnerIdentityMismatchError) as e:
             click.echo(str(e))
         else:
-            click.secho(f'Cluster {name} started.', fg='green')
+            if not async_call:
+                click.secho(f'Cluster {name} started.', fg='green')
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -2594,9 +2718,14 @@ def start(
                 **_get_shell_complete_args(_complete_cluster_name))
 @click.option('--all',
               '-a',
-              default=None,
+              default=False,
               is_flag=True,
               help='Tear down all existing clusters.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              help='Tear down all existing clusters for all users.')
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -2615,12 +2744,15 @@ def start(
           ' in certain manual troubleshooting scenarios; with it set, it is the'
           ' user\'s responsibility to ensure there are no leaked instances and '
           'related resources.'))
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def down(
     clusters: List[str],
-    all: Optional[bool],  # pylint: disable=redefined-builtin
+    all: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,  # pylint: disable=redefined-builtin
     yes: bool,
     purge: bool,
+    async_call: bool,
 ):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tear down cluster(s).
@@ -2652,12 +2784,15 @@ def down(
     """
     _down_or_stop_clusters(clusters,
                            apply_to_all=all,
+                           all_users=all_users,
                            down=True,
                            no_confirm=yes,
-                           purge=purge)
+                           purge=purge,
+                           async_call=async_call)
 
 
-def _hint_or_raise_for_down_jobs_controller(controller_name: str):
+def _hint_or_raise_for_down_jobs_controller(controller_name: str,
+                                            purge: bool) -> None:
     """Helper function to check job controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
@@ -2669,14 +2804,19 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
             to be torn down (e.g., because it has jobs running or
             it is in init state)
     """
+    if not common.is_current_user_controller(controller_name):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Tearing down other user\'s managed job controller '
+                f'{controller_name!r} is not allowed.')
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Checking for in-progress managed jobs')):
+    with rich_utils.client_status(
+            '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
-            managed_jobs_ = managed_jobs.queue(refresh=False,
-                                               skip_finished=True)
+            request_id = managed_jobs.queue(refresh=False, skip_finished=True)
+            managed_jobs_ = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2704,14 +2844,19 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str):
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
             ['   ' + line for line in job_table.split('\n') if line != ''])
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress managed '
+                           'jobs. This could cause leaked clusters!')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise exceptions.NotSupportedError(msg)
     else:
         click.echo(' * No in-progress managed jobs found. It should be safe to '
                    'terminate (see caveats above).')
 
 
-def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
+def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
+                                                 purge: bool) -> None:
     """Helper function to check serve controller status before tearing it down.
 
     Raises helpful exceptions and errors if the controller is not in a safe
@@ -2723,12 +2868,18 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
             to be torn down (e.g., because it has services running or
             it is in init state)
     """
+    # TODO(zhwu): Move this check to the sdk or even API server side.
+    if not common.is_current_user_controller(controller_name):
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NotSupportedError(
+                f'Tearing down other user\'s sky serve controller '
+                f'{controller_name!r} is not allowed.')
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Checking for live services')):
+    with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
-            services = serve_lib.status()
+            request_id = serve_lib.status(service_names=None)
+            services = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
                 with ux_utils.print_exception_no_traceback():
@@ -2745,35 +2896,52 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str):
 
     if services:
         service_names = [service['name'] for service in services]
-        with ux_utils.print_exception_no_traceback():
-            msg = (
-                controller.value.decline_down_for_dirty_controller_hint.format(
-                    service_names=', '.join(service_names)))
-            raise exceptions.NotSupportedError(msg)
+        if purge:
+            logger.warning('--purge is set, ignoring the in-progress services. '
+                           'This could cause leaked clusters!')
+        else:
+            with ux_utils.print_exception_no_traceback():
+                msg = (controller.value.decline_down_for_dirty_controller_hint.
+                       format(service_names=', '.join(service_names)))
+                raise exceptions.NotSupportedError(msg)
     # Do nothing for STOPPED state, as it is safe to terminate the cluster.
     click.echo(f'Terminate sky serve controller: {controller_name}.')
 
 
-_CONTROLLER_TO_HINT_OR_RAISE = {
-    controller_utils.Controllers.JOBS_CONTROLLER:
-        (_hint_or_raise_for_down_jobs_controller),
-    controller_utils.Controllers.SKY_SERVE_CONTROLLER:
-        (_hint_or_raise_for_down_sky_serve_controller),
-}
+def _controller_to_hint_or_raise(
+        controller: controller_utils.Controllers
+) -> Callable[[str, bool], None]:
+    if controller == controller_utils.Controllers.JOBS_CONTROLLER:
+        return _hint_or_raise_for_down_jobs_controller
+    return _hint_or_raise_for_down_sky_serve_controller
 
 
 def _down_or_stop_clusters(
         names: List[str],
-        apply_to_all: Optional[bool],
-        down: bool,  # pylint: disable=redefined-outer-name
-        no_confirm: bool,
+        apply_to_all: bool = False,
+        all_users: bool = False,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+        no_confirm: bool = True,
         purge: bool = False,
-        idle_minutes_to_autostop: Optional[int] = None) -> None:
+        idle_minutes_to_autostop: Optional[int] = None,
+        async_call: bool = False) -> None:
     """Tears down or (auto-)stops a cluster (or all clusters).
 
     Controllers (jobs controller and sky serve controller) can only be
     terminated if the cluster name is explicitly and uniquely specified (not
     via glob).
+
+    Args:
+        names: The names of the clusters to tear down or stop. If empty,
+            apply_to_all or all_users must be set.
+        apply_to_all: If True, apply the operation to all clusters.
+        all_users: If True, apply the operation to all clusters for all users.
+        down: If True, tear down the clusters.
+        no_confirm: If True, skip the confirmation prompt.
+        purge: If True, forcefully remove the clusters from the cluster table.
+        idle_minutes_to_autostop: The number of minutes to wait before
+            automatically stopping the cluster.
+        async_call: If True, send the request asynchronously.
     """
     if down:
         command = 'down'
@@ -2781,17 +2949,12 @@ def _down_or_stop_clusters(
         command = 'autostop'
     else:
         command = 'stop'
-    if not names and apply_to_all is None:
-        # UX: frequently users may have only 1 cluster. In this case, 'sky
-        # stop/down' without args should be smart and default to that unique
-        # choice.
-        all_cluster_names = global_user_state.get_cluster_names_start_with('')
-        if len(all_cluster_names) <= 1:
-            names = all_cluster_names
-        else:
-            raise click.UsageError(
-                f'`sky {command}` requires either a cluster name or glob '
-                '(see `sky status`), or the -a/--all flag.')
+    if not names and not apply_to_all and not all_users:
+        raise click.UsageError(
+            f'`sky {command}` requires either a cluster name or glob '
+            '(see `sky status`), or the -a/--all flag for all your '
+            'clusters, or the -u/--all-users flag for all clusters in '
+            'your team.')
 
     operation = 'Terminating' if down else 'Stopping'
     if idle_minutes_to_autostop is not None:
@@ -2802,6 +2965,7 @@ def _down_or_stop_clusters(
             option_str = '{stop,down}'
         operation = f'{verb} auto{option_str} on'
 
+    names = list(names)
     if names:
         controllers = [
             name for name in names
@@ -2809,8 +2973,9 @@ def _down_or_stop_clusters(
         ]
         controllers_str = ', '.join(map(repr, controllers))
         names = [
-            name for name in _get_glob_clusters(names)
-            if controller_utils.Controllers.from_name(name) is None
+            cluster['name']
+            for cluster in _get_cluster_records_and_set_ssh_config(names)
+            if controller_utils.Controllers.from_name(cluster['name']) is None
         ]
 
         # Make sure the controllers are explicitly specified without other
@@ -2837,7 +3002,7 @@ def _down_or_stop_clusters(
                 controller = controller_utils.Controllers.from_name(
                     controller_name)
                 assert controller is not None
-                hint_or_raise = _CONTROLLER_TO_HINT_OR_RAISE[controller]
+                hint_or_raise = _controller_to_hint_or_raise(controller)
                 try:
                     # TODO(zhwu): This hint or raise is not transactional, which
                     # means even if it passed the check with no in-progress spot
@@ -2846,7 +3011,7 @@ def _down_or_stop_clusters(
                     # `sky serve up` before typing the delete, causing a leaked
                     # managed job or service. We should make this check atomic
                     # with the termination.
-                    hint_or_raise(controller_name)
+                    hint_or_raise(controller_name, purge)
                 except (exceptions.ClusterOwnerIdentityMismatchError,
                         RuntimeError) as e:
                     if purge:
@@ -2867,8 +3032,9 @@ def _down_or_stop_clusters(
                 no_confirm = True
         names += controllers
 
-    if apply_to_all:
-        all_clusters = global_user_state.get_clusters()
+    if apply_to_all or all_users:
+        all_clusters = _get_cluster_records_and_set_ssh_config(
+            clusters=None, all_users=all_users)
         if names:
             click.echo(
                 f'Both --all and cluster(s) specified for `sky {command}`. '
@@ -2881,15 +3047,7 @@ def _down_or_stop_clusters(
             if controller_utils.Controllers.from_name(record['name']) is None
         ]
 
-    clusters = []
-    for name in names:
-        handle = global_user_state.get_handle_from_cluster_name(name)
-        if handle is None:
-            # This codepath is used for 'sky down -p <controller>' when the
-            # controller is not in 'sky status'.  Cluster-not-found message
-            # should've been printed by _get_glob_clusters() above.
-            continue
-        clusters.append(name)
+    clusters = names
     usage_lib.record_cluster_name_for_current_operation(clusters)
 
     if not clusters:
@@ -2910,15 +3068,21 @@ def _down_or_stop_clusters(
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(ux_utils.spinner_message(
-        f'{operation} {len(clusters)} cluster{plural}'),
-                             total=len(clusters))
+    task = progress.add_task(
+        f'[bold cyan]{operation} {len(clusters)} cluster{plural}[/]',
+        total=len(clusters))
+
+    request_ids = []
 
     def _down_or_stop(name: str):
         success_progress = False
         if idle_minutes_to_autostop is not None:
             try:
-                core.autostop(name, idle_minutes_to_autostop, down)
+                request_id = sdk.autostop(name, idle_minutes_to_autostop, down)
+                request_ids.append(request_id)
+                _async_call_or_wait(
+                    request_id, async_call,
+                    server_constants.REQUEST_NAME_PREFIX + operation)
             except (exceptions.NotSupportedError,
                     exceptions.ClusterNotUpError) as e:
                 message = str(e)
@@ -2941,9 +3105,17 @@ def _down_or_stop_clusters(
         else:
             try:
                 if down:
-                    core.down(name, purge=purge)
+                    request_id = sdk.down(name, purge=purge)
                 else:
-                    core.stop(name, purge=purge)
+                    request_id = sdk.stop(name, purge=purge)
+                request_ids.append(request_id)
+                _async_call_or_wait(
+                    request_id, async_call,
+                    server_constants.REQUEST_NAME_PREFIX + operation)
+                if not async_call:
+                    # Remove the cluster from the SSH config file as soon as it
+                    # is stopped or downed.
+                    cluster_utils.SSHConfigHelper.remove_cluster(name)
             except RuntimeError as e:
                 message = (
                     f'{colorama.Fore.RED}{operation} cluster {name}...failed. '
@@ -2974,6 +3146,10 @@ def _down_or_stop_clusters(
         # Make sure the progress bar not mess up the terminal.
         progress.refresh()
 
+    if async_call:
+        click.secho(f'{operation} requests are sent. Check the requests\' '
+                    'status with `sky request get <request_id>`.')
+
 
 @cli.command(cls=_DocumentedCodeCommand)
 @click.argument('clouds', required=False, type=str, nargs=-1)
@@ -2983,6 +3159,7 @@ def _down_or_stop_clusters(
               default=False,
               help='Show the activated account for each cloud.')
 @usage_lib.entrypoint
+# pylint: disable=redefined-outer-name
 def check(clouds: Tuple[str], verbose: bool):
     """Check which clouds are available to use.
 
@@ -3005,8 +3182,13 @@ def check(clouds: Tuple[str], verbose: bool):
       # Check only specific clouds - AWS and GCP.
       sky check aws gcp
     """
-    clouds_arg = clouds if clouds else None
-    sky_check.check(verbose=verbose, clouds=clouds_arg)
+    clouds_arg = clouds if len(clouds) > 0 else None
+    request_id = sdk.check(clouds=clouds_arg, verbose=verbose)
+    sdk.stream_and_get(request_id)
+    api_server_url = server_common.get_server_url()
+    click.echo()
+    click.echo(
+        click.style(f'Using SkyPilot API server: {api_server_url}', fg='green'))
 
 
 @cli.command()
@@ -3099,23 +3281,27 @@ def show_gpus(
             '--all-regions and --region flags cannot be used simultaneously.')
 
     # This will validate 'cloud' and raise if not found.
-    cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud)
-    cloud_name = cloud_obj.canonical_name() if cloud_obj is not None else None
-    service_catalog.validate_region_zone(region, None, clouds=cloud_name)
+    cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud)
+    cloud_name = str(cloud_obj).lower() if cloud is not None else None
     show_all = all
     if show_all and accelerator_str is not None:
         raise click.UsageError('--all is only allowed without a GPU name.')
 
     # Kubernetes specific bools
-    cloud_is_kubernetes = isinstance(cloud_obj, sky_clouds.Kubernetes)
+    enabled_clouds = sdk.get(sdk.enabled_clouds())
+    cloud_is_kubernetes = isinstance(cloud_obj, clouds.Kubernetes)
+    # TODO(romilb): We should move this to the backend.
     kubernetes_autoscaling = kubernetes_utils.get_autoscaler_type() is not None
-    kubernetes_is_enabled = sky_clouds.cloud_in_iterable(
-        sky_clouds.Kubernetes(), global_user_state.get_cached_enabled_clouds())
-    no_permissions_str = '<no permissions>'
+    kubernetes_is_enabled = clouds.cloud_in_iterable(
+        clouds.Kubernetes(),
+        enabled_clouds,
+    )
 
     def _list_to_str(lst):
         return ', '.join([str(e) for e in lst])
 
+    # TODO(zhwu,romilb): We should move most of these kubernetes related
+    # queries into the backend, especially behind the server.
     def _get_kubernetes_realtime_gpu_table(
             context: Optional[str] = None,
             name_filter: Optional[str] = None,
@@ -3128,19 +3314,12 @@ def show_gpus(
             free_header = 'TOTAL_FREE_GPUS'
         realtime_gpu_table = log_utils.create_table(
             ['GPU', qty_header, 'TOTAL_GPUS', free_header])
-        counts, capacity, available = service_catalog.list_accelerator_realtime(
-            gpus_only=True,
-            clouds='kubernetes',
-            name_filter=name_filter,
-            region_filter=context,
-            quantity_filter=quantity_filter,
-            case_sensitive=False)
-        assert (set(counts.keys()) == set(capacity.keys()) == set(
-            available.keys())), (f'Keys of counts ({list(counts.keys())}), '
-                                 f'capacity ({list(capacity.keys())}), '
-                                 f'and available ({list(available.keys())}) '
-                                 'must be same.')
-        if not counts:
+        realtime_gpu_availability_list = sdk.stream_and_get(
+            sdk.realtime_kubernetes_gpu_availability(
+                context=context,
+                name_filter=name_filter,
+                quantity_filter=quantity_filter))
+        if not realtime_gpu_availability_list:
             err_msg = 'No GPUs found in Kubernetes cluster. '
             debug_msg = 'To further debug, run: sky check '
             if name_filter is not None:
@@ -3152,24 +3331,32 @@ def show_gpus(
                            'in Kubernetes cluster. ')
                 debug_msg = ('To show available accelerators on kubernetes,'
                              ' run: sky show-gpus --cloud kubernetes ')
-            full_err_msg = (err_msg +
-                            kubernetes_utils.NO_ACCELERATOR_HELP_MESSAGE +
+            full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
                             debug_msg)
             raise ValueError(full_err_msg)
-        for gpu, _ in sorted(counts.items()):
-            available_qty = available[gpu] if available[gpu] != -1 else (
-                no_permissions_str)
+        no_permissions_str = '<no permissions>'
+        for realtime_gpu_availability in sorted(realtime_gpu_availability_list):
+            gpu_availability = models.RealtimeGpuAvailability(
+                *realtime_gpu_availability)
+            available_qty = (gpu_availability.available
+                             if gpu_availability.available != -1 else
+                             no_permissions_str)
             realtime_gpu_table.add_row([
-                gpu,
-                _list_to_str(counts.pop(gpu)), capacity[gpu], available_qty
+                gpu_availability.gpu,
+                _list_to_str(gpu_availability.counts),
+                gpu_availability.capacity,
+                available_qty,
             ])
         return realtime_gpu_table
 
+    # TODO(zhwu): this needs to run on remote server.
     def _get_kubernetes_node_info_table(context: Optional[str]):
         node_table = log_utils.create_table(
             ['NODE_NAME', 'GPU_NAME', 'TOTAL_GPUS', 'FREE_GPUS'])
 
-        node_info_dict = kubernetes_utils.get_kubernetes_node_info(context)
+        no_permissions_str = '<no permissions>'
+        node_info_dict = sdk.stream_and_get(
+            sdk.kubernetes_node_info(context=context))
         for node_name, node_info in node_info_dict.items():
             available = node_info.free[
                 'accelerators_available'] if node_info.free[
@@ -3180,7 +3367,7 @@ def show_gpus(
             ])
         return node_table
 
-    def _output():
+    def _output() -> Generator[str, None, None]:
         gpu_table = log_utils.create_table(
             ['COMMON_GPU', 'AVAILABLE_QUANTITIES'])
         tpu_table = log_utils.create_table(
@@ -3193,7 +3380,7 @@ def show_gpus(
         # Optimization - do not poll for Kubernetes API for fetching
         # common GPUs because that will be fetched later for the table after
         # common GPUs.
-        clouds_to_list = cloud_name
+        clouds_to_list: Union[Optional[str], List[str]] = cloud_name
         if cloud_name is None:
             clouds_to_list = [
                 c for c in service_catalog.ALL_CLOUDS if c != 'kubernetes'
@@ -3206,12 +3393,8 @@ def show_gpus(
             # If cloud is kubernetes, we want to show real-time capacity
             if kubernetes_is_enabled and (cloud_name is None or
                                           cloud_is_kubernetes):
-                if region:
-                    context = region
-                else:
-                    # If region is not specified, we use the current context
-                    context = (
-                        kubernetes_utils.get_current_kube_config_context_name())
+                context = region
+
                 try:
                     # If --cloud kubernetes is not specified, we want to catch
                     # the case where no GPUs are available on the cluster and
@@ -3225,8 +3408,9 @@ def show_gpus(
                     k8s_messages += str(e)
                 else:
                     print_section_titles = True
+                    context_str = f'(Context: {context})' if context else ''
                     yield (f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-                           f'Kubernetes GPUs (context: {context})'
+                           f'Kubernetes GPUs {context_str}'
                            f'{colorama.Style.RESET_ALL}\n')
                     yield from k8s_realtime_table.get_string()
                     k8s_node_table = _get_kubernetes_node_info_table(context)
@@ -3262,11 +3446,14 @@ def show_gpus(
                 yield k8s_messages
                 yield '\n\n'
 
-            result = service_catalog.list_accelerator_counts(
-                gpus_only=True,
-                clouds=clouds_to_list,
-                region_filter=region,
-            )
+            result = sdk.stream_and_get(
+                sdk.list_accelerator_counts(
+                    gpus_only=True,
+                    clouds=clouds_to_list,
+                    region_filter=region,
+                ))
+            # TODO(zhwu): handle the case where no accelerators are found,
+            # especially when --region specified a non-existent region.
 
             if print_section_titles:
                 # If section titles were printed above, print again here
@@ -3354,16 +3541,17 @@ def show_gpus(
 
         # For clouds other than Kubernetes, get the accelerator details
         # Case-sensitive
-        result = service_catalog.list_accelerators(gpus_only=True,
-                                                   name_filter=name,
-                                                   quantity_filter=quantity,
-                                                   region_filter=region,
-                                                   clouds=clouds_to_list,
-                                                   case_sensitive=False,
-                                                   all_regions=all_regions)
+        result = sdk.stream_and_get(
+            sdk.list_accelerators(gpus_only=True,
+                                  name_filter=name,
+                                  quantity_filter=quantity,
+                                  region_filter=region,
+                                  clouds=clouds_to_list,
+                                  case_sensitive=False,
+                                  all_regions=all_regions))
         # Import here to save module load speed.
         # pylint: disable=import-outside-toplevel,line-too-long
-        from sky.clouds.service_catalog import common
+        from sky.clouds.service_catalog import common as catalog_common
 
         # For each gpu name (count not included):
         #   - Group by cloud
@@ -3384,7 +3572,7 @@ def show_gpus(
             df = df.sort_values(by=['min_price', 'min_spot_price'])
             df = df.drop(columns=['min_price', 'min_spot_price'])
             sorted_dataclasses = [
-                common.InstanceTypeInfo(*row)
+                catalog_common.InstanceTypeInfo(*row)
                 for row in df.to_records(index=False)
             ]
             new_result[gpu] = sorted_dataclasses
@@ -3459,10 +3647,11 @@ def show_gpus(
                 yield '\n\n'
             yield from accelerator_table.get_string()
 
+    outputs = _output()
     if show_all:
-        click.echo_via_pager(_output())
+        click.echo_via_pager(outputs)
     else:
-        for out in _output():
+        for out in outputs:
             click.echo(out, nl=False)
         click.echo()
 
@@ -3474,18 +3663,20 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
               help='Show all information in full.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def storage_ls(all: bool):
+def storage_ls(verbose: bool):
     """List storage objects managed by SkyPilot."""
-    storages = sky.storage_ls()
-    storage_table = storage_utils.format_storage_table(storages, show_all=all)
+    request_id = sdk.storage_ls()
+    storages = sdk.stream_and_get(request_id)
+    storage_table = storage_utils.format_storage_table(storages,
+                                                       show_all=verbose)
     click.echo(storage_table)
 
 
@@ -3507,8 +3698,9 @@ def storage_ls(all: bool):
               is_flag=True,
               required=False,
               help='Skip confirmation prompt.')
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
-def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=redefined-builtin
+def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  # pylint: disable=redefined-builtin
     """Delete storage objects.
 
     Examples:
@@ -3527,9 +3719,8 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
     if sum([bool(names), all]) != 1:
         raise click.UsageError('Either --all or a name must be specified.')
     if all:
-        # Use '*' to get all storages.
-        names = global_user_state.get_glob_storage_name(storage_name='*')
-        if not names:
+        storages = sdk.get(sdk.storage_ls())
+        if not storages:
             click.echo('No storage(s) to delete.')
             return
     else:
@@ -3545,19 +3736,25 @@ def storage_delete(names: List[str], all: bool, yes: bool):  # pylint: disable=r
                 abort=True,
                 show_default=True)
 
-    def delete_storage(name: str) -> None:
+    request_ids = {}
+    # TODO(zhwu): Support all flag for the underlying SDK and API server to
+    # avoid multiple requests.
+    for name in names:
+        request_ids[name] = sdk.storage_delete(name)
+
+    for name, request_id in request_ids.items():
         try:
-            sky.storage_delete(name)
+            _async_call_or_wait(request_id, async_call, 'sky.storage')
         except Exception as e:  # pylint: disable=broad-except
-            click.secho(f'Error deleting storage {name}: {e}', fg='red')
+            logger.error(f'{colorama.Fore.RED}Error deleting storage {name}: '
+                         f'{common_utils.format_exception(e, use_bracket=True)}'
+                         f'{colorama.Style.RESET_ALL}')
 
-    subprocess_utils.run_in_parallel(delete_storage, names)
 
-
-@cli.group(cls=_NaturalOrderGroup)
+@cli.group(cls=_NaturalOrderGroup, hidden=True)
 def bench():
     """SkyPilot Benchmark CLI."""
-    pass
+    raise click.UsageError('The benchmark CLI is currently disabled.')
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -3573,7 +3770,8 @@ def jobs():
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
 # TODO(zhwu): Add --dryrun option to test the launch command.
-@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
+                    _COMMON_OPTIONS)
 @click.option('--cluster',
               '-c',
               default=None,
@@ -3622,6 +3820,7 @@ def jobs_launch(
     ports: Tuple[str],
     detach_run: bool,
     yes: bool,
+    async_call: bool,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3678,36 +3877,25 @@ def jobs_launch(
     dag_utils.maybe_infer_and_fill_dag_and_task_names(dag)
     dag_utils.fill_default_config_in_dag_for_job_launch(dag)
 
-    dag, _ = admin_policy_utils.apply(
-        dag, use_mutated_config_in_current_request=False)
-
-    if yes:
-        # Skip resource preview if -y is set, since we are probably running in
-        # a script and the user won't have a chance to review it anyway.
-        # This can save a couple of seconds.
-        click.secho(
-            f'Resources for managed job {dag.name!r} will be computed on the '
-            'managed jobs controller, since --yes is set.',
-            fg='cyan')
-
-    else:
-        click.secho(
-            f'Managed job {dag.name!r} will be launched on (estimated):',
-            fg='cyan')
-        dag = sky.optimize(dag)
-
-        prompt = f'Launching a managed job {dag.name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
     common_utils.check_cluster_name_is_valid(name)
 
-    managed_jobs.launch(dag, name, detach_run=detach_run)
+    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
+                fg='yellow')
+
+    request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
+    job_id_handle = _async_call_or_wait(request_id, async_call,
+                                        'sky.jobs.launch')
+    if not async_call and not detach_run:
+        job_id = job_id_handle[0]
+        managed_jobs.tail_logs(name=None,
+                               job_id=job_id,
+                               follow=True,
+                               controller=False)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
@@ -3728,7 +3916,7 @@ def jobs_launch(
               help='Show only pending/running jobs\' information.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
+def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -3782,13 +3970,13 @@ def jobs_queue(all: bool, refresh: bool, skip_finished: bool):
       watch -n60 sky jobs queue
 
     """
-    click.secho('Fetching managed jobs...', fg='cyan')
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Checking managed jobs')):
-        _, msg = _get_managed_jobs(refresh=refresh,
-                                   skip_finished=skip_finished,
-                                   show_all=all,
-                                   is_called_by_user=True)
+    click.secho('Fetching managed job statuses...', fg='cyan')
+    with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
+        managed_jobs_request_id = managed_jobs.queue(
+            refresh=refresh, skip_finished=skip_finished)
+        _, msg = _handle_jobs_queue_request(managed_jobs_request_id,
+                                            show_all=verbose,
+                                            is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -3835,13 +4023,6 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       # Cancel managed jobs with IDs 1, 2, 3
       $ sky jobs cancel 1 2 3
     """
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Checking managed jobs')):
-        backend_utils.is_controller_accessible(
-            controller=controller_utils.Controllers.JOBS_CONTROLLER,
-            stopped_message='All managed jobs should have finished.',
-            exit_if_not_accessible=True)
-
     job_id_str = ','.join(map(str, job_ids))
     if sum([bool(job_ids), name is not None, all]) != 1:
         argument_str = f'--job-ids {job_id_str}' if job_ids else ''
@@ -3861,7 +4042,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
                       abort=True,
                       show_default=True)
 
-    managed_jobs.cancel(job_ids=job_ids, name=name, all=all)
+    sdk.stream_and_get(managed_jobs.cancel(job_ids=job_ids, name=name, all=all))
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
@@ -3903,10 +4084,19 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     """Tail or sync down the log of a managed job."""
     try:
         if sync_down:
-            managed_jobs.sync_down_logs(name=name,
-                                        job_id=job_id,
-                                        controller=controller,
-                                        refresh=refresh)
+            with rich_utils.client_status(
+                    ux_utils.spinner_message('Downloading jobs logs')):
+                log_local_path_dict = managed_jobs.download_logs(
+                    name=name,
+                    job_id=job_id,
+                    controller=controller,
+                    refresh=refresh)
+            style = colorama.Style
+            fore = colorama.Fore
+            controller_str = ' (controller)' if controller else ''
+            for job, log_local_path in log_local_path_dict.items():
+                logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
+                            f'{log_local_path}{style.RESET_ALL}')
         else:
             managed_jobs.tail_logs(name=name,
                                    job_id=job_id,
@@ -3919,62 +4109,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
-@click.option(
-    '--port',
-    '-p',
-    default=None,
-    type=int,
-    required=False,
-    help=('Local port to use for the dashboard. If None, a free port is '
-          'automatically chosen.'))
 @usage_lib.entrypoint
-def jobs_dashboard(port: Optional[int]):
-    """Opens a dashboard for managed jobs (needs controller to be UP)."""
-    # TODO(zongheng): ideally, the controller/dashboard server should expose the
-    # API perhaps via REST. Then here we would (1) not have to use SSH to try to
-    # see if the controller is UP first, which is slow; (2) not have to run SSH
-    # port forwarding first (we'd just launch a local dashboard which would make
-    # REST API calls to the controller dashboard server).
-    click.secho('Checking if jobs controller is up...', fg='cyan')
-    hint = ('Dashboard is not available if jobs controller is not up. Run a '
-            'managed job first.')
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.JOBS_CONTROLLER,
-        stopped_message=hint,
-        non_existent_message=hint,
-        exit_if_not_accessible=True)
-
-    # SSH forward a free local port to remote's dashboard port.
-    remote_port = constants.SPOT_DASHBOARD_REMOTE_PORT
-    if port is None:
-        free_port = common_utils.find_free_port(remote_port)
-    else:
-        free_port = port
-    ssh_command = (
-        f'ssh -qNL {free_port}:localhost:{remote_port} '
-        f'{controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name}')
-    click.echo('Forwarding port: ', nl=False)
-    click.secho(f'{ssh_command}', dim=True)
-
-    with subprocess.Popen(ssh_command, shell=True,
-                          start_new_session=True) as ssh_process:
-        time.sleep(3)  # Added delay for ssh_command to initialize.
-        webbrowser.open(f'http://localhost:{free_port}')
-        click.secho(
-            f'Dashboard is now available at: http://127.0.0.1:{free_port}',
-            fg='green')
-        try:
-            ssh_process.wait()
-        except KeyboardInterrupt:
-            # When user presses Ctrl-C in terminal, exits the previous ssh
-            # command so that <free local port> is freed up.
-            try:
-                os.killpg(os.getpgid(ssh_process.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                # This happens if jobs controller is auto-stopped.
-                pass
-        finally:
-            click.echo('Exiting.')
+def jobs_dashboard():
+    """Opens a dashboard for managed jobs."""
+    managed_jobs.dashboard()
 
 
 @cli.group(cls=_NaturalOrderGroup)
@@ -4111,7 +4249,7 @@ def _generate_task_with_service(
               type=str,
               help='A service name. Unique for each service. If not provided, '
               'a unique name is autogenerated.')
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
 @click.option('--yes',
               '-y',
               is_flag=True,
@@ -4140,6 +4278,7 @@ def serve_up(
     disk_size: Optional[int],
     disk_tier: Optional[str],
     yes: bool,
+    async_call: bool,
 ):
     """Launch a SkyServe service.
 
@@ -4200,16 +4339,9 @@ def serve_up(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
-    dag, _ = admin_policy_utils.apply(
-        dag, use_mutated_config_in_current_request=False)
-    sky.optimize(dag)
 
-    if not yes:
-        prompt = f'Launching a new service {service_name!r}. Proceed?'
-        if prompt is not None:
-            click.confirm(prompt, default=True, abort=True, show_default=True)
-
-    serve_lib.up(task, service_name)
+    request_id = serve_lib.up(task, service_name, _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.serve.up')
 
 
 # TODO(MaoZiming): Update Doc.
@@ -4222,7 +4354,7 @@ def serve_up(
                 type=str,
                 nargs=-1,
                 **_get_shell_complete_args(_complete_file_name))
-@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS + _COMMON_OPTIONS)
 @click.option('--mode',
               default=serve_lib.DEFAULT_UPDATE_MODE.value,
               type=click.Choice([m.value for m in serve_lib.UpdateMode],
@@ -4239,28 +4371,16 @@ def serve_up(
               help='Skip confirmation prompt.')
 @timeline.event
 @usage_lib.entrypoint
-def serve_update(
-    service_name: str,
-    service_yaml: Tuple[str, ...],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    gpus: Optional[str],
-    instance_type: Optional[str],
-    ports: Tuple[str],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    mode: str,
-    yes: bool,
-):
+def serve_update(service_name: str, service_yaml: Tuple[str, ...],
+                 workdir: Optional[str], cloud: Optional[str],
+                 region: Optional[str], zone: Optional[str],
+                 num_nodes: Optional[int], use_spot: Optional[bool],
+                 image_id: Optional[str], env_file: Optional[Dict[str, str]],
+                 env: List[Tuple[str, str]], gpus: Optional[str],
+                 instance_type: Optional[str], ports: Tuple[str],
+                 cpus: Optional[str], memory: Optional[str],
+                 disk_size: Optional[int], disk_tier: Optional[str], mode: str,
+                 yes: bool, async_call: bool):
     """Update a SkyServe service.
 
     service_yaml must point to a valid YAML file.
@@ -4318,22 +4438,17 @@ def serve_update(
                 fg='cyan')
     with sky.Dag() as dag:
         dag.add(task)
-    dag, _ = admin_policy_utils.apply(
-        dag, use_mutated_config_in_current_request=False)
-    sky.optimize(dag)
 
-    if not yes:
-        click.confirm(f'Updating service {service_name!r}. Proceed?',
-                      default=True,
-                      abort=True,
-                      show_default=True)
-
-    serve_lib.update(task, service_name, mode=serve_lib.UpdateMode(mode))
+    request_id = serve_lib.update(task,
+                                  service_name,
+                                  mode=serve_lib.UpdateMode(mode),
+                                  _need_confirmation=not yes)
+    _async_call_or_wait(request_id, async_call, 'sky.serve.update')
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
-@click.option('--all',
-              '-a',
+@click.option('--verbose',
+              '-v',
               default=False,
               is_flag=True,
               required=False,
@@ -4346,7 +4461,7 @@ def serve_update(
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(all: bool, endpoint: bool, service_names: List[str]):
+def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
@@ -4433,17 +4548,22 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
       sky serve status
       \b
       # Show detailed status for all services
-      sky serve status -a
+      sky serve status -v
       \b
       # Only show status of my-service
       sky serve status my-service
     """
+    service_names_to_query: Optional[List[str]] = service_names
+    if not service_names:
+        service_names_to_query = None
     # This won't pollute the output of --endpoint.
-    with rich_utils.safe_status(ux_utils.spinner_message('Checking services')):
-        _, msg = _get_services(service_names,
-                               show_all=all,
-                               show_endpoint=endpoint,
-                               is_called_by_user=True)
+    with rich_utils.client_status('[cyan]Checking services[/]'):
+        service_status_request_id = serve_lib.status(service_names_to_query)
+        _, msg = _handle_services_request(service_status_request_id,
+                                          service_names=service_names_to_query,
+                                          show_all=verbose,
+                                          show_endpoint=endpoint,
+                                          is_called_by_user=True)
 
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
@@ -4473,10 +4593,17 @@ def serve_status(all: bool, endpoint: bool, service_names: List[str]):
               default=None,
               type=int,
               help='Tear down a given replica')
+@_add_click_options(_COMMON_OPTIONS)
 # pylint: disable=redefined-builtin
-def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
-               replica_id: Optional[int]):
-    """Teardown service(s) or a replica.
+def serve_down(
+    service_names: List[str],
+    all: bool,
+    purge: bool,
+    yes: bool,
+    replica_id: Optional[int],
+    async_call: bool,
+) -> None:
+    """Teardown service(s).
 
     SERVICE_NAMES is the name of the service (or glob pattern) to tear down. If
     both SERVICE_NAMES and ``--all`` are supplied, the latter takes precedence.
@@ -4527,12 +4654,6 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
         if all:
             raise click.UsageError('The --replica-id option cannot be used '
                                    'with the --all option.')
-
-    backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message='All services should have been terminated.',
-        exit_if_not_accessible=True)
-
     if not yes:
         if replica_id_is_defined:
             click.confirm(
@@ -4543,8 +4664,8 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
                 show_default=True)
         else:
             quoted_service_names = [f'{name!r}' for name in service_names]
-            service_identity_str = (f'service(s) '
-                                    f'{", ".join(quoted_service_names)}')
+            list_service_str = ', '.join(quoted_service_names)
+            service_identity_str = f'service(s) {list_service_str}'
             if all:
                 service_identity_str = 'all services'
             click.confirm(f'Terminating {service_identity_str}. Proceed?',
@@ -4553,9 +4674,13 @@ def serve_down(service_names: List[str], all: bool, purge: bool, yes: bool,
                           show_default=True)
 
     if replica_id_is_defined:
-        serve_lib.terminate_replica(service_names[0], replica_id, purge)
+        request_id = serve_lib.terminate_replica(service_names[0], replica_id,
+                                                 purge)
     else:
-        serve_lib.down(service_names=service_names, all=all, purge=purge)
+        request_id = serve_lib.down(service_names=service_names,
+                                    all=all,
+                                    purge=purge)
+    _async_call_or_wait(request_id, async_call, 'sky.serve.down')
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
@@ -4682,7 +4807,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               required=True,
               type=str,
               help='Benchmark name.')
-@_add_click_options(_TASK_OPTIONS_WITH_NAME)
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _COMMON_OPTIONS)
 @click.option('--gpus',
               required=False,
               type=str,
@@ -4717,26 +4842,27 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_launch(
-    entrypoint: str,
-    benchmark: str,
-    name: Optional[str],
-    workdir: Optional[str],
-    cloud: Optional[str],
-    region: Optional[str],
-    zone: Optional[str],
-    gpus: Optional[str],
-    num_nodes: Optional[int],
-    use_spot: Optional[bool],
-    image_id: Optional[str],
-    env_file: Optional[Dict[str, str]],
-    env: List[Tuple[str, str]],
-    cpus: Optional[str],
-    memory: Optional[str],
-    disk_size: Optional[int],
-    disk_tier: Optional[str],
-    ports: Tuple[str],
-    idle_minutes_to_autostop: Optional[int],
-    yes: bool,
+        entrypoint: str,
+        benchmark: str,
+        name: Optional[str],
+        workdir: Optional[str],
+        cloud: Optional[str],
+        region: Optional[str],
+        zone: Optional[str],
+        gpus: Optional[str],
+        num_nodes: Optional[int],
+        use_spot: Optional[bool],
+        image_id: Optional[str],
+        env_file: Optional[Dict[str, str]],
+        env: List[Tuple[str, str]],
+        cpus: Optional[str],
+        memory: Optional[str],
+        disk_size: Optional[int],
+        disk_tier: Optional[str],
+        ports: Tuple[str],
+        idle_minutes_to_autostop: Optional[int],
+        yes: bool,
+        async_call: bool,  # pylint: disable=unused-argument
 ) -> None:
     """Benchmark a task on different resources.
 
@@ -4745,6 +4871,7 @@ def benchmark_launch(
     Alternatively, specify the benchmarking resources in your YAML (see doc),
     which allows benchmarking on many more resource fields.
     """
+    # TODO(zhwu): move benchmark to SkyPilot API server
     env = _merge_env_vars(env_file, env)
     record = benchmark_state.get_benchmark_from_name(benchmark)
     if record is not None:
@@ -5135,10 +5262,7 @@ def benchmark_down(
             continue
         to_stop.append(cluster)
 
-    _down_or_stop_clusters(to_stop,
-                           apply_to_all=False,
-                           down=True,
-                           no_confirm=yes)
+    _down_or_stop_clusters(to_stop, down=True, no_confirm=yes)
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
@@ -5192,9 +5316,9 @@ def benchmark_delete(benchmarks: Tuple[str], all: Optional[bool],
     progress = rich_progress.Progress(transient=True,
                                       redirect_stdout=False,
                                       redirect_stderr=False)
-    task = progress.add_task(ux_utils.spinner_message(
-        f'Deleting {len(to_delete)} benchmark{plural}'),
-                             total=len(to_delete))
+    task = progress.add_task(
+        f'[bold cyan]Deleting {len(to_delete)} benchmark{plural}: ',
+        total=len(to_delete))
 
     def _delete_benchmark(benchmark: str) -> None:
         clusters = benchmark_state.get_benchmark_clusters(benchmark)
@@ -5244,196 +5368,6 @@ def local():
     pass
 
 
-def _deploy_local_cluster(gpus: bool):
-    cluster_created = False
-
-    # Check if GPUs are available on the host
-    local_gpus_available = backend_utils.check_local_gpus()
-    gpus = gpus and local_gpus_available
-
-    # Check if ~/.kube/config exists:
-    if os.path.exists(os.path.expanduser('~/.kube/config')):
-        curr_context = kubernetes_utils.get_current_kube_config_context_name()
-        skypilot_context = 'kind-skypilot'
-        if curr_context is not None and curr_context != skypilot_context:
-            click.echo(
-                f'Current context in kube config: {curr_context}'
-                '\nWill automatically switch to kind-skypilot after the local '
-                'cluster is created.')
-    message_str = 'Creating local cluster{}...'
-    message_str = message_str.format((' with GPU support (this may take up '
-                                      'to 15 minutes)') if gpus else '')
-    path_to_package = os.path.dirname(os.path.dirname(__file__))
-    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                  'create_cluster.sh')
-
-    # Get directory of script and run it from there
-    cwd = os.path.dirname(os.path.abspath(up_script_path))
-    run_command = up_script_path + f' {common_utils.get_user_hash()}'
-    run_command = run_command + ' --gpus' if gpus else run_command
-    run_command = shlex.split(run_command)
-
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'local_up.log')
-    tail_cmd = 'tail -n100 -f ' + log_path
-
-    click.echo(message_str)
-    style = colorama.Style
-    click.echo('To view detailed progress: '
-               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-
-    returncode, _, stderr = log_lib.run_with_log(
-        cmd=run_command,
-        log_path=log_path,
-        require_outputs=True,
-        stream_logs=False,
-        line_processor=log_utils.SkyLocalUpLineProcessor(),
-        cwd=cwd)
-
-    # Kind always writes to stderr even if it succeeds.
-    # If the failure happens after the cluster is created, we need
-    # to strip all stderr of "No kind clusters found.", which is
-    # printed when querying with kind get clusters.
-    stderr = stderr.replace('No kind clusters found.\n', '')
-
-    if returncode == 0:
-        cluster_created = True
-    elif returncode == 100:
-        click.echo(f'{colorama.Fore.GREEN}Local cluster already '
-                   f'exists.{style.RESET_ALL}\n'
-                   'If you want to delete it instead, run: sky local down')
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                'Failed to create local cluster. '
-                f'Full log: {log_path}'
-                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-    # Run sky check
-    with rich_utils.safe_status(ux_utils.spinner_message('Running sky check')):
-        sky_check.check(clouds=['kubernetes'], quiet=True)
-    if cluster_created:
-        # Prepare completion message which shows CPU and GPU count
-        # Get number of CPUs
-        p = subprocess_utils.run(
-            'kubectl get nodes -o jsonpath=\'{.items[0].status.capacity.cpu}\'',
-            capture_output=True)
-        num_cpus = int(p.stdout.decode('utf-8'))
-
-        # GPU count/type parsing
-        gpu_message = ''
-        gpu_hint = ''
-        if gpus:
-            # Get GPU model by querying the node labels
-            label_name_escaped = 'skypilot.co/accelerator'.replace('.', '\\.')
-            gpu_type_cmd = f'kubectl get node skypilot-control-plane -o jsonpath=\"{{.metadata.labels[\'{label_name_escaped}\']}}\"'  # pylint: disable=line-too-long
-            try:
-                # Run the command and capture the output
-                gpu_count_output = subprocess.check_output(gpu_type_cmd,
-                                                           shell=True,
-                                                           text=True)
-                gpu_type_str = gpu_count_output.strip() + ' '
-            except subprocess.CalledProcessError as e:
-                output = str(e.output.decode('utf-8'))
-                logger.warning(f'Failed to get GPU type: {output}')
-                gpu_type_str = ''
-
-            # Get number of GPUs (sum of nvidia.com/gpu resources)
-            gpu_count_command = 'kubectl get nodes -o=jsonpath=\'{range .items[*]}{.status.allocatable.nvidia\\.com/gpu}{\"\\n\"}{end}\' | awk \'{sum += $1} END {print sum}\''  # pylint: disable=line-too-long
-            try:
-                # Run the command and capture the output
-                gpu_count_output = subprocess.check_output(gpu_count_command,
-                                                           shell=True,
-                                                           text=True)
-                gpu_count = gpu_count_output.strip(
-                )  # Remove any extra whitespace
-                gpu_message = f' and {gpu_count} {gpu_type_str}GPUs'
-            except subprocess.CalledProcessError as e:
-                output = str(e.output.decode('utf-8'))
-                logger.warning(f'Failed to get GPU count: {output}')
-                gpu_message = f' with {gpu_type_str}GPU support'
-
-            gpu_hint = (
-                '\nHint: To see the list of GPUs in the cluster, '
-                'run \'sky show-gpus --cloud kubernetes\'') if gpus else ''
-
-        if num_cpus < 2:
-            click.echo('Warning: Local cluster has less than 2 CPUs. '
-                       'This may cause issues with running tasks.')
-        click.echo(
-            f'\n{colorama.Fore.GREEN}Local Kubernetes cluster created '
-            'successfully with '
-            f'{num_cpus} CPUs{gpu_message}.{style.RESET_ALL}\n`sky launch` can '
-            'now run tasks locally.'
-            '\nHint: To change the number of CPUs, change your docker '
-            'runtime settings. See https://kind.sigs.k8s.io/docs/user/quick-start/#settings-for-docker-desktop for more info.'  # pylint: disable=line-too-long
-            f'{gpu_hint}')
-
-
-def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
-                           cleanup: bool):
-    success = False
-    path_to_package = os.path.dirname(os.path.dirname(__file__))
-    up_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                  'deploy_remote_cluster.sh')
-    # Get directory of script and run it from there
-    cwd = os.path.dirname(os.path.abspath(up_script_path))
-
-    deploy_command = f'{up_script_path} {ip_file} {ssh_user} {ssh_key_path}'
-    if cleanup:
-        deploy_command += ' --cleanup'
-
-    # Convert the command to a format suitable for subprocess
-    deploy_command = shlex.split(deploy_command)
-
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'local_up.log')
-    tail_cmd = 'tail -n100 -f ' + log_path
-
-    # Check if ~/.kube/config exists:
-    if os.path.exists(os.path.expanduser('~/.kube/config')):
-        click.echo('Found existing kube config. '
-                   'It will be backed up to ~/.kube/config.bak.')
-    style = colorama.Style
-    click.echo('To view detailed progress: '
-               f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-    if cleanup:
-        msg_str = 'Cleaning up remote cluster...'
-    else:
-        msg_str = 'Deploying remote cluster...'
-    with rich_utils.safe_status(f'[bold cyan]{msg_str}'):
-        returncode, _, stderr = log_lib.run_with_log(
-            cmd=deploy_command,
-            log_path=log_path,
-            require_outputs=True,
-            stream_logs=False,
-            line_processor=log_utils.SkyRemoteUpLineProcessor(),
-            cwd=cwd)
-    if returncode == 0:
-        success = True
-    else:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                'Failed to deploy remote cluster. '
-                f'Full log: {log_path}'
-                f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-
-    if success:
-        if cleanup:
-            click.echo(f'{colorama.Fore.GREEN}'
-                       '🎉 Remote cluster cleaned up successfully.'
-                       f'{style.RESET_ALL}')
-        else:
-            click.echo('Cluster deployment done. You can now run tasks on '
-                       'this cluster.\nE.g., run a task with: '
-                       'sky launch --cloud kubernetes -- echo hello world.'
-                       f'\n{colorama.Fore.GREEN}🎉 Remote cluster deployed '
-                       f'successfully. {style.RESET_ALL}')
-
-
 @click.option('--gpus/--no-gpus',
               default=True,
               is_flag=True,
@@ -5456,9 +5390,10 @@ def _deploy_remote_cluster(ip_file: str, ssh_user: str, ssh_key_path: str,
               is_flag=True,
               help='Clean up the remote cluster instead of deploying it.')
 @local.command('up', cls=_DocumentedCodeCommand)
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool):
+             cleanup: bool, async_call: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5479,64 +5414,226 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
     _validate_args(ips, ssh_user, ssh_key_path, cleanup)
 
     # If remote deployment arguments are specified, run remote up script
+    ip_list = None
+    ssh_key = None
     if ips and ssh_user and ssh_key_path:
-        # Convert ips and ssh_key_path to absolute paths
-        ips = os.path.abspath(ips)
-        ssh_key_path = os.path.abspath(ssh_key_path)
-        _deploy_remote_cluster(ips, ssh_user, ssh_key_path, cleanup)
-    else:
-        # Run local deployment (kind) if no remote args are specified
-        _deploy_local_cluster(gpus)
+        # Read and validate IP file
+        try:
+            with open(os.path.expanduser(ips), 'r', encoding='utf-8') as f:
+                ip_list = f.read().strip().splitlines()
+            if not ip_list:
+                raise click.BadParameter(f'IP file is empty: {ips}')
+        except (IOError, OSError) as e:
+            raise click.BadParameter(f'Failed to read IP file {ips}: {str(e)}')
+
+        # Read and validate SSH key file
+        try:
+            with open(os.path.expanduser(ssh_key_path), 'r',
+                      encoding='utf-8') as f:
+                ssh_key = f.read()
+            if not ssh_key:
+                raise click.BadParameter(
+                    f'SSH key file is empty: {ssh_key_path}')
+        except (IOError, OSError) as e:
+            raise click.BadParameter(
+                f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
+
+    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup)
+    _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
+@_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
-def local_down():
+def local_down(async_call: bool):
     """Deletes a local cluster."""
-    cluster_removed = False
+    request_id = sdk.local_down()
+    _async_call_or_wait(request_id, async_call, request_name='sky.local.down')
 
-    path_to_package = os.path.dirname(os.path.dirname(__file__))
-    down_script_path = os.path.join(path_to_package, 'sky/utils/kubernetes',
-                                    'delete_cluster.sh')
 
-    cwd = os.path.dirname(os.path.abspath(down_script_path))
-    run_command = shlex.split(down_script_path)
+@cli.group(cls=_NaturalOrderGroup)
+def api():
+    """SkyPilot API server commands."""
+    pass
 
-    # Setup logging paths
-    run_timestamp = sky_logging.get_run_timestamp()
-    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
-                            'local_down.log')
-    tail_cmd = 'tail -n100 -f ' + log_path
 
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Removing local cluster')):
-        style = colorama.Style
-        click.echo('To view detailed progress: '
-                   f'{style.BRIGHT}{tail_cmd}{style.RESET_ALL}')
-        returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
-                                                          log_path=log_path,
-                                                          require_outputs=True,
-                                                          stream_logs=False,
-                                                          cwd=cwd)
-        stderr = stderr.replace('No kind clusters found.\n', '')
+@api.command('start', cls=_DocumentedCodeCommand)
+@click.option('--deploy',
+              type=bool,
+              is_flag=True,
+              default=False,
+              required=False,
+              help=('Deploy the SkyPilot API server. When set to True, '
+                    'SkyPilot API server will use all resources on the host '
+                    'machine assuming the machine is dedicated to SkyPilot API '
+                    'server; host will also be set to 0.0.0.0 to allow remote '
+                    'access.'))
+@click.option('--host',
+              default='127.0.0.1',
+              type=click.Choice(server_common.AVAILBLE_LOCAL_API_SERVER_HOSTS),
+              required=False,
+              help=('The host to deploy the SkyPilot API server. To allow '
+                    'remote access, set this to 0.0.0.0'))
+@usage_lib.entrypoint
+def api_start(deploy: bool, host: Optional[str]):
+    """Starts the SkyPilot API server locally."""
+    sdk.api_start(deploy=deploy, host=host)
 
-        if returncode == 0:
-            cluster_removed = True
-        elif returncode == 100:
-            click.echo('\nLocal cluster does not exist.')
-        else:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Failed to create local cluster. '
-                    f'Stdout: {stdout}'
-                    f'\nError: {style.BRIGHT}{stderr}{style.RESET_ALL}')
-    if cluster_removed:
-        # Run sky check
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Running sky check')):
-            sky_check.check(clouds=['kubernetes'], quiet=True)
-        click.echo(
-            f'{colorama.Fore.GREEN}Local cluster removed.{style.RESET_ALL}')
+
+@api.command('stop', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def api_stop():
+    """Stops the SkyPilot API server locally."""
+    sdk.api_stop()
+
+
+@api.command('logs', cls=_DocumentedCodeCommand)
+@click.argument('request_id', required=False, type=str)
+@click.option('--server-logs',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Stream the server logs.')
+@click.option('--log-path',
+              '-l',
+              required=False,
+              type=str,
+              help='The path to the log file to stream.')
+@click.option('--tail',
+              required=False,
+              type=int,
+              help=('Number of lines to show from the end of the logs. '
+                    '(default: None)'))
+@click.option('--follow/--no-follow',
+              is_flag=True,
+              default=True,
+              required=False,
+              help='Follow the logs.')
+@usage_lib.entrypoint
+def api_logs(request_id: Optional[str], server_logs: bool,
+             log_path: Optional[str], tail: Optional[int], follow: bool):
+    """Stream the logs of a request running on SkyPilot API server."""
+    if not server_logs and request_id is None and log_path is None:
+        # TODO(zhwu): get the latest request ID.
+        raise click.BadParameter('Please provide the request ID or log path.')
+    if server_logs:
+        sdk.api_server_logs(follow=follow, tail=tail)
+        return
+
+    if request_id is not None and log_path is not None:
+        raise click.BadParameter(
+            'Only one of request ID and log path can be provided.')
+    sdk.stream_and_get(request_id, log_path, tail)
+
+
+@api.command('cancel', cls=_DocumentedCodeCommand)
+@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.option('--all',
+              '-a',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Cancel all your requests.')
+@click.option('--all-users',
+              '-u',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Cancel all requests from all users.')
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
+    """Cancel a request running on SkyPilot API server."""
+    if all or all_users:
+        keyword = 'ALL USERS\'' if all_users else 'YOUR'
+        user_input = click.prompt(
+            f'This will cancel all {keyword} requests.\n'
+            f'To proceed, please type {colorama.Style.BRIGHT}'
+            f'\'cancel all requests\'{colorama.Style.RESET_ALL}',
+            type=str)
+        if user_input != 'cancel all requests':
+            raise click.Abort()
+    if all:
+        request_ids = None
+    cancelled_request_ids = sdk.get(
+        sdk.api_cancel(request_ids=request_ids, all_users=all_users))
+    if not cancelled_request_ids:
+        click.secho('No requests need to be cancelled.', fg='green')
+    elif len(cancelled_request_ids) == 1:
+        click.secho(f'Cancelled 1 request: {cancelled_request_ids[0]}',
+                    fg='green')
+    else:
+        click.secho(f'Cancelled {len(cancelled_request_ids)} requests.',
+                    fg='green')
+
+
+@api.command('status', cls=_DocumentedCodeCommand)
+@click.argument('request_ids', required=False, type=str, nargs=-1)
+@click.option('--all-status',
+              '-a',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show requests of all statuses.')
+@click.option('--verbose',
+              '-v',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Show more details.')
+@usage_lib.entrypoint
+# pylint: disable=redefined-builtin
+def api_status(request_ids: Optional[List[str]], all_status: bool,
+               verbose: bool):
+    """List requests on SkyPilot API server."""
+    if not request_ids:
+        request_ids = None
+    request_list = sdk.api_status(request_ids, all_status)
+    columns = ['ID', 'User', 'Name']
+    if verbose:
+        columns.append('Cluster')
+    columns.extend(['Created', 'Status'])
+    table = log_utils.create_table(columns)
+    for request in request_list:
+        r_id = request.request_id
+        if not verbose:
+            r_id = common_utils.truncate_long_string(r_id, 36)
+        req_status = requests.RequestStatus(request.status)
+        row = [r_id, request.user_name, request.name]
+        if verbose:
+            row.append(request.cluster_name)
+        row.extend([
+            log_utils.readable_time_duration(request.created_at),
+            req_status.colored_str()
+        ])
+        table.add_row(row)
+    click.echo(table)
+
+
+@api.command('login', cls=_DocumentedCodeCommand)
+@click.option('--endpoint',
+              '-e',
+              required=False,
+              help='The SkyPilot API server endpoint.')
+@usage_lib.entrypoint
+def api_login(endpoint: Optional[str]):
+    """Logs into a SkyPilot API server."""
+    sdk.api_login(endpoint)
+
+
+@api.command('info', cls=_DocumentedCodeCommand)
+@usage_lib.entrypoint
+def api_info():
+    """Shows the SkyPilot API server URL."""
+    url = server_common.get_server_url()
+    api_server_info = sdk.api_info()
+    user_name = os.getenv(constants.USER_ENV_VAR, getpass.getuser())
+    user_hash = common_utils.get_user_hash()
+    click.echo(f'Using SkyPilot API server: {url}\n'
+               f'{ux_utils.INDENT_SYMBOL}Status: {api_server_info["status"]}, '
+               f'commit: {api_server_info["commit"]}, '
+               f'version: {api_server_info["version"]}\n'
+               f'{ux_utils.INDENT_LAST_SYMBOL}User: {user_name} ({user_hash})')
 
 
 def main():

@@ -193,6 +193,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
+   ../reference/api-server/api-server
    Secrets and Environment Variables <../running-jobs/environment-variables>
    Docker Containers <../examples/docker-containers>
    ../examples/ports

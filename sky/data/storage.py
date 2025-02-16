@@ -18,7 +18,6 @@ from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
@@ -34,6 +33,7 @@ from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -203,9 +203,8 @@ class StoreType(enum.Enum):
     @classmethod
     def get_fields_from_store_url(
         cls, store_url: str
-    ) -> Tuple['StoreType', Type['AbstractStore'], str, str, Optional[str],
-               Optional[str]]:
-        """Returns the store type, store class, bucket name, and sub path from
+    ) -> Tuple['StoreType', str, str, Optional[str], Optional[str]]:
+        """Returns the store type, bucket name, and sub path from
         a store URL, and the storage account name and region if applicable.
 
         Args:
@@ -221,21 +220,16 @@ class StoreType(enum.Enum):
                 if store_type == StoreType.AZURE:
                     storage_account_name, bucket_name, sub_path = \
                         data_utils.split_az_path(store_url)
-                    store_cls: Type['AbstractStore'] = AzureBlobStore
                 elif store_type == StoreType.IBM:
                     bucket_name, sub_path, region = data_utils.split_cos_path(
                         store_url)
-                    store_cls = IBMCosStore
                 elif store_type == StoreType.R2:
                     bucket_name, sub_path = data_utils.split_r2_path(store_url)
-                    store_cls = R2Store
                 elif store_type == StoreType.GCS:
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
-                    store_cls = GcsStore
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
-                    store_cls = S3Store
-                return store_type, store_cls,bucket_name, \
+                return store_type, bucket_name, \
                     sub_path, storage_account_name, region
         raise ValueError(f'Unknown store URL: {store_url}')
 
@@ -546,7 +540,7 @@ class Storage(object):
         self,
         name: Optional[str] = None,
         source: Optional[SourceType] = None,
-        stores: Optional[Dict[StoreType, AbstractStore]] = None,
+        stores: Optional[List[StoreType]] = None,
         persistent: Optional[bool] = True,
         mode: StorageMode = StorageMode.MOUNT,
         sync_on_reconstruction: bool = True,
@@ -605,26 +599,47 @@ class Storage(object):
           _bucket_sub_path: Optional[str]; The subdirectory to use for the
             storage object.
         """
-        self.name: str
+        self.name = name
         self.source = source
         self.persistent = persistent
         self.mode = mode
         assert mode in StorageMode
+        self.stores: Dict[StoreType, Optional[AbstractStore]] = {}
+        if stores is not None:
+            for store in stores:
+                self.stores[store] = None
         self.sync_on_reconstruction = sync_on_reconstruction
         self._is_sky_managed = _is_sky_managed
         self._bucket_sub_path = _bucket_sub_path
 
+        self._constructed = False
         # TODO(romilb, zhwu): This is a workaround to support storage deletion
-        # for spot. Once sky storage supports forced management for external
-        # buckets, this can be deprecated.
+        # for managed jobs. Once sky storage supports forced management for
+        # external buckets, this can be deprecated.
         self.force_delete = False
 
-        # Validate and correct inputs if necessary
-        self._validate_storage_spec(name)
+    def construct(self):
+        """Constructs the storage object.
 
-        # Sky optimizer either adds a storage object instance or selects
-        # from existing ones
-        self.stores = {} if stores is None else stores
+        The Storage object is lazily initialized, so that when a user
+        initializes a Storage object on client side, it does not trigger the
+        actual storage creation on the client side.
+
+        Instead, once the specification of the storage object is uploaded to the
+        SkyPilot API server side, the server side should use this construct()
+        method to actually create the storage object. The construct() method
+        will:
+
+        1. Set the stores field if not specified
+        2. Create the bucket or check the existence of the bucket
+        3. Sync the data from the source to the bucket if necessary
+        """
+        if self._constructed:
+            return
+        self._constructed = True
+
+        # Validate and correct inputs if necessary
+        self._validate_storage_spec(self.name)
 
         # Logic to rebuild Storage if it is in global user state
         handle = global_user_state.get_handle_from_storage_name(self.name)
@@ -634,6 +649,28 @@ class Storage(object):
             logger.debug('Detected existing storage object, '
                          f'loading Storage: {self.name}')
             self._add_store_from_metadata(self.handle.sky_stores)
+
+            # When a storage object is reconstructed from global_user_state,
+            # the user may have specified a new store type in the yaml file that
+            # was not used with the storage object. We should error out in this
+            # case, as we don't support having multiple stores for the same
+            # storage object.
+            if any(s is None for s in self.stores.values()):
+                new_store_type = None
+                previous_store_type = None
+                for store_type, store in self.stores.items():
+                    if store is not None:
+                        previous_store_type = store_type
+                    else:
+                        new_store_type = store_type
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.StorageBucketCreateError(
+                        f'Bucket {self.name} was previously created for '
+                        f'{previous_store_type.value.lower()!r}, but a new '
+                        f'store type {new_store_type.value.lower()!r} is '
+                        'requested. This is not supported yet. Please specify '
+                        'the same store type: '
+                        f'{previous_store_type.value.lower()!r}.')
 
             # TODO(romilb): This logic should likely be in add_store to move
             # syncing to file_mount stage..
@@ -648,15 +685,16 @@ class Storage(object):
 
         else:
             # Storage does not exist in global_user_state, create new stores
-            sky_managed_stores = {
-                t: s.get_metadata()
-                for t, s in self.stores.items()
-                if s.is_sky_managed
-            }
+            # Sky optimizer either adds a storage object instance or selects
+            # from existing ones
+            input_stores = self.stores
+            self.stores = {}
             self.handle = self.StorageMetadata(storage_name=self.name,
                                                source=self.source,
-                                               mode=self.mode,
-                                               sky_stores=sky_managed_stores)
+                                               mode=self.mode)
+
+            for store in input_stores:
+                self.add_store(store)
 
             if self.source is not None:
                 # If source is a pre-existing bucket, connect to the bucket
@@ -987,10 +1025,13 @@ class Storage(object):
           region: str; Region to place the bucket in. Caller must ensure that
             the region is valid for the chosen store_type.
         """
+        assert self._constructed, self
+        assert self.name is not None, self
+
         if isinstance(store_type, str):
             store_type = StoreType(store_type)
 
-        if store_type in self.stores:
+        if self.stores.get(store_type) is not None:
             if store_type == StoreType.AZURE:
                 azure_store_obj = self.stores[store_type]
                 assert isinstance(azure_store_obj, AzureBlobStore)
@@ -999,8 +1040,9 @@ class Storage(object):
                             f'storage account {storage_account_name!r}.')
             else:
                 logger.info(f'Storage type {store_type} already exists.')
-
-            return self.stores[store_type]
+            store = self.stores[store_type]
+            assert store is not None, self
+            return store
 
         store_cls: Type[AbstractStore]
         if store_type == StoreType.S3:
@@ -1068,6 +1110,7 @@ class Storage(object):
         if store.is_sky_managed:
             self.handle.add_store(store)
             if not is_reconstructed:
+                assert self.name is not None, self
                 global_user_state.add_or_update_storage(self.name, self.handle,
                                                         StorageStatus.INIT)
 
@@ -1083,17 +1126,26 @@ class Storage(object):
         """
         if not self.stores:
             logger.info('No backing stores found. Deleting storage.')
+            assert self.name is not None
             global_user_state.remove_storage(self.name)
         if store_type is not None:
+            assert self.name is not None
             store = self.stores[store_type]
+            assert store is not None, self
+            is_sky_managed = store.is_sky_managed
             # We delete a store from the cloud if it's sky managed. Else just
             # remove handle and return
-            if store.is_sky_managed:
+            if is_sky_managed:
                 self.handle.remove_store(store)
                 store.delete()
                 # Check remaining stores - if none is sky managed, remove
                 # the storage from global_user_state.
-                delete = all(not s.is_sky_managed for s in self.stores.values())
+                delete = True
+                for store in self.stores.values():
+                    assert store is not None, self
+                    if store.is_sky_managed:
+                        delete = False
+                        break
                 if delete:
                     global_user_state.remove_storage(self.name)
                 else:
@@ -1104,6 +1156,7 @@ class Storage(object):
             del self.stores[store_type]
         else:
             for _, store in self.stores.items():
+                assert store is not None, self
                 if store.is_sky_managed:
                     self.handle.remove_store(store)
                     store.delete()
@@ -1111,15 +1164,19 @@ class Storage(object):
                     store.delete()
             self.stores = {}
             # Remove storage from global_user_state if present
-            global_user_state.remove_storage(self.name)
+            if self.name is not None:
+                global_user_state.remove_storage(self.name)
 
     def sync_all_stores(self):
         """Syncs the source and destinations of all stores in the Storage"""
         for _, store in self.stores.items():
+            assert store is not None, self
             self._sync_store(store)
 
     def _sync_store(self, store: AbstractStore):
         """Runs the upload routine for the store and handles failures"""
+        assert self._constructed, self
+        assert self.name is not None, self
 
         def warn_for_git_dir(source: str):
             if os.path.isdir(os.path.join(source, '.git')):
@@ -1175,14 +1232,17 @@ class Storage(object):
         assert not config, f'Invalid storage args: {config.keys()}'
 
         # Validation of the config object happens on instantiation.
+        if store is not None:
+            stores = [StoreType(store.upper())]
+        else:
+            stores = None
         storage_obj = cls(name=name,
                           source=source,
                           persistent=persistent,
                           mode=mode,
+                          stores=stores,
                           _is_sky_managed=_is_sky_managed,
                           _bucket_sub_path=_bucket_sub_path)
-        if store is not None:
-            storage_obj.add_store(StoreType(store.upper()))
 
         # Add force deletion flag
         storage_obj.force_delete = force_delete
@@ -1207,7 +1267,9 @@ class Storage(object):
         is_sky_managed = self._is_sky_managed
         if self.stores:
             stores = ','.join([store.value for store in self.stores])
-            is_sky_managed = list(self.stores.values())[0].is_sky_managed
+            store = list(self.stores.values())[0]
+            if store is not None:
+                is_sky_managed = store.is_sky_managed
         add_if_not_none('store', stores)
         add_if_not_none('_is_sky_managed', is_sky_managed)
         add_if_not_none('persistent', self.persistent)

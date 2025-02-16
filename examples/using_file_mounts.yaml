@@ -121,11 +121,9 @@ run: |
 
   # ls -lH /data/fake_imagenet | head -n10
 
-  # sky.egg-info/ should not exists on remote due to the .gitingore
+  # sky.egg-info/ should not exists on remote due to the .gitignore
   cd ~/sky_workdir
   ! ls sky.egg-info/
 
-  # Symlinks should be copied, but they will be broken
   # Assumes symlink named circle-link in /tmp/workdir (created by test_smoke.py)
-  ls /tmp/workdir/circle-link
-  ! readlink -e /tmp/workdir/circle-link
+  ls -l /tmp/workdir/circle-link

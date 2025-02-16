@@ -117,7 +117,8 @@ def get_az_mount_cmd(container_name: str,
     if storage_account_key is None:
         key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
     else:
-        key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
+        key_env_var = ('AZURE_STORAGE_ACCESS_KEY='
+                       f'{shlex.quote(storage_account_key)}')
 
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
