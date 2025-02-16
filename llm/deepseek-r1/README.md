@@ -80,7 +80,7 @@ It may take a while (30-40 minutes) for SGLang to download the model weights, co
 
 After the initialization, you can access the model with the endpoint:
 ```
-ENDPOINT=$(sky status --endpoint 30000 deepseek)
+ENDPOINT=$(sky status --endpoint 30000 r1)
 
 curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -102,7 +102,7 @@ curl http://$ENDPOINT/v1/chat/completions \
 You will get the following answer, which interestingly does not trigger any chain of thoughts.
 
 <details>
-    <summary>How many Rs are in strawberry: So, the answer is **3**. 🍓</summary>
+    <summary>How many Rs are in strawberry: So, the answer is <b>3</b>. 🍓</summary>
 
 Okay, let's figure out how many times the letter \"r\" appears in the word \"strawberry.\" First, I need to make sure I'm spelling \"strawberry\" correctly. Sometimes people might miss letters or add extra ones. Let me write it out: S-T-R-A-W-B-E-R-R-Y. Wait, is that right? Let's double-check. Strawberry is spelled S-T-R-A-W-B-E-R-R-Y. Yes, that's correct. Now, I need to go through each letter one by one and count the number of \"r\"s.\n\nStarting with the first letter: S (no), T (no), R (yes, that's one). Then A (no), W (no), B (no), E (no), R (that's two), R (that's three), Y (no). Wait, wait, hold on. Let me write out the letters with their positions to be precise.\n\nBreaking down \"strawberry\" letter by letter:\n1. S\n2. T\n3. R\n4. A\n5. W\n6. B\n7. E\n8. R\n9. R\n10. Y\n\nSo, looking at positions 3, 8, and 9: that's three \"r\"s. But wait, does that match the actual spelling? Let me confirm again. The word is strawberry. Sometimes people might think it's \"strawberry\" with two \"r\"s, but actually, according to correct spelling, it's S-T-R-A-W-B-E-R-R-Y. So after the B and E, there are two R's, right? Let me check a dictionary or maybe think of the pronunciation. Straw-ber-ry. The \"ber\" part is one R, but the correct spelling includes two R's after the E. So yes, that makes three R's in total. Hmm, but let me make sure I'm not miscounting. So positions 3, 8, 9: R, then two R's at the end before Y. That's three R's. Wait, actually, in the breakdown above, position 3 is R, then positions 8 and 9 are the two R's. So total three. Yes, that's right. So the answer should be three. Let me see if I can find any source that confirms this. Alternatively, I can write the word again and count: S T R A W B E R R Y. So R appears once at the beginning (third letter) and then twice towards the end (8th and 9th letters). So total of three times. Therefore, the correct answer is three.\n</think>\n\nThe word \"strawberry\" contains **3** instances of the letter \"r\". Here's the breakdown:\n\n1. **S**  \n2. **T**  \n3. **R** (1st \"r\")  \n4. **A**  \n5. **W**  \n6. **B**  \n7. **E**  \n8. **R** (2nd \"r\")  \n9. **R** (3rd \"r\")  \n10. **Y**  \n\nSo, the answer is **3**. 🍓
 
