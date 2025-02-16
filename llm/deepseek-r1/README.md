@@ -1,5 +1,4 @@
-# Distributed DeepSeek-R1 Serving with high throughput using SGLang and SkyPilot
-
+# Distributed DeepSeek-R1 Serving with High Throughput using SGLang and SkyPilot
 
 <p align="center">
 <img src="https://i.imgur.com/cd5C5IK.png" alt="DeepSeek-R1 on SkyPilot" style="width: 70%;">
@@ -7,23 +6,23 @@
 
 On Jan 20, 2025, DeepSeek AI released the [DeepSeek-R1](https://github.com/deepseek-ai/DeepSeek-R1), including a family of models up to 671B parameters. 
 
-DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning behaviors. It outperforms **state-of-the-art proprietary models** such as OpenAI-o1-mini and becomes **the first time** an open LLM closely rivals like OpenAI-o1.
+DeepSeek-R1 naturally emerged with numerous powerful and interesting reasoning behaviors. It outperforms **state-of-the-art proprietary models** such as OpenAI-o1-mini and becomes **the first open LLM** to closely rival closed-source models like OpenAI-o1.
 
 We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distributedly with high throughput in this example.
 
 
-**Note**: This example is for the original DeepSeek-R1 671B model. For smaller size distilled models, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
+**Note**: This example is for the original DeepSeek-R1 671B model. For smaller distilled models, please refer to [deepseek-r1-distilled](https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1-distilled/).
 
 ## Run 671B DeepSeek-R1 on Kubernetes or any Cloud
 
-SkyPilot allows you to run the model distributedly with a single command with the framework [SGLang](https://github.com/sgl-project/sglang).
+SkyPilot allows you to run the model distributedly with a single command using [SGLang](https://github.com/sgl-project/sglang).
 
-The SkyPilot YAML for DeepSeek-R1 671B, or see [here](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml):
+The SkyPilot YAML for DeepSeek-R1 671B ([view full file](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml)):
 ```yaml
 name: deepseek-r1
 
 resources:
-  accelerators: {H200:8, H100:8, A100-80GB:8}
+  accelerators: {H200:8, H100:8}
   disk_size: 1024 # Large disk for model weights
   disk_tier: best
   ports: 30000
@@ -31,7 +30,7 @@ resources:
     - use_spot: true
     - use_spot: false
 
-num_nodes: 2 # Specify number of nodes to launch
+num_nodes: 2 # Specify number of nodes to launch; requirements may vary based on accelerators
 
 setup: |
   # Install sglang with all dependencies using uv
@@ -84,7 +83,7 @@ sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up
 
 ![Find any cheapest candidate resources](https://i.imgur.com/FpAV6Ok.png)
 
-SkyPilot finds the cheapest candidate resources for you, and automatically failover through different regions,
+SkyPilot finds the cheapest candidate resources for you, and automatically fails over through different regions,
 clouds, or Kubernetes clusters to find the resources to launch the model.
 
 It may take a while (30-40 minutes) for SGLang to download the model weights, compile, and start the server.
@@ -142,16 +141,16 @@ Example speed for 2 H100:8 nodes on GCP with a single request (you may get bette
 
 ## Deploy the Service with Multiple Replicas
 
-The lauching command above only starts a single replica (with 2 nodes) for the service. SkyServe helps deploy the service with multiple replicas with out-of-the-box load balancing, autoscaling and automatic recovering.
+The launching command above only starts a single replica (with 2 nodes) for the service. SkyServe helps deploy the service with multiple replicas with out-of-the-box load balancing, autoscaling and automatic recovery.
 Importantly, it also enables serving on spot instances resulting in 30\% lower cost.
 
-The only difference you have to do is to add a service section for serving specific configuration:
+The only change needed is to add a service section for serving specific configuration:
 
 ```yaml
 service:
   # Specifying the path to the endpoint to check the readiness of the service.
   readiness_probe: /health
-  # Allow 1 hour for code start.
+  # Allow up to 1 hour for cold start
   initial_delay_seconds: 3600
   # Autoscaling from 0 to 2 replicas
   replica_policy:
