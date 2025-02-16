@@ -44,7 +44,8 @@ from fastchat.model.model_adapter import get_conversation_template
 import torch
 from torch.utils.data import Dataset
 import transformers
-from transformers import Trainerfrom transformers.trainer_pt_utils import LabelSmoother
+from transformers import Trainer
+from transformers.trainer_pt_utils import LabelSmoother
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 
