@@ -816,17 +816,18 @@ def get_endpoint(service_record: Dict[str, Any]) -> str:
     load_balancer_port = service_record['load_balancer_port']
     if load_balancer_port is None:
         return '-'
+    protocol = 'https' if service_record['tls_encrypted'] else 'http'
     try:
         endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                               load_balancer_port).get(
+                                               load_balancer_port,
+                                               protocol=protocol).get(
                                                    load_balancer_port, None)
     except exceptions.ClusterNotUpError:
         return '-'
     if endpoint is None:
         return '-'
     assert isinstance(endpoint, str), endpoint
-    protocol = 'https' if service_record['tls_encrypted'] else 'http'
-    return f'{protocol}://{endpoint}'
+    return endpoint
 
 
 def format_service_table(service_records: List[Dict[str, Any]],

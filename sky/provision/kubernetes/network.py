@@ -24,15 +24,15 @@ def open_ports(
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
-    ports = list(port_ranges_to_set(ports))
+    parsed_ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _open_ports_using_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
-            ports=ports,
+            ports=parsed_ports,
             provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         _open_ports_using_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
-                                  ports=ports,
+                                  ports=parsed_ports,
                                   provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
         # Do nothing, as PodIP mode does not require opening ports
@@ -137,14 +137,14 @@ def cleanup_ports(
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
-    ports = list(port_ranges_to_set(ports))
+    parsed_ports = list(port_ranges_to_set(ports))
     if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
         _cleanup_ports_for_loadbalancer(
             cluster_name_on_cloud=cluster_name_on_cloud,
             provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
         _cleanup_ports_for_ingress(cluster_name_on_cloud=cluster_name_on_cloud,
-                                   ports=ports,
+                                   ports=parsed_ports,
                                    provider_config=provider_config)
     elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
         # Do nothing, as PodIP mode does not require opening ports
@@ -197,25 +197,25 @@ def query_ports(
     assert provider_config is not None, 'provider_config is required'
     port_mode = network_utils.get_port_mode(
         provider_config.get('port_mode', None))
-    ports = list(port_ranges_to_set(ports))
+    parsed_ports = list(port_ranges_to_set(ports))
 
     try:
         if port_mode == kubernetes_enums.KubernetesPortMode.LOADBALANCER:
             return _query_ports_for_loadbalancer(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                ports=ports,
+                ports=parsed_ports,
                 provider_config=provider_config,
             )
         elif port_mode == kubernetes_enums.KubernetesPortMode.INGRESS:
             return _query_ports_for_ingress(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                ports=ports,
+                ports=parsed_ports,
                 provider_config=provider_config,
             )
         elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
             return _query_ports_for_podip(
                 cluster_name_on_cloud=cluster_name_on_cloud,
-                ports=ports,
+                ports=parsed_ports,
                 provider_config=provider_config,
             )
         else:
@@ -280,8 +280,8 @@ def _query_ports_for_ingress(
             port=port,
             namespace=namespace)
 
-        http_port, https_port = external_ports \
-            if external_ports is not None else (None, None)
+        http_port, https_port = (external_ports if external_ports is not None
+                                 else (None, None))
         result[port] = [
             common.HTTPEndpoint(host=external_ip,
                                 port=http_port,

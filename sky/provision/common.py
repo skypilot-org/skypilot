@@ -278,11 +278,10 @@ def query_ports_passthrough(
 
     Returns a list of socket endpoint using head_ip and ports."""
     assert head_ip is not None, head_ip
-    ports = list(resources_utils.port_ranges_to_set(ports))
-    result: Dict[int, List[Endpoint]] = {}
-    for port in ports:
-        result[port] = [SocketEndpoint(port=port, host=head_ip)]
-    return result
+    parsed_ports = list(resources_utils.port_ranges_to_set(ports))
+    return {
+        port: [SocketEndpoint(port=port, host=head_ip)] for port in parsed_ports
+    }
 
 
 def log_function_start_end(func):
