@@ -4,9 +4,10 @@ import argparse
 
 from datasets import load_dataset
 import torch
-from transformers import TrainingArguments
 from trl import SFTTrainer
 from unsloth import FastLanguageModel
+
+from transformers import TrainingArguments
 
 max_seq_length = 2048
 

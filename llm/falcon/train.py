@@ -21,12 +21,13 @@ from datasets import load_dataset
 from peft import LoraConfig
 from peft.tuners.lora import LoraLayer
 import torch
+from trl import SFTTrainer
+
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 from transformers import BitsAndBytesConfig
 from transformers import HfArgumentParser
 from transformers import TrainingArguments
-from trl import SFTTrainer
 
 ########################################################################
 # This is a fully working simple example to use trl's RewardTrainer.
