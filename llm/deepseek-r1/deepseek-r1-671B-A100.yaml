@@ -1,8 +1,9 @@
+# Ajusted on deepseek-r1-671B.yaml for A100.
 name: deepseek-r1-A100
 
 resources:
   accelerators: { A100-80GB:8 }
-  disk_size: 3072 # More needed for the conversion
+  disk_size: 2048 # The model in BF16 format takes about 1.3TB
   disk_tier: best
   ports: 30000
   any_of:

@@ -73,7 +73,7 @@ Adjust the `accelerators` and `num_nodes` to fit your needs. Common configuratio
 
 .. note::
 
-  For A100 GPUs, use the [deepseek-r1-671B-A100.yaml](deepseek-r1-671B-A100.yaml) for FP8 to BF16 conversion, as FP8 is unsupported on A100 GPUs. Alternatively, use a pre-converted version from the Hugging Face community.
+  For A100 GPUs, use [deepseek-r1-671B-A100.yaml](deepseek-r1-671B-A100.yaml), which includes a preprocessing step to convert the model from FP8 to BF16, as A100 does not support FP8. This conversion process takes an additional 30-40 minutes. Alternatively, you can use a pre-converted BF16 model from the Hugging Face community to skip the conversion step.
 
   For more configuration options, refer to the [DeepSeek SGLang Docs](https://github.com/sgl-project/sglang/blob/main/benchmark/deepseek_v3/README.md).
 
