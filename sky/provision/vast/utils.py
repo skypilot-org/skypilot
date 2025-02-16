@@ -115,7 +115,7 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
         ]),
         'label': name,
         'image': image_name,
-	'disk': disk_size
+        'disk': disk_size
     }
 
     if preemptible:
