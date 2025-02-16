@@ -10,7 +10,7 @@ resources:
     - use_spot: true
     - use_spot: false
 
-num_nodes: 2 # Specify number of nodes to launch, the requirement might be different for different accelerators
+num_nodes: 4 # Specify number of nodes to launch, the requirement might be different for different accelerators
 
 setup: |
   # Install sglang with all dependencies using uv
