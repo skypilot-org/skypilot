@@ -25,19 +25,23 @@ setup: |
   # Conversion script
   git clone https://github.com/deepseek-ai/DeepSeek-V3.git deepseek_repo
   # A workaround for running conversion script on A100. See https://github.com/deepseek-ai/DeepSeek-V3/issues/4
-  sed -i 's/new_state_dict\[weight_name\] = weight_dequant(weight, scale_inv)/new_state_dict[weight_name] = weight_dequant(weight.float(), scale_inv)/' ./deepseek_repo/inference/fp8_cast_bf16.py
+  CONVERSION_SCRIPT="deepseek_repo/inference/fp8_cast_bf16.py"
+  sed -i 's/new_state_dict\[weight_name\] = weight_dequant(weight, scale_inv)/new_state_dict[weight_name] = weight_dequant(weight.float(), scale_inv)/' $CONVERSION_SCRIPT
 
   uv venv venv_convert && source venv_convert/bin/activate
-  uv pip install huggingface_hub -r deepseek_repo/inference/requirements.txt
+
+  # setuptools is needed by triton
+  uv pip install huggingface_hub setuptools -r deepseek_repo/inference/requirements.txt
 
   # Download the model weights and convert to BF16 format
   echo "Downloading model weights..."
-  python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='deepseek-ai/DeepSeek-R1', local_dir='./DeepSeek-R1-FP8')"
+  FP8_MODEL_DIR="DeepSeek-R1-FP8"
+  python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='deepseek-ai/DeepSeek-R1', local_dir='./$FP8_MODEL_DIR')"
 
   # Convert the model to BF16 format
   MODEL_DIR="DeepSeek-R1-BF16"
-  python deepseek_repo/inference/fp8_cast_bf16.py \
-    --input-fp8-hf-path DeepSeek-R1-FP8 \
+  python $CONVERSION_SCRIPT \
+    --input-fp8-hf-path $FP8_MODEL_DIR \
     --output-bf16-hf-path $MODEL_DIR
 
   if [ $? -ne 0 ]; then
@@ -45,7 +49,21 @@ setup: |
     exit 1
   fi
 
-  echo "BF16 conversion completed. Model saved to $MODEL_DIR"
+  MODEL_FILES=(
+  "config.json"
+  "generation_config.json"
+  "modeling_deepseek.py"
+  "configuration_deepseek.py"
+  "tokenizer.json"
+  "tokenizer_config.json"
+  # the bf16 directory has its own model.safetensors.index.json
+  )
+  cp "${MODEL_FILES[@]/#/$FP8_MODEL_DIR/}" $MODEL_DIR/
+  # See https://github.com/sgl-project/sglang/issues/3491
+  sed -i '/"quantization_config": {/,/}/d' $MODEL_DIR/config.json
+
+  echo "BF16 conversion completed. Model saved to $(realpath $MODEL_DIR)"
+  ls -lh "$MODEL_DIR"  # List files for verification
 
 run: |
   # Launch the server with appropriate configuration
@@ -55,9 +73,9 @@ run: |
 
   # For A100, we only export the head node for serving requests
   if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
-      EXTRA_ARGS="--host 0.0.0.0 --port 30000"
+      HEAD_NODE_ARGS="--host 0.0.0.0 --port 30000"
   else
-      EXTRA_ARGS=""
+      HEAD_NODE_ARGS=""
   fi
 
   python -m sglang.launch_server \
@@ -70,4 +88,4 @@ run: |
     --enable-dp-attention \
     --enable-torch-compile \
     --torch-compile-max-bs 8 \
-    $EXTRA_ARGS
+    $HEAD_NODE_ARGS
