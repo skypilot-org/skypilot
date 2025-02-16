@@ -48,7 +48,6 @@ Now it's time to run deepseek with SkyPilot. The instruction can be dependent on
 ```
 sky launch deepseek-r1-vllm.yaml \
   -c deepseek \
-  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
   --env MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Llama-8B \
   --gpus L4:1
 ```
@@ -57,12 +56,11 @@ sky launch deepseek-r1-vllm.yaml \
 ```
 sky launch deepseek-r1-vllm.yaml \
   -c deepseek \
-  --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN \
   --env MODEL_NAME=deepseek-ai/DeepSeek-R1-Distill-Llama-70B \
   --gpus A100-80GB:2
 ```
 
-replace the command with your own huggingface token and the GPU that you wish to use. You may run `sky show-gpus` to know what GPU that you have access to. As a reference, here is the model-GPU compatibility matrix:
+replace the command with the model and the GPU that you wish to use. You may run `sky show-gpus` to know what GPU that you have access to. As a reference, here is the model-GPU compatibility matrix:
 
 | **GPU**         	| **DeepSeek-R1-Distill-Qwen-7B**  | **DeepSeek-R1-Distill-Llama-70B** 	| **DeepSeek-R1**  	| 
 |-----------------	|------------------------------	|------------------------	|------------------------------	|
