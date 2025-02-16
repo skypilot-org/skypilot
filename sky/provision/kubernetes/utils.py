@@ -1892,8 +1892,8 @@ def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
 ) -> None:
-    """Adds or updates fields in the YAML with fields from the ~/.sky/config's
-    kubernetes.pod_spec dict.
+    """Adds or updates fields in the YAML with fields from the
+    ~/.sky/config.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
     SkyPilot yet, or require simple configuration (e.g., adding an
     imagePullSecrets field).
@@ -1953,7 +1953,7 @@ def combine_pod_config_fields(
 
 def combine_metadata_fields(cluster_yaml_path: str) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
-    fields from the ~/.sky/config's kubernetes.custom_metadata dict.
+    fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
