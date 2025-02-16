@@ -62,6 +62,21 @@ run: |
 
 ```
 
+Adjust the `accelerators` and `num_nodes` to fit your needs. Common configurations include:
+
+| **GPU**          | **Num Nodes** |
+|------------------|---------------|
+| H200:8           | 1             |
+| H100:8           | 2             |
+| A100-80GB:8      | 2             |
+| A100:8           | 4             |
+| L4:8             | 8             |
+
+.. note::
+
+  For A100 GPUs, use the [deepseek-r1-671B-A100.yaml](deepseek-r1-671B-A100.yaml) for FP8 to BF16 conversion, as FP8 is unsupported on A100 GPUs. Alternatively, use a pre-converted version from the Hugging Face community.
+
+  For more configuration options, refer to the [DeepSeek SGLang Docs](https://github.com/sgl-project/sglang/blob/main/benchmark/deepseek_v3/README.md).
 
 ```bash
 sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up

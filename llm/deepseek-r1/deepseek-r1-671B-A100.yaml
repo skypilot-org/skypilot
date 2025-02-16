@@ -1,0 +1,72 @@
+name: deepseek-r1-A100
+
+resources:
+  accelerators: { A100-80GB:8 }
+  disk_size: 3072 # More needed for the conversion
+  disk_tier: best
+  ports: 30000
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+num_nodes: 2 # Specify number of nodes to launch, the requirement might be different for different accelerators
+
+setup: |
+  # Install sglang with all dependencies using uv
+  uv pip install "sglang[all]>=0.4.2.post4" --find-links https://flashinfer.ai/whl/cu124/torch2.5/flashinfer
+
+  # Set up shared memory for better performance
+  sudo bash -c "echo 'vm.max_map_count=655300' >> /etc/sysctl.conf"
+  sudo sysctl -p
+
+  echo "FP8 is not supported on A100, we need to convert the model to BF16 format"
+
+  # Conversion script
+  git clone https://github.com/deepseek-ai/DeepSeek-V3.git deepseek_repo
+  # A workaround for running conversion script on A100. See https://github.com/deepseek-ai/DeepSeek-V3/issues/4
+  sed -i 's/new_state_dict\[weight_name\] = weight_dequant(weight, scale_inv)/new_state_dict[weight_name] = weight_dequant(weight.float(), scale_inv)/' ./deepseek_repo/inference/fp8_cast_bf16.py
+
+  uv venv venv_convert && source venv_convert/bin/activate
+  uv pip install huggingface_hub -r deepseek_repo/inference/requirements.txt
+
+  # Download the model weights and convert to BF16 format
+  echo "Downloading model weights..."
+  python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='deepseek-ai/DeepSeek-R1', local_dir='./DeepSeek-R1-FP8')"
+
+  # Convert the model to BF16 format
+  MODEL_DIR="DeepSeek-R1-BF16"
+  python deepseek_repo/inference/fp8_cast_bf16.py \
+    --input-fp8-hf-path DeepSeek-R1-FP8 \
+    --output-bf16-hf-path $MODEL_DIR
+
+  if [ $? -ne 0 ]; then
+    echo "BF16 conversion failed"
+    exit 1
+  fi
+
+  echo "BF16 conversion completed. Model saved to $MODEL_DIR"
+
+run: |
+  # Launch the server with appropriate configuration
+  MASTER_ADDR=$(echo "$SKYPILOT_NODE_IPS" | head -n1)
+  # TP should be number of GPUs per node times number of nodes
+  TP=$(($SKYPILOT_NUM_GPUS_PER_NODE * $SKYPILOT_NUM_NODES))
+
+  # For A100, we only export the head node for serving requests
+  if [ "$SKYPILOT_NODE_RANK" -eq 0 ]; then
+      EXTRA_ARGS="--host 0.0.0.0 --port 30000"
+  else
+      EXTRA_ARGS=""
+  fi
+
+  python -m sglang.launch_server \
+    --model-path DeepSeek-R1-BF16 \
+    --tp $TP \
+    --dist-init-addr ${MASTER_ADDR}:5000 \
+    --nnodes ${SKYPILOT_NUM_NODES} \
+    --node-rank ${SKYPILOT_NODE_RANK} \
+    --trust-remote-code \
+    --enable-dp-attention \
+    --enable-torch-compile \
+    --torch-compile-max-bs 8 \
+    $EXTRA_ARGS
