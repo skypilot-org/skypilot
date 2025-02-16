@@ -88,15 +88,17 @@ def stop_safe_status():
     stream logs from user program and do not want it to interfere with the
     spinner display.
     """
+    from sky import sky_logging  # pylint: disable=import-outside-toplevel
     if (threading.current_thread() is threading.main_thread() and
-            _status is not None):
+            not sky_logging.is_silent() and _status is not None):
         _status.stop()
 
 
 def force_update_status(msg: str):
     """Update the status message even if sky_logging.is_silent() is true."""
+    from sky import sky_logging  # pylint: disable=import-outside-toplevel
     if (threading.current_thread() is threading.main_thread() and
-            _status is not None):
+            not sky_logging.is_silent() and _status is not None):
         _status.update(msg)
 
 
