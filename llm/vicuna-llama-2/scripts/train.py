@@ -43,10 +43,8 @@ from fastchat.conversation import SeparatorStyle
 from fastchat.model.model_adapter import get_conversation_template
 import torch
 from torch.utils.data import Dataset
-from transformers.trainer_pt_utils import LabelSmoother
-
 import transformers
-from transformers import Trainer
+from transformers import Trainerfrom transformers.trainer_pt_utils import LabelSmoother
 
 IGNORE_TOKEN_ID = LabelSmoother.ignore_index
 

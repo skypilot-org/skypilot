@@ -8,9 +8,8 @@ from flash_attn.bert_padding import unpad_input
 from flash_attn.flash_attn_interface import flash_attn_varlen_qkvpacked_func
 import torch
 from torch import nn
-from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
-
 import transformers
+from transformers.models.llama.modeling_llama import apply_rotary_pos_emb
 
 
 def forward(

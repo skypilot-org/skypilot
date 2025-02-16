@@ -1,33 +1,12 @@
-# Adapted from https://gist.github.com/pacman100/1731b41f7a90a87b457e8c5415ff1c14
-# coding=utf-8
-# Copyright 2023 The HuggingFace Inc. team. All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
-from dataclasses import dataclass
-from dataclasses import field
-from typing import Optional
-
-from datasets import load_dataset
 from peft import LoraConfig
 from peft.tuners.lora import LoraLayer
 import torch
-from trl import SFTTrainer
-
 from transformers import AutoModelForCausalLM
 from transformers import AutoTokenizer
 from transformers import BitsAndBytesConfig
 from transformers import HfArgumentParser
 from transformers import TrainingArguments
+from trl import SFTTrainer
 
 ########################################################################
 # This is a fully working simple example to use trl's RewardTrainer.
