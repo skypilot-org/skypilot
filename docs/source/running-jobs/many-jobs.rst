@@ -236,11 +236,75 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
 Scale out to many jobs
 -----------------------
 
-With CLI and config files
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+With the above setup, you can now scale out to run many jobs in parallel.
 
-You can run many jobs in parallel by (1) creating multiple config files and (2)
-submitting them as :ref:`SkyPilot managed jobs <managed-jobs>`.
+To run many jobs at once, we will launch the jobs as :ref:`SkyPilot managed jobs <managed-jobs>`. We can control the hyperparameter environment variables independently for each managed job.
+
+You can use normal loops in bash or Python to iterate over possible hyperparamters:
+
+.. tab-set::
+
+    .. tab-item:: CLI
+        :sync: cli
+
+        .. code-block:: bash
+
+          job_idx=0
+          for lr in 0.01 0.03 0.1 0.3 1.0; do
+              for max_steps in 100 300 1000; do
+                  sky jobs launch -n train-job${job_idx} -y -d train-template.yaml \
+                    --env LR="${lr}" --env MAX_STEPS="${max_steps}" \
+                    --env WANDB_API_KEY # pick up from environment
+                  ((job_idx++))
+              done
+          done
+
+    .. tab-item:: Python
+        :sync: python
+
+        .. code-block:: python
+
+          import os
+          import sky
+
+          LR_CANDIDATES = [0.01, 0.03, 0.1, 0.3, 1.0]
+          MAX_STEPS_CANDIDATES = [100, 300, 1000]
+          task = sky.Task.from_yaml('train-template.yaml')
+
+          job_idx = 1
+          for lr in LR_CANDIDATES:
+            for max_steps in MAX_STEPS_CANDIDATES:
+              task.update_envs({'LR': lr, 'MAX_STEPS': max_steps})
+              sky.jobs.launch(
+                task,
+                name=f'train-job{job_idx}',
+                detach_run=True,
+                retry_until_up=True,
+              )
+              job_idx += 1
+
+The launched jobs will "detach" once submitted (``-d``), and will run in parallel.
+
+Job statuses can be checked via ``sky jobs queue``:
+
+.. code-block:: console
+
+  $ sky jobs queue
+
+  Fetching managed jobs...
+  Managed jobs
+  In progress tasks: 10 RUNNING
+  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
+  10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
+  9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
+  8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
+  ...
+
+
+With Config Files
+~~~~~~~~~~~~~~~~~
+
+For more control, you can also create specific env var config files.
 
 First, create a config file for each job (for example, in a ``configs`` directory):
 
@@ -297,49 +361,6 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
       --env-file $config_file \
       --env WANDB_API_KEY
   done
-
-
-Job statuses can be checked via ``sky jobs queue``:
-
-.. code-block:: console
-
-  $ sky jobs queue
-
-  Fetching managed jobs...
-  Managed jobs
-  In progress tasks: 10 RUNNING
-  ID  TASK  NAME        RESOURCES  SUBMITTED    TOT. DURATION  JOB DURATION  #RECOVERIES  STATUS
-  10  -     train-job10 1x[V100:4] 5 mins ago   5m 5s          1m 12s        0            RUNNING
-  9   -     train-job9  1x[V100:4] 6 mins ago   6m 11s         2m 23s        0            RUNNING
-  8   -     train-job8  1x[V100:4] 7 mins ago   7m 15s         3m 31s        0            RUNNING
-  ...
-
-
-With Python API
-~~~~~~~~~~~~~~~
-
-To have more customized control over generation of job variants, you can also use SkyPilot Python API to launch the jobs.
-
-.. code-block:: python
-
-  import os
-  import sky
-
-  LR_CANDIDATES = [0.01, 0.03, 0.1, 0.3, 1.0]
-  MAX_STEPS_CANDIDATES = [100, 300, 1000]
-  task = sky.Task.from_yaml('train-template.yaml')
-
-  job_idx = 1
-  for lr in LR_CANDIDATES:
-    for max_steps in MAX_STEPS_CANDIDATES:
-      task.update_envs({'LR': lr, 'MAX_STEPS': max_steps})
-      sky.jobs.launch(
-        task,
-        name=f'train-job{job_idx}',
-        detach_run=True,
-        retry_until_up=True,
-      )
-      job_idx += 1
 
 
 Best practices for scaling
