@@ -285,8 +285,6 @@ class Optimizer:
 
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
-            if do_print:
-                logger.debug('#### {} ####'.format(node))
 
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
@@ -297,6 +295,10 @@ class Optimizer:
                         blocked_resources=blocked_resources,
                         quiet=quiet))
                 node_to_candidate_map[node] = cloud_candidates
+                # Has to call the printing after the launchable resources are
+                # computed, because the missing fields of the resources are
+                # inferred in the _fill_in_launchable_resources function.
+                logger.debug('#### {} ####'.format(node))
             else:
                 # Dummy sink node.
                 launchable_resources = {
