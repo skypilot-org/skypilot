@@ -190,7 +190,7 @@ new-versioned replicas.  :code:`sky serve status` shows the latest service
 version and each replica's version.
 
 Example
-~~~~~~~~
+~~~~~~~
 
 We use the same service ``http-server`` as an example. We can then use :code:`sky serve update --mode blue_green` to update the service:
 
