@@ -5,7 +5,6 @@ VMs, GPUs, and TPUs. The script takes about 1-2 minutes to run.
 """
 
 import argparse
-import functools
 import io
 import multiprocessing
 import os
@@ -20,6 +19,7 @@ import numpy as np
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
+from sky.utils import annotations
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
@@ -281,7 +281,7 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
 
 
 @filter_zones
-@functools.lru_cache(maxsize=None)
+@annotations.lru_cache(scope='global', maxsize=None)
 def _get_all_zones() -> List[str]:
     zones_request = gcp_client.zones().list(project=project_id)
     zones = []

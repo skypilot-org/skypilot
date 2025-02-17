@@ -136,6 +136,20 @@ Supported bucket types:
 
 .. code-block:: yaml
 
+  # Endpoint of the SkyPilot API server (optional).
+  #
+  # This is used to connect to the SkyPilot API server.
+  #
+  # Default: null (use the local endpoint, which will be started by SkyPilot
+  # automatically).
+  api_server:
+    endpoint: http://xx.xx.xx.xx:8000
+
+  # Custom managed jobs controller resources (optional).
+  #
+  # These take effects only when a managed jobs controller does not already exist.
+  #
+  # Ref: https://docs.skypilot.co/en/latest/examples/managed-jobs.html#customizing-job-controller-resources
   jobs:
     bucket: s3://my-bucket/
     # bucket: gs://my-bucket/

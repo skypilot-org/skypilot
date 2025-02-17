@@ -57,7 +57,13 @@ templates_path = ['_templates']
 main_doc = 'index'
 
 autosummary_generate = True
-napolean_use_rtype = False
+# Disable automatic type hints to let Napoleon handle them
+napoleon_use_rtype = False
+# Napoleon settings
+napoleon_custom_sections = [
+    ('Request Returns', 'params_style'),
+    ('Request Raises', 'params_style'),
+]
 
 # -- Options for autodoc
 

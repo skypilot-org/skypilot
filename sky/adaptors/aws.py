@@ -35,6 +35,7 @@ import time
 from typing import Any, Callable
 
 from sky.adaptors import common
+from sky.utils import annotations
 from sky.utils import common_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
@@ -59,7 +60,7 @@ class _ThreadLocalLRUCache(threading.local):
 
     def __init__(self, maxsize=32):
         super().__init__()
-        self.cache = functools.lru_cache(maxsize=maxsize)
+        self.cache = annotations.lru_cache(scope='global', maxsize=maxsize)
 
 
 def _thread_local_lru_cache(maxsize=32):
