@@ -291,11 +291,11 @@ and mutate user requests.
 
 This is useful for enforcing certain policies on all tasks, such as:
 
-- Adding custom labels
-- Enforcing resource limits
-- Restricting cloud providers
-- Requiring spot instances
-- Setting autostop timeouts
+- Adding custom labels.
+- Enforcing resource limits.
+- Restricting cloud providers.
+- Requiring spot instances.
+- Setting autostop timeouts.
 
 See :ref:`advanced-policy-config` for details.
 
@@ -528,6 +528,7 @@ Supported values:
 1. **LOCAL_CREDENTIALS**:
    The user's local credential files will be uploaded to AWS instances created by SkyPilot.
    These credentials are used for:
+
    - Accessing cloud resources (e.g., private buckets).
    - Launching new instances (e.g., for jobs/serve controllers).
 
@@ -615,7 +616,7 @@ Example:
 
 VPC to use (optional).
 
-Default: null, which implies the following behavior. First, all existing
+Default: ``null``, which implies the following behavior. First, all existing
 VPCs in the project are checked against the minimal recommended firewall
 rules for SkyPilot to function. If any VPC satisfies these rules, it is
 used. Otherwise, a new VPC named ``skypilot-vpc`` is automatically created
@@ -637,7 +638,7 @@ will be added.
 
 Should instances be assigned private IPs only? (optional).
 
-Set to true to use private IPs to communicate between the local client and
+Set to ``true`` to use private IPs to communicate between the local client and
 any SkyPilot nodes. This requires the networking stack be properly set up.
 
 This flag is typically set together with ``vpc_name`` above and
@@ -651,10 +652,10 @@ Default: ``false``.
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Should instances in a vpc where communicated with via internal IPs still
-have an external IP? (optional)
+have an external IP? (optional).
 
-Set to true to force VMs to be assigned an exteral IP even when vpc_name
-and use_internal_ips are set.
+Set to ``true`` to force VMs to be assigned an exteral IP even when
+``vpc_name`` and ``use_internal_ips`` are set.
 
 Default: ``false``.
 
@@ -665,7 +666,7 @@ Default: ``false``.
 
 SSH proxy command (optional).
 
-Please refer to the aws.ssh_proxy_command section above for more details.
+Please refer to the :ref:`aws.ssh_proxy_command <config-yaml-aws-ssh-proxy-command>` section above for more details.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -698,20 +699,20 @@ Whether to prioritize reserved instance types/locations (considered as 0
 cost) in the optimizer.
 
 If you have "automatically consumed" reservations in your GCP project:
-Setting this to true guarantees the optimizer will pick any matching
-reservation and GCP will auto consume your reservation, and setting to
-false means optimizer uses regular, non-zero pricing in optimization (if
-by chance any matching reservation exists, GCP still auto consumes the
-reservation).
+  - Setting this to ``true`` guarantees the optimizer will pick any matching
+    reservation and GCP will auto consume your reservation, and setting to
+    ``false`` means optimizer uses regular, non-zero pricing in optimization (if
+    by chance any matching reservation exists, GCP still auto consumes the
+    reservation).
 
 If you have "specifically targeted" reservations (set by the
-``specific_reservations`` field below): This field will automatically be set
-to true.
+  ``specific_reservations`` field below):
+  - This field will automatically be set to ``true``.
 
-Note: this setting is default to false for performance reasons, as it can
-take half a minute to retrieve the reservations from GCP when set to true.
+Note: this setting is default to ``false`` for performance reasons, as it can
+take half a minute to retrieve the reservations from GCP when set to ``true``.
 
-Default: false.
+Default: ``false``.
 
 .. _config-yaml-gcp-specific-reservations:
 
@@ -840,9 +841,10 @@ Advanced Kubernetes configurations (optional).
 Networking mode (optional).
 
 Can be one of:
-- portforward: Use port forwarding to access the pods
-- hostnetwork: Use host network to access the pods
-- weave: Use Weave CNI for networking
+
+- ``portforward``: Use port forwarding to access the pods.
+- ``hostnetwork``: Use host network to access the pods.
+- ``weave``: Use Weave CNI for networking.
 
 Default: ``portforward``.
 
@@ -854,8 +856,9 @@ Default: ``portforward``.
 Port configuration mode (optional).
 
 Can be one of:
-- loadbalancer: Use LoadBalancer service to expose ports
-- nodeport: Use NodePort service to expose ports
+
+- ``loadbalancer``: Use LoadBalancer service to expose ports.
+- ``nodeport``: Use NodePort service to expose ports.
 
 Default: ``loadbalancer``.
 
@@ -904,7 +907,9 @@ Default: ``10``.
 
 Autoscaler type (optional).
 
-Type of autoscaler to use. Can be one of:
+Type of autoscaler to use.
+
+Can be one of:
 
 - ``gke``: Google Kubernetes Engine Autopilot
 - ``eks``: Amazon EKS
@@ -971,18 +976,18 @@ Example:
 Advanced OCI configurations (optional).
 
 ``oci_config_profile``
-    The profile name in ~/.oci/config to use for launching instances.
+    The profile name in ``~/.oci/config`` to use for launching instances.
     Default: ``DEFAULT``
 
 ``compartment_ocid``
     The OCID of the compartment to use for launching instances. If not set, the root compartment will be used (optional).
 
 ``image_tag_general``
-    The default image tag to use for launching general instances (CPU) if the image_id parameter is not specified.
+    The default image tag to use for launching general instances (CPU) if the ``image_id`` parameter is not specified.
     Default: ``skypilot:cpu-ubuntu-2204``
 
 ``image_tag_gpu``
-    The default image tag to use for launching GPU instances if the image_id parameter is not specified.
+    The default image tag to use for launching GPU instances if the ``image_id`` parameter is not specified.
     Default: ``skypilot:gpu-ubuntu-2204``
 
 The configuration can be specified either in the ``default`` section (applying to all regions unless overridden) or in region-specific sections.
