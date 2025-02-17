@@ -65,7 +65,7 @@ run: |
 
 ```
 
-Adjust the `accelerators` and `num_nodes` to fit your needs. Common configurations include:
+You can also adjust the `accelerators` and `num_nodes` to fit your needs. Common configurations include:
 
 | **GPU**          | **Num Nodes** |
 |------------------|---------------|
