@@ -1231,6 +1231,146 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@click.argument('entrypoint',
+                required=False,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--num-jobs',
+              required=True,
+              type=int,
+              help='Number of jobs to launch.')
+@click.option('--cluster',
+              '-c',
+              default=None,
+              type=str,
+              **_get_shell_complete_args(_complete_cluster_name),
+              help='Base name for clusters. Each job will launch on a cluster named {cluster}-{job_id}.')
+@_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS)
+@click.option(
+    '--idle-minutes-to-autostop',
+    '-i',
+    default=None,
+    type=int,
+    required=False,
+    help=('Automatically stop the cluster after this many minutes '
+          'of idleness, i.e., no running or pending jobs in the cluster\'s job '
+          'queue. Idleness gets reset whenever setting-up/running/pending jobs '
+          'are found in the job queue. '
+          'Setting this flag is equivalent to '
+          'running ``sky launch -d ...`` and then ``sky autostop -i <minutes>``'
+          '. If not set, the cluster will not be autostopped.'))
+@click.option(
+    '--down',
+    default=False,
+    is_flag=True,
+    required=False,
+    help=
+    ('Autodown the cluster: tear down the cluster after all jobs finish '
+     '(successfully or abnormally). If --idle-minutes-to-autostop is also set, '
+     'the cluster will be torn down after the specified idle time. '
+     'Note that if errors occur during provisioning/data syncing/setting up, '
+     'the cluster will not be torn down for debugging purposes.'),
+)
+@usage_lib.entrypoint
+def batch(
+    entrypoint: Tuple[str, ...],
+    num_jobs: int,
+    cluster: Optional[str],
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    ports: Tuple[str, ...],
+    idle_minutes_to_autostop: Optional[int],
+    down: bool):
+    """Launch multiple copies of a task, each on its own cluster.
+
+    Works exactly like `sky launch` but launches multiple copies of the task, each
+    on a different cluster. The cluster names will be {cluster}-{job_id}.
+
+    For each job, two environment variables are set:
+    - SKYPILOT_NUM_JOBS: Total number of jobs in the batch
+    - SKYPILOT_JOB_ID: ID of this job (0 to num_jobs-1)
+    """
+    if num_jobs <= 0:
+        raise click.BadParameter('Number of jobs must be positive.')
+
+    # Generate base cluster name if not provided
+    base_cluster_name = cluster
+    if base_cluster_name is None:
+        base_cluster_name = cluster_utils.generate_cluster_name()
+        click.echo(f'Using auto-generated base cluster name: {base_cluster_name}')
+
+    base_env = _merge_env_vars(env_file, env)
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
+        entrypoint=entrypoint,
+        name=name,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=base_env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+    )
+
+    if isinstance(task_or_dag, sky.Dag):
+        raise click.UsageError(
+            _DAG_NOT_SUPPORTED_MESSAGE.format(command='sky batch'))
+
+    task = task_or_dag
+    request_ids = []
+    cluster_names = []
+
+    for job_id in range(num_jobs):
+        job_task = copy.deepcopy(task)
+        job_env = [
+            ('SKYPILOT_NUM_JOBS', str(num_jobs)),
+            ('SKYPILOT_JOB_ID', str(job_id))
+        ]
+        job_task.update_envs(job_env)
+
+        # Create unique cluster name for this job
+        job_cluster_name = f'{base_cluster_name}-{job_id}'
+        cluster_names.append(job_cluster_name)
+
+        request_id = sdk.launch(
+            job_task,
+            cluster_name=job_cluster_name,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+        )
+        request_ids.append(request_id)
+
+    # Print summary
+    click.echo(f'Submitted {num_jobs} jobs:')
+    for i, (cluster_name, request_id) in enumerate(zip(cluster_names, request_ids)):
+        click.echo(f'  Job {i}: Launched on cluster {cluster_name}')
+        click.echo(f'    Logs: sky api logs {request_id}')
+
+
+@cli.command(cls=_DocumentedCodeCommand)
 @click.argument('cluster',
                 required=False,
                 type=str,
@@ -3891,6 +4031,144 @@ def jobs_launch(
                                job_id=job_id,
                                follow=True,
                                controller=False)
+
+
+@jobs.command('batch', cls=_DocumentedCodeCommand)
+@click.argument('entrypoint',
+                required=True,
+                type=str,
+                nargs=-1,
+                **_get_shell_complete_args(_complete_file_name))
+@click.option('--num-jobs',
+              required=True,
+              type=int,
+              help='Number of jobs to launch.')
+@click.option('--name',
+              '-n',
+              required=False,
+              type=str,
+              help=('Base name for jobs. Each job will be named {name}-{job_id}. '
+                    'If not specified, job names will be auto-generated.'))
+@_add_click_options(_TASK_OPTIONS + _EXTRA_RESOURCES_OPTIONS)
+@click.option(
+    '--detach-run',
+    '-d',
+    default=False,
+    is_flag=True,
+    help=('If True, as soon as jobs are submitted, return from this call '
+          'and do not stream execution logs.'))
+@click.option('--yes',
+              '-y',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Skip confirmation prompt.')
+@click.option('--job-recovery',
+              default=None,
+              type=str,
+              help='Recovery strategy to use for managed jobs.')
+@usage_lib.entrypoint
+def jobs_batch(
+    entrypoint: Tuple[str, ...],
+    num_jobs: int,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    cpus: Optional[str],
+    memory: Optional[str],
+    instance_type: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    ports: Tuple[str, ...],
+    detach_run: bool,
+    yes: bool,
+    job_recovery: Optional[str]):
+    """Launch multiple managed jobs.
+
+    Works exactly like `sky jobs launch` but launches multiple copies of the task.
+    Each job will get a unique name of the form {name}-{job_id}.
+
+    For each job, two environment variables are set:
+    - SKYPILOT_NUM_JOBS: Total number of jobs in the batch
+    - SKYPILOT_JOB_ID: ID of this job (0 to num_jobs-1)
+    """
+    if num_jobs <= 0:
+        raise click.BadParameter('Number of jobs must be positive.')
+
+    env = _merge_env_vars(env_file, env)
+    task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
+        entrypoint=entrypoint,
+        workdir=workdir,
+        cloud=cloud,
+        region=region,
+        zone=zone,
+        gpus=gpus,
+        cpus=cpus,
+        memory=memory,
+        instance_type=instance_type,
+        num_nodes=num_nodes,
+        use_spot=use_spot,
+        image_id=image_id,
+        env=env,
+        disk_size=disk_size,
+        disk_tier=disk_tier,
+        ports=ports,
+        job_recovery=job_recovery,
+    )
+
+    if not isinstance(task_or_dag, sky.Dag):
+        assert isinstance(task_or_dag, sky.Task), task_or_dag
+        with sky.Dag() as dag:
+            dag.add(task_or_dag)
+    else:
+        dag = task_or_dag
+
+    # Generate base job name if not provided
+    base_name = name
+    if base_name is None:
+        base_name = dag.name or 'sky-batch'
+        click.echo(f'Using base job name: {base_name}')
+
+    request_ids = []
+    job_names = []
+
+    for job_id in range(num_jobs):
+        job_dag = copy.deepcopy(dag)
+
+        # Add job-specific env vars to all tasks in the DAG
+        job_env = [
+            ('SKYPILOT_NUM_JOBS', str(num_jobs)),
+            ('SKYPILOT_JOB_ID', str(job_id))
+        ]
+        for task in job_dag.tasks:
+            task.update_envs(job_env)
+
+        # Set unique name for this job
+        job_name = f'{base_name}-{job_id}'
+        job_dag.name = job_name
+        job_names.append(job_name)
+
+        request_id = managed_jobs.launch(
+            job_dag,
+            job_name,
+            _need_confirmation=False
+        )
+        request_ids.append(request_id)
+
+    # Print summary
+    click.echo(f'Submitted {num_jobs} jobs:')
+    for i, (job_name, request_id) in enumerate(zip(job_names, request_ids)):
+        click.echo(f'  Job {i}: {job_name}')
+        click.echo(f'    Logs: sky api logs {request_id}')
+
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
