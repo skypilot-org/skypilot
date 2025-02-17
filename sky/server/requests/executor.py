@@ -78,8 +78,8 @@ multiprocessing.set_start_method('spawn', force=True)
 # TODO(aylei): maintaining these constants is error-prone, we may need to
 # automatically tune parallelism at runtime according to system usage stats
 # in the future.
-_PER_BLOCKING_REQUEST_MEM_GB = 0.3
-_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.2
+_PER_BLOCKING_REQUEST_MEM_GB = 0.4
+_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.25
 # To control the number of blocking workers.
 _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS = 2
 _MAX_BLOCKING_WORKERS_LOCAL = 4

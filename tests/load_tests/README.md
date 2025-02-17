@@ -5,6 +5,9 @@ This folder contains tools for load testing and profiling the SkyPilot API serve
 * System Profiling (`sys_profiling.py`): monitors system resource usage (CPU and memory) over time
 * Load Testing (`test_load_on_server.py`): sends concurrent requests to stress test the SkyPilot API server
 
+> **Note**: The load testing workload is simple and may not reflect the usage of the SkyPilot API server in real-world scenarios.
+> You may consider running part of or all smoke tests to get a more accurate measurement.
+
 ## Instructions
 
 1. Start the SkyPilot API server on a remote machine
