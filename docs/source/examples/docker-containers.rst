@@ -43,8 +43,8 @@ For example, to run a HuggingFace TGI serving container:
     # will NOT be run inside the container.
 
 
-Private Registries for Tasks
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Private registries
+^^^^^^^^^^^^^^^^^^
 
 When using this mode, to access Docker images hosted on private registries,
 simply add a :code:`setup` section to your task YAML file to authenticate with
@@ -189,8 +189,8 @@ Any GPUs assigned to the task will be automatically mapped to your Docker contai
   default entrypoint (i.e. :code:`/bin/bash`).
 
 
-Private Registries for Runtime Environments
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Private registries
+^^^^^^^^^^^^^^^^^^
 
 .. note::
 

@@ -112,7 +112,7 @@ resources:
   accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
 ```
 
-### Accessing the Multi-Instance Service
+### Accessing the model
 
 After the `sky serve up` command, there will be a single endpoint for the service. We can access the model through the OpenAI API with the IP and port:
 
