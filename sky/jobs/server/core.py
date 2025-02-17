@@ -22,9 +22,11 @@ from sky.clouds.service_catalog import common as service_catalog_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common
+from sky.server import constants as server_constants
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import common as utils_common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -149,6 +151,10 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
+
+        # Launch with the api server's user hash, so that sky status does not
+        # show the owner of the controller as whatever user launched it first.
+        os.environ[skylet_constants.USER_ID_ENV_VAR] = utils_common.SERVER_ID
         return execution.launch(task=controller_task,
                                 cluster_name=controller_name,
                                 stream_logs=stream_logs,

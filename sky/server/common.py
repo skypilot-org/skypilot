@@ -406,23 +406,6 @@ def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
 def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str]):
     """Reload modules, global variables, and usage message for a new request."""
-    # When a user request is sent to api server, it changes the user hash in the
-    # env vars, but since controller_utils is imported before the env vars are
-    # set, it doesn't get updated. So we need to reload it here.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
-    common.SKY_SERVE_CONTROLLER_NAME = common.get_controller_name(
-        common.ControllerType.SERVE)
-    common.JOB_CONTROLLER_NAME = common.get_controller_name(
-        common.ControllerType.JOBS)
-    # TODO(zhwu): We should avoid reloading the controller_utils module.
-    # Instead, we should reload required cache or global variables.
-    # TODO(zhwu): Reloading the controller_utils module may cause the global
-    # variables in other modules referring the `controller_utils.Controllers`
-    # dangling, as they will be pointing to the old object. We should not use
-    # it in global variables.
-    importlib.reload(controller_utils)
-
     # Reset the client entrypoint and command for the usage message.
     common_utils.set_client_entrypoint_and_command(
         client_entrypoint=client_entrypoint,

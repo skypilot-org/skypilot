@@ -1420,12 +1420,9 @@ def _handle_jobs_queue_request(
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the jobs.
             controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-            # Query status of the controller cluster. We add a wildcard because
-            # the controller cluster name can have a suffix like
-            # '-remote-<hash>' when using remote API server.
+            # Query status of the controller cluster.
             records = sdk.get(
-                sdk.status(
-                    cluster_names=[controller_type.value.cluster_name + '*']))
+                sdk.status(cluster_names=[controller_type.value.cluster_name]))
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
@@ -1495,12 +1492,9 @@ def _handle_services_request(
             # due to the controller being autostopped when querying the
             # services.
             controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-            # Query status of the controller cluster. We add a wildcard because
-            # the controller cluster name can have a suffix like
-            # '-remote-<hash>' when using remote API server.
+            # Query status of the controller cluster.
             records = sdk.get(
-                sdk.status(
-                    cluster_names=[controller_type.value.cluster_name + '*']))
+                sdk.status(cluster_names=[controller_type.value.cluster_name]))
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
                 msg = controller_type.value.default_hint_if_non_existent
@@ -2804,11 +2798,6 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
             to be torn down (e.g., because it has jobs running or
             it is in init state)
     """
-    if not common.is_current_user_controller(controller_name):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                f'Tearing down other user\'s managed job controller '
-                f'{controller_name!r} is not allowed.')
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
 
@@ -2868,12 +2857,6 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
             to be torn down (e.g., because it has services running or
             it is in init state)
     """
-    # TODO(zhwu): Move this check to the sdk or even API server side.
-    if not common.is_current_user_controller(controller_name):
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(
-                f'Tearing down other user\'s sky serve controller '
-                f'{controller_name!r} is not allowed.')
     controller = controller_utils.Controllers.from_name(controller_name)
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):

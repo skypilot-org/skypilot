@@ -15,8 +15,7 @@ router = fastapi.APIRouter()
 
 
 def _get_controller_name(request_body: payloads.RequestBody) -> str:
-    user_hash = request_body.user_hash
-    return common.get_controller_name(common.ControllerType.SERVE, user_hash)
+    return common.SKY_SERVE_CONTROLLER_NAME
 
 
 @router.post('/up')

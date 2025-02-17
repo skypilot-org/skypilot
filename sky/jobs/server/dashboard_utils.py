@@ -1,4 +1,9 @@
-"""Persistent dashboard sessions."""
+"""Persistent dashboard sessions.
+
+Note: before #4717, this was useful because we needed to tunnel to multiple
+controllers - one per user. Now, there is only one controller for the whole API
+server, so this is not very useful. TODO(cooperc): Remove or fix this.
+"""
 import pathlib
 from typing import Tuple
 
