@@ -73,8 +73,13 @@ multiprocessing.set_start_method('spawn', force=True)
 # Constants based on profiling the peak memory usage of
 # various sky commands. See `tests/load_test/` for details.
 # Max memory consumption for each request.
-_PER_BLOCKING_REQUEST_MEM_GB = 0.25
-_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.15
+# NOTE(dev): update these constants for each release according to the load
+# test results.
+# TODO(aylei): maintaining these constants is error-prone, we may need to
+# automatically tune parallelism at runtime according to system usage stats
+# in the future.
+_PER_BLOCKING_REQUEST_MEM_GB = 0.3
+_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.2
 # To control the number of blocking workers.
 _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS = 2
 _MAX_BLOCKING_WORKERS_LOCAL = 4
@@ -301,34 +306,33 @@ def schedule_request(request_id: str,
     _get_queue(schedule_type).put(input_tuple)
 
 
+def executor_initializer(sub_title: str):
+    setproctitle.setproctitle(
+        f'{sub_title}:{multiprocessing.current_process().pid}')
+
+
 def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
     """Worker for the requests.
 
     Args:
         max_parallel_size: Maximum number of parallel jobs this worker can run.
     """
-    logger.info(f'Starting {worker} with pid '
-                f'{multiprocessing.current_process().pid}')
     setproctitle.setproctitle(
         f'SkyPilot:worker:{worker.schedule_type.value}-{worker.id}')
+    sub_title = f'SkyPilot:executor:{worker.schedule_type.value}-{worker.id}'
     queue = _get_queue(worker.schedule_type)
-    # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
-    # because the former is more efficient with the support of lazy creation of
-    # worker processes.
-    # We use executor instead of individual multiprocessing.Process to avoid
-    # the overhead of forking a new process for each request, which can be about
-    # 1s delay.
-    with concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_parallel_size) as executor:
-        while True:
+
+    def process_request(executor: concurrent.futures.ProcessPoolExecutor):
+        try:
             request_element = queue.get()
             if request_element is None:
                 time.sleep(0.1)
-                continue
+                return
             request_id, ignore_return_value = request_element
             request = api_requests.get_request(request_id)
+            assert request is not None, request_id
             if request.status == api_requests.RequestStatus.CANCELLED:
-                continue
+                return
             logger.info(f'[{worker}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
             # cancelled when requested by a user.
@@ -347,6 +351,22 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
+        except Exception as e:
+            logger.error(f'[{worker}] Error processing request {request_id}.\n'
+                         f'{common_utils.format_exception(e)}')
+
+    # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
+    # because the former is more efficient with the support of lazy creation of
+    # worker processes.
+    # We use executor instead of individual multiprocessing.Process to avoid
+    # the overhead of forking a new process for each request, which can be about
+    # 1s delay.
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_parallel_size,
+            initializer=executor_initializer,
+            initargs=(sub_title,)) as executor:
+        while True:
+            process_request(executor)
 
 
 def _get_cpu_count() -> int:
@@ -390,11 +410,9 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     cpu_count = _get_cpu_count()
     mem_size_gb = _get_mem_size_gb()
     mem_size_gb = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
-    parallel_for_blocking = _max_parallel_size_for_blocking(
-        cpu_count, mem_size_gb)
-    if not deploy:
-        parallel_for_blocking = min(parallel_for_blocking,
-                                    _MAX_BLOCKING_WORKERS_LOCAL)
+    parallel_for_blocking = _max_parallel_size_for_blocking(cpu_count,
+                                                            mem_size_gb,
+                                                            local=not deploy)
     max_parallel_for_non_blocking = _max_parallel_size_for_non_blocking(
         mem_size_gb, parallel_for_blocking)
     logger.info(
@@ -443,12 +461,28 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
-def _max_parallel_size_for_blocking(cpu_count: int, mem_size_gb: float) -> int:
+def _max_parallel_size_for_blocking(cpu_count: int,
+                                    mem_size_gb: float,
+                                    local=False) -> int:
     """Max parallelism for blocking requests."""
+    # since the estimation can be off by a lot, we allow users to override
+    # the default value by setting the environment variable.
+    env_parallel_size = os.getenv('SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS')
+    if env_parallel_size is not None:
+        try:
+            n = int(env_parallel_size)
+            return max(1, n)
+        except ValueError:
+            logger.warning(
+                f'Invalid SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS value: {env_parallel_size}. '
+                'Falling back to calculated value.')
+
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS
     mem_based_max_parallel = int(mem_size_gb * _MAX_MEM_PERCENT_FOR_BLOCKING /
                                  _PER_BLOCKING_REQUEST_MEM_GB)
     n = max(1, min(cpu_based_max_parallel, mem_based_max_parallel))
+    if local:
+        return min(n, _MAX_BLOCKING_WORKERS_LOCAL)
     return n
 
 
@@ -456,6 +490,19 @@ def _max_parallel_size_for_blocking(cpu_count: int, mem_size_gb: float) -> int:
 def _max_parallel_size_for_non_blocking(mem_size_gb: float,
                                         parallel_size_for_blocking: int) -> int:
     """Max parallelism for non-blocking requests."""
+    # since the estimation can be off by a lot, we allow users to override
+    # the default value by setting the environment variable.
+    env_parallel_size = os.getenv('SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS')
+    if env_parallel_size is not None:
+        try:
+            n = int(env_parallel_size)
+            return max(1, n)
+        except ValueError:
+            logger.warning(
+                f'Invalid SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS value: {env_parallel_size}. '
+                'Falling back to calculated value.')
+
+    # Fall back to calculation if env var is not set or invalid
     available_mem = mem_size_gb - (parallel_size_for_blocking *
                                    _PER_BLOCKING_REQUEST_MEM_GB)
     n = max(1, int(available_mem / _PER_NON_BLOCKING_REQUEST_MEM_GB))

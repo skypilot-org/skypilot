@@ -16,12 +16,34 @@ def get_size_gb(bytes):
     return bytes / (1024**3)
 
 
+def get_worker_memory(process_keyword):
+    top = 0
+    acc = 0
+    count = 0
+    for proc in psutil.process_iter(['name', 'cmdline']):
+        try:
+            cmdline = ' '.join(proc.cmdline()) if proc.cmdline() else ''
+            if process_keyword in cmdline:
+                top = max(top, proc.memory_info().rss)
+                acc += proc.memory_info().rss
+                count += 1
+        except (psutil.NoSuchProcess, psutil.AccessDenied,
+                psutil.ZombieProcess):
+            pass
+    avg = acc / count if count > 0 else 0
+    return top, avg
+
+
 def monitor_system():
     # Initialize peak tracking variables
     interval = 0.2
     peak_cpu = 0
     peak_memory_percent = 0
     peak_memory_used = 0
+    nonblocking_worker_memory_peak = 0
+    blocking_worker_memory_peak = 0
+    nonblocking_worker_memory_avg_peak = 0
+    blocking_worker_memory_avg_peak = 0
     start_time = datetime.now()
     samples = 0
     total_cpu = 0
@@ -35,6 +57,17 @@ def monitor_system():
 
     try:
         while True:
+            nb_top, nb_avg = get_worker_memory('SkyPilot:executor:short')
+            nonblocking_worker_memory_peak = max(nonblocking_worker_memory_peak,
+                                                 nb_top)
+            nonblocking_worker_memory_avg_peak = max(
+                nonblocking_worker_memory_avg_peak, nb_avg)
+            b_top, b_avg = get_worker_memory('SkyPilot:executor:long')
+            blocking_worker_memory_peak = max(blocking_worker_memory_peak,
+                                              b_top)
+            blocking_worker_memory_avg_peak = max(
+                blocking_worker_memory_avg_peak, b_avg)
+
             # CPU Usage
             cpu_percent = psutil.cpu_percent(interval=interval)
 
@@ -91,6 +124,14 @@ def monitor_system():
         print(
             f"Memory Delta: {get_size_gb(peak_memory_used - baseline_memory.used):.1f}GB"
         )
+        print("Peak Non-blocking Executor Memory: "
+              f"{get_size_gb(nonblocking_worker_memory_peak):.2f}GB")
+        print("Peak Non-blocking Executor Memory Average: "
+              f"{get_size_gb(nonblocking_worker_memory_avg_peak):.2f}GB")
+        print("Peak Blocking Executor Memory: "
+              f"{get_size_gb(blocking_worker_memory_peak):.2f}GB")
+        print("Peak Blocking Executor Memory Average: "
+              f"{get_size_gb(blocking_worker_memory_avg_peak):.2f}GB")
         print("\nAVERAGE USAGE:")
         print(f"Average CPU: {avg_cpu:.1f}%")
         print(f"Average Memory: {avg_memory:.1f}%")

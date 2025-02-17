@@ -17,27 +17,31 @@ python tests/load_tests/sys_profiling.py
 ```
 3. Run the load testing script locally to send requests to the server
 ```bash
-python tests/load_tests/test_load_on_server.py -n 100 -r launch
+python tests/load_tests/test_load_on_server.py -n 50 -r all --cloud aws
 ```
 4. Once the load testing is done, terminate the profiling process to get a resource usage summary printed in the terminal, e.g.
 ```bash
 ==================================================
 MONITORING SUMMARY
 ==================================================
-Duration: 28.6 seconds (0.01 hours)
+Duration: 1481.7 seconds (0.41 hours)
 
 BASELINE USAGE:
-Baseline CPU: 2.5%
-Baseline Memory: 14.17GB (47.6%)
+Baseline CPU: 1.2%
+Baseline Memory: 2.99GB (21.6%)
 
 PEAK USAGE:
-Peak CPU: 100.0%
-Peak Memory: 15.88GB (53.2%)
-Memory Delta: 1.7GB
+Peak CPU: 96.9%
+Peak Memory: 11.78GB (79.0%)
+Memory Delta: 8.8GB
+Peak Non-blocking Executor Memory: 0.37GB
+Peak Non-blocking Executor Memory Average: 0.23GB
+Peak Blocking Executor Memory: 0.35GB
+Peak Blocking Executor Memory Average: 0.30GB
 
 AVERAGE USAGE:
-Average CPU: 19.3%
-Average Memory: 49.5%
+Average CPU: 11.5%
+Average Memory: 63.1%
 ==================================================
 ```
-
+5. Update the `_PER_BLOCKING_REQUEST_MEM_GB` and `_PER_NON_BLOCKING_REQUEST_MEM_GB` constants in `sky/server/requests/executor.py` based on the peak memory usage of the blocking and non-blocking workers.

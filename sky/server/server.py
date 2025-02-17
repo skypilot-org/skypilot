@@ -57,7 +57,9 @@ P = ParamSpec('P')
 
 def _add_timestamp_prefix_for_server_logs() -> None:
     server_logger = sky_logging.init_logger('sky.server')
-    # Disable propagation to avoid the root logger of SkyPilot being affected.
+    # Clear existing handlers first to prevent duplicates
+    server_logger.handlers.clear()
+    # Disable propagation to avoid the root logger of SkyPilot being affected
     server_logger.propagate = False
     # Add date prefix to the log message printed by loggers under
     # server.
@@ -70,6 +72,8 @@ def _add_timestamp_prefix_for_server_logs() -> None:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.addHandler(stream_handler)
+        # Also disable propagation for uvicorn loggers
+        uvicorn_logger.propagate = False
 
 
 _add_timestamp_prefix_for_server_logs()
@@ -794,10 +798,9 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
                                             detail=dataclasses.asdict(
                                                 request_task.encode()))
             return request_task.encode()
-        # Sleep 0 to yield, so other coroutines can run. This busy waiting
-        # loop is performance critical for short-running requests, so we do
-        # not want to yield too long.
-        await asyncio.sleep(0)
+        # yield control to allow other coroutines to run, sleep shortly
+        # to avoid storming the DB and CPU in the meantime
+        await asyncio.sleep(0.1)
 
 
 @app.get('/api/stream')
