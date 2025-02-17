@@ -420,6 +420,10 @@ Test the API server by curling the health endpoint:
 
 If all looks good, you can now start using the API server. Refer to :ref:`sky-api-server-connect` to connect your local SkyPilot client to the API server.
 
+.. note::
+
+    API server deployment using the above YAML does not have any authentication by default. We recommend adding a authentication layer (e.g., nginx reverse proxy) or using the helm chart for a more secure deployment.
+
 .. tip::
 
     If you are installing SkyPilot API client in the same environment, we recommend using a different python environment (venv, conda, etc.) to avoid conflicts with the SkyPilot installation used to deploy the API server.
