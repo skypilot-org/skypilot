@@ -17,7 +17,11 @@ We use [SGLang](https://github.com/sgl-project/sglang) to serve the model distri
 
 SkyPilot allows you to run the model distributedly with a single command using [SGLang](https://github.com/sgl-project/sglang).
 
-The SkyPilot YAML for DeepSeek-R1 671B ([view full file](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml)):
+```bash
+sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up
+```
+
+Below is the SkyPilot YAML configuration for DeepSeek-R1 671B, as provided in [`llm/deepseek-r1/deepseek-r1-671B.yaml`](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml):
 ```yaml
 name: deepseek-r1
 
@@ -70,17 +74,19 @@ Adjust the `accelerators` and `num_nodes` to fit your needs. Common configuratio
 | A100-80GB:8      | 4             |
 | A100:8           | 8             |
 
-.. note::
-
-  For A100 GPUs, use [deepseek-r1-671B-A100.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B-A100.yaml), which includes a preprocessing step to convert the model from FP8 to BF16, as A100 does not support FP8. This conversion process takes an additional 30-40 minutes. Alternatively, you can use a pre-converted BF16 model from the Hugging Face community to skip the conversion step.
-
-  Since BF16 models consume more memory, A100 deployments require twice the number of nodes compared to H100. That is, if an H100 setup requires 2 nodes, an A100-80GB setup requires 4 nodes, and an A100-40GB setup requires 8 nodes.
-
-  For more configuration options, refer to the [DeepSeek SGLang Docs](https://github.com/sgl-project/sglang/blob/main/benchmark/deepseek_v3/README.md).
+You can override `num_nodes` in the command line without modifying the YAML file. For example:
 
 ```bash
-sky launch -c r1 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up
+sky launch -c r1-A100 llm/deepseek-r1/deepseek-r1-671B.yaml --retry-until-up --num-nodes=4 --accelerators=A100-80GB:8
 ```
+
+> [!IMPORTANT]
+> For A100 GPUs, use [deepseek-r1-671B-A100.yaml](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B-A100.yaml), which includes a preprocessing step to convert the model from FP8 to BF16, as A100 does not support FP8. This conversion process takes an additional 30-40 minutes. Alternatively, you can use a pre-converted BF16 model from the Hugging Face community to skip the conversion step.
+>
+> Since BF16 models consume more memory, A100 deployments require twice the number of nodes compared to H100. That is, if an H100 setup requires 2 nodes, an A100-80GB setup requires 4 nodes, and an A100-40GB setup requires 8 nodes.
+>
+> For more configuration options, refer to the [DeepSeek SGLang Docs](https://github.com/sgl-project/sglang/blob/main/benchmark/deepseek_v3/README.md).
+
 
 ![Find any cheapest candidate resources](https://i.imgur.com/FpAV6Ok.png)
 
