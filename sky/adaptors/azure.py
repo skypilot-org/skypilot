@@ -3,7 +3,6 @@
 # pylint: disable=import-outside-toplevel
 import asyncio
 import datetime
-import functools
 import logging
 import threading
 import time
@@ -14,6 +13,7 @@ from sky import exceptions as sky_exceptions
 from sky import sky_logging
 from sky.adaptors import common
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -33,7 +33,7 @@ _MAX_RETRY_FOR_GET_SUBSCRIPTION_ID = 5
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global', maxsize=1)
 def get_subscription_id() -> str:
     """Get the default subscription id."""
     from azure.common import credentials
@@ -69,7 +69,7 @@ def exceptions():
     return azure_exceptions
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def azure_mgmt_models(name: str):
     if name == 'compute':
@@ -83,7 +83,7 @@ def azure_mgmt_models(name: str):
 # We should keep the order of the decorators having 'lru_cache' followed
 # by 'load_lazy_modules' as we need to make sure a caller can call
 # 'get_client.cache_clear', which is a function provided by 'lru_cache'
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 @common.load_lazy_modules(modules=_LAZY_MODULES)
 def get_client(name: str,
                subscription_id: Optional[str] = None,

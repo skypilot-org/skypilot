@@ -170,9 +170,6 @@ Environment variables for ``setup``
    * - ``SKYPILOT_TASK_ID``
      - A unique ID assigned to each task.
 
-       This environment variable is available only when the task is submitted
-       with :code:`sky launch --detach-setup`, or run as a managed spot job.
-
        Refer to the description in the :ref:`environment variables for run <env-vars-for-run>`.
      - sky-2023-07-06-21-18-31-563597_myclus_1
 

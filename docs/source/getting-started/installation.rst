@@ -110,27 +110,27 @@ To use more than one cloud, combine the pip extras:
 
         .. code-block:: shell
 
-          pip install -U "skypilot[aws,gcp]"
+          pip install -U "skypilot[kubernetes,aws,gcp]"
 
     .. tab-item:: Nightly
         :sync: nightly-tab
 
         .. code-block:: shell
 
-          pip install -U "skypilot-nightly[aws,gcp]"
+          pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
 
     .. tab-item:: From Source
         :sync: from-source-tab
 
         .. code-block:: shell
 
-          pip install -e ".[aws,gcp]"
+          pip install -e ".[kubernetes,aws,gcp]"
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
 .. _verify-cloud-access:
 
-Verifying cloud access
+Verify cloud access
 ------------------------------------
 
 After installation, run :code:`sky check` to verify that credentials are correctly set up:
@@ -160,8 +160,6 @@ This will produce a summary like:
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
 
-  SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
-
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
 section :ref:`below <cloud-account-setup>`.
@@ -177,15 +175,28 @@ section :ref:`below <cloud-account-setup>`.
 
 .. _cloud-account-setup:
 
-Cloud account setup
--------------------
+Set up Kubernetes or clouds
+---------------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo,
-IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
-
-If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
+SkyPilot supports most major cloud providers.
+If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can access your enabled clouds<verify-cloud-access>`.
 
 Otherwise, configure access to at least one cloud using the following guides.
+
+Kubernetes
+~~~~~~~~~~
+
+SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
+(e.g., EKS, GKE). The only requirement is a valid kubeconfig at
+:code:`~/.kube/config`.
+
+.. code-block:: shell
+
+  # Place your kubeconfig at ~/.kube/config
+  mkdir -p ~/.kube
+  cp /path/to/kubeconfig ~/.kube/config
+
+See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. _aws-installation:
 
@@ -307,7 +318,7 @@ Vast
 `Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
 
 .. code-block:: shell
-  
+
   pip install "vastai-sdk>=0.1.12"
   echo "<your_api_key_here>" > ~/.vast_api_key
 
@@ -317,7 +328,7 @@ RunPod
 `RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
 
 .. code-block:: shell
-  
+
   pip install "runpod>=1.6.1"
   runpod config
 
@@ -499,21 +510,8 @@ Nebius
   nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
 
-Kubernetes
-~~~~~~~~~~
 
-SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
-
-.. code-block:: shell
-
-  # Place your kubeconfig at ~/.kube/config
-  mkdir -p ~/.kube
-  cp /path/to/kubeconfig ~/.kube/config
-
-See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
-
-
-Requesting quotas for first time users
+Request quotas for first time users
 --------------------------------------
 
 If your cloud account has not been used to launch instances before, the
@@ -525,7 +523,7 @@ increases before proceeding.
 
 .. _docker-image:
 
-Quick alternative: trying in Docker
+Quick alternative: Trying in Docker
 ------------------------------------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
@@ -571,7 +569,7 @@ See more details about the dev container image
 
 .. _shell-completion:
 
-Enabling shell completion
+Enable shell completion
 -------------------------
 
 SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).

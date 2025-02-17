@@ -12,6 +12,8 @@ This guide will walk you through:
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
+.. _hello-skypilot:
+
 Hello, SkyPilot!
 ------------------
 
@@ -200,17 +202,21 @@ Scaling out
 =========================
 
 So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
-When you are ready to scale out (e.g., run 10s or 100s of jobs), SkyPilot supports two options:
-
-- Queue many jobs on your cluster(s) with ``sky exec`` (see :ref:`Job Queue <job-queue>`);
-- Use :ref:`Managed Spot Jobs <spot-jobs>` to run on auto-managed spot instances
-  (users need not interact with the underlying clusters)
-
-Managed spot jobs run on much cheaper spot instances, with automatic preemption recovery. Try it out with:
+When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**, or even spot instances.
 
 .. code-block:: console
 
-  $ sky jobs launch --use-spot hello_sky.yaml
+  $ for i in $(seq 100) # launch 100 jobs
+      do sky jobs launch --use-spot --detach-run --yes -n hello-$i hello_sky.yaml
+    done
+  ...
+  $ sky jobs dashboard # check the jobs status
+
+.. image:: ../images/managed-jobs-dashboard.png
+  :width: 800
+  :alt: Managed jobs dashboard
+
+SkyPilot can support :ref:`thousands of managed jobs <many-jobs>` running at once.
 
 Next steps
 -----------

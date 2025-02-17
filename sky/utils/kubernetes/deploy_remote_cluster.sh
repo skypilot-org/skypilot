@@ -64,7 +64,7 @@ run_remote() {
     local NODE_IP=$1
     local CMD=$2
     # echo -e "${YELLOW}Running command on $NODE_IP...${NC}"
-    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER@$NODE_IP" "$CMD"
+    ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_KEY" "$USER@$NODE_IP" "$CMD"
 }
 
 # Function to uninstall k3s and clean up the state on a remote machine
@@ -167,7 +167,7 @@ for NODE in $WORKER_NODES; do
 done
 # Step 3: Configure local kubectl to connect to the cluster
 progress_message "Configuring local kubectl to connect to the cluster..."
-scp -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER@$HEAD_NODE":~/.kube/config ~/.kube/config
+scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_KEY" "$USER@$HEAD_NODE":~/.kube/config ~/.kube/config
 
 # Back up the original kubeconfig file if it exists
 KUBECONFIG_FILE="$HOME/.kube/config"

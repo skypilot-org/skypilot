@@ -11,11 +11,6 @@ Cluster CLI
    :prog: sky launch
    :nested: full
 
-.. _sky-exec:
-.. click:: sky.cli:exec
-   :prog: sky exec
-   :nested: full
-
 .. _sky-stop:
 .. click:: sky.cli:stop
    :prog: sky stop
@@ -41,14 +36,18 @@ Cluster CLI
    :prog: sky autostop
    :nested: full
 
+
+Cluster Jobs CLI
+----------------
+
+.. _sky-exec:
+.. click:: sky.cli:exec
+   :prog: sky exec
+   :nested: full
+
 .. _sky-queue:
 .. click:: sky.cli:queue
    :prog: sky queue
-   :nested: full
-
-.. _sky-logs:
-.. click:: sky.cli:logs
-   :prog: sky logs
    :nested: full
 
 .. _sky-cancel:
@@ -56,7 +55,12 @@ Cluster CLI
    :prog: sky cancel
    :nested: full
 
-Managed (Spot) Jobs CLI
+.. _sky-logs:
+.. click:: sky.cli:logs
+   :prog: sky logs
+   :nested: full
+
+Managed Jobs CLI
 ---------------------------
 
 .. _sky-job-launch:
@@ -79,8 +83,7 @@ Managed (Spot) Jobs CLI
    :prog: sky jobs logs
    :nested: full
 
-
-SkyServe CLI
+Serving CLI
 -------------
 
 .. click:: sky.cli:serve_up
@@ -116,6 +119,52 @@ Storage CLI
 .. click:: sky.cli:storage_delete
    :prog: sky storage delete
    :nested: full
+
+
+.. _sky-api-cli:
+
+API Server CLI
+--------------
+
+End-user CLI
+~~~~~~~~~~~~~
+
+.. _sky-api-login:
+.. click:: sky.cli:api_login
+   :prog: sky api login
+   :nested: full
+
+.. _sky-api-info:
+.. click:: sky.cli:api_info
+   :prog: sky api info
+   :nested: full
+
+.. _sky-api-logs:
+.. click:: sky.cli:api_logs
+   :prog: sky api logs
+   :nested: full
+
+.. _sky-api-status:
+.. click:: sky.cli:api_status
+   :prog: sky api status
+   :nested: full
+
+.. _sky-api-cancel:
+.. click:: sky.cli:api_cancel
+   :prog: sky api cancel
+   :nested: full
+
+Admin CLI
+~~~~~~~~~~
+
+.. click:: sky.cli:api_stop
+   :prog: sky api stop
+   :nested: full
+
+.. click:: sky.cli:api_start
+   :prog: sky api start
+   :nested: full
+
 
 Utils: ``show-gpus``/``check``/``cost-report``
 -------------------------------------------------

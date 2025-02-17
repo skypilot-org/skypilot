@@ -220,7 +220,7 @@ def test_skyserve_azure_http():
 
 @pytest.mark.kubernetes
 @pytest.mark.serve
-@pytest.mark.requires_gke
+@pytest.mark.resource_heavy
 def test_skyserve_kubernetes_http():
     """Test skyserve on Kubernetes"""
     name = _get_service_name()
@@ -242,6 +242,7 @@ def test_skyserve_oci_http():
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -284,16 +285,19 @@ def test_skyserve_spot_recovery():
     test = smoke_tests_utils.Test(
         f'test-skyserve-spot-recovery-gcp',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky serve up -n {name} -y tests/skyserve/spot/recovery.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
-            smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, smoke_tests_utils.terminate_gcp_replica(name, zone, 1)),
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
-        _TEARDOWN_SERVICE.format(name=name),
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+        f'{_TEARDOWN_SERVICE.format(name=name)}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -330,6 +334,7 @@ def test_skyserve_dynamic_ondemand_fallback():
     test = smoke_tests_utils.Test(
         f'test-skyserve-dynamic-ondemand-fallback',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky serve up -n {name} --cloud gcp -y tests/skyserve/spot/dynamic_ondemand_fallback.yaml',
             f'sleep 40',
             # 2 on-demand (provisioning) + 2 Spot (provisioning).
@@ -346,7 +351,8 @@ def test_skyserve_dynamic_ondemand_fallback():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             _check_replica_in_status(name, [(2, True, 'READY'),
                                             (0, False, '')]),
-            smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name, smoke_tests_utils.terminate_gcp_replica(name, zone, 1)),
             f'sleep 40',
             # 1 on-demand (provisioning) + 1 Spot (ready) + 1 spot (provisioning).
             f'{_SERVE_STATUS_WAIT.format(name=name)}; '
@@ -361,7 +367,8 @@ def test_skyserve_dynamic_ondemand_fallback():
             _check_replica_in_status(name, [(2, True, 'READY'),
                                             (0, False, '')]),
         ],
-        _TEARDOWN_SERVICE.format(name=name),
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+        f'{_TEARDOWN_SERVICE.format(name=name)}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -373,6 +380,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
 @pytest.mark.no_vast  # Vast doesn't support opening ports
+@pytest.mark.resource_heavy
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
@@ -388,14 +396,14 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             f's=$(sky serve status {name}); echo "$s";'
             'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
             'do echo "Waiting for first service to be FAILED..."; '
-            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
+            f'sleep 2; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
             + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
             # User bug failure will cause no further scaling.
             f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
             f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl $endpoint | grep "Hi, SkyPilot here"; do sleep 2; done; sleep 2; '
+            'until curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"; do sleep 1; done; sleep 2; '
             + _check_replica_in_status(name, [(1, False, 'READY'),
                                               (1, False, 'FAILED')]),
         ],
@@ -441,6 +449,7 @@ def test_skyserve_auto_restart():
     test = smoke_tests_utils.Test(
         f'test-skyserve-auto-restart',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             # TODO(tian): we can dynamically generate YAML from template to
             # avoid maintaining too many YAML files
             f'sky serve up -n {name} -y tests/skyserve/auto_restart.yaml',
@@ -450,7 +459,9 @@ def test_skyserve_auto_restart():
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
             f'sleep 20',
-            smoke_tests_utils.terminate_gcp_replica(name, zone, 1),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=smoke_tests_utils.terminate_gcp_replica(name, zone, 1)),
             # Wait for consecutive failure timeout passed.
             # If the cluster is not using spot, it won't check the cluster status
             # on the cloud (since manual shutdown is not a common behavior and such
@@ -468,7 +479,8 @@ def test_skyserve_auto_restart():
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
-        _TEARDOWN_SERVICE.format(name=name),
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
+        f'{_TEARDOWN_SERVICE.format(name=name)}',
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -477,6 +489,7 @@ def test_skyserve_auto_restart():
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.resource_heavy
 def test_skyserve_cancel(generic_cloud: str):
     """Test skyserve with cancel"""
     name = _get_service_name()
@@ -504,6 +517,7 @@ def test_skyserve_cancel(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     name = _get_service_name()
@@ -550,6 +564,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.resource_heavy
 def test_skyserve_large_readiness_timeout(generic_cloud: str):
     """Test skyserve with customized large readiness timeout"""
     name = _get_service_name()
@@ -573,6 +588,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     name = _get_service_name()
@@ -606,6 +622,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     name = _get_service_name()
@@ -645,6 +662,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_fast_update(generic_cloud: str):
     """Test skyserve with fast update (Increment version of old replicas)"""
     name = _get_service_name()
@@ -688,6 +706,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.serve
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     name = _get_service_name()
@@ -796,6 +815,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.no_vast  # Vast doesn't support opening ports
 @pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
     name = _get_service_name()
@@ -843,6 +863,7 @@ def test_skyserve_failures(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_https(generic_cloud: str):
     """Test skyserve with https"""
     name = _get_service_name()
@@ -880,6 +901,7 @@ def test_skyserve_https(generic_cloud: str):
 
 
 @pytest.mark.serve
+@pytest.mark.resource_heavy
 def test_skyserve_multi_ports(generic_cloud: str):
     """Test skyserve with multiple ports"""
     name = _get_service_name()

@@ -306,6 +306,12 @@ def _get_instance_types_df(region: str) -> Union[str, 'pd.DataFrame']:
                 assert find_num_in_name is not None, row['InstanceType']
                 num_in_name = find_num_in_name.group(1)
                 acc_count = int(num_in_name) // 2
+            if row['InstanceType'] == 'p5en.48xlarge':
+                # TODO(andyl): Check if this workaround still needed after
+                # v0.10.0 released. Currently, the acc_name returned by the
+                # AWS API is 'NVIDIA', which is incorrect. See #4652.
+                acc_name = 'H200'
+                acc_count = 8
             return pd.Series({
                 'AcceleratorName': acc_name,
                 'AcceleratorCount': acc_count,

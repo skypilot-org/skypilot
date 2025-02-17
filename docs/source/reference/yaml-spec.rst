@@ -1,11 +1,13 @@
 .. _yaml-spec:
 
-Task YAML
-=========
+SkyPilot YAML
+=============
 
-SkyPilot provides an intuitive YAML interface to specify a task (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
+SkyPilot provides an intuitive YAML interface to specify clusters, jobs, or
+services (resource requirements, setup commands, run commands, file mounts,
+storage mounts, and so on).
 
-Task YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (:meth:`sky.Task.from_yaml`).
+YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (e.g., :meth:`sky.Task.from_yaml`).
 
 Available fields:
 
@@ -19,10 +21,10 @@ Available fields:
     #
     # Commands in "setup" and "run" will be executed under it.
     #
-    # If a relative path is used, it's evaluated relative to the location from 
+    # If a relative path is used, it's evaluated relative to the location from
     # which `sky` is called.
     #
-    # To exclude files from syncing, see 
+    # To exclude files from syncing, see
     # https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
     workdir: ~/my-task-code
 
@@ -98,7 +100,7 @@ Available fields:
       #
       # If `FAILOVER` is specified, the job will be restarted in the same region
       # if the node fails, and go to the next region if no available resources
-      # are found in the same region. 
+      # are found in the same region.
       #
       # If `EAGER_NEXT_REGION` is specified, the job will go to the next region
       # directly if the node fails. This is useful for spot instances, as in
@@ -217,7 +219,7 @@ Available fields:
       #
       # OCI
       # To find OCI images: https://docs.oracle.com/en-us/iaas/images
-      # You can choose the image with OS version from the following image tags 
+      # You can choose the image with OS version from the following image tags
       # provided by SkyPilot:
       #   image_id: skypilot:gpu-ubuntu-2204
       #   image_id: skypilot:gpu-ubuntu-2004
@@ -282,6 +284,10 @@ Available fields:
     #
     # Values set here can be overridden by a CLI flag:
     # `sky launch/exec --env ENV=val` (if ENV is present).
+    #
+    # For costumized non-root docker image in RunPod, you need to set
+    # `SKYPILOT_RUNPOD_DOCKER_USERNAME` to specify the login username for the
+    # docker image. See :ref:`docker-containers-as-runtime-environments` for more.
     #
     # If you want to use a docker image as runtime environment in a private
     # registry, you can specify your username, password, and registry server as
@@ -360,7 +366,7 @@ Available fields:
 
 .. _task-yaml-experimental:
 
-Experimental Configurations
+Experimental configurations
 ---------------------------
 
 .. note::
@@ -387,3 +393,89 @@ In additional to the above fields, SkyPilot also supports the following experime
             managed_instance_group: ...
         nvidia_gpus:
             disable_ecc: ...
+
+
+
+.. _service-yaml-spec:
+
+SkyServe services
+=================
+
+To define a YAML for use for :ref:`services <sky-serve>`, use previously
+mentioned fields to describe each replica, then add a ``service`` section to
+describe the entire service.
+
+.. code-block:: yaml
+
+    service:
+
+      # Readiness probe (required). Used by SkyServe to check if your service
+      # replicas are ready for accepting traffic. If the readiness probe returns
+      # a 200, SkyServe will start routing traffic to that replica.
+      readiness_probe:
+        # Path to probe (required).
+        path: /v1/models
+        # Post data (optional). If this is specified, the readiness probe will use
+        # POST instead of GET, and the post data will be sent as the request body.
+        post_data: {'model_name': 'model'}
+        # Initial delay in seconds (optional). Defaults to 1200 seconds (20 minutes).
+        # Any readiness probe failures during this period will be ignored. This is
+        # highly related to your service, so it is recommended to set this value
+        # based on your service's startup time.
+        initial_delay_seconds: 1200
+        # The Timeout in seconds for a readiness probe request (optional).
+        # Defaults to 15 seconds. If the readiness probe takes longer than this
+        # time to respond, the probe will be considered as failed. This is
+        # useful when your service is slow to respond to readiness probe
+        # requests. Note, having a too high timeout will delay the detection
+        # of a real failure of your service replica.
+        timeout_seconds: 15
+
+      # Simplified version of readiness probe that only contains the readiness
+      # probe path. If you want to use GET method for readiness probe and the
+      # default initial delay, you can use the following syntax:
+      readiness_probe: /v1/models
+
+      # One of the two following fields (replica_policy or replicas) is required.
+
+      # Replica autoscaling policy. This describes how SkyServe autoscales
+      # your service based on the QPS (queries per second) of your service.
+      replica_policy:
+        # Minimum number of replicas (required).
+        min_replicas: 1
+        # Maximum number of replicas (optional). If not specified, SkyServe will
+        # use a fixed number of replicas (the same as min_replicas) and ignore
+        # any QPS threshold specified below.
+        max_replicas: 3
+        # Following specs describe the autoscaling policy.
+        # Target query per second per replica (optional). SkyServe will scale your
+        # service so that, ultimately, each replica manages approximately
+        # target_qps_per_replica queries per second. **Autoscaling will only be
+        # enabled if this value is specified.**
+        target_qps_per_replica: 5
+        # Upscale and downscale delay in seconds (optional). Defaults to 300 seconds
+        # (5 minutes) and 1200 seconds (20 minutes) respectively. To avoid aggressive
+        # autoscaling, SkyServe will only upscale or downscale your service if the
+        # QPS of your service is higher or lower than the target QPS for a period
+        # of time. This period of time is controlled by upscale_delay_seconds and
+        # downscale_delay_seconds. The default values should work in most cases.
+        # If you want to scale your service more aggressively, you can set
+        # these values to a smaller number.
+        upscale_delay_seconds: 300
+        downscale_delay_seconds: 1200
+      # Simplified version of replica policy that uses a fixed number of
+      # replicas:
+      replicas: 2
+
+    ##### Fields below describe each replica #####
+
+    # Besides the `service` section, the rest is a regular SkyPilot task YAML.
+
+    resources:
+      # Port to run your service on each replica (required). This port will be
+      # automatically exposed to the public internet by SkyServe.
+      ports: 8080
+      # Other resources config...
+
+    # Other fields of your SkyPilot task YAML...
+
