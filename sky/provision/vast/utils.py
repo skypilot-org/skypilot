@@ -114,7 +114,8 @@ def launch(name: str, instance_type: str, region: str, disk_size: int,
             f'echo "{vast.vast().api_key_access}" > ~/.vast_api_key',
         ]),
         'label': name,
-        'image': image_name
+        'image': image_name,
+        'disk': disk_size
     }
 
     if preemptible:

@@ -5,7 +5,7 @@ Authorization
 
 SkyServe provides robust authorization capabilities at the replica level, allowing you to control access to service endpoints with API keys.
 
-Setup API Keys
+Setup API keys
 --------------
 
 SkyServe relies on the authorization of the service running on underlying service replicas, e.g., the inference engine. We take the vLLM inference engine as an example, which supports static API key authorization with an argument :code:`--api-key`.
@@ -78,10 +78,10 @@ To send a request to the service endpoint, a service client need to include the 
 .. raw:: HTML
 
   <details>
-  
+
   <summary>Example output</summary>
-  
-  
+
+
 .. code-block:: console
 
   {
@@ -107,7 +107,7 @@ To send a request to the service endpoint, a service client need to include the 
       "completion_tokens": 134
     }
   }
-  
+
 .. raw:: html
 
   </details>

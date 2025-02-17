@@ -20,6 +20,7 @@
 # > pytest tests/smoke_tests/test_cluster_job.py --generic-cloud aws
 
 import pathlib
+import shlex
 import tempfile
 import textwrap
 from typing import Dict
@@ -45,6 +46,7 @@ from sky.utils import resources_utils
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -135,7 +137,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str,
             f'sky logs {name} 5 --status',
             f'sky logs {name} 6 --status',
             # Make sure it is still visible after an stop & start cycle.
-            f'sky exec {name} --image-id {image_id} nvidia-smi | grep -i "{accelerator}"',
+            f'sky exec {name} --image-id {image_id} nvidia-smi | grep "Tesla T4"',
             f'sky logs {name} 7 --status'
         ],
         f'sky down -y {name}',
@@ -235,7 +237,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
             f'sky launch -y -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/job_queue/cluster_multinode.yaml',
             f'sky exec {name} -n {name}-1 -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
             f'sky exec {name} -n {name}-2 -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
-            f'sky launch -c {name} -n {name}-3 --detach-setup -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-3 -d --gpus {accelerator}:0.5 examples/job_queue/job_multinode.yaml',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
             f's=$(sky queue {name}) && echo "$s" && (echo "$s" | grep {name}-3 | grep PENDING)',
@@ -244,7 +246,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
             'sleep 5',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep {name}-3 | grep SETTING_UP',
             f'sky cancel -y {name} 1 2 3',
-            f'sky launch -c {name} -n {name}-4 --detach-setup -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
+            f'sky launch -c {name} -n {name}-4 -d --gpus {accelerator} examples/job_queue/job_multinode.yaml',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
             'sleep 5',
@@ -267,6 +269,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
+@pytest.mark.resource_heavy
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -313,6 +316,7 @@ def test_large_job_queue(generic_cloud: str):
 @pytest.mark.no_fluidstack  # No FluidStack VM has 8 CPUs
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
+@pytest.mark.resource_heavy
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
     name = smoke_tests_utils.get_cluster_name()
@@ -340,7 +344,7 @@ def test_ibm_job_queue_multinode():
             f'sky launch -y -c {name} --cloud ibm --gpus v100 --num-nodes 2',
             f'sky exec {name} -n {name}-1 -d {task_file}',
             f'sky exec {name} -n {name}-2 -d {task_file}',
-            f'sky launch -y -c {name} -n {name}-3 --detach-setup -d {task_file}',
+            f'sky launch -y -c {name} -n {name}-3 -d {task_file}',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-1 | grep RUNNING)',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-2 | grep RUNNING)',
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-3 | grep SETTING_UP)',
@@ -350,7 +354,7 @@ def test_ibm_job_queue_multinode():
             'sleep 5',
             f'sky queue {name} | grep {name}-3 | grep RUNNING',
             f'sky cancel -y {name} 1 2 3',
-            f'sky launch -c {name} -n {name}-4 --detach-setup -d {task_file}',
+            f'sky launch -c {name} -n {name}-4 -d {task_file}',
             # Test the job status is correctly set to SETTING_UP, during the setup is running,
             # and the job can be cancelled during the setup.
             f's=$(sky queue {name}) && printf "$s" && (echo "$s" | grep {name}-4 | grep SETTING_UP)',
@@ -401,6 +405,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
+@pytest.mark.resource_heavy
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -414,10 +419,11 @@ def test_multi_echo(generic_cloud: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 30',
             # Make sure that our job scheduler is fast enough to have at least
-            # 10 RUNNING jobs in parallel.
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 10) exit 1}}\'',
+            # 15 RUNNING jobs in parallel.
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 18) exit 1}}\'',
             'sleep 30',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
+            # This is to make sure we can finish job 32 before the test timeout.
             f'until sky logs {name} 32 --status; do echo "Waiting for job 32 to finish..."; sleep 1; done',
         ] +
         # Ensure jobs succeeded.
@@ -444,6 +450,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -575,7 +582,6 @@ def test_tpu_vm_pod():
 
 
 # ---------- TPU Pod Slice on GKE. ----------
-@pytest.mark.requires_gke
 @pytest.mark.kubernetes
 @pytest.mark.skip
 def test_tpu_pod_slice_gke():
@@ -624,14 +630,7 @@ def test_multi_node_failure(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'multi_node_failure',
         [
-            # TODO(zhwu): we use multi-thread to run the commands in setup
-            # commands in parallel, which makes it impossible to fail fast
-            # when one of the nodes fails. We should fix this in the future.
-            # The --detach-setup version can fail fast, as the setup is
-            # submitted to the remote machine, which does not use multi-thread.
-            # Refer to the comment in `subprocess_utils.run_in_parallel`.
-            # f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml && exit 1',  # Ensure the job setup failed.
-            f'sky launch -y -c {name} --cloud {generic_cloud} --detach-setup tests/test_yamls/failed_worker_setup.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml',
             f'sky logs {name} 1 --status | grep FAILED_SETUP',  # Ensure the job setup failed.
             f'sky exec {name} tests/test_yamls/failed_worker_run.yaml',
             f'sky logs {name} 2 --status | grep FAILED',  # Ensure the job failed.
@@ -695,6 +694,7 @@ def test_azure_http_server_with_custom_ports():
 
 # ---------- Web apps with custom ports on Kubernetes. ----------
 @pytest.mark.kubernetes
+@pytest.mark.resource_heavy
 def test_kubernetes_http_server_with_custom_ports():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -759,17 +759,19 @@ def test_task_labels_aws():
         test = smoke_tests_utils.Test(
             'task_labels_aws',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with aws cli that the tags are set.
-                'aws ec2 describe-instances '
-                '--query "Reservations[*].Instances[*].InstanceId" '
-                '--filters "Name=instance-state-name,Values=running" '
-                f'--filters "Name=tag:skypilot-cluster-name,Values={name}*" '
-                '--filters "Name=tag:inlinelabel1,Values=inlinevalue1" '
-                '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
-                '--region us-east-1 --output text',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, 'aws ec2 describe-instances '
+                    '--query "Reservations[*].Instances[*].InstanceId" '
+                    '--filters "Name=instance-state-name,Values=running" '
+                    f'--filters "Name=tag:skypilot-cluster-name,Values={name}*" '
+                    '--filters "Name=tag:inlinelabel1,Values=inlinevalue1" '
+                    '--filters "Name=tag:inlinelabel2,Values=inlinevalue2" '
+                    '--region us-east-1 --output text'),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -789,14 +791,18 @@ def test_task_labels_gcp():
         test = smoke_tests_utils.Test(
             'task_labels_gcp',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with gcloud cli that the tags are set
-                f'gcloud compute instances list --filter="name~\'^{name}\' AND '
-                'labels.inlinelabel1=\'inlinevalue1\' AND '
-                'labels.inlinelabel2=\'inlinevalue2\'" '
-                '--format="value(name)" | grep .',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=
+                    (f'gcloud compute instances list --filter="name~\'^{name}\' AND '
+                     'labels.inlinelabel1=\'inlinevalue1\' AND '
+                     'labels.inlinelabel2=\'inlinevalue2\'" '
+                     '--format="value(name)" | grep .')),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -816,15 +822,19 @@ def test_task_labels_kubernetes():
         test = smoke_tests_utils.Test(
             'task_labels_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name} {file_path}',
                 # Verify with kubectl that the labels are set.
-                'kubectl get pods '
-                '--selector inlinelabel1=inlinevalue1 '
-                '--selector inlinelabel2=inlinevalue2 '
-                '-o jsonpath=\'{.items[*].metadata.name}\' | '
-                f'grep \'^{name}\''
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name, 'kubectl get pods '
+                    '--selector inlinelabel1=inlinevalue1 '
+                    '--selector inlinelabel2=inlinevalue2 '
+                    '-o jsonpath=\'{.items[*].metadata.name}\' | '
+                    f'grep \'^{name}\'')
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -836,20 +846,29 @@ def test_add_pod_annotations_for_autodown_with_launch():
     test = smoke_tests_utils.Test(
         'add_pod_annotations_for_autodown_with_launch',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
             # Autodown is set.
             f'sky launch -y -c {name} -i 10 --down --num-nodes 2 --cpus=1 --cloud kubernetes',
             # Get names of the pods containing cluster name.
-            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
-            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
-            # Describe the first pod and check for annotations.
-            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
-            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
-            # Describe the second pod and check for annotations.
-            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
-            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop'
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                # Describe the first pod and check for annotations.
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            ),
+            # Get names of the pods containing cluster name.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                # Describe the second pod and check for annotations.
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            ),
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -860,54 +879,83 @@ def test_add_and_remove_pod_annotations_with_autostop():
     test = smoke_tests_utils.Test(
         'add_and_remove_pod_annotations_with_autostop',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('kubernetes', name),
             # Launch Kubernetes cluster with two nodes, each being head node and worker node.
             f'sky launch -y -c {name} --num-nodes 2 --cpus=1 --cloud kubernetes',
             # Set autodown on the cluster with 'autostop' command.
             f'sky autostop -y {name} -i 20 --down',
             # Get names of the pods containing cluster name.
-            f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p)',
-            f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p)',
-            # Describe the first pod and check for annotations.
-            'kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
-            'kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                # Describe the first pod and check for annotations.
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            ),
             # Describe the second pod and check for annotations.
-            'kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
-            'kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop'
+            ),
             # Cancel the set autodown to remove the annotations from the pods.
             f'sky autostop -y {name} --cancel',
             # Describe the first pod and check if annotations are removed.
-            '! kubectl describe pod $pod_1 | grep -q skypilot.co/autodown',
-            '! kubectl describe pod $pod_1 | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_1=$(kubectl get pods -o name | grep {name} | sed -n 1p) && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_1); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            ),
             # Describe the second pod and check if annotations are removed.
-            '! kubectl describe pod $pod_2 | grep -q skypilot.co/autodown',
-            '! kubectl describe pod $pod_2 | grep -q skypilot.co/idle_minutes_to_autostop',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                f'pod_2=$(kubectl get pods -o name | grep {name} | sed -n 2p) && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/autodown && '
+                'pod_tag=$(kubectl describe $pod_2); echo "$pod_tag"; ! echo "$pod_tag" | grep -q skypilot.co/idle_minutes_to_autostop',
+            ),
         ],
-        f'sky down -y {name}',
+        f'sky down -y {name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
     )
     smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Container logs from task on Kubernetes ----------
-@pytest.mark.requires_gke
+@pytest.mark.resource_heavy
 @pytest.mark.kubernetes
 def test_container_logs_multinode_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    head_logs = ('kubectl get pods '
-                 f' | grep {name} |  grep head | '
-                 " awk '{print $1}' | xargs -I {} kubectl logs {}")
-    worker_logs = ('kubectl get pods '
-                   f' | grep {name} |  grep worker |'
+    head_logs = (
+        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'echo "$all_pods" | grep {name} | '
+        # Exclude the cloud cmd execution pod.
+        'grep -v "cloud-cmd" |  '
+        'grep head | '
+        " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    worker_logs = ('all_pods=$(kubectl get pods); echo "$all_pods"; '
+                   f'echo "$all_pods" | grep {name} |  grep worker | '
                    " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'container_logs_multinode_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml} --num-nodes 2',
-                f'{head_logs} | wc -l | grep 9',
-                f'{worker_logs} | wc -l | grep 9',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{head_logs} | wc -l | grep 9',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{worker_logs} | wc -l | grep 9',
+                ),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -916,28 +964,68 @@ def test_container_logs_multinode_kubernetes():
 def test_container_logs_two_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml'
-    pod_logs = ('kubectl get pods '
-                f' | grep {name} |  grep head |'
-                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    pod_logs = (
+        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'echo "$all_pods" | grep {name} | '
+        # Exclude the cloud cmd execution pod.
+        'grep -v "cloud-cmd" |  '
+        'grep head |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_jobs_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name} {task_yaml}',
-                f'{pod_logs} | wc -l | grep 9',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | wc -l | grep 9',
+                ),
                 f'sky launch -y -c {name} {task_yaml}',
-                f'{pod_logs} | wc -l | grep 18',
-                f'{pod_logs} | grep 1 | wc -l | grep 2',
-                f'{pod_logs} | grep 2 | wc -l | grep 2',
-                f'{pod_logs} | grep 3 | wc -l | grep 2',
-                f'{pod_logs} | grep 4 | wc -l | grep 2',
-                f'{pod_logs} | grep 5 | wc -l | grep 2',
-                f'{pod_logs} | grep 6 | wc -l | grep 2',
-                f'{pod_logs} | grep 7 | wc -l | grep 2',
-                f'{pod_logs} | grep 8 | wc -l | grep 2',
-                f'{pod_logs} | grep 9 | wc -l | grep 2',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | wc -l | grep 18',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 1 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 2 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 3 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 4 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 5 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 6 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 7 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 8 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 9 | wc -l | grep 2',
+                ),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -946,29 +1034,66 @@ def test_container_logs_two_jobs_kubernetes():
 def test_container_logs_two_simultaneous_jobs_kubernetes():
     name = smoke_tests_utils.get_cluster_name()
     task_yaml = 'tests/test_yamls/test_k8s_logs.yaml '
-    pod_logs = ('kubectl get pods '
-                f' | grep {name} |  grep head |'
-                " awk '{print $1}' | xargs -I {} kubectl logs {}")
+    pod_logs = (
+        'all_pods=$(kubectl get pods); echo "$all_pods"; '
+        f'echo "$all_pods" | grep {name} |  '
+        # Exclude the cloud cmd execution pod.
+        'grep -v "cloud-cmd" |  '
+        'grep head |'
+        " awk '{print $1}' | xargs -I {} kubectl logs {}")
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test = smoke_tests_utils.Test(
             'test_container_logs_two_simultaneous_jobs_kubernetes',
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd(
+                    'kubernetes', name),
                 f'sky launch -y -c {name}',
                 f'sky exec -c {name} -d {task_yaml}',
                 f'sky exec -c {name} -d {task_yaml}',
                 'sleep 30',
-                f'{pod_logs} | wc -l | grep 18',
-                f'{pod_logs} | grep 1 | wc -l | grep 2',
-                f'{pod_logs} | grep 2 | wc -l | grep 2',
-                f'{pod_logs} | grep 3 | wc -l | grep 2',
-                f'{pod_logs} | grep 4 | wc -l | grep 2',
-                f'{pod_logs} | grep 5 | wc -l | grep 2',
-                f'{pod_logs} | grep 6 | wc -l | grep 2',
-                f'{pod_logs} | grep 7 | wc -l | grep 2',
-                f'{pod_logs} | grep 8 | wc -l | grep 2',
-                f'{pod_logs} | grep 9 | wc -l | grep 2',
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | wc -l | grep 18',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 1 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 2 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 3 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 4 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 5 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 6 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 7 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 8 | wc -l | grep 2',
+                ),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    f'{pod_logs} | grep 9 | wc -l | grep 2',
+                ),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && '
+            f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -1152,14 +1277,14 @@ def test_autodown(generic_cloud: str):
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
-            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep "1m (down)"',
             f'sleep {autodown_timeout}',
             # Ensure the cluster is terminated.
-            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|terminated on the cloud"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
+            f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             f'sleep {autodown_timeout}',
@@ -1212,10 +1337,12 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
         f'{cloud}-cancel-task',
         [
             f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} -y -d',
-            # Wait the GPU process to start.
-            'sleep 60',
+            # Wait the job to be scheduled and finished setup.
+            f'until sky queue {name} | grep "RUNNING"; do sleep 10; done',
+            # Wait the setup and initialize before the GPU process starts.
+            'sleep 120',
             f'sky exec {name} "nvidia-smi | grep python"',
-            f'sky logs {name} 2 --status',  # Ensure the job succeeded.
+            f'sky logs {name} 2 --status || {{ sky logs {name} --no-follow 1 && exit 1; }}',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',
             # check if the python job is gone.
@@ -1256,6 +1383,7 @@ def test_cancel_azure():
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -1264,19 +1392,20 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
         'cancel-pytorch',
         [
             f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
-            # Wait the GPU process to start.
-            'sleep 90',
-            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep python) || '
+            # Wait the GPU process to start. Azure takes longer to start due to
+            # the long Azure VM setup time.
+            'sleep 150' if generic_cloud == 'azure' else 'sleep 90',
+            f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; echo "$s" | grep python || '
             # When run inside container/k8s, nvidia-smi cannot show process ids.
             # See https://github.com/NVIDIA/nvidia-docker/issues/179
             # To work around, we check if GPU utilization is greater than 0.
-            f'[ \$(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits) -gt 0 ]"',
+            f'[ $(nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits) -gt 0 ]\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky cancel -y {name} 1',
             'sleep 60',
-            f'sky exec {name} --num-nodes 2 "(nvidia-smi | grep \'No running process\') || '
+            f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; (echo "$s" | grep "No running process") || '
             # Ensure Xorg is the only process running.
-            '[ \$(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]"',
+            '[ $(nvidia-smi | grep -A 10 Processes | grep -A 10 === | grep -v Xorg) -eq 2 ]\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
         ],
         f'sky down -y {name}',
@@ -1445,7 +1574,7 @@ def test_aws_custom_image():
     smoke_tests_utils.run_one_test(test)
 
 
-@pytest.mark.requires_gke
+@pytest.mark.resource_heavy
 @pytest.mark.kubernetes
 @pytest.mark.parametrize(
     'image_id',
@@ -1508,34 +1637,41 @@ def test_azure_start_stop_two_nodes():
 @pytest.mark.aws
 def test_aws_disk_tier():
 
-    def _get_aws_query_command(region, instance_id, field, expected):
+    def _get_aws_query_command(region: str, instance_id: str, field: str,
+                               expected: str):
         return (f'aws ec2 describe-volumes --region {region} '
                 f'--filters Name=attachment.instance-id,Values={instance_id} '
                 f'--query Volumes[*].{field} | grep {expected} ; ')
 
+    cluster_name = smoke_tests_utils.get_cluster_name()
     for disk_tier in list(resources_utils.DiskTier):
         specs = AWS._get_disk_specs(disk_tier)
-        name = smoke_tests_utils.get_cluster_name() + '-' + disk_tier.value
+        name = cluster_name + '-' + disk_tier.value
         name_on_cloud = common_utils.make_cluster_name_on_cloud(
             name, sky.AWS.max_cluster_name_length())
         region = 'us-east-2'
         test = smoke_tests_utils.Test(
             'aws-disk-tier-' + disk_tier.value,
             [
+                smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
                 f'sky launch -y -c {name} --cloud aws --region {region} '
                 f'--disk-tier {disk_tier.value} echo "hello sky"',
-                f'id=`aws ec2 describe-instances --region {region} --filters '
-                f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
-                f'Reservations[].Instances[].InstanceId --output text`; ' +
-                _get_aws_query_command(region, '$id', 'VolumeType',
-                                       specs['disk_tier']) +
-                ('' if specs['disk_tier']
-                 == 'standard' else _get_aws_query_command(
-                     region, '$id', 'Iops', specs['disk_iops'])) +
-                ('' if specs['disk_tier'] != 'gp3' else _get_aws_query_command(
-                    region, '$id', 'Throughput', specs['disk_throughput'])),
+                smoke_tests_utils.run_cloud_cmd_on_cluster(
+                    name,
+                    cmd=
+                    (f'id=`aws ec2 describe-instances --region {region} --filters '
+                     f'Name=tag:ray-cluster-name,Values={name_on_cloud} --query '
+                     f'Reservations[].Instances[].InstanceId --output text`; ' +
+                     _get_aws_query_command(region, '$id', 'VolumeType',
+                                            specs['disk_tier']) +
+                     ('' if specs['disk_tier']
+                      == 'standard' else _get_aws_query_command(
+                          region, '$id', 'Iops', specs['disk_iops'])) +
+                     ('' if specs['disk_tier'] != 'gp3' else
+                      _get_aws_query_command(region, '$id', 'Throughput',
+                                             specs['disk_throughput'])))),
             ],
-            f'sky down -y {name}',
+            f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
             timeout=10 * 60,  # 10 mins  (it takes around ~6 mins)
         )
         smoke_tests_utils.run_one_test(test)
@@ -1563,15 +1699,18 @@ def test_gcp_disk_tier():
             test = smoke_tests_utils.Test(
                 'gcp-disk-tier-' + disk_tier.value,
                 [
+                    smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
                     f'sky launch -y -c {name} --cloud gcp --region {region} '
                     f'--disk-tier {disk_tier.value} {instance_type_option} ',
-                    f'name=`gcloud compute instances list --filter='
-                    f'"labels.ray-cluster-name:{name_on_cloud}" '
-                    '--format="value(name)"`; '
-                    f'gcloud compute disks list --filter="name=$name" '
-                    f'--format="value(type)" | grep {disk_type} '
+                    smoke_tests_utils.run_cloud_cmd_on_cluster(
+                        name,
+                        cmd=(f'name=`gcloud compute instances list --filter='
+                             f'"labels.ray-cluster-name:{name_on_cloud}" '
+                             '--format="value(name)"`; '
+                             f'gcloud compute disks list --filter="name=$name" '
+                             f'--format="value(type)" | grep {disk_type}'))
                 ],
-                f'sky down -y {name}',
+                f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
                 timeout=6 * 60,  # 6 mins  (it takes around ~3 mins)
             )
             smoke_tests_utils.run_one_test(test)

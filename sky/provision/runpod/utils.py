@@ -186,7 +186,7 @@ def delete_pod_template(template_name: str) -> None:
         runpod.runpod.api.graphql.run_graphql_query(
             f'mutation {{deleteTemplate(templateName: "{template_name}")}}')
     except runpod.runpod.error.QueryError as e:
-        logger.warning(f'Failed to delete template {template_name}: {e}'
+        logger.warning(f'Failed to delete template {template_name}: {e} '
                        'Please delete it manually.')
 
 
@@ -195,8 +195,9 @@ def delete_register_auth(registry_auth_id: str) -> None:
     try:
         runpod.runpod.delete_container_registry_auth(registry_auth_id)
     except runpod.runpod.error.QueryError as e:
-        logger.warning(f'Failed to delete registry auth {registry_auth_id}: {e}'
-                       'Please delete it manually.')
+        logger.warning(
+            f'Failed to delete registry auth {registry_auth_id}: {e} '
+            'Please delete it manually.')
 
 
 def _create_template_for_docker_login(

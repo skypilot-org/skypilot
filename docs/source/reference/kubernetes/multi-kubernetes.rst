@@ -24,7 +24,7 @@ You may have multiple Kubernetes clusters for different:
 Configuration
 -------------
 
-Step 1: Set Up Credentials
+Step 1: Set up credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To work with multiple Kubernetes clusters, their credentials must be set up as individual `contexts <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/>`_ in your local ``~/.kube/config`` file.
@@ -63,7 +63,7 @@ For example, a ``~/.kube/config`` file may look like this:
 
 In this example, we have two Kubernetes clusters: ``my-h100-cluster`` and ``my-tpu-cluster``, and each Kubernetes cluster has a context for it.
 
-Step 2: Set up SkyPilot to Access Multiple Kubernetes Clusters
+Step 2: Set up SkyPilot to access multiple Kubernetes clusters
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Unlike clouds, SkyPilot does not failover through different Kubernetes clusters
@@ -97,7 +97,7 @@ To check the enabled Kubernetes clusters, you can run ``sky check k8s``.
         └── my-tpu-cluster
 
 
-Failover across Multiple Kubernetes Clusters
+Failover across multiple Kubernetes clusters
 --------------------------------------------
 
 With the ``kubernetes.allowed_contexts`` config set, SkyPilot will failover
@@ -117,7 +117,7 @@ through the Kubernetes clusters in the same order as they are specified in the f
     ------------------------------------------------------------------------------------------------------------
 
 
-Launching in a Specific Kubernetes Cluster
+Launching in a specific Kubernetes cluster
 ------------------------------------------
 
 SkyPilot uses the ``region`` field to denote a Kubernetes context. You can point to a Kubernetes cluster
@@ -144,7 +144,7 @@ by specifying the ``--region`` with the context name for that cluster.
 When launching a SkyPilot cluster or task, you can also specify the context name with ``--region`` to launch the cluster or task in.
 
 
-Dynamically Updating Clusters to Use
+Dynamically updating clusters to use
 ----------------------------------------------
 
 You can configure SkyPilot to dynamically fetch Kubernetes cluster configs and enforce restrictions on which clusters are used. Refer to :ref:`dynamic-kubernetes-contexts-update-policy` for more.

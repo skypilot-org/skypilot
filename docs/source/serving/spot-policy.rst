@@ -3,10 +3,9 @@
 Using Spot Instances for Serving
 ================================
 
-SkyServe supports serving models on a mixture of spot and on-demand replicas with two options: :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`. Currently, SkyServe relies on the user side to retry in the event of spot instance preemptions. 
+SkyServe supports serving models on a mixture of spot and on-demand replicas with two options: :code:`base_ondemand_fallback_replicas` and :code:`dynamic_ondemand_fallback`. Currently, SkyServe relies on the user side to retry in the event of spot instance preemptions.
 
-
-Base on-demand Fallback
+Base on-demand fallback
 -----------------------
 
 :code:`base_ondemand_fallback_replicas` sets the number of on-demand replicas to keep running at all times. This is useful for ensuring service availability and making sure that there is always some capacity available, even if spot replicas are not available. :code:`use_spot` should be set to :code:`true` to enable spot replicas.
@@ -36,8 +35,7 @@ Base on-demand Fallback
 
     Kubernetes instances are considered on-demand instances. You can use the :code:`base_ondemand_fallback_replicas` option to have some replicas run on Kubernetes, while others run on cloud spot instances.
 
-
-Dynamic on-demand Fallback
+Dynamic on-demand fallback
 --------------------------
 
 SkyServe supports dynamically fallback to on-demand replicas when spot replicas are not available.
@@ -73,7 +71,7 @@ When spot replicas are available, SkyServe will automatically switch back to usi
 Example
 -------
 
-The following example demonstrates how to use spot replicas with SkyServe with dynamic fallback. The example is a simple HTTP server that listens on port 8081 with :code:`dynamic_ondemand_fallback: true`. To run: 
+The following example demonstrates how to use spot replicas with SkyServe with dynamic fallback. The example is a simple HTTP server that listens on port 8081 with :code:`dynamic_ondemand_fallback: true`. To run:
 
 .. code-block:: console
 
@@ -86,31 +84,31 @@ When the service is up, we can check the status of the service and the replicas 
     $ sky serve status http-server
 
     Services
-    NAME         VERSION  UPTIME  STATUS      REPLICAS  ENDPOINT         
+    NAME         VERSION  UPTIME  STATUS      REPLICAS  ENDPOINT
     http-server  1        1m 17s  NO_REPLICA  0/4       54.227.229.217:30001
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES             STATUS         REGION       
-    http-server   1   1        -                          1 min ago   1x GCP([Spot]vCPU=2)  PROVISIONING  us-east1     
-    http-server   2   1        -                          1 min ago   1x GCP([Spot]vCPU=2)  PROVISIONING  us-central1  
-    http-server   3   1        -                          1 mins ago  1x GCP(vCPU=2)        PROVISIONING  us-east1     
+    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES             STATUS         REGION
+    http-server   1   1        -                          1 min ago   1x GCP([Spot]vCPU=2)  PROVISIONING  us-east1
+    http-server   2   1        -                          1 min ago   1x GCP([Spot]vCPU=2)  PROVISIONING  us-central1
+    http-server   3   1        -                          1 mins ago  1x GCP(vCPU=2)        PROVISIONING  us-east1
     http-server   4   1        -                          1 min ago   1x GCP(vCPU=2)        PROVISIONING  us-central1
 
-When the required number of spot replicas are not available, SkyServe will provision on-demand replicas to meet the target number of replicas. For example, when the target number is 2 and no spot replicas are ready, SkyServe will provision 2 on-demand replicas to meet the target number of replicas. 
+When the required number of spot replicas are not available, SkyServe will provision on-demand replicas to meet the target number of replicas. For example, when the target number is 2 and no spot replicas are ready, SkyServe will provision 2 on-demand replicas to meet the target number of replicas.
 
 .. code-block:: console
 
     $ sky serve status http-server
 
     Services
-    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT              
-    http-server  1        1m 17s  READY   2/4       54.227.229.217:30001  
+    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+    http-server  1        1m 17s  READY   2/4       54.227.229.217:30001
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES             STATUS         REGION       
-    http-server   1   1        http://34.23.22.160:8081   3 min ago   1x GCP([Spot]vCPU=2)  READY          us-east1     
-    http-server   2   1        http://34.68.226.193:8081  3 min ago   1x GCP([Spot]vCPU=2)  READY          us-central1  
-    http-server   3   1        -                          3 mins ago  1x GCP(vCPU=2)        SHUTTING_DOWN  us-east1     
+    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES             STATUS         REGION
+    http-server   1   1        http://34.23.22.160:8081   3 min ago   1x GCP([Spot]vCPU=2)  READY          us-east1
+    http-server   2   1        http://34.68.226.193:8081  3 min ago   1x GCP([Spot]vCPU=2)  READY          us-central1
+    http-server   3   1        -                          3 mins ago  1x GCP(vCPU=2)        SHUTTING_DOWN  us-east1
     http-server   4   1        -                          3 min ago   1x GCP(vCPU=2)        SHUTTING_DOWN  us-central1
 
 When the spot replicas are ready, SkyServe will automatically scale down on-demand replicas to maximize cost savings.
@@ -120,13 +118,13 @@ When the spot replicas are ready, SkyServe will automatically scale down on-dema
     $ sky serve status http-server
 
     Services
-    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT              
-    http-server  1        3m 59s  READY   2/2       54.227.229.217:30001  
+    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+    http-server  1        3m 59s  READY   2/2       54.227.229.217:30001
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES             STATUS  REGION       
-    http-server   1   1        http://34.23.22.160:8081   4 mins ago  1x GCP([Spot]vCPU=2)  READY   us-east1     
-    http-server   2   1        http://34.68.226.193:8081  4 mins ago  1x GCP([Spot]vCPU=2)  READY   us-central1 
+    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED    RESOURCES             STATUS  REGION
+    http-server   1   1        http://34.23.22.160:8081   4 mins ago  1x GCP([Spot]vCPU=2)  READY   us-east1
+    http-server   2   1        http://34.68.226.193:8081  4 mins ago  1x GCP([Spot]vCPU=2)  READY   us-central1
 
 In the event of spot instance interruptions (e.g. replica 1), SkyServe will automatically fallback to on-demand replicas (e.g. launch one on-demand replica) to meet the required capacity of replicas. SkyServe will continue trying to provision one spot replica in the event where spot availability is back. Note that SkyServe will try different regions and clouds to maximize the chance of successfully provisioning spot instances.
 
@@ -135,13 +133,13 @@ In the event of spot instance interruptions (e.g. replica 1), SkyServe will auto
     $ sky serve status http-server
 
     Services
-    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT              
-    http-server  1        7m 2s   READY   1/3       54.227.229.217:30001  
+    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+    http-server  1        7m 2s   READY   1/3       54.227.229.217:30001
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED     RESOURCES             STATUS        REGION       
-    http-server   2   1        http://34.68.226.193:8081  7 mins ago   1x GCP([Spot]vCPU=2)  READY         us-central1  
-    http-server   5   1        -                          13 secs ago  1x GCP([Spot]vCPU=2)  PROVISIONING  us-central1  
+    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED     RESOURCES             STATUS        REGION
+    http-server   2   1        http://34.68.226.193:8081  7 mins ago   1x GCP([Spot]vCPU=2)  READY         us-central1
+    http-server   5   1        -                          13 secs ago  1x GCP([Spot]vCPU=2)  PROVISIONING  us-central1
     http-server   6   1        -                          13 secs ago  1x GCP(vCPU=2)        PROVISIONING  us-central1
 
 Eventually, when the spot availability is back, SkyServe will automatically scale down on-demand replicas.
@@ -151,10 +149,10 @@ Eventually, when the spot availability is back, SkyServe will automatically scal
     $ sky serve status http-server
 
     Services
-    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT              
-    http-server  1        10m 5s  READY   2/3       54.227.229.217:30001  
+    NAME         VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+    http-server  1        10m 5s  READY   2/3       54.227.229.217:30001
 
     Service Replicas
-    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED     RESOURCES             STATUS         REGION       
-    http-server   2   1        http://34.68.226.193:8081  10 mins ago  1x GCP([Spot]vCPU=2)  READY          us-central1  
+    SERVICE_NAME  ID  VERSION  ENDPOINT                   LAUNCHED     RESOURCES             STATUS         REGION
+    http-server   2   1        http://34.68.226.193:8081  10 mins ago  1x GCP([Spot]vCPU=2)  READY          us-central1
     http-server   5   1        http://34.121.49.94:8081   1 min ago    1x GCP([Spot]vCPU=2)  READY          us-central1
