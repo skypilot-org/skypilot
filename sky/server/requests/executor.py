@@ -351,7 +351,7 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-except
             logger.error(f'[{worker}] Error processing request {request_id}.\n'
                          f'{common_utils.format_exception(e)}')
 
@@ -474,8 +474,8 @@ def _max_parallel_size_for_blocking(cpu_count: int,
             return max(1, n)
         except ValueError:
             logger.warning(
-                f'Invalid SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS value: {env_parallel_size}. '
-                'Falling back to calculated value.')
+                'Invalid SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS value: '
+                f'{env_parallel_size}. Falling back to calculated value.')
 
     cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS
     mem_based_max_parallel = int(mem_size_gb * _MAX_MEM_PERCENT_FOR_BLOCKING /
@@ -499,8 +499,8 @@ def _max_parallel_size_for_non_blocking(mem_size_gb: float,
             return max(1, n)
         except ValueError:
             logger.warning(
-                f'Invalid SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS value: {env_parallel_size}. '
-                'Falling back to calculated value.')
+                'Invalid SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS value: '
+                f'{env_parallel_size}. Falling back to calculated value.')
 
     # Fall back to calculation if env var is not set or invalid
     available_mem = mem_size_gb - (parallel_size_for_blocking *
