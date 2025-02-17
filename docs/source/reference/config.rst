@@ -18,6 +18,9 @@ Below is the configuration syntax and some example values. See detailed explanat
 
 .. parsed-literal::
 
+  :ref:`api_server <config-yaml-api-server>`:
+    :ref:`endpoint <config-yaml-api-server-endpoint>`: \http://xx.xx.xx.xx:8000
+
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
     - aws
     - gcp
@@ -114,6 +117,33 @@ Below is the configuration syntax and some example values. See detailed explanat
 Properties
 ----------
 
+
+.. _config-yaml-api-server:
+
+``api_server``
+~~~~~~~~~~~~~~~~~~~
+
+Configure the SkyPilot API server.
+
+.. _config-yaml-api-server-endpoint:
+
+``endpoint``
+~~~~~~~~~~~~~~~~~~~~~
+
+Endpoint of the SkyPilot API server (optional).
+
+This is used to connect to the SkyPilot API server.
+
+Default: ``null`` (use the local endpoint, which will be started by SkyPilot automatically).
+
+Example:
+
+.. code-block:: yaml
+
+  api_server:
+    endpoint: http://xx.xx.xx.xx:8000
+
+
 .. _config-yaml-jobs:
 
 ``jobs``
@@ -124,6 +154,7 @@ Custom managed jobs controller resources (optional).
 These take effects only when a managed jobs controller does not already exist.
 
 For more information about managed jobs, see :ref:`managed-jobs`.
+
 
 .. _config-yaml-jobs-bucket:
 
@@ -137,15 +168,6 @@ Optional. If not set, SkyPilot will create a new bucket for each managed job lau
 Supported bucket types:
 
 .. code-block:: yaml
-
-  # Endpoint of the SkyPilot API server (optional).
-  #
-  # This is used to connect to the SkyPilot API server.
-  #
-  # Default: null (use the local endpoint, which will be started by SkyPilot
-  # automatically).
-  api_server:
-    endpoint: http://xx.xx.xx.xx:8000
 
   # Custom managed jobs controller resources (optional).
   #
@@ -183,7 +205,7 @@ Example:
 ``allowed_clouds``
 ~~~~~~~~~~~~~~~~~~
 
-Allow list for clouds to be used in ``sky check``
+Allow list for clouds to be used in ``sky check``.
 
 This field is used to restrict the clouds that SkyPilot will check and use
 when running ``sky check``. Any cloud already enabled but not specified here
@@ -210,7 +232,7 @@ The following run options are applied by default and cannot be overridden:
 - ``--cap-add=SYS_ADMIN``
 - ``--device=/dev/fuse``
 - ``--security-opt=apparmor:unconfined``
-- ``--runtime=nvidia``  # Applied if nvidia GPUs are detected on the host
+- ``--runtime=nvidia # Applied if nvidia GPUs are detected on the host``
 
 .. _config-yaml-docker-run-options:
 
@@ -220,7 +242,7 @@ The following run options are applied by default and cannot be overridden:
 This field can be useful for mounting volumes and other advanced Docker
 configurations. You can specify a list of arguments or a string, where the
 former will be combined into a single string with spaces. The following is
-an example option for mounting the Docker socket and increasing the size of /dev/shm:
+an example option for mounting the Docker socket and increasing the size of ``/dev/shm``:
 
 Example:
 
@@ -262,15 +284,26 @@ Default: ``false``.
 ``admin_policy``
 ~~~~~~~~~~~~~~~~
 
-Admin policy to be applied to all tasks. (optional).
+Admin policy to be applied to all tasks (optional).
 
 The policy class to be applied to all tasks, which can be used to validate
 and mutate user requests.
 
-This is useful for enforcing certain policies on all tasks, e.g.,
-add custom labels; enforce certain resource limits; etc.
+This is useful for enforcing certain policies on all tasks, such as:
 
-The policy class should implement the sky.AdminPolicy interface.
+- Adding custom labels
+- Enforcing resource limits
+- Restricting cloud providers
+- Requiring spot instances
+- Setting autostop timeouts
+
+See :ref:`advanced-policy-config` for details.
+
+Example:
+
+.. code-block:: yaml
+
+  admin_policy: my_package.SkyPilotPolicyV1
 
 .. _config-yaml-aws:
 
@@ -332,12 +365,12 @@ Default: ``null`` (use the default VPC in each region).
 ``aws.use_internal_ips``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Should instances be assigned private IPs only? (optional)
+Should instances be assigned private IPs only? (optional).
 
 Set to true to use private IPs to communicate between the local client and
 any SkyPilot nodes. This requires the networking stack be properly set up.
 
-When set to true, SkyPilot will only use private subnets to launch nodes.
+When set to ``true``, SkyPilot will only use private subnets to launch nodes.
 Private subnets are defined as those satisfying both of these properties:
 
   1. Subnets whose route tables have no routes to an internet gateway (IGW);
@@ -366,7 +399,7 @@ connections (including rsync) used to communicate between the local client
 and any SkyPilot nodes. (This option is not used between SkyPilot nodes,
 since they are behind the proxy / may not have such a proxy set up.)
 
-Optional; default: ``null``.
+Default: ``null``.
 
 Format 1:
   A string; the same proxy command is used for all regions.
@@ -435,7 +468,7 @@ Example:
 
 Encrypted boot disk (optional).
 
-Set to true to encrypt the boot disk of all AWS instances launched by
+Set to ``true`` to encrypt the boot disk of all AWS instances launched by
 SkyPilot. This is useful for compliance with data protection regulations.
 
 Default: ``false``.
@@ -451,14 +484,14 @@ Whether to prioritize capacity reservations (considered as 0 cost) in the
 optimizer.
 
 If you have capacity reservations in your AWS project:
-Setting this to true guarantees the optimizer will pick any matching
+Setting this to ``true`` guarantees the optimizer will pick any matching
 reservation within all regions and AWS will auto consume your reservations
-with instance match criteria to "open", and setting to false means
+with instance match criteria to "open", and setting to ``false`` means
 optimizer uses regular, non-zero pricing in optimization (if by chance any
 matching reservation exists, AWS will still consume the reservation).
 
-Note: this setting is default to false for performance reasons, as it can
-take half a minute to retrieve the reservations from AWS when set to true.
+Note: this setting is default to ``false`` for performance reasons, as it can
+take half a minute to retrieve the reservations from AWS when set to ``true``.
 
 Default: ``false``.
 
@@ -467,7 +500,7 @@ Default: ``false``.
 ``aws.specific_reservations``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The targeted capacity reservations (CapacityReservationId) to be
+The targeted capacity reservations (``CapacityReservationId``) to be
 considered when provisioning clusters on AWS. SkyPilot will automatically
 prioritize this reserved capacity (considered as zero cost) if the
 requested resources matches the reservation.
@@ -511,12 +544,10 @@ Supported values:
 
    - **<string>**: Apply the service account with the specified name to all instances.
    - **<list of single-element dict>**: A list of single-element dictionaries mapping cluster names (patterns) to service account names.
-     - Matching of cluster names is done in the same order as the list.
-     - If no wildcard expression matches the cluster name, ``LOCAL_CREDENTIALS`` will be used.
-     - To specify a default, use ``*`` as the wildcard expression.
 
-     **Note**:
-     If none of the wildcard expressions in the dictionary match the cluster name, ``LOCAL_CREDENTIALS`` will be used. To specify your default, use ``*`` as the wildcard expression.
+     * Matching of cluster names is done in the same order as the list.
+     * If no wildcard expression matches the cluster name, ``LOCAL_CREDENTIALS`` will be used.
+     * To specify a default, use ``*`` as the wildcard expression.
 
 ---
 
@@ -529,11 +560,6 @@ Supported values:
 2. If the SkyPilot jobs/serve controller is on AWS:
    - Non-AWS managed jobs or non-AWS service replicas will fail to access AWS resources.
    - This occurs because the controllers won't have AWS credential files to assign to these non-AWS instances.
-
----
-
-**Default**:
-``LOCAL_CREDENTIALS``
 
 ---
 
@@ -609,7 +635,7 @@ will be added.
 ``gcp.use_internal_ips``
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Should instances be assigned private IPs only? (optional)
+Should instances be assigned private IPs only? (optional).
 
 Set to true to use private IPs to communicate between the local client and
 any SkyPilot nodes. This requires the networking stack be properly set up.
