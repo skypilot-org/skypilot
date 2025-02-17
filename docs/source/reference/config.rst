@@ -14,6 +14,8 @@ Such configurations apply to all new clusters and do not affect existing cluster
 Syntax
 ------
 
+Below is the configuration syntax and some example values. See detailed explanations under each field.
+
 .. parsed-literal::
 
   :ref:`allowed_clouds <config-yaml-allowed-clouds>`:
@@ -121,7 +123,7 @@ Custom managed jobs controller resources (optional).
 
 These take effects only when a managed jobs controller does not already exist.
 
-For more information about managed jobs, see :ref:`managed-jobs <managed-jobs>`
+For more information about managed jobs, see :ref:`managed-jobs`.
 
 .. _config-yaml-jobs-bucket:
 
