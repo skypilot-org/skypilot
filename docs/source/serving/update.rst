@@ -37,8 +37,8 @@ SkyServe will launch new replicas described by ``new_service.yaml`` with the fol
   by applying the new service spec and bumping its version (See :code:`sky serve status` for the versions). This will significantly reduce the time to
   update the service and avoid potential quota issues.
 
-Rolling Update Example
-~~~~~~~~~~~~~~~~~~~~~~
+Example
+~~~~~~~~
 
 We first launch a `simple HTTP service <https://github.com/skypilot-org/skypilot/blob/master/examples/serve/http_server/task.yaml>`_:
 
@@ -189,8 +189,8 @@ During an update, traffic is entirely serviced by either old-versioned or
 new-versioned replicas.  :code:`sky serve status` shows the latest service
 version and each replica's version.
 
-Blue-Green Update Example
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+Example
+~~~~~~~~
 
 We use the same service ``http-server`` as an example. We can then use :code:`sky serve update --mode blue_green` to update the service:
 

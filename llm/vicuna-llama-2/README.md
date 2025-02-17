@@ -34,7 +34,7 @@ envs:
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 ```
 
-## Getting Started with Training
+## Train your own Vicuna on Llama-2
 
 
 ### Training data and model identity

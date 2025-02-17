@@ -175,6 +175,10 @@ googleanalytics_id = 'G-92WF3MDCJV'
 
 autosectionlabel_prefix_document = True
 
+suppress_warnings = [
+    'autosectionlabel.*',
+]
+
 
 def setup(app):
     app.connect('builder-inited',

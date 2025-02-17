@@ -552,7 +552,7 @@ Supported values:
 
 ---
 
-**Caveats for SERVICE_ACCOUNT with Multicloud Users**
+**Caveats for SERVICE_ACCOUNT with multicloud users**
 
 1. This setting only affects AWS instances.
    Local AWS credentials will still be uploaded to **non-AWS instances** (since those may need access to AWS resources).
@@ -564,7 +564,7 @@ Supported values:
 
 ---
 
-**Example Configuration**
+**Example configuration**
 
 .. code-block:: yaml
 
@@ -705,8 +705,7 @@ If you have "automatically consumed" reservations in your GCP project:
     by chance any matching reservation exists, GCP still auto consumes the
     reservation).
 
-If you have "specifically targeted" reservations (set by the
-  ``specific_reservations`` field below):
+If you have "specifically targeted" reservations (set by the ``specific_reservations`` field below):
   - This field will automatically be set to ``true``.
 
 Note: this setting is default to ``false`` for performance reasons, as it can

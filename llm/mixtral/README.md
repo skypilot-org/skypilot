@@ -46,7 +46,7 @@ Considered resources (1 node):
 ```
 
 
-### Accessing the Single Instance Model
+### Accessing the model
 
 We can now access the model through the OpenAI API with the IP and port:
 
