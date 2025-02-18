@@ -132,13 +132,12 @@ wait_until_cluster_up() {
     echo "${status_output}" | grep UP && break
     sleep 10
     echo "Waiting for cluster ${cluster_name} to be UP"
-    echo "${status_output}"
   done
 
   status_output=$(sky status ${cluster_name})
-  echo "${status_output}"
   echo "${status_output}" | grep UP || {
     echo "Cluster ${cluster_name} failed to reach UP status"
+    echo "${status_output}"
     exit 1
   }
 }
