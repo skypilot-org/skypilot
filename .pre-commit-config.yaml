@@ -44,6 +44,7 @@ repos:
             - "sky/benchmark|sky/callbacks|sky/skylet/providers/azure|sky/resources.py|sky/backends/monkey_patches"
         pass_filenames: false
         additional_dependencies:
+            - types-aiofiles
             - types-PyYAML
             - types-requests<2.31  # Match the condition in requirements.txt
             - types-setuptools

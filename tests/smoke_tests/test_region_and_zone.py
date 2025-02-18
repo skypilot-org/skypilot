@@ -26,6 +26,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.skylet import constants
 
 
@@ -39,7 +40,7 @@ def test_aws_region():
             f'sky launch -y -c {name} --region us-east-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
@@ -54,13 +55,17 @@ def test_aws_region():
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()
-
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
             textwrap.dedent(f"""\
         aws:
             ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
+        f.write(
+            textwrap.dedent(f"""\
+            api_server:
+                endpoint: {sky.server.common.get_server_url()}
+            """))
         f.flush()
         test = smoke_tests_utils.Test(
             'aws_with_ssh_proxy_command',
@@ -108,7 +113,7 @@ def test_gcp_region_and_service_account():
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-central1',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
@@ -130,7 +135,7 @@ def test_ibm_region():
             f'sky launch -y -c {name} --cloud ibm --region {region} examples/minimal.yaml',
             f'sky exec {name} --cloud ibm examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep {region}',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep {region}',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -146,7 +151,7 @@ def test_azure_region():
             f'sky launch -y -c {name} --region eastus2 --cloud azure tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep eastus2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep eastus2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
@@ -170,7 +175,7 @@ def test_aws_zone():
             f'sky launch -y -c {name} examples/minimal.yaml --zone us-east-2b',
             f'sky exec {name} examples/minimal.yaml --zone us-east-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )
@@ -187,7 +192,7 @@ def test_ibm_zone():
             f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml --zone {zone}',
             f'sky exec {name} --cloud ibm examples/minimal.yaml --zone {zone}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep {zone}',  # Ensure the zone is correct.
         ],
         f'sky down -y {name} {name}-2 {name}-3',
     )
@@ -203,7 +208,7 @@ def test_gcp_zone():
             f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )

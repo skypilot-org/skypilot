@@ -6,11 +6,14 @@ import click
 import colorama
 
 from sky import backends
-from sky import status_lib
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
+
+if typing.TYPE_CHECKING:
+    from sky.provision.kubernetes import utils as kubernetes_utils
 
 if typing.TYPE_CHECKING:
     from sky.provision.kubernetes import utils as kubernetes_utils
@@ -45,7 +48,9 @@ class StatusColumn:
 
 
 def show_status_table(cluster_records: List[_ClusterRecord],
-                      show_all: bool) -> int:
+                      show_all: bool,
+                      show_user: bool,
+                      query_clusters: Optional[List[str]] = None) -> int:
     """Compute cluster table values and display.
 
     Returns:
@@ -56,6 +61,13 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     status_columns = [
         StatusColumn('NAME', _get_name),
+    ]
+    if show_user:
+        status_columns.append(StatusColumn('USER', _get_user_name))
+        status_columns.append(
+            StatusColumn('USER_ID', _get_user_hash, show_by_default=False))
+
+    status_columns += [
         StatusColumn('LAUNCHED', _get_launched),
         StatusColumn('RESOURCES',
                      _get_resources,
@@ -87,7 +99,21 @@ def show_status_table(cluster_records: List[_ClusterRecord],
 
     if cluster_records:
         click.echo(cluster_table)
-    else:
+
+    if query_clusters:
+        cluster_names = {record['name'] for record in cluster_records}
+        not_found_clusters = [
+            repr(cluster)
+            for cluster in query_clusters
+            if cluster not in cluster_names
+        ]
+        cluster_str = 'Cluster'
+        if len(not_found_clusters) > 1:
+            cluster_str += 's'
+        cluster_str += ' '
+        cluster_str += ', '.join(not_found_clusters)
+        click.echo(f'{cluster_str} not found.')
+    elif not cluster_records:
         click.echo('No existing clusters.')
     return num_pending_autostop
 
@@ -188,6 +214,8 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # _ClusterCostReportRecord, which is okay as we guarantee the queried fields
 # exist in those cases.
 _get_name = (lambda cluster_record: cluster_record['name'])
+_get_user_hash = (lambda cluster_record: cluster_record['user_hash'])
+_get_user_name = (lambda cluster_record: cluster_record.get('user_name', '-'))
 _get_launched = (lambda cluster_record: log_utils.readable_time_duration(
     cluster_record['launched_at']))
 _get_region = (
@@ -206,6 +234,8 @@ def _get_status_colored(cluster_record: _ClusterRecord) -> str:
 
 
 def _get_resources(cluster_record: _ClusterRecord) -> str:
+    if 'resources_str' in cluster_record:
+        return cluster_record['resources_str']
     handle = cluster_record['handle']
     if isinstance(handle, backends.LocalDockerResourceHandle):
         resources_str = 'docker'

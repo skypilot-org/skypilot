@@ -1,7 +1,6 @@
 """SkyServe core APIs."""
 import re
 import signal
-import subprocess
 import tempfile
 import threading
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -11,6 +10,7 @@ import colorama
 import sky
 from sky import backends
 from sky import exceptions
+from sky import execution
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
@@ -22,6 +22,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import command_runner
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import resources_utils
@@ -137,7 +138,7 @@ def up(
     task: 'sky.Task',
     service_name: Optional[str] = None,
 ) -> Tuple[str, str]:
-    """Spin up a service.
+    """Spins up a service.
 
     Please refer to the sky.cli.serve_up for the document.
 
@@ -150,6 +151,7 @@ def up(
             argument.
         endpoint: str; The service endpoint.
     """
+    task.validate()
     if service_name is None:
         service_name = serve_utils.generate_service_name()
 
@@ -187,7 +189,7 @@ def up(
             prefix=f'controller-task-{service_name}-',
             mode='w',
     ) as controller_file:
-        controller_name = serve_utils.SKY_SERVE_CONTROLLER_NAME
+        controller_name = common.SKY_SERVE_CONTROLLER_NAME
         task_config = task.to_yaml_config()
         common_utils.dump_yaml(service_file.name, task_config)
         remote_tmp_task_yaml_path = (
@@ -247,11 +249,9 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-        controller_job_id, controller_handle = sky.launch(
+        controller_job_id, controller_handle = execution.launch(
             task=controller_task,
-            stream_logs=False,
             cluster_name=controller_name,
-            detach_run=True,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
             _disable_controller_check=True,
@@ -325,7 +325,7 @@ def up(
                         if task.service.tls_credential is None else 'https')
             endpoint = f'{protocol}://{socket_endpoint}'
 
-        sky_logging.print(
+        logger.info(
             f'{fore.CYAN}Service name: '
             f'{style.BRIGHT}{service_name}{style.RESET_ALL}'
             f'\n{fore.CYAN}Endpoint URL: '
@@ -363,14 +363,16 @@ def update(
         task: 'sky.Task',
         service_name: str,
         mode: serve_utils.UpdateMode = serve_utils.DEFAULT_UPDATE_MODE) -> None:
-    """Update an existing service.
+    """Updates an existing service.
 
     Please refer to the sky.cli.serve_update for the document.
 
     Args:
         task: sky.Task to update.
         service_name: Name of the service.
+        mode: Update mode.
     """
+    task.validate()
     _validate_service_task(task)
 
     # Always apply the policy again here, even though it might have been applied
@@ -527,7 +529,7 @@ def down(
     all: bool = False,
     purge: bool = False,
 ) -> None:
-    """Teardown a service.
+    """Tears down a service.
 
     Please refer to the sky.cli.serve_down for the docs.
 
@@ -571,7 +573,7 @@ def down(
     except exceptions.FetchClusterInfoError as e:
         raise RuntimeError(
             'Failed to fetch controller IP. Please refresh controller status '
-            f'by `sky status -r {serve_utils.SKY_SERVE_CONTROLLER_NAME}` '
+            f'by `sky status -r {common.SKY_SERVE_CONTROLLER_NAME}` '
             'and try again.') from e
 
     try:
@@ -581,12 +583,12 @@ def down(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    sky_logging.print(stdout)
+    logger.info(stdout)
 
 
 @usage_lib.entrypoint
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
-    """Tear down a specific replica for the given service.
+    """Tears down a specific replica for the given service.
 
     Args:
         service_name: Name of the service.
@@ -635,7 +637,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 def status(
     service_names: Optional[Union[str,
                                   List[str]]] = None) -> List[Dict[str, Any]]:
-    """Get service statuses.
+    """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
     services.
@@ -652,6 +654,7 @@ def status(
             'status': (sky.ServiceStatus) service status,
             'controller_port': (Optional[int]) controller port,
             'load_balancer_port': (Optional[int]) load balancer port,
+            'endpoint': (Optional[str]) load balancer endpoint,
             'policy': (Optional[str]) autoscaling policy description,
             'requested_resources_str': (str) str representation of
               requested resources,
@@ -671,6 +674,7 @@ def status(
             'version': (int) replica version,
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
+            'endpoint': (str) endpoint of the replica,
         }
 
     For possible service statuses and replica statuses, please refer to
@@ -724,7 +728,24 @@ def status(
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
 
-    return serve_utils.load_service_status(serve_status_payload)
+    service_records = serve_utils.load_service_status(serve_status_payload)
+    # Get the endpoint for each service
+    for service_record in service_records:
+        service_record['endpoint'] = None
+        if service_record['load_balancer_port'] is not None:
+            try:
+                endpoint = backend_utils.get_endpoints(
+                    cluster=common.SKY_SERVE_CONTROLLER_NAME,
+                    port=service_record['load_balancer_port']).get(
+                        service_record['load_balancer_port'], None)
+            except exceptions.ClusterNotUpError:
+                pass
+            else:
+                protocol = ('https'
+                            if service_record['tls_encrypted'] else 'http')
+                service_record['endpoint'] = f'{protocol}://{endpoint}'
+
+    return service_records
 
 
 @usage_lib.entrypoint
@@ -735,7 +756,7 @@ def tail_logs(
     replica_id: Optional[int] = None,
     follow: bool = True,
 ) -> None:
-    """Tail logs for a service.
+    """Tails logs for a service.
 
     Usage:
         sky.serve.tail_logs(
@@ -816,5 +837,4 @@ def tail_logs(
                         code,
                         stream_logs=True,
                         process_stream=False,
-                        ssh_mode=command_runner.SshMode.INTERACTIVE,
-                        stdin=subprocess.DEVNULL)
+                        ssh_mode=command_runner.SshMode.INTERACTIVE)

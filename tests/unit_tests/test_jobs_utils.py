@@ -4,7 +4,7 @@ from sky.exceptions import ClusterDoesNotExist
 from sky.jobs import utils
 
 
-@mock.patch('sky.down')
+@mock.patch('sky.core.down')
 @mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
 def test_terminate_cluster_retry_on_value_error(mock_set_internal,
                                                 mock_sky_down) -> None:
@@ -30,7 +30,7 @@ def test_terminate_cluster_retry_on_value_error(mock_set_internal,
     assert mock_set_internal.call_count == 3
 
 
-@mock.patch('sky.down')
+@mock.patch('sky.core.down')
 @mock.patch('sky.usage.usage_lib.messages.usage.set_internal')
 def test_terminate_cluster_handles_nonexistent_cluster(mock_set_internal,
                                                        mock_sky_down) -> None:
