@@ -211,6 +211,7 @@ def up(
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             retry_until_up=True,
             _disable_controller_check=True,
+            _is_launched_by_sky_serve_controller=True,
         )
 
         style = colorama.Style
