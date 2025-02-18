@@ -233,8 +233,11 @@ class DO(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
-            return resources_utils.FeasibleResources(
-                _make([default_instance_type]), [], None)
+            if default_instance_type is None:
+                return resources_utils.FeasibleResources([], [], None)
+            else:
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]
