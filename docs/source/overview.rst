@@ -121,7 +121,7 @@ A *job* is a program you want to run. Two types of jobs are supported:
 
 
 
-A job can contain one or :ref:`more <pipeline>` tasks. In most cases, a job has just one task; we'll refer to them interchangeably.
+A job can contain one or :ref:`more <pipeline>` *tasks*. In most cases, a job has just one task; we'll refer to them interchangeably.
 
 
 
@@ -205,6 +205,8 @@ Bringing your infra
 SkyPilot easily connects to your existing infra---clouds, Kubernetes
 clusters, or on-prem machines---using each infra's native authentication
 (cloud credentials, kubeconfig, SSH).
+
+.. _concept-cloud-vms:
 
 Cloud VMs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

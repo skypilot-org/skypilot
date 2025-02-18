@@ -8,6 +8,7 @@ from sky import clouds
 from sky.adaptors import do
 from sky.clouds import service_catalog
 from sky.provision.do import utils as do_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -16,7 +17,7 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILE = 'config.yaml'
 
 
-@clouds.CLOUD_REGISTRY.register(aliases=['digitalocean'])
+@registry.CLOUD_REGISTRY.register(aliases=['digitalocean'])
 class DO(clouds.Cloud):
     """Digital Ocean Cloud"""
 

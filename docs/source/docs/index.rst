@@ -108,7 +108,7 @@ Runnable examples:
   * `LocalGPT <https://github.com/skypilot-org/skypilot/tree/master/llm/localgpt>`_
   * Add yours here & see more in `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`_!
 
-* Framework examples: `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo_gpt_train.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, `Cog <https://github.com/skypilot-org/skypilot/blob/master/examples/cog/>`_, `Unsloth <https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml>`_, `Ollama <https://github.com/skypilot-org/skypilot/blob/master/llm/ollama>`_, `llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`__, `Airflow <https://github.com/skypilot-org/skypilot/blob/master/examples/airflow/training_workflow>`_ and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
+* Framework examples: `Vector Database <https://github.com/skypilot-org/skypilot/tree/master/examples/vector_database>`_, `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo_gpt_train.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, `Cog <https://github.com/skypilot-org/skypilot/blob/master/examples/cog/>`_, `Unsloth <https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml>`_, `Ollama <https://github.com/skypilot-org/skypilot/blob/master/llm/ollama>`_, `llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`__, `Airflow <https://github.com/skypilot-org/skypilot/blob/master/examples/airflow/training_workflow>`_ and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
 
 Case Studies and Integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
 
@@ -136,90 +136,88 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
-   ../examples/interactive-development
-   ../getting-started/tutorial
+   Example: AI Training <../getting-started/tutorial>
    ../sky-computing
 
-
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Running Jobs
+   :caption: Clusters
 
-   ../examples/managed-jobs
-   ../reference/job-queue
+   Start a Cluster <../examples/interactive-development>
    ../examples/auto-failover
-   ../running-jobs/distributed-jobs
-   ../running-jobs/many-jobs
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: Reserved & Existing Clusters
-
-   ../reservations/reservations
-   Using Existing Machines <../reservations/existing-machines>
-   ../reference/kubernetes/index
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: SkyServe: Model Serving
-
-   ../serving/sky-serve
-   ../serving/user-guides
-   ../serving/service-yaml-spec
-   ../serving/https
-
-.. toctree::
-   :hidden:
-   :maxdepth: 1
-   :caption: Cutting Cloud Costs
-
-   Managed Spot Jobs <../examples/spot-jobs>
    ../reference/auto-stop
-   ../reference/benchmark/index
 
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Using Data
+   :caption: Jobs
 
-   ../examples/syncing-code-artifacts
+   Cluster Jobs <../reference/job-queue>
+   ../examples/managed-jobs
+   Multi-Node Jobs <../running-jobs/distributed-jobs>
+   Many Parallel Jobs <../running-jobs/many-jobs>
+
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Model Serving
+
+   Getting Started <../serving/sky-serve>
+   ../serving/user-guides
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Infra Choices
+
+   ../compute/gpus
+   Using Cloud VMs <../compute/cloud-vm>
+   ../reference/kubernetes/index
+   Using Existing Machines <../reservations/existing-machines>
+   ../reservations/reservations
+
+
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+   :caption: Data
+
    ../reference/storage
+   ../examples/syncing-code-artifacts
 
 .. toctree::
    :hidden:
    :maxdepth: 1
    :caption: User Guides
 
-   ../running-jobs/environment-variables
-   ../examples/docker-containers
+   ../reference/api-server/api-server
+   Secrets and Environment Variables <../running-jobs/environment-variables>
+   Docker Containers <../examples/docker-containers>
    ../examples/ports
-   ../reference/tpu
    ../reference/logging
    ../reference/faq
-   SkyPilot vs. Other Systems <../reference/comparison>
-
 
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Cloud Admin and Usage
+   :caption: Administrator Guides
 
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
    ../cloud-setup/quota
-   ../cloud-setup/policy
+   Admin Policies <../cloud-setup/policy>
 
 .. toctree::
    :hidden:
    :maxdepth: 1
    :caption: References
 
-   ../reference/yaml-spec
-   ../reference/cli
-   ../reference/api
+   Task YAML <../reference/yaml-spec>
+   CLI <../reference/cli>
+   Python API <../reference/api>
    ../reference/config
    ../developers/index
 

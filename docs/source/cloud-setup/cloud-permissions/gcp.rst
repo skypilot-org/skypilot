@@ -12,7 +12,7 @@ Generally, the administrator can choose among three "levels" of permissions, fro
 
 .. _gcp-medium-permissions:
 
-Medium Permissions
+Medium permissions
 -----------------------
 
 The easiest way to grant permissions to a user access your GCP project without the ``Owner`` role is to add the following roles to the user principals:
@@ -41,7 +41,7 @@ You can grant those accesses via GCP's `IAM & Admin console <https://console.clo
 
 .. _gcp-minimal-permissions:
 
-Minimal Permissions
+Minimal permissions
 -----------------------
 
 The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions for some GCP services to the user.  If you would like to grant finer-grained and more minimal permissions to your users in your organization / project, you can create a custom role by following the steps below:
@@ -178,7 +178,7 @@ User
 
 .. _gcp-service-account-creation:
 
-Service Account
+Service account
 ~~~~~~~~~~~~~~~~~~~
 .. note::
 
@@ -210,7 +210,7 @@ Medium Permissions roles as described in the previous sections.
 
 .. _gcp-minimum-firewall-rules:
 
-Firewall Rules
+Firewall rules
 ~~~~~~~~~~~~~~~~~~~
 
 By default, users do not need to set up any special firewall rules to start
@@ -286,7 +286,7 @@ The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-fir
 .. _gcp-use-internal-ips:
 
 
-Using Internal IPs
+Using internal IPs
 -----------------------
 For security reason, users may only want to use internal IPs for SkyPilot instances.
 To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
@@ -302,7 +302,7 @@ To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to sp
 The ``gcp.ssh_proxy_command`` field is optional. If SkyPilot is run on a machine that can directly access the internal IPs of the instances, it can be omitted. Otherwise, it should be set to a command that can be used to proxy SSH connections to the internal IPs of the instances.
 
 
-Cloud NAT Setup
+Cloud NAT setup
 ~~~~~~~~~~~~~~~~
 
 Instances created with internal IPs only on GCP cannot access public internet by default. To make sure SkyPilot can install the dependencies correctly on the instances,
@@ -340,8 +340,8 @@ If proxy is not needed, but the regions need to be limited, you can set the ``gc
         us-east1: null
 
 
-Force Enable Exteral IPs
-~~~~~~~~~~~~~~~~~~~~~~~~
+Force enable external IPs
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
 An alternative to setting up cloud NAT for instances that need to access the public internet but are in a VPC and communicated with via their internal IP is to force them to be created with an external IP address.
 

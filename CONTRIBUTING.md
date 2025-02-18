@@ -10,7 +10,7 @@ all contributions to the project, including but not limited to:
 * Documentation
 * Tutorials, blog posts and talks on SkyPilot
 
-## Contributing Code
+## Contributing code
 
 We use GitHub to track issues and features. For new contributors, we recommend looking at issues labeled ["good first issue"](https://github.com/sky-proj/sky/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22+).
 

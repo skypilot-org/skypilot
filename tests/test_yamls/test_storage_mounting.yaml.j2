@@ -1,13 +1,17 @@
 file_mounts:
   # Mounting public buckets for AWS
+  {% if include_s3_mount | default(True) %}
   /mount_public_s3:
     source: s3://digitalcorpora
     mode: MOUNT
+  {% endif %}
 
   # Mounting public buckets for GCP
+  {% if include_gcs_mount | default(True) %}
   /mount_public_gcp:
     source: gs://gcp-public-data-sentinel-2
     mode: MOUNT
+  {% endif %}
 
   {% if include_azure_mount | default(True) %}
   # Mounting public buckets for Azure
@@ -40,8 +44,12 @@ run: |
   set -ex
 
   # Check public bucket contents
+  {% if include_s3_mount | default(True) %}
   ls -ltr /mount_public_s3/corpora
+  {% endif %}
+  {% if include_gcs_mount | default(True) %}
   ls -ltr /mount_public_gcp/tiles
+  {% endif %}
   {% if include_azure_mount | default(True) %}
   ls -ltr /mount_public_azure/green
   {% endif %}
