@@ -1,15 +1,5 @@
 name: deepseek-r1
 
-service:
-  # Specifying the path to the endpoint to check the readiness of the service.
-  readiness_probe: /health
-  # Allow 1 hour for code start.
-  initial_delay_seconds: 3600
-  # Autoscaling from 0 to 2 replicas
-  replica_policy:
-    min_replicas: 0
-    max_replicas: 2
-
 resources:
   accelerators: {H200:8, H100:8, A100-80GB:8}
   disk_size: 1024 # Large disk for model weights
