@@ -1310,6 +1310,9 @@ class Resources:
             _docker_username_for_runpod=override.pop(
                 '_docker_username_for_runpod',
                 self._docker_username_for_runpod),
+            _should_raise_for_backward_compatibility=override.pop(
+                '_should_raise_for_backward_compatibility',
+                self._should_raise_for_backward_compatibility),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
