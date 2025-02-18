@@ -10,7 +10,24 @@
 #   cd skypilot-repo
 #   git checkout <feature branch>
 #   pip uninstall -y skypilot ray
-#   bash tests/backward_compatibility_tests.sh
+#   bash tests/backward_compatibility_tests.sh [need_launch] [start_from] [base_branch]
+#
+#   need_launch: Whether to launch a new cluster after switching to the current environment. 0 or 1. Default: 0.
+#   start_from:  The section number to start the test from. Integer from 1 to 8. Default: 0.
+#   base_branch: The base branch to clone skypilot from. Default: master.
+#
+# Example Usage:
+#   1. Run all tests with default settings (test managed jobs, starting from section 7, using 'master' as the base branch):
+#      bash tests/backward_compatibility_tests.sh
+#
+#   2. Run all tests, launch a new cluster after upgrading, and use the 'dev' branch as the base:
+#      bash tests/backward_compatibility_tests.sh 1 1 dev
+#
+#   3. Start from section 3 (sky autostop + sky status -r), using the default base branch ('master'):
+#      bash tests/backward_compatibility_tests.sh 0 3
+#
+#   4.  Start from section 5, do not launch, and specify base branch as my-branch
+#       bash tests/backward_compatibility_tests.sh 0 5 my-branch
 
 #!/bin/bash
 set -evx
@@ -22,7 +39,7 @@ ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && p
 rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
-start_from=${2:-7}
+start_from=${2:-0}
 base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$(whoami)"

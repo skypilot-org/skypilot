@@ -71,7 +71,6 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
-        _should_raise_for_backward_compatibility: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -163,8 +162,6 @@ class Resources:
             ValueError: if some attributes are invalid.
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
-        self._should_raise_for_backward_compatibility = (
-            _should_raise_for_backward_compatibility)
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = region
@@ -1310,9 +1307,6 @@ class Resources:
             _docker_username_for_runpod=override.pop(
                 '_docker_username_for_runpod',
                 self._docker_username_for_runpod),
-            _should_raise_for_backward_compatibility=override.pop(
-                '_should_raise_for_backward_compatibility',
-                self._should_raise_for_backward_compatibility),
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
