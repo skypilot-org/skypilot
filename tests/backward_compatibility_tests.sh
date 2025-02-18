@@ -32,56 +32,69 @@ uuid=$(uuidgen)
 MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
 CLOUD="aws"
 
-# Function to activate the base environment and change directory
-activate_base_env() {
-  # Activate the base environment
-  source ~/sky-back-compat-base/bin/activate
+# Function to activate a given environment
+activate_env() {
+  local env_name="$1"
+  local restart_api_server="$2"
+  local env_dir
+  local absolute_dir
 
-  # Change to the sky-base directory
-  cd "$ABSOLUTE_BASE_VERSION_DIR" || {
-    echo "Failed to change directory to $ABSOLUTE_BASE_VERSION_DIR"
+  # Determine environment directory and absolute path based on env_name
+  case "$env_name" in
+    base)
+      env_dir="sky-back-compat-base"
+      absolute_dir="$ABSOLUTE_BASE_VERSION_DIR"
+      ;;
+    current)
+      env_dir="sky-back-compat-current"
+      absolute_dir="$ABSOLUTE_CURRENT_VERSION_DIR"
+      ;;
+    *)
+      echo "Invalid environment name: '$env_name'. Must be 'base' or 'current'."
+      exit 1
+      ;;
+  esac
+
+  # Argument validation
+  if [ "$#" -ne 2 ]; then
+    echo "Usage: activate_env <environment (base or current)> <restart_api_server (0 or 1)>"
+    exit 1
+  fi
+  if ! [[ "$restart_api_server" =~ ^[01]$ ]]; then
+    echo "Invalid restart_api_server value: '$restart_api_server'. Must be 0 or 1."
+    exit 1
+  fi
+
+  # Activate the environment
+  source ~/"$env_dir"/bin/activate
+
+  # Show which sky is being used.
+  which sky
+
+  # Change to the environment directory
+  cd "$absolute_dir" || {
+    echo "Failed to change directory to $absolute_dir"
     exit 1
   }
 
-  # Check if the 'sky' command exists
-  if command -v sky &> /dev/null; then
-    # Stop the sky API if it is running, ignore errors if it's not
-    sky api stop || true
-
-    # Start the sky API
+  # API operations: Restart the API if restart_api_server is 1
+  if [ "$restart_api_server" -eq 1 ]; then
+    sky api stop || true  # Stop, ignoring errors if it's not running
     if ! sky api start; then
       echo "Failed to start sky API"
       exit 1
     fi
-  else
-    echo "'sky' command not found. Skipping sky API operations."
   fi
+}
+
+# Function to activate the base environment and change directory
+activate_base_env() {
+  activate_env "base" "${1:-1}"
 }
 
 # Function to activate the current environment and return to the initial directory
 activate_current_env() {
-  # Activate the current environment
-  source ~/sky-back-compat-current/bin/activate
-
-  # Change to the current directory
-  cd "$ABSOLUTE_CURRENT_VERSION_DIR" || {
-    echo "Failed to change directory to $ABSOLUTE_CURRENT_VERSION_DIR"
-    exit 1
-  }
-
-  # Check if the 'sky' command exists
-  if command -v sky &> /dev/null; then
-    # Stop the sky API if it is running, ignore errors if it's not
-    sky api stop || true
-
-    # Start the sky API
-    if ! sky api start; then
-      echo "Failed to start sky API"
-      exit 1
-    fi
-  else
-    echo "'sky' command not found. Skipping sky API operations."
-  fi
+  activate_env "current" "${1:-1}"
 }
 
 git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLUTE_BASE_VERSION_DIR || true
@@ -105,14 +118,14 @@ if ! gcloud --version; then
 fi
 rm -r  ~/.sky/wheels || true
 
-activate_base_env
+activate_base_env 0
 git pull origin ${base_branch}
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate
 
-activate_current_env
+activate_current_env 0
 rm -r  ~/.sky/wheels || true
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
