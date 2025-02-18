@@ -15,8 +15,12 @@
 #!/bin/bash
 set -evx
 
+# Store the initial directory
+INITIAL_DIR=$(pwd)
+
 need_launch=${1:-0}
 start_from=${2:-0}
+base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$USER"
 # Test managed jobs to make sure existing jobs and new job can run correctly,
@@ -26,13 +30,23 @@ uuid=$(uuidgen)
 MANAGED_JOB_JOB_NAME=${CLUSTER_NAME}-${uuid:0:4}
 CLOUD="aws"
 
-git clone https://github.com/skypilot-org/skypilot.git ../sky-master || true
+# Function to activate the base environment and change directory
+activate_base_env() {
+  source ~/sky-back-compat-base/bin/activate && cd ../sky-base
+}
+
+# Function to activate the current environment and return to the initial directory
+activate_current_env() {
+  source ~/sky-back-compat-current/bin/activate && cd "$INITIAL_DIR"
+}
+
+git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git ../sky-base || true
 ~/.local/bin/uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh
 UV=~/.local/bin/uv
 
 # Create environment for compatibility tests
 source ~/.bashrc
-$UV venv --seed --python=3.9 ~/sky-back-compat-master
+$UV venv --seed --python=3.9 ~/sky-back-compat-base
 $UV venv --seed --python=3.9 ~/sky-back-compat-current
 
 # Install gcloud
@@ -47,16 +61,14 @@ if ! gcloud --version; then
 fi
 rm -r  ~/.sky/wheels || true
 
-source ~/sky-back-compat-master/bin/activate
-cd ../sky-master
-git pull origin master
+activate_base_env
+git pull origin ${base_branch}
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
-cd -
 deactivate
 
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
@@ -64,7 +76,7 @@ $UV pip install -e ".[all]"
 deactivate
 
 cleanup_resources() {
-  source ~/sky-back-compat-current/bin/activate
+  activate_current_env
   sky down ${CLUSTER_NAME}* -y || true
   sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y || true
   sky serve down ${CLUSTER_NAME}-* -y || true
@@ -76,7 +88,7 @@ trap cleanup_resources EXIT
 
 # exec + launch
 if [ "$start_from" -le 1 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 which sky
 # Job 1
@@ -86,7 +98,7 @@ sky autostop -i 10 -y ${CLUSTER_NAME}
 sky exec -d --cloud ${CLOUD} --num-nodes 2 ${CLUSTER_NAME} sleep 100
 deactivate
 
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 # The original cluster should exist in the status output
 sky status ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
@@ -114,11 +126,11 @@ fi
 
 # sky stop + sky start + sky exec
 if [ "$start_from" -le 2 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-2 examples/minimal.yaml
 deactivate
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
@@ -130,11 +142,11 @@ fi
 
 # `sky autostop` + `sky status -r`
 if [ "$start_from" -le 3 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-3 examples/minimal.yaml
 deactivate
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 sky autostop -y -i0 ${CLUSTER_NAME}-3
 sleep 120
@@ -145,12 +157,12 @@ fi
 
 # (1 node) sky launch --cloud ${CLOUD} + sky exec + sky queue + sky logs
 if [ "$start_from" -le 4 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-4
 deactivate
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --num-nodes 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky queue ${CLUSTER_NAME}-4
@@ -163,12 +175,12 @@ fi
 
 # (1 node) sky start + sky exec + sky queue + sky logs
 if [ "$start_from" -le 5 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-5
 deactivate
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 sky start -y ${CLUSTER_NAME}-5
 sky queue ${CLUSTER_NAME}-5
@@ -183,12 +195,12 @@ fi
 
 # (2 nodes) sky launch --cloud ${CLOUD} + sky exec + sky queue + sky logs
 if [ "$start_from" -le 6 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
 sky stop -y ${CLUSTER_NAME}-6
 deactivate
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 sky start -y ${CLUSTER_NAME}-6
 sky queue ${CLUSTER_NAME}-6
@@ -202,12 +214,12 @@ deactivate
 fi
 
 if [ "$start_from" -le 7 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
 deactivate
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
 s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
@@ -231,13 +243,13 @@ fi
 
 # sky serve
 if [ "$start_from" -le 8 ]; then
-source ~/sky-back-compat-master/bin/activate
+activate_base_env
 rm -r  ~/.sky/wheels || true
 sky serve up --cloud ${CLOUD} -y --cpus 2 -y -n ${CLUSTER_NAME}-8-0 examples/serve/http_server/task.yaml
 sky serve status ${CLUSTER_NAME}-8-0
 deactivate
 
-source ~/sky-back-compat-current/bin/activate
+activate_current_env
 rm -r  ~/.sky/wheels || true
 sky serve status
 sky serve logs ${CLUSTER_NAME}-8-0 2 --no-follow
