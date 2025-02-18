@@ -70,6 +70,9 @@ def launch(
       handle: Optional[backends.ResourceHandle]; handle to the controller VM.
         None if dryrun.
     """
+    with ux_utils.print_exception_no_traceback():
+        raise ValueError('Managed jobs is disabled for artifact evaluation. '
+                         'Please try sky serve related commands instead.')
     entrypoint = task
     dag_uuid = str(uuid.uuid4().hex[:4])
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)

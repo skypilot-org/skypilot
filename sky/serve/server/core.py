@@ -15,6 +15,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
+import sky.exceptions
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
@@ -98,6 +99,30 @@ def up(
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
     serve_utils.validate_service_task(task)
+
+    max_num_services = 1
+    try:
+        current_num_services = len(status())
+    except sky.exceptions.ClusterNotUpError:
+        current_num_services = 0
+    if current_num_services >= max_num_services:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Max number of services for artifact evaluation '
+                             'reached. The maximum number of services is '
+                             f'{max_num_services}. To spin up more services, '
+                             'please tear down some existing services. '
+                             'To see existing services, run: sky serve status')
+
+    assert task.service is not None
+    max_num_replicas = 3
+    if task.service.max_replicas >= max_num_replicas:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Max number of replicas for artifact evaluation '
+                             'reached. The maximum number of replicas is '
+                             f'{max_num_replicas}. To spin up more replicas, '
+                             'please tear down some existing services. '
+                             'To see existing services, run: sky serve status')
+
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.

@@ -475,6 +475,11 @@ def launch(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+    if not _is_launched_by_sky_serve_controller:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Launching SkyPilot clusters is disabled for '
+                             'artifact evaluation. Please try sky serve '
+                             'related commands instead.')
 
     entrypoint = task
     entrypoint.validate()
