@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: skypilot-config
+  name: {{ .Release.Name }}-config
   namespace: {{ .Release.namespace }}
 data:
   config.yaml: |

@@ -1,7 +1,7 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: skypilot-api-service
+  name: {{ .Release.Name }}-api-service
   namespace: {{ .Release.namespace }}
 spec:
   type: ClusterIP  # Use clusterIP to allow ingress to authenticate
@@ -10,4 +10,4 @@ spec:
       targetPort: 46580  # Assuming your container listens on port 46580
       protocol: TCP
   selector:
-    app: skypilot-api
+    app: {{ .Release.Name }}-api

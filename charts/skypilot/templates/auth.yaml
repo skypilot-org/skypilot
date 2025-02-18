@@ -2,7 +2,7 @@
 apiVersion: v1
 kind: Secret
 metadata:
-  name: basic-auth
+  name: {{ .Release.Name }}-basic-auth
   namespace: {{ .Release.namespace }}
 type: Opaque
 stringData:

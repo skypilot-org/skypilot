@@ -1,7 +1,7 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: skypilot-api-server
+  name: {{ .Release.Name }}-api-server
   namespace: {{ .Release.namespace }}
 spec:
   # Note: replicas > 1 is not well tested, and requires a PVC that supports ReadWriteMany.
@@ -10,14 +10,14 @@ spec:
     type: Recreate
   selector:
     matchLabels:
-      app: skypilot-api
+      app: {{ .Release.Name }}-api
   template:
     metadata:
       labels:
-        app: skypilot-api
+        app: {{ .Release.Name }}-api
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
-      serviceAccountName: skypilot-api-sa
+      serviceAccountName: {{ .Release.Name }}-api-sa
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
@@ -149,7 +149,7 @@ spec:
       {{- if .Values.storage.enabled }}
       - name: state-volume
         persistentVolumeClaim:
-          claimName: skyplatform-state
+          claimName: {{ .Release.Name }}-state
       {{- else }}
       - name: state-volume
         emptyDir: {}
@@ -174,5 +174,5 @@ spec:
       {{- if .Values.apiService.config }}
       - name: skypilot-config
         configMap:
-          name: skypilot-config
+          name: {{ .Release.Name }}-config
       {{- end }}
