@@ -727,16 +727,11 @@ def test_optimize_disk_tier(enable_all_clouds):
         map(registry.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates
 
 
-def test_resource_hints_for_invalid_resources(monkeypatch, capfd):
+def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
     """Tests that helpful hints are shown when no matching resources are found."""
     # Test when there are no fuzzy candidates
     with pytest.raises(exceptions.ResourcesUnavailableError):
-        _test_resources_launch(
-            monkeypatch,
-            enabled_clouds=[sky.Azure(), sky.GCP(),
-                            sky.AWS()],
-            cpus=111,
-            memory=999)
+        _test_resources_launch(cloud=sky.AWS(), cpus=111, memory=999)
     stdout, _ = capfd.readouterr()
     assert 'Try specifying a different CPU count' in stdout
     assert 'add "+" to the end of the CPU count' in stdout
