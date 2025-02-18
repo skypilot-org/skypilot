@@ -19,6 +19,7 @@ set -evx
 ABSOLUTE_CURRENT_VERSION_DIR=$(pwd)
 BASE_VERSION_DIR="../sky-base"
 ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && pwd || pwd)/$(basename "$BASE_VERSION_DIR")
+rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
 start_from=${2:-7}
