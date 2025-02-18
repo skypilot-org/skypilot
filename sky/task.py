@@ -278,6 +278,10 @@ class Task:
         # https://github.com/python/mypy/issues/3004
         self._num_nodes = 1
         self.num_nodes = num_nodes  # type: ignore
+        if num_nodes is not None and num_nodes > 1:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('num_nodes > 1 is not supported for artifact '
+                                 'evaluation.')
 
         self.inputs: Optional[str] = None
         self.outputs: Optional[str] = None

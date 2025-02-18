@@ -15,7 +15,7 @@ service:
       max_tokens: 1
   replica_policy:
     min_replicas: 2
-    max_replicas: 5
+    max_replicas: 3
     num_overprovision: 1
     target_qps_per_replica: 10
     dynamic_ondemand_fallback: true
