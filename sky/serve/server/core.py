@@ -105,7 +105,7 @@ def up(
         current_num_services = len(status())
     except sky.exceptions.ClusterNotUpError:
         current_num_services = 0
-    if current_num_services >= max_num_services:
+    if current_num_services > max_num_services:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Max number of services for artifact evaluation '
                              'reached. The maximum number of services is '
