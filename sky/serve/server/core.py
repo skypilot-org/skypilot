@@ -119,9 +119,9 @@ def up(
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Max number of replicas for artifact evaluation '
                              'reached. The maximum number of replicas is '
-                             f'{max_num_replicas}. To spin up more replicas, '
-                             'please tear down some existing services. '
-                             'To see existing services, run: sky serve status')
+                             f'{max_num_replicas}. Got '
+                             f'{task.service.max_replicas}. Please try '
+                             'decreasing the number of replicas.')
 
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
