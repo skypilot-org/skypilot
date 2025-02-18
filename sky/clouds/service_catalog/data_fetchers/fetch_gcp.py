@@ -60,8 +60,8 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
 
-# TPU V6e price for us-central2 is missing in the SKUs.
-TPU_V6E_MISSING_REGIONS = ['us-central2']
+# TPU V6e price for the following regions is missing in the SKUs.
+TPU_V6E_MISSING_REGIONS = ['us-central2', 'southamerica-west1']
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
@@ -647,6 +647,10 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         # no 'Pod' keyword in the description.
         is_pod = ((num_cores > 8 or tpu_version == 'v4') and
                   not tpu_version.startswith('v5') and tpu_version != 'v6e')
+
+        with open('@temp/a.json', 'w') as f:
+            import json
+            json.dump(gce_skus + tpu_skus, f)
 
         for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
