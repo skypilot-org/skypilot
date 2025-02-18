@@ -35,9 +35,11 @@ spec:
         - name: SKYPILOT_IN_CLUSTER_NAMESPACE
           value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
         {{- end }}
-        # Start api service and tail logs
-        command: ["/bin/sh", "-c"]
+        # Use tini as the init process
+        command: ["/tini", "--"]
         args:
+        - /bin/sh
+        - -c
         - |
           set -e
           {{- if .Values.apiService.preDeployHook }}

@@ -9,7 +9,7 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     apt-get update -y && \
     apt-get install --no-install-recommends -y \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse socat netcat-openbsd curl rsync vim && \
+        pciutils nano fuse socat netcat-openbsd curl rsync vim tini && \
     rm -rf /var/lib/apt/lists/* && \
     # Install kubectl
     curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/amd64/kubectl" && \
