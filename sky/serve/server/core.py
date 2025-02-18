@@ -115,7 +115,7 @@ def up(
 
     assert task.service is not None
     max_num_replicas = 3
-    if task.service.max_replicas >= max_num_replicas:
+    if task.service.max_replicas > max_num_replicas:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('Max number of replicas for artifact evaluation '
                              'reached. The maximum number of replicas is '
