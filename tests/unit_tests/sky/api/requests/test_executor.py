@@ -5,14 +5,6 @@ import pytest
 from sky.server.requests import executor
 
 
-@pytest.fixture(autouse=True)
-def clear_lru_cache():
-    """Clear the LRU cache before each test."""
-    executor._max_parallel_size_for_blocking.cache_clear()
-    executor._max_parallel_size_for_non_blocking.cache_clear()
-    yield
-
-
 def test_parallel_size_blocking():
     # Test with insufficient memory
     cpu_count = 4
