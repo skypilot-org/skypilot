@@ -113,18 +113,18 @@ _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
 
 def _wait_until_cluster_status_not_init(cluster_name: str,
                                         timeout_s: float = 30) -> None:
-    """Waits until a cluster is no longer in INIT state.
+    """Waits until a cluster is found and no longer in INIT state.
 
-    Polls the cluster status until it is no longer in INIT state or timeout
-    occurs.
+    Polls the cluster status until it is found and no longer in INIT state or
+    timeout occurs.
 
     Args:
         cluster_name: Name of the cluster to check status for.
         timeout_s: Maximum time to wait in seconds before timing out.
 
     Raises:
-        sky.exceptions.ClusterNotUpError: If cluster remains in INIT state after
-            timeout_s seconds.
+        sky.exceptions.ClusterNotUpError: If cluster is not found or remains in
+            INIT state after timeout_s seconds.
     """
     start_time = time.time()
     records: List[Dict[str, Any]] = []
