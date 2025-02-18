@@ -1,8 +1,4 @@
 apiService:
-  # TODO: Setting limits causes issues with the API server. For now we advise
-  # not to set limits.
-  cpuCoresLimit: null
-  memoryGBLimit: null
   image: berkeleyskypilot/skypilot-nightly:latest
   # Number of replicas to deploy - replicas > 1 is not well tested, and requires 
   # a PVC that supports ReadWriteMany (see accessMode in storage section below).
@@ -37,6 +33,19 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Set resource requests and limits for the API server
+  # TODO: Setting limits causes issues with the API server. For now we advise
+  # not to set limits.
+  resources: null
+  # resources:
+  #   requests:
+  #     cpu: "1"
+  #     memory: "2Gi"
+  #   limits:
+  #     cpu: "2"
+  #     memory: "4Gi"
+  #     # Additional resource types like ephemeral-storage can be specified here
+  
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 

@@ -23,24 +23,10 @@ spec:
         image: {{ .Values.apiService.image }}
         imagePullPolicy: Always
         resources:
-          {{- if .Values.apiService.cpuCoresLimit }}
-          limits:
-            cpu: {{ .Values.apiService.cpuCoresLimit }}
-          {{- end }}
-          {{- if .Values.apiService.memoryGBLimit }}
-            memory: {{ .Values.apiService.memoryGBLimit }}G
-          {{- end }}
+          {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
         - name: SKYPILOT_DEV
-          value: {{ .Values.apiService.skypilotDev | quote }}          
-        {{- if .Values.apiService.cpuCoresLimit }}
-        - name: SKYPILOT_POD_CPU_CORES_LIMIT
-          value: {{ .Values.apiService.cpuCoresLimit | quote }}
-        {{- end }}
-        {{- if .Values.apiService.memoryGBLimit }}
-        - name: SKYPILOT_POD_MEMORY_GB_LIMIT
-          value: {{ .Values.apiService.memoryGBLimit | quote }}
-        {{- end }}
+          value: {{ .Values.apiService.skypilotDev | quote }}
         {{- if .Values.gcpCredentials.enabled }}
         - name: GOOGLE_APPLICATION_CREDENTIALS
           value: /root/gcp-cred.json
