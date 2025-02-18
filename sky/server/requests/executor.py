@@ -330,7 +330,7 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 return
             request_id, ignore_return_value = request_element
             request = api_requests.get_request(request_id)
-            assert request is not None, request_id
+            assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
                 return
             logger.info(f'[{worker}] Submitting request: {request_id}')
@@ -352,8 +352,9 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
         except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'[{worker}] Error processing request {request_id}.\n'
-                         f'{common_utils.format_exception(e)}')
+            logger.error(
+                f'[{worker}] Error processing request {request_id}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
     # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
     # because the former is more efficient with the support of lazy creation of
