@@ -419,7 +419,7 @@ def test_multi_echo(generic_cloud: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 30',
             # Make sure that our job scheduler is fast enough to have at least
-            # 15 RUNNING jobs in parallel.
+            # 18 RUNNING jobs in parallel.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 18) exit 1}}\'',
             'sleep 30',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
@@ -1265,13 +1265,13 @@ def test_autodown(generic_cloud: str):
     # the VM is terminated.
     autodown_timeout = 900 if generic_cloud == 'azure' else 240
     total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
+    check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
     test = smoke_tests_utils.Test(
         'autodown',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m (down)"',
+            check_autostop_set,
             # Ensure the cluster is not terminated early.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
@@ -1281,7 +1281,7 @@ def test_autodown(generic_cloud: str):
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep "1m (down)"',
+            check_autostop_set,
             f'sleep {autodown_timeout}',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
