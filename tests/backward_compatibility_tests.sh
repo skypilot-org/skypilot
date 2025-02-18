@@ -65,6 +65,7 @@ activate_env() {
     exit 1
   fi
 
+  rm -r  ~/.sky/wheels || true
   # Activate the environment
   source ~/"$env_dir"/bin/activate
 
@@ -128,7 +129,6 @@ if ! gcloud --version; then
   echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc
   source ~/google-cloud-sdk/path.bash.inc
 fi
-rm -r  ~/.sky/wheels || true
 
 activate_base_env 0
 git pull origin ${base_branch}
@@ -138,7 +138,6 @@ $UV pip install -e ".[all]"
 deactivate
 
 activate_current_env 0
-rm -r  ~/.sky/wheels || true
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
@@ -159,7 +158,6 @@ trap cleanup_resources EXIT
 # exec + launch
 if [ "$start_from" -le 1 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 which sky
 # Job 1
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME} examples/minimal.yaml
@@ -172,7 +170,6 @@ activate_current_env
 # The original cluster should exist in the status output
 sky status ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
-rm -r  ~/.sky/wheels || true
 if [ "$need_launch" -eq "1" ]; then
   sky launch --cloud ${CLOUD} -y -c ${CLUSTER_NAME}
 fi
@@ -197,11 +194,9 @@ fi
 # sky stop + sky start + sky exec
 if [ "$start_from" -le 2 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-2 examples/minimal.yaml
 deactivate
 activate_current_env
-rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
 wait_until_cluster_up ${CLUSTER_NAME}-2
@@ -214,11 +209,9 @@ fi
 # `sky autostop` + `sky status -r`
 if [ "$start_from" -le 3 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-3 examples/minimal.yaml
 deactivate
 activate_current_env
-rm -r  ~/.sky/wheels || true
 sky autostop -y -i0 ${CLUSTER_NAME}-3
 sleep 120
 sky status -r ${CLUSTER_NAME}-3 | grep STOPPED || exit 1
@@ -229,12 +222,10 @@ fi
 # (1 node) sky launch --cloud ${CLOUD} + sky exec + sky queue + sky logs
 if [ "$start_from" -le 4 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-4
 deactivate
 activate_current_env
-rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --num-nodes 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky queue ${CLUSTER_NAME}-4
 sky logs ${CLUSTER_NAME}-4 1 --status
@@ -247,12 +238,10 @@ fi
 # (1 node) sky start + sky exec + sky queue + sky logs
 if [ "$start_from" -le 5 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-5
 deactivate
 activate_current_env
-rm -r  ~/.sky/wheels || true
 sky start -y ${CLUSTER_NAME}-5
 wait_until_cluster_up ${CLUSTER_NAME}-5
 sky queue ${CLUSTER_NAME}-5
@@ -268,12 +257,10 @@ fi
 # (2 nodes) sky launch --cloud ${CLOUD} + sky exec + sky queue + sky logs
 if [ "$start_from" -le 6 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
 sky stop -y ${CLUSTER_NAME}-6
 deactivate
 activate_current_env
-rm -r  ~/.sky/wheels || true
 sky start -y ${CLUSTER_NAME}-6
 wait_until_cluster_up ${CLUSTER_NAME}-6
 sky queue ${CLUSTER_NAME}-6
@@ -288,12 +275,10 @@ fi
 
 if [ "$start_from" -le 7 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
 deactivate
 activate_current_env
-rm -r  ~/.sky/wheels || true
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
 s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
 echo "$s"
@@ -317,13 +302,11 @@ fi
 # sky serve
 if [ "$start_from" -le 8 ]; then
 activate_base_env
-rm -r  ~/.sky/wheels || true
 sky serve up --cloud ${CLOUD} -y --cpus 2 -y -n ${CLUSTER_NAME}-8-0 examples/serve/http_server/task.yaml
 sky serve status ${CLUSTER_NAME}-8-0
 deactivate
 
 activate_current_env
-rm -r  ~/.sky/wheels || true
 sky serve status
 sky serve logs ${CLUSTER_NAME}-8-0 2 --no-follow
 sky serve logs --controller ${CLUSTER_NAME}-8-0  --no-follow
