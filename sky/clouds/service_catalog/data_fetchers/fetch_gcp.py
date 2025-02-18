@@ -648,10 +648,6 @@ def get_tpu_df(gce_skus: List[Dict[str, Any]],
         is_pod = ((num_cores > 8 or tpu_version == 'v4') and
                   not tpu_version.startswith('v5') and tpu_version != 'v6e')
 
-        with open('@temp/a.json', 'w') as f:
-            import json
-            json.dump(gce_skus + tpu_skus, f)
-
         for sku in gce_skus + tpu_skus:
             if tpu_region not in sku['serviceRegions']:
                 continue
