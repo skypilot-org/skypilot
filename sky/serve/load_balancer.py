@@ -205,8 +205,7 @@ class SkyServeLoadBalancer:
             retry_cnt += 1
             with self._client_pool_lock:
 
-                def _should_reset_failed_replicas_for_retry(
-                    failed_replica_urls: Set[str]) -> bool:
+                def _should_reset_failed_replicas_for_retry() -> bool:
                     """Check if all currently available replicas have failed
                     and need retry.
 
@@ -216,7 +215,7 @@ class SkyServeLoadBalancer:
                     currently_ready_replicas = set(
                         self._load_balancing_policy.ready_replicas)
                     remaining_healthy_replicas = (currently_ready_replicas -
-                                                  )
+                                                  failed_replica_urls)
                     return not remaining_healthy_replicas
 
                 # Reset failed replicas when all are failed, allowing retry for

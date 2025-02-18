@@ -39,8 +39,7 @@ class LoadBalancingPolicy:
         LB_POLICIES[name] = cls
         if default:
             global DEFAULT_LB_POLICY
-            assert DEFAULT_LB_POLICY is None, (
-                'Only one policy can be default.')
+            assert DEFAULT_LB_POLICY is None, 'Only one policy can be default.'
             DEFAULT_LB_POLICY = name
 
     @classmethod
@@ -142,8 +141,14 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         if not self.ready_replicas:
             return None
         with self.lock:
-            return min(self.ready_replicas,
-                       key=lambda replica: self.load_map.get(replica, 0))
+            ready_replicas = sorted(
+                self.ready_replicas,
+                key=lambda replica: self.load_map.get(replica, 0))
+            return next(
+                (replica for replica in ready_replicas
+                 if replica not in disabled_replicas),
+                None,
+            )
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
