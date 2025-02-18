@@ -18,7 +18,6 @@ from sky.clouds.service_catalog import common as service_catalog_common
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.serve import spot_placer
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
@@ -26,7 +25,6 @@ from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
