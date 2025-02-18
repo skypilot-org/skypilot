@@ -636,6 +636,13 @@ class Resources:
                                     f'{self.instance_type!r}) for TPU VM.')
 
         self._accelerators = accelerators
+        if self._accelerators is not None:
+            for k in self._accelerators:
+                if k != 'L4':
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'Invalid accelerator type {k!r}. '
+                            'Only L4 is supported for artifact evaluation.')
         self._accelerator_args = accelerator_args
 
     def is_launchable(self) -> bool:
