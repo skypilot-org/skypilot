@@ -856,7 +856,9 @@ def test_managed_jobs_storage(generic_cloud: str):
                 *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     generic_cloud, name),
-                f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
+                # Override CPU/memory requirements to relax resource constraints
+                # and reduce the chance of out-of-stock
+                f'sky jobs launch -n {name}{use_spot} --cpus 2+ --memory 4+ --cloud {generic_cloud}{region_flag} {file_path} -y -d',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
