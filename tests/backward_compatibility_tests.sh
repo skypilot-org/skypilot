@@ -16,7 +16,9 @@
 set -evx
 
 # Store the initial directory
-INITIAL_DIR=$(pwd)
+ABSOLUTE_CURRENT_VERSION_DIR=$(pwd)
+BASE_VERSION_DIR="../sky-base"
+ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && pwd || pwd)/$(basename "$BASE_VERSION_DIR")
 
 need_launch=${1:-0}
 start_from=${2:-0}
@@ -32,15 +34,57 @@ CLOUD="aws"
 
 # Function to activate the base environment and change directory
 activate_base_env() {
-  source ~/sky-back-compat-base/bin/activate && cd ../sky-base
+  # Activate the base environment
+  source ~/sky-back-compat-base/bin/activate
+
+  # Change to the sky-base directory
+  cd "$ABSOLUTE_BASE_VERSION_DIR" || {
+    echo "Failed to change directory to $ABSOLUTE_BASE_VERSION_DIR"
+    return 1
+  }
+
+  # Check if the 'sky' command exists
+  if command -v sky &> /dev/null; then
+    # Stop the sky API if it is running, ignore errors if it's not
+    sky api stop || true
+
+    # Start the sky API
+    if ! sky api start; then
+      echo "Failed to start sky API"
+      exit 1
+    fi
+  else
+    echo "'sky' command not found. Skipping sky API operations."
+  fi
 }
 
 # Function to activate the current environment and return to the initial directory
 activate_current_env() {
-  source ~/sky-back-compat-current/bin/activate && cd "$INITIAL_DIR"
+  # Activate the current environment
+  source ~/sky-back-compat-current/bin/activate
+
+  # Change to the current directory
+  cd "$ABSOLUTE_CURRENT_VERSION_DIR" || {
+    echo "Failed to change directory to $ABSOLUTE_CURRENT_VERSION_DIR"
+    return 1
+  }
+
+  # Check if the 'sky' command exists
+  if command -v sky &> /dev/null; then
+    # Stop the sky API if it is running, ignore errors if it's not
+    sky api stop || true
+
+    # Start the sky API
+    if ! sky api start; then
+      echo "Failed to start sky API"
+      exit 1
+    fi
+  else
+    echo "'sky' command not found. Skipping sky API operations."
+  fi
 }
 
-git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git ../sky-base || true
+git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLUTE_BASE_VERSION_DIR || true
 ~/.local/bin/uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh
 UV=~/.local/bin/uv
 
@@ -80,6 +124,7 @@ cleanup_resources() {
   sky down ${CLUSTER_NAME}* -y || true
   sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y || true
   sky serve down ${CLUSTER_NAME}-* -y || true
+  sky api stop
   deactivate
 }
 
