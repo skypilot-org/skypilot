@@ -1,9 +1,3 @@
-# An example of using spot_hedge placer.
-
-envs:
-  MODEL_NAME: meta-llama/Meta-Llama-3.1-8B-Instruct
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-
 service:
   readiness_probe:
     path: /v1/chat/completions
@@ -13,15 +7,21 @@ service:
         - role: user
           content: Hello! What is your name?
       max_tokens: 1
+    initial_delay_seconds: 1800
   replica_policy:
-    min_replicas: 0
+    min_replicas: 1
     max_replicas: 3
-    num_overprovision: 1
     target_qps_per_replica: 10
+    num_overprovision: 1
     dynamic_ondemand_fallback: true
     spot_placer: dynamic_fallback
 
+envs:
+  MODEL_NAME: meta-llama/Llama-2-7b-chat-hf
+  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
+
 resources:
+  cloud: aws
   any_of:
     # Enable one region in AWS.
     - cloud: aws
@@ -30,17 +30,28 @@ resources:
     - cloud: gcp
   use_spot: true
   accelerators: L4
-  cpus: 32+
-  disk_tier: best
-  ports: 8081  # Expose to internet traffic.
+  ports: 9000  # Expose to internet traffic.
 
 setup: |
-  pip install vllm==0.5.3post1
-  pip install vllm-flash-attn==2.5.9.post1
+  conda activate vllm
+  if [ $? -ne 0 ]; then
+    conda create -n vllm python=3.10 -y
+    conda activate vllm
+  fi
+
+  pip install fschat==0.2.36 accelerate==0.28.0 vllm==0.3.3 outlines==0.0.39
+  python -c "import huggingface_hub; huggingface_hub.login('$HF_TOKEN')"
 
 run: |
-  vllm serve $MODEL_NAME \
+  conda activate vllm
+  echo 'Starting vllm api server...'
+
+  # https://github.com/vllm-project/vllm/issues/3098
+  export PATH=$PATH:/sbin
+
+  python -u -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 --port 9000 \
+    --model $MODEL_NAME \
     --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
-    --max-model-len 4096 \
-    --port 8081 \
+    --max-num-seqs 64 \
     2>&1 | tee api_server.log
