@@ -128,10 +128,18 @@ wait_until_cluster_up() {
   local cluster_name=$1
   for i in {1..30}; do
     # Could still be in INIT state, waiting until UP
-    sky status ${cluster_name} | grep UP && break
+    status_output=$(sky status ${cluster_name})
+    echo "${status_output}"
+    echo "${status_output}" | grep UP && break
     sleep 10
   done
-  sky status ${cluster_name} | grep UP || exit 1
+
+  status_output=$(sky status ${cluster_name})
+  echo "${status_output}"
+  echo "${status_output}" | grep UP || {
+    echo "Cluster ${cluster_name} failed to reach UP status"
+    exit 1
+  }
 }
 
 
