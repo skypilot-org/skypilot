@@ -22,7 +22,6 @@ from sky.clouds.service_catalog import common as service_catalog_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
 from sky.provision import common
-from sky.server import constants as server_constants
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils

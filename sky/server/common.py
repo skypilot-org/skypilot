@@ -3,7 +3,6 @@
 import dataclasses
 import enum
 import functools
-import importlib
 import json
 import os
 import pathlib
@@ -28,14 +27,12 @@ from sky.server import constants as server_constants
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
-    from sky.server.requests import payloads
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']

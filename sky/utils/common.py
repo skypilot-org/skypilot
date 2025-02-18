@@ -1,10 +1,11 @@
 """Common enumerators and classes."""
 
 import enum
-from typing import Optional
 
 from sky.utils import common_utils
 
+SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
+JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 # We use the user hash (machine-specific) for the controller name. It will be
 # the same across the whole lifecycle of the server, including:
 # 1. all requests, because this global variable is set once during server
@@ -15,8 +16,8 @@ from sky.utils import common_utils
 # same as the normal user hash). This ensures backwards-compatibility with jobs
 # controllers from before #4660.
 SERVER_ID = common_utils.get_user_hash()
-SKY_SERVE_CONTROLLER_NAME = f'sky-serve-controller-{SERVER_ID}'
-JOB_CONTROLLER_NAME = f'sky-jobs-controller-{SERVER_ID}'
+SKY_SERVE_CONTROLLER_NAME: str = f'{SKY_SERVE_CONTROLLER_PREFIX}{SERVER_ID}'
+JOB_CONTROLLER_NAME: str = f'{JOB_CONTROLLER_PREFIX}{SERVER_ID}'
 
 
 class StatusRefreshMode(enum.Enum):

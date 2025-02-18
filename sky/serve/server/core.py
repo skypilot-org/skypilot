@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import os
 import re
 import signal
 import tempfile
@@ -249,6 +250,10 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
+        # Since the controller may be shared among multiple users, launch the
+        # controller with the API server's user hash.
+        old_user_hash = common_utils.get_user_hash()
+        os.environ[constants.USER_ID_ENV_VAR] = common.SERVER_ID
         controller_job_id, controller_handle = execution.launch(
             task=controller_task,
             cluster_name=controller_name,
@@ -256,6 +261,7 @@ def up(
             retry_until_up=True,
             _disable_controller_check=True,
         )
+        os.environ[constants.USER_ID_ENV_VAR] = old_user_hash
 
         style = colorama.Style
         fore = colorama.Fore
