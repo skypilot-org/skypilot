@@ -1,7 +1,11 @@
 apiService:
+  # TODO: Setting limits causes issues with the API server. For now we advise
+  # not to set limits.
   cpuCoresLimit: null
   memoryGBLimit: null
   image: berkeleyskypilot/skypilot-nightly:latest
+  # Number of replicas to deploy - replicas > 1 is not well tested, and requires 
+  # a PVC that supports ReadWriteMany (see accessMode in storage section below).
   replicas: 1
   preDeployHook: |-
     # Run commands before deploying the API server, e.g. installing an admin
@@ -64,7 +68,10 @@ gcpCredentials:
 
 ingress:
   enabled: true
-  auth: "username:$apr1$encrypted_password"
+  # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
+  authSecret: null
+  # Basic auth credentials in format "username:encrypted_password" (only used if ingressAuthSecret is not set)
+  authCredentials: "username:$apr1$encrypted_password"
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
   httpNodePort: 30050 # Set to null to automatically assign a random port
@@ -90,3 +97,11 @@ kubernetesCredentials:
   useKubeconfig: false
   # Namespace to use for in-cluster resources
   inclusterNamespace: null
+
+rbac:
+  # Configure the RBAC permissions for the SkyPilot API server
+  rules:
+    # Default configuration with full access - override for restricted environments
+    - apiGroups: ["*"]
+      resources: ["*"]
+      verbs: ["*"]

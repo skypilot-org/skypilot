@@ -7,4 +7,4 @@ metadata:
 data:
   config.yaml: |
 {{ .Values.apiService.config | indent 4 }} 
-{{- end }} 
+{{- end }}

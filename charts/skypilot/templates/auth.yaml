@@ -1,3 +1,4 @@
+{{- if and (not .Values.ingress.authSecret) .Values.ingress.authCredentials }}
 apiVersion: v1
 kind: Secret
 metadata:
@@ -5,4 +6,5 @@ metadata:
   namespace: {{ .Release.namespace }}
 type: Opaque
 stringData:
-  auth: {{ .Values.ingress.auth | quote }}
+  auth: {{ .Values.ingress.authCredentials | quote }}
+{{- end }}

@@ -9,15 +9,17 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     apt-get update -y && \
     apt-get install --no-install-recommends -y \
         git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse socat netcat curl rsync vim && \
+        pciutils nano fuse socat netcat-openbsd curl rsync vim && \
     rm -rf /var/lib/apt/lists/* && \
     # Install kubectl
-    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
+    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/amd64/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl && \
     # Install uv and skypilot
     curl -LsSf https://astral.sh/uv/install.sh | sh && \
-    ~/.local/bin/uv pip install --prerelease=allow skypilot-nightly[all] --system && \
+    ~/.local/bin/uv pip install --prerelease allow azure-cli --system && \
+    ~/.local/bin/uv pip install skypilot-nightly[all] --system && \
     # Cleanup all caches to reduce the image size
     conda clean -afy && \
+    ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv
