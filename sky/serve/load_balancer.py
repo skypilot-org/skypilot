@@ -216,12 +216,12 @@ class SkyServeLoadBalancer:
                     currently_ready_replicas = set(
                         self._load_balancing_policy.ready_replicas)
                     remaining_healthy_replicas = (currently_ready_replicas -
-                                                  failed_replica_urls)
+                                                  )
                     return not remaining_healthy_replicas
 
                 # Reset failed replicas when all are failed, allowing retry for
                 # transient network issues.
-                if _should_reset_failed_replicas_for_retry(failed_replica_urls):
+                if _should_reset_failed_replicas_for_retry():
                     failed_replica_urls.clear()
 
                 ready_replica_url = self._load_balancing_policy.select_replica(
