@@ -179,8 +179,9 @@ def start(instance_id: str) -> None:
 def launch(cluster_name_on_cloud: str, node_type: str, platform: str,
            preset: str, region: str, image_family: str, disk_size: int,
            user_data: str) -> str:
-    # Each node must have a unique name to avoid conflicts.
-    # To ensure uniqueness, a UUID is appended to the node name.
+    # Each node must have a unique name to avoid conflicts between
+    # multiple worker VMs. To ensure uniqueness,a UUID is appended
+    # to the node name.
     instance_name = (f'{cluster_name_on_cloud}-'
                      f'{uuid.uuid4().hex[:4]}-{node_type}')
     logger.debug(f'Launching instance: {instance_name}')
