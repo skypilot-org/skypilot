@@ -97,6 +97,18 @@ activate_current_env() {
   activate_env "current" "${1:-1}"
 }
 
+wait_until_cluster_up() {
+  local cluster_name=$1
+  for i in {1..30}; do
+    # Could still be in INIT state, waiting until UP
+    sky status ${cluster_name} | grep UP && break
+    sleep 10
+  done
+  sky status ${cluster_name} | grep UP || exit 1
+}
+
+
+
 git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLUTE_BASE_VERSION_DIR || true
 ~/.local/bin/uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh
 UV=~/.local/bin/uv
@@ -192,6 +204,7 @@ activate_current_env
 rm -r  ~/.sky/wheels || true
 sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
+wait_until_cluster_up ${CLUSTER_NAME}-2
 s=$(sky exec --cloud ${CLOUD} -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
 echo "$s"
 echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2" || exit 1
@@ -241,6 +254,7 @@ deactivate
 activate_current_env
 rm -r  ~/.sky/wheels || true
 sky start -y ${CLUSTER_NAME}-5
+wait_until_cluster_up ${CLUSTER_NAME}-5
 sky queue ${CLUSTER_NAME}-5
 sky logs ${CLUSTER_NAME}-5 1 --status
 sky logs ${CLUSTER_NAME}-5 1
@@ -261,6 +275,7 @@ deactivate
 activate_current_env
 rm -r  ~/.sky/wheels || true
 sky start -y ${CLUSTER_NAME}-6
+wait_until_cluster_up ${CLUSTER_NAME}-6
 sky queue ${CLUSTER_NAME}-6
 sky logs ${CLUSTER_NAME}-6 1 --status
 sky logs ${CLUSTER_NAME}-6 1
