@@ -1,7 +1,7 @@
 .. _sky-storage:
 
-Cloud Object Storage
-====================
+Cloud Buckets
+==============
 
 SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, OCI Object Storage or IBM COS.
 

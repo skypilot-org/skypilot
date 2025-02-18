@@ -24,24 +24,24 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky import status_lib
-from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.serve import spot_placer
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
 
+    import sky
     from sky.serve import replica_managers
 
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
@@ -202,6 +202,84 @@ class RequestTimestamp(RequestsAggregator):
         return f'RequestTimestamp(timestamps={self.timestamps})'
 
 
+def validate_service_task(task: 'sky.Task') -> None:
+    """Validate the task for Sky Serve.
+
+    Args:
+        task: sky.Task to validate
+
+    Raises:
+        ValueError: if the arguments are invalid.
+        RuntimeError: if the task.serve is not found.
+    """
+    spot_resources: List['sky.Resources'] = [
+        resource for resource in task.resources if resource.use_spot
+    ]
+    # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
+    # On-demand fallback should go to the resources specified as on-demand.
+    if len(spot_resources) not in [0, len(task.resources)]:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Resources must either all use spot or none use spot. '
+                'To use on-demand and spot instances together, '
+                'use `dynamic_ondemand_fallback` or set '
+                'base_ondemand_fallback_replicas.')
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    policy_description = ('on-demand'
+                          if task.service.dynamic_ondemand_fallback else 'spot')
+    for resource in list(task.resources):
+        if resource.job_recovery is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('job_recovery is disabled for SkyServe. '
+                                 'SkyServe will replenish preempted spot '
+                                 f'with {policy_description} instances.')
+
+    # Try to create a spot placer from the task yaml. Check if the task yaml
+    # is valid for spot placer.
+    spot_placer.SpotPlacer.from_task(task.service, task)
+
+    replica_ingress_port: Optional[int] = int(
+        task.service.ports) if (task.service.ports is not None) else None
+    for requested_resources in task.resources:
+        if (task.service.use_ondemand_fallback and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`use_ondemand_fallback` is only supported '
+                    'for spot resources. Please explicitly specify '
+                    '`use_spot: true` in resources for on-demand fallback.')
+        if (task.service.spot_placer is not None and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`spot_placer` is only supported for spot resources. '
+                    'Please explicitly specify `use_spot: true` in resources.')
+        if task.service.ports is None:
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'To open multiple ports on the replica, please set the '
+                        '`service.ports` field to specify a main service port. '
+                        'Must only specify one port in resources otherwise. '
+                        'Each replica will use the port specified as '
+                        'application ingress port.')
+            service_port = requested_ports[0]
+            if replica_ingress_port is None:
+                replica_ingress_port = service_port
+            elif service_port != replica_ingress_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{replica_ingress_port} in different resources. '
+                        'Please specify the same port instead.')
+
+
 def generate_service_name():
     return f'sky-service-{uuid.uuid4().hex[:4]}'
 
@@ -351,7 +429,7 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
             raise ValueError(f'Failed to update service: {resp.text}')
 
     service_msg = resp.json()['message']
-    return common_utils.encode_payload(service_msg)
+    return message_utils.encode_payload(service_msg)
 
 
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
@@ -421,13 +499,28 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return common_utils.encode_payload(service_statuses)
+    # We have to use payload_type here to avoid the issue of
+    # message_utils.decode_payload() not being able to correctly decode the
+    # message with <sky-payload> tags.
+    return message_utils.encode_payload(service_statuses,
+                                        payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = common_utils.decode_payload(payload)
+    try:
+        service_statuses_encoded = message_utils.decode_payload(
+            payload, payload_type='service_status')
+    except ValueError as e:
+        if 'Invalid payload string' in str(e):
+            # Backward compatibility for serve controller started before #4660
+            # where the payload type is not added.
+            service_statuses_encoded = message_utils.decode_payload(payload)
+        else:
+            raise
     service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
+        if not isinstance(service_status, dict):
+            raise ValueError(f'Invalid service status: {service_status}')
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
             for k, v in service_status.items()
@@ -437,11 +530,11 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
 
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
-    return common_utils.encode_payload(new_version)
+    return message_utils.encode_payload(new_version)
 
 
 def load_version_string(payload: str) -> str:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def _terminate_failed_services(
@@ -557,7 +650,31 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    setup_completed = False
     while True:
+        job_status = job_lib.get_status(job_id)
+        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+            # Wait for the controller process to finish setting up. It can be
+            # slow if a lot cloud dependencies are being installed.
+            if (time.time() - start_time >
+                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to start the controller '
+                        f'process for the service {service_name!r} '
+                        f'within '
+                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
+                    )
+            # No need to check the service status as the controller process
+            # is still setting up.
+            time.sleep(1)
+            continue
+
+        if not setup_completed:
+            setup_completed = True
+            # Reset the start time to wait for the service to be registered.
+            start_time = time.time()
+
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
             if job_id != record['controller_job_id']:
@@ -569,7 +686,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
-                return common_utils.encode_payload(lb_port)
+                return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
@@ -592,7 +709,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
 
 
 def load_service_initialization_result(payload: str) -> int:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -806,29 +923,6 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def get_endpoint(service_record: Dict[str, Any]) -> str:
-    # Don't use backend_utils.is_controller_accessible since it is too slow.
-    handle = global_user_state.get_handle_from_cluster_name(
-        SKY_SERVE_CONTROLLER_NAME)
-    if handle is None:
-        return '-'
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    load_balancer_port = service_record['load_balancer_port']
-    if load_balancer_port is None:
-        return '-'
-    try:
-        endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                               load_balancer_port).get(
-                                                   load_balancer_port, None)
-    except exceptions.ClusterNotUpError:
-        return '-'
-    if endpoint is None:
-        return '-'
-    assert isinstance(endpoint, str), endpoint
-    protocol = 'https' if service_record['tls_encrypted'] else 'http'
-    return f'{protocol}://{endpoint}'
-
-
 def format_service_table(service_records: List[Dict[str, Any]],
                          show_all: bool) -> str:
     if not service_records:
@@ -858,7 +952,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_status = record['status']
         status_str = service_status.colored_str()
         replicas = _get_replicas(record)
-        endpoint = get_endpoint(record)
+        endpoint = record['endpoint']
+        if endpoint is None:
+            endpoint = '-'
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
         load_balancing_policy = record['load_balancing_policy']
@@ -1031,7 +1127,11 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return (f'{skylet_constants.SKY_PYTHON_CMD} '
+        # Use the local user id to make sure the operation goes to the correct
+        # user.
+        return (f'export {skylet_constants.USER_ID_ENV_VAR}='
+                f'"{common_utils.get_user_hash()}"; '
+                f'{skylet_constants.SKY_PYTHON_CMD} '
                 f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod

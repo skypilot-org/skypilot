@@ -73,6 +73,12 @@ def cleanup_storage(task_yaml: str) -> bool:
     try:
         task = task_lib.Task.from_yaml(task_yaml)
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        # Need to re-construct storage object in the controller process
+        # because when SkyPilot API server machine sends the yaml config to the
+        # controller machine, only storage metadata is sent, not the storage
+        # object itself.
+        for storage in task.storage_mounts.values():
+            storage.construct()
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to clean up storage: '
@@ -251,7 +257,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             if proc is not None
         ]
         subprocess_utils.kill_children_processes(
-            [process.pid for process in process_to_kill], force=True)
+            parent_pids=[process.pid for process in process_to_kill],
+            force=True)
         for process in process_to_kill:
             process.join()
         failed = _cleanup(service_name)

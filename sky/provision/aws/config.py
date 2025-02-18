@@ -8,7 +8,6 @@ _default_ec2_resource() to avoid version mismatch issues.
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
-import functools
 import json
 import logging
 import time
@@ -21,6 +20,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.provision import common
 from sky.provision.aws import utils
+from sky.utils import annotations
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -222,7 +222,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
-@functools.lru_cache(maxsize=128)  # Keep bounded.
+@annotations.lru_cache(scope='request', maxsize=128)  # Keep bounded.
 def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
                       main: bool) -> List[Any]:
     """Get route tables associated with a VPC and region

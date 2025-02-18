@@ -473,8 +473,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
-    config_override_schema = _filter_schema(get_config_schema(),
-                                            constants.OVERRIDEABLE_CONFIG_KEYS)
+    config_override_schema = _filter_schema(
+        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
         'experimental': {
             'type': 'object',
@@ -551,6 +551,9 @@ def get_task_schema():
                 'additionalProperties': {
                     'type': 'number'
                 }
+            },
+            'file_mounts_mapping': {
+                'type': 'object',
             },
             **_experimental_task_schema(),
         }
@@ -634,15 +637,6 @@ _NETWORK_CONFIG_SCHEMA = {
 }
 
 _LABELS_SCHEMA = {
-    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.8.0.
-    'instance_tags': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': {
-            'type': 'string',
-        },
-    },
     'labels': {
         'type': 'object',
         'required': [],
@@ -961,6 +955,19 @@ def get_config_schema():
         }
     }
 
+    api_server = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'endpoint': {
+                'type': 'string',
+                # Apply validation for URL
+                'pattern': r'^https?://.*$',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -982,6 +989,7 @@ def get_config_schema():
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
+            'api_server': api_server,
             **cloud_configs,
         },
     }

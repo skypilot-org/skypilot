@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set
 from sky import check as sky_check
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -56,7 +57,7 @@ class Location:
     ) -> Optional['Location']:
         if data is None:
             return None
-        cloud = sky_clouds.CLOUD_REGISTRY.from_str(data['cloud'])
+        cloud = registry.CLOUD_REGISTRY.from_str(data['cloud'])
         assert cloud is not None
         assert data['region'] is not None
         return cls(
@@ -115,7 +116,7 @@ def _get_possible_location_from_task(task: 'task_lib.Task') -> List[Location]:
 
     clouds_list: List[sky_clouds.Cloud] = []
     for c in location_requirements.keys():
-        cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(c)
+        cloud_obj = registry.CLOUD_REGISTRY.from_str(c)
         assert cloud_obj is not None
         clouds_list.append(cloud_obj)
     if not clouds_list:
