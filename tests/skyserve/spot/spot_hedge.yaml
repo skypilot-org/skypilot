@@ -14,8 +14,8 @@ service:
           content: Hello! What is your name?
       max_tokens: 1
   replica_policy:
-    min_replicas: 2
-    max_replicas: 5
+    min_replicas: 0
+    max_replicas: 3
     num_overprovision: 1
     target_qps_per_replica: 10
     dynamic_ondemand_fallback: true
