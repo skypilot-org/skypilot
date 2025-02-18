@@ -8,6 +8,7 @@
 
 resources:
   cloud: aws
+  cpus: 2+
   use_spot: true
   job_recovery: failover
 
