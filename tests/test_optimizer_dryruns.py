@@ -329,16 +329,19 @@ def test_invalid_instance_type(enable_all_clouds):
 
 def test_infer_cloud_from_instance_type(enable_all_clouds):
     # AWS instances
-    _test_resources(cloud=sky.AWS(),
-                    instance_type='m5.12xlarge',
-                    expected_cloud=sky.AWS())
+    _test_resources(instance_type='m5.12xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='m5.12xlarge')
     _test_resources(instance_type='p3.8xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='p3.8xlarge')
     _test_resources(instance_type='g4dn.2xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='g4dn.2xlarge')
     # GCP instances
     _test_resources(instance_type='n1-standard-96', expected_cloud=sky.GCP())
+    _test_resources_launch(instance_type='n1-standard-96')
     #Azure instances
     _test_resources(instance_type='Standard_NC12s_v3',
                     expected_cloud=sky.Azure())
+    _test_resources_launch(instance_type='Standard_NC12s_v3')
 
 
 def test_invalid_cpus(enable_all_clouds):
