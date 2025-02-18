@@ -40,7 +40,7 @@ activate_base_env() {
   # Change to the sky-base directory
   cd "$ABSOLUTE_BASE_VERSION_DIR" || {
     echo "Failed to change directory to $ABSOLUTE_BASE_VERSION_DIR"
-    return 1
+    exit 1
   }
 
   # Check if the 'sky' command exists
@@ -66,7 +66,7 @@ activate_current_env() {
   # Change to the current directory
   cd "$ABSOLUTE_CURRENT_VERSION_DIR" || {
     echo "Failed to change directory to $ABSOLUTE_CURRENT_VERSION_DIR"
-    return 1
+    exit 1
   }
 
   # Check if the 'sky' command exists
