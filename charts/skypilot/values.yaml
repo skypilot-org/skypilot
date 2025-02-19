@@ -79,7 +79,7 @@ ingress:
   enabled: true
   # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
   authSecret: null
-  # Basic auth credentials in format "username:encrypted_password" (only used if ingressAuthSecret is not set)
+  # Basic auth credentials in format "username:encrypted_password" (only used if ingress.authSecret is not set)
   authCredentials: "username:$apr1$encrypted_password"
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
