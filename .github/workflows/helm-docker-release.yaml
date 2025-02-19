@@ -38,8 +38,8 @@ jobs:
     uses: ./.github/workflows/publish-helm.yml
     with:
       version: ${{ needs.docker-build.outputs.version }}
-      docker_image: '${{ needs.set-package.outputs.package_name }}:${{ needs.docker-build.outputs.version }}'
       commit_message: 'Update Helm charts for ${{ needs.set-package.outputs.package_name }} version ${{ needs.docker-build.outputs.version }}'
       package_name: ${{ needs.set-package.outputs.package_name }}
     secrets:
       DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      HELM_DEPLOY_KEY: ${{ secrets.HELM_DEPLOY_KEY }}

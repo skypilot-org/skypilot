@@ -21,12 +21,8 @@ on:
         description: "Git commit message"
         required: false
         type: string
-      docker_image:
-        description: "Docker image tag to set in values.yaml. Defaults to skypilot-nightly:latest"
-        required: false
-        type: string
       package_name:
-        description: "Package name to use as chart name"
+        description: "Package name to use as chart name and docker image name"
         required: false
         type: string
         default: "skypilot-nightly"
@@ -46,10 +42,11 @@ on:
         required: false
         type: string
         default: "Updated from ref: $GITHUB_SHA"
-      docker_image:
-        description: "Docker image tag to set in values.yaml. Defaults to skypilot-nightly:latest"
+      package_name:
+        description: "Package name to use as chart name and docker image name"
         required: false
         type: string
+        default: "skypilot-nightly"
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -100,10 +97,10 @@ jobs:
           sed -i "s/^name:.*$/name: ${{ inputs.package_name }}/" src/charts/skypilot/Chart.yaml
 
       - name: Update docker image in charts
-        if: inputs.docker_image != ''
+        if: inputs.version != ''
         run: |
           # Update the image in values.yaml
-          sed -i "s|image: .*$|image: ${{ secrets.DOCKER_USERNAME }}/${{ inputs.docker_image }}|" src/charts/skypilot/values.yaml
+          sed -i "s|image: .*$|image: ${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ inputs.version }}|" src/charts/skypilot/values.yaml
           # Print the new values.yaml for debugging
           cat src/charts/skypilot/values.yaml
 
