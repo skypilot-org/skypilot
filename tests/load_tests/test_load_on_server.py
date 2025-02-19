@@ -6,35 +6,38 @@ example usage:
 """
 
 import argparse
+from collections import defaultdict
 import os
 import subprocess
 import threading
 import time
-from collections import defaultdict
-import numpy as np
 from typing import Dict, List
+
+import numpy as np
 
 results_lock = threading.Lock()
 request_latencies: Dict[str, List[float]] = defaultdict(list)
+
 
 def run_single_request(idx, cmd):
     """Run a single request to the API server and record its latency."""
     try:
         print(f"Request {idx} submitted")
         begin = time.time()
-        
+
         subprocess.run(cmd,
                        shell=True,
                        check=True,
                        capture_output=True,
                        text=True)
-                              
+
         duration = time.time() - begin
         with results_lock:
             request_latencies[cmd].append(duration)
-            
+
     except subprocess.CalledProcessError as e:
         print(f"Request {idx} failed: {e}")
+
 
 def calculate_statistics(latencies: List[float]) -> Dict[str, float]:
     """Calculate statistics for a list of latencies."""
@@ -48,7 +51,7 @@ def calculate_statistics(latencies: List[float]) -> Dict[str, float]:
             'p95': 0,
             'p99': 0
         }
-    
+
     return {
         'count': len(latencies),
         'total': sum(latencies),
@@ -59,26 +62,30 @@ def calculate_statistics(latencies: List[float]) -> Dict[str, float]:
         'p99': np.percentile(latencies, 99)
     }
 
+
 def print_latency_statistics():
     """Print statistics for all recorded latencies."""
     print("\nLatency Statistics:")
     print("-" * 100)  # Increased width to accommodate more columns
-    print(f"{'Command':<20} {'Count':<8} {'Total(s)':<10} {'Avg(s)':<10} {'Min(s)':<10} {'Max(s)':<10} {'P95(s)':<10} {'P99(s)':<10}")
+    print(
+        f"{'Command':<20} {'Count':<8} {'Total(s)':<10} {'Avg(s)':<10} {'Min(s)':<10} {'Max(s)':<10} {'P95(s)':<10} {'P99(s)':<10}"
+    )
     print("-" * 100)
-    
+
     for cmd, latencies in request_latencies.items():
         stats = calculate_statistics(latencies)
-        print(f"{cmd:<20} {stats['count']:<8d} {stats['total']:<10.2f} "
-              f"{stats['avg']:<10.2f} {stats['min']:<10.2f} {stats['max']:<10.2f} "
-              f"{stats['p95']:<10.2f} {stats['p99']:<10.2f}")
+        print(
+            f"{cmd:<20} {stats['count']:<8d} {stats['total']:<10.2f} "
+            f"{stats['avg']:<10.2f} {stats['min']:<10.2f} {stats['max']:<10.2f} "
+            f"{stats['p95']:<10.2f} {stats['p99']:<10.2f}")
+
 
 def run_concurrent_requests(num_requests, cmd):
     threads = []
 
     # Create and start threads
     for i in range(num_requests):
-        thread = threading.Thread(target=run_single_request, 
-                                args=(i + 1, cmd))
+        thread = threading.Thread(target=run_single_request, args=(i + 1, cmd))
         threads.append(thread)
         thread.start()
 
@@ -197,6 +204,6 @@ if __name__ == '__main__':
     end_time = time.time()
     total_time = end_time - start_time
     print(f"\nAll requests completed in {total_time:.2f} seconds")
-    
+
     # Print latency statistics
     print_latency_statistics()

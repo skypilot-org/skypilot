@@ -507,7 +507,6 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
-    logger.info(f"Status request received: {request.state.request_id}")
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',

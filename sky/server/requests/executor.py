@@ -314,9 +314,9 @@ def schedule_request(request_id: str,
     _get_queue(schedule_type).put(input_tuple)
 
 
-def executor_initializer(sub_title: str):
-    setproctitle.setproctitle(
-        f'{sub_title}:{multiprocessing.current_process().pid}')
+def executor_initializer(proc_group: str):
+    setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
+                              f'{multiprocessing.current_process().pid}')
 
 
 def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
@@ -325,9 +325,8 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
     Args:
         max_parallel_size: Maximum number of parallel jobs this worker can run.
     """
-    setproctitle.setproctitle(
-        f'SkyPilot:worker:{worker.schedule_type.value}-{worker.id}')
-    sub_title = f'SkyPilot:executor:{worker.schedule_type.value}-{worker.id}'
+    proc_group = f'{worker.schedule_type.value}-{worker.id}'
+    setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
     queue = _get_queue(worker.schedule_type)
 
     def process_request(executor: concurrent.futures.ProcessPoolExecutor):
@@ -382,7 +381,7 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
     with concurrent.futures.ProcessPoolExecutor(
             max_workers=max_parallel_size,
             initializer=executor_initializer,
-            initargs=(sub_title,)) as executor:
+            initargs=(proc_group,)) as executor:
         while True:
             process_request(executor)
 
