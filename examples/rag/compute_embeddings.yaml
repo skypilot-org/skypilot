@@ -8,7 +8,7 @@ resources:
     # A10G: 1
     V100: 1
   memory: 32+
-  # use_spot: true
+  use_spot: true
   
 file_mounts:
   /output:
@@ -60,3 +60,7 @@ run: |
     --chunk-overlap 512 \
     --vllm-endpoint http://localhost:8000 \
     --batch-size 32 
+
+  # Clean up vLLM service
+  pkill -f "python -m vllm.entrypoints.openai.api_server"
+  echo "vLLM service has been stopped"

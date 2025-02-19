@@ -89,7 +89,7 @@ def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
         if current_length + sentence_len > chunk_size and current_chunk:
             chunk_text = ' '.join(current_chunk)
             chunks.append({
-                'id': str(chunk_idx),
+                'id': document['id'] + '_' + str(chunk_idx),
                 'name': document['name'],
                 'content': document['text'],  # Store full document content
                 'chunk_text': chunk_text.strip(),  # Store the specific chunk
@@ -118,7 +118,7 @@ def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
     if current_chunk:
         chunk_text = ' '.join(current_chunk)
         chunks.append({
-            'id': str(chunk_idx),
+            'id': document['id'] + '_' + str(chunk_idx),
             'name': document['name'],
             'content': document['text'],  # Store full document content
             'chunk_text': chunk_text.strip(),  # Store the specific chunk

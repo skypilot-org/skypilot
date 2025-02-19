@@ -93,8 +93,7 @@ def main():
 
         sky.jobs.launch(
             task_copy,
-            name=f'rag-compute-{job_start}-{job_end}',
-            detach_run=True,
+            name=f'rag-compute-{job_start}-{job_end}'
         )
 
 
