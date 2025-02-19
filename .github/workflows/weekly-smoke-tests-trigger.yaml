@@ -3,15 +3,16 @@ name: Smoke Tests Trigger (Scheduled and PR)
 on:
   schedule:
     - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # uncomment this for PR triggers testing
+  # pull_request:
+  #   types: [opened, synchronize, reopened]
 
 jobs:
   smoke-tests:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        cloud: [aws]
+        cloud: [aws, azure, gcp, kubernetes]
     steps:
       - name: Trigger Smoke Tests (${{ matrix.cloud }})
         env:
