@@ -73,12 +73,8 @@ activate_env() {
   esac
 
   # Argument validation
-  if [ "$#" -ne 2 ]; then
-    echo "Usage: activate_env <environment (base or current)> <restart_api_server (0 or 1)>"
-    exit 1
-  fi
-  if ! [[ "$restart_api_server" =~ ^[01]$ ]]; then
-    echo "Invalid restart_api_server value: '$restart_api_server'. Must be 0 or 1."
+  if [ "$#" -ne 1 ]; then
+    echo "Usage: activate_env <environment (base or current)>"
     exit 1
   fi
 
