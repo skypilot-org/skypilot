@@ -9,7 +9,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     from sky import clouds
 
-# Canonicalized names of all accelerators (except TPUs) supported by SkyPilot.
+# Canonical names of all accelerators (except TPUs) supported by SkyPilot.
 # NOTE: Must include accelerators supported for local clusters.
 #
 # 1. What if a name is in this list, but not in any catalog?
@@ -31,30 +31,10 @@ if typing.TYPE_CHECKING:
 #
 # Append its case-sensitive canonical name to this list. The name must match
 # `AcceleratorName` in the service catalog.
-_ACCELERATORS = [
-    'A100',
-    'A10G',
-    'Gaudi HL-205',
-    'Inferentia',
-    'Trainium',
-    'K520',
-    'K80',
-    'M60',
-    'Radeon Pro V520',
-    'T4',
-    'T4g',
-    'V100',
-    'V100-32GB',
-    'Virtex UltraScale (VU9P)',
-    'A10',
-    'A100-80GB',
-    'P100',
-    'P40',
-    'Radeon MI25',
-    'P4',
-    'L4',
-    'H100',
-]
+
+# Use a cached version of accelerators to cloud mapping, so that we don't have
+# to download and read the catalog file for every cloud locally.
+_accelerator_df = service_catalog.common.read_catalog('common/accelerators.csv')
 
 # List of non-GPU accelerators that are supported by our backend for job queue
 # scheduling.
@@ -78,45 +58,45 @@ def canonicalize_accelerator_name(accelerator: str,
     """Returns the canonical accelerator name."""
     cloud_str = None
     if cloud is not None:
-        cloud_str = str(cloud).lower()
+        cloud_str = str(cloud)
 
     # TPU names are always lowercase.
     if accelerator.lower().startswith('tpu-'):
         return accelerator.lower()
 
     # Common case: do not read the catalog files.
-    mapping = {name.lower(): name for name in _ACCELERATORS}
-    if accelerator.lower() in mapping:
-        return mapping[accelerator.lower()]
+    df = _accelerator_df[_accelerator_df['AcceleratorName'].str.contains(
+        accelerator, case=False, regex=True)]
+    names = []
+    for name, clouds in df[['AcceleratorName', 'Clouds']].values:
+        if accelerator.lower() == name.lower():
+            return name
+        if cloud_str is None or cloud_str in clouds:
+            names.append(name)
 
-    # Listing accelerators can be time-consuming since canonicalizing usually
-    # involves catalog reading with cache not warmed up.
-    with rich_utils.safe_status('Listing accelerators...'):
-        # _ACCELERATORS may not be comprehensive.
-        # Users may manually add new accelerators to the catalogs, or download
-        # new catalogs (that have new accelerators) without upgrading SkyPilot.
-        # To cover such cases, we should search the accelerator name
-        # in the service catalog.
-        searched = service_catalog.list_accelerators(name_filter=accelerator,
-                                                     case_sensitive=False,
-                                                     clouds=cloud_str)
-    names = list(searched.keys())
+    # Look for Kubernetes accelerators online if the accelerator is not found
+    # in the public cloud catalog. This is to make sure custom accelerators
+    # on Kubernetes can be correctly canonicalized.
+    if not names and cloud_str in ['kubernetes', None]:
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Listing accelerators on Kubernetes')):
+            searched = service_catalog.list_accelerators(
+                name_filter=accelerator,
+                case_sensitive=False,
+                clouds=cloud_str,
+            )
+        names = list(searched.keys())
+        if accelerator in names:
+            return accelerator
 
-    # Exact match.
-    if accelerator in names:
+    if not names:
+        # If no match is found, it is fine to return the original name, as
+        # the custom accelerator might be on kubernetes cluster.
         return accelerator
 
     if len(names) == 1:
         return names[0]
-
-    # Do not print an error message here. Optimizer will handle it.
-    if not names:
-        return accelerator
-
-    # Currently unreachable.
-    # This can happen if catalogs have the same accelerator with
-    # different names (e.g., A10g and A10G).
-    assert len(names) > 1
+    assert len(names) > 1, names
     with ux_utils.print_exception_no_traceback():
         raise ValueError(f'Accelerator name {accelerator!r} is ambiguous. '
                          f'Please choose one of {names}.')

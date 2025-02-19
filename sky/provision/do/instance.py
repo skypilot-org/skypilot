@@ -5,10 +5,10 @@ from typing import Any, Dict, List, Optional
 import uuid
 
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 from sky.provision.do import constants
 from sky.provision.do import utils
+from sky.utils import status_lib
 
 # The maximum number of times to poll for the status of an operation
 MAX_POLLS = 60 // constants.POLL_INTERVAL

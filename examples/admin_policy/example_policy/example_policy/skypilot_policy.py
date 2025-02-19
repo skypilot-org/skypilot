@@ -93,7 +93,9 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         cluster_name = request_options.cluster_name
         cluster_records = []
         if cluster_name is not None:
-            cluster_records = sky.status(cluster_name, refresh=True)
+            cluster_records = sky.status(cluster_name,
+                                         refresh=True,
+                                         all_users=True)
 
         # Check if the user request should specify autostop settings.
         need_autostop = False
