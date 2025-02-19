@@ -14,7 +14,7 @@ resources:
   #   - use_spot: false
 file_mounts:
   /vectordb:
-    name: sky-legal-vectordb
+    name: sky-rag-vectordb
     # this needs to be the same as in build_vectordb.yaml
     mode: MOUNT
 

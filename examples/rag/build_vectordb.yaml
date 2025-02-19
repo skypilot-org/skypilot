@@ -8,12 +8,12 @@ resources:
 
 file_mounts:
   /embeddings:
-    name: sky-law-embeddings
+    name: sky-rag-embeddings
     # this needs to be the same as the output in compute_embeddings.yaml
     mode: MOUNT
   
   /vectordb:
-    name: sky-legal-vectordb
+    name: sky-rag-vectordb
     mode: MOUNT
 
 setup: |
