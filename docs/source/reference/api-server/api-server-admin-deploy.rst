@@ -406,7 +406,7 @@ Write the SkyPilot API server YAML file and use ``sky launch`` to deploy the API
         cpus: 8+
         memory: 16+
         ports: 46580
-        image_id: docker:berkeleyskypilot/skypilot-beta:latest
+        image_id: docker:berkeleyskypilot/skypilot-nightly:latest
 
     run: |
       sky api start --deploy

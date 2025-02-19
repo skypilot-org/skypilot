@@ -70,13 +70,11 @@ to connect to it.
 
 We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See `uv <https://docs.astral.sh/uv/>`_ or `conda <https://docs.conda.io/en/latest/>`_ for creating an environment with different python versions.
 
-Install the SkyPilot client on your local machine:
+:ref:`Install <installation>` the SkyPilot client on your local machine:
 
 .. code-block:: console
 
-    $ pip install --extra-index-url http://skypilot-packages.s3-website-us-west-2.amazonaws.com/simple/ \
-    --trusted-host skypilot-packages.s3-website-us-west-2.amazonaws.com \
-    skypilot-beta[kubernetes,aws]
+    $ pip install -U skypilot-nightly
 
 Run ``sky api login`` to connect to the API server.
 
