@@ -1,8 +1,10 @@
 name: Weekly Smoke Tests Trigger
 
 on:
-  schedule:
-    - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
+    schedule:
+      - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
+    pull_request:  # Add this section for PR triggers
+      types: [opened, synchronize, reopened]
 
 jobs:
   smoke-tests:
