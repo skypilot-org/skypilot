@@ -316,6 +316,15 @@ API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
 # API server.
 SKY_API_SERVER_URL_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_ENDPOINT'
 
+# The name of the environment variable that specified the max parallelism of
+# API server for long request. An best-effort estimation is used if not set.
+API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}MAX_PARALLEL_LONG_WORKERS')
+# The name of the environment variable that specified the max parallelism of
+# API server for short request. An best-effort estimation is used if not set.
+API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}MAX_PARALLEL_SHORT_WORKERS')
+
 # SkyPilot environment variables
 SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
 SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'

@@ -72,8 +72,6 @@ def _add_timestamp_prefix_for_server_logs() -> None:
         uvicorn_logger = logging.getLogger(name)
         uvicorn_logger.handlers.clear()
         uvicorn_logger.addHandler(stream_handler)
-        # Also disable propagation for uvicorn loggers
-        uvicorn_logger.propagate = False
 
 
 _add_timestamp_prefix_for_server_logs()
@@ -464,6 +462,7 @@ async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
     """Launches a cluster or task."""
     request_id = request.state.request_id
+    logger.info(f'Launching request: {request_id}')
     executor.schedule_request(
         request_id,
         request_name='launch',
@@ -508,6 +507,7 @@ async def status(
     status_body: payloads.StatusBody = payloads.StatusBody()
 ) -> None:
     """Gets cluster statuses."""
+    logger.info(f"Status request received: {request.state.request_id}")
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='status',

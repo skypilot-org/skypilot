@@ -70,22 +70,30 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
-# Constants based on profiling the peak memory usage of
-# various sky commands. See `tests/load_test/` for details.
-# Max memory consumption for each request.
+# Constants based on profiling the peak memory usage while serving various
+# sky commands. These estimation are highly related to usage patterns
+# (clouds enabled, type of requests, etc. see `tests/load_tests` for details.),
+# the profiling covers major clouds and common usage patterns. For user has
+# deviated usage pattern, they can override the default estimation by
+# environment variables.
 # NOTE(dev): update these constants for each release according to the load
 # test results.
 # TODO(aylei): maintaining these constants is error-prone, we may need to
 # automatically tune parallelism at runtime according to system usage stats
 # in the future.
-_PER_BLOCKING_REQUEST_MEM_GB = 0.4
-_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.25
-# To control the number of blocking workers.
-_CPU_MULTIPLIER_FOR_BLOCKING_WORKERS = 2
-_MAX_BLOCKING_WORKERS_LOCAL = 4
-# Percentage of memory for blocking requests
+_LONG_WORKER_MEM_GB = 0.4
+_SHORT_WORKER_MEM_GB = 0.25
+# To control the number of long workers.
+_CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
+# Limit the number of long workers of local API server, since local server is
+# typically:
+# 1. launched automatically in an environment with high resource contention
+#    (e.g. Laptop)
+# 2. used by a single user
+_MAX_LONG_WORKERS_LOCAL = 4
+# Percentage of memory for long requests
 # from the memory reserved for SkyPilot.
-# This is to reserve some memory for non-blocking requests.
+# This is to reserve some memory for short requests.
 _MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
 
 
@@ -351,7 +359,16 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
-        except Exception as e:  # pylint: disable=broad-except
+        except KeyboardInterrupt:
+            # Interrupt the worker process will stop request execution, but
+            # the SIGTERM request should be respected anyway since it might
+            # be explicitly sent by user.
+            # TODO(aylei): crash the API server or recreate the worker process
+            # to avoid broken state.
+            logger.error(f'[{worker}] Worker process interrupted')
+            raise
+        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
                 f'[{worker}] Error processing request {request_id}: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -466,24 +483,24 @@ def _max_parallel_size_for_blocking(cpu_count: int,
                                     mem_size_gb: float,
                                     local=False) -> int:
     """Max parallelism for blocking requests."""
-    # since the estimation can be off by a lot, we allow users to override
-    # the default value by setting the environment variable.
-    env_parallel_size = os.getenv('SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS')
+    env_parallel_size = os.getenv(
+        constants.API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR)
     if env_parallel_size is not None:
         try:
             n = int(env_parallel_size)
             return max(1, n)
         except ValueError:
             logger.warning(
-                'Invalid SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS value: '
-                f'{env_parallel_size}. Falling back to calculated value.')
+                f'Invalid {constants.API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR} '
+                f'value: {env_parallel_size}. Falling back to calculated value.'
+            )
 
-    cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS
+    cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(mem_size_gb * _MAX_MEM_PERCENT_FOR_BLOCKING /
-                                 _PER_BLOCKING_REQUEST_MEM_GB)
+                                 _LONG_WORKER_MEM_GB)
     n = max(1, min(cpu_based_max_parallel, mem_based_max_parallel))
     if local:
-        return min(n, _MAX_BLOCKING_WORKERS_LOCAL)
+        return min(n, _MAX_LONG_WORKERS_LOCAL)
     return n
 
 
@@ -491,20 +508,22 @@ def _max_parallel_size_for_blocking(cpu_count: int,
 def _max_parallel_size_for_non_blocking(mem_size_gb: float,
                                         parallel_size_for_blocking: int) -> int:
     """Max parallelism for non-blocking requests."""
-    # since the estimation can be off by a lot, we allow users to override
+    # Since the estimation can be off by a lot, we allow users to override
     # the default value by setting the environment variable.
-    env_parallel_size = os.getenv('SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS')
+    env_parallel_size = os.getenv(
+        constants.API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR)
     if env_parallel_size is not None:
         try:
             n = int(env_parallel_size)
             return max(1, n)
         except ValueError:
             logger.warning(
-                'Invalid SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS value: '
-                f'{env_parallel_size}. Falling back to calculated value.')
+                f'Invalid {constants.API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR} '
+                f'value: {env_parallel_size}. Falling back to calculated value.'
+            )
 
     # Fall back to calculation if env var is not set or invalid
     available_mem = mem_size_gb - (parallel_size_for_blocking *
-                                   _PER_BLOCKING_REQUEST_MEM_GB)
-    n = max(1, int(available_mem / _PER_NON_BLOCKING_REQUEST_MEM_GB))
+                                   _LONG_WORKER_MEM_GB)
+    n = max(1, int(available_mem / _SHORT_WORKER_MEM_GB))
     return n
