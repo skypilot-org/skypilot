@@ -370,3 +370,23 @@ def test_nested_config_override_with_nonexistent_key():
                                     default_value=None,
                                     override_configs=override_config)
     assert result == override_config['kubernetes']['pod_config']
+
+
+def test_merge_k8s_configs_list_deduplication():
+    """Test that merge_k8s_configs correctly deduplicates list values."""
+    base_config = {'allowed_contexts': ['context1', 'context2']}
+    override_config = {'allowed_contexts': ['context2', 'context3']}
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+
+    # Test order preservation with multiple duplicates
+    base_config = {'allowed_contexts': ['context1', 'context2', 'context3']}
+    override_config = {
+        'allowed_contexts': ['context2', 'context4', 'context1', 'context5']
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+    # Should keep original order of base_config items and append new items in order
+    assert base_config['allowed_contexts'] == [
+        'context1', 'context2', 'context3', 'context4', 'context5'
+    ]
