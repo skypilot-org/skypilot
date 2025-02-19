@@ -27,12 +27,15 @@ JOB_CONTROLLER_NAME: str = f'{JOB_CONTROLLER_PREFIX}{SERVER_ID}'
 @contextlib.contextmanager
 def with_server_user_hash() -> Generator[None, None, None]:
     """Temporarily set the user hash to common.SERVER_ID."""
-    old_user_hash = common_utils.get_user_hash()
+    old_env_user_hash = os.getenv(constants.USER_ID_ENV_VAR)
     os.environ[constants.USER_ID_ENV_VAR] = SERVER_ID
     try:
         yield
     finally:
-        os.environ[constants.USER_ID_ENV_VAR] = old_user_hash
+        if old_env_user_hash is not None:
+            os.environ[constants.USER_ID_ENV_VAR] = old_env_user_hash
+        else:
+            os.environ.pop(constants.USER_ID_ENV_VAR)
 
 
 class StatusRefreshMode(enum.Enum):
