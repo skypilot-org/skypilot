@@ -285,8 +285,6 @@ class Optimizer:
 
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
-            if do_print:
-                logger.debug('#### {} ####'.format(node))
 
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
@@ -297,6 +295,10 @@ class Optimizer:
                         blocked_resources=blocked_resources,
                         quiet=quiet))
                 node_to_candidate_map[node] = cloud_candidates
+                # Has to call the printing after the launchable resources are
+                # computed, because the missing fields of the resources are
+                # inferred in the _fill_in_launchable_resources function.
+                logger.debug('#### {} ####'.format(node))
             else:
                 # Dummy sink node.
                 launchable_resources = {
@@ -1324,17 +1326,17 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
+                else:
+                    if resources.cpus is not None:
+                        logger.info('Try specifying a different CPU count, '
+                                    'or add "+" to the end of the CPU count '
+                                    'to allow for larger instances.')
+                    if resources.memory is not None:
+                        logger.info('Try specifying a different memory size, '
+                                    'or add "+" to the end of the memory size '
+                                    'to allow for larger instances.')
                 for cloud, hint in hints.items():
                     logger.info(f'{repr(cloud)}: {hint}')
-            else:
-                if resources.cpus is not None:
-                    logger.info('Try specifying a different CPU count, '
-                                'or add "+" to the end of the CPU count '
-                                'to allow for larger instances.')
-                if resources.memory is not None:
-                    logger.info('Try specifying a different memory size, '
-                                'or add "+" to the end of the memory size '
-                                'to allow for larger instances.')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)

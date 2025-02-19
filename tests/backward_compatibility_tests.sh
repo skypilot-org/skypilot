@@ -18,7 +18,7 @@ set -evx
 need_launch=${1:-0}
 start_from=${2:-0}
 
-CLUSTER_NAME="test-back-compat-$USER"
+CLUSTER_NAME="test-back-compat-$(whoami)"
 # Test managed jobs to make sure existing jobs and new job can run correctly,
 # after the jobs controller is updated.
 # Get a new uuid to avoid conflict with previous back-compat tests.
