@@ -14,10 +14,6 @@ logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
-def _get_controller_name() -> str:
-    return common.SKY_SERVE_CONTROLLER_NAME
-
-
 @router.post('/up')
 async def up(
     request: fastapi.Request,
@@ -29,7 +25,7 @@ async def up(
         request_body=up_body,
         func=core.up,
         schedule_type=api_requests.ScheduleType.LONG,
-        request_cluster_name=_get_controller_name(),
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
 
@@ -44,7 +40,7 @@ async def update(
         request_body=update_body,
         func=core.update,
         schedule_type=api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(),
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
 
@@ -59,7 +55,7 @@ async def down(
         request_body=down_body,
         func=core.down,
         schedule_type=api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(),
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
 
@@ -74,7 +70,7 @@ async def terminate_replica(
         request_body=terminate_replica_body,
         func=core.terminate_replica,
         schedule_type=api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(),
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
 
@@ -89,7 +85,7 @@ async def status(
         request_body=status_body,
         func=core.status,
         schedule_type=api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(),
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
 
@@ -104,7 +100,7 @@ async def tail_logs(
         request_body=log_body,
         func=core.tail_logs,
         schedule_type=api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(),
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
 
     request_task = api_requests.get_request(request.state.request_id)
