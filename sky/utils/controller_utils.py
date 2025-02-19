@@ -680,8 +680,9 @@ def translate_local_file_mounts_to_two_hop(
     |      local path  ----|--|-> controller path --|--|-> job dst path   |
     ------------------------  -----------------------  --------------------
 
-    Returns a dict mapping from controller file mount path to local file mount
-    path for the first hop. The task is updated in-place to do the second hop.
+    Returns:
+        A dict mapping from controller file mount path to local file mount path
+          for the first hop. The task is updated in-place to do the second hop.
     """
     first_hop_file_mounts = {}
     second_hop_file_mounts = {}
@@ -916,7 +917,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # also upload any storage mounts that are not translated.  After
         # sync_storage_mounts, we will also have file_mounts in the task, but
         # these aren't used since the storage_mounts for the same paths take
-        # precendence.
+        # precedence.
         if task.storage_mounts:
             # There may be existing (non-translated) storage mounts, so log this
             # whenever task.storage_mounts is non-empty.
