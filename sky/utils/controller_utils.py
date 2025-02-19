@@ -670,14 +670,14 @@ def translate_local_file_mounts_to_two_hop(
         task: 'task_lib.Task') -> Dict[str, str]:
     """Translates local->VM mounts into two-hop file mounts.
 
-    This strategy will upload the local files to the controller first, using
-    a normal rsync as part of sky.launch(). Then, when the controller launches
-    the task, it will also use local file_mounts from the destination path of
-    the first hop.
+    This strategy will upload the local files to the controller first, using a
+    normal rsync as part of sky.launch() for the controller. Then, when the
+    controller launches the task, it will also use local file_mounts from the
+    destination path of the first hop.
 
     Local machine/API server        Controller              Job cluster
     ------------------------  -----------------------  --------------------
-    |      local path -----|--|-> controller path --|--|-> job dst path   |
+    |      local path  ----|--|-> controller path --|--|-> job dst path   |
     ------------------------  -----------------------  --------------------
 
     Returns a dict mapping from controller file mount path to local file mount

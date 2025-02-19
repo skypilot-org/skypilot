@@ -505,12 +505,16 @@ def _cleanup(job_id: int, dag_yaml: str):
         # Clean up any files mounted from the local disk, such as two-hop file
         # mounts.
         for file_mount in (task.file_mounts or {}).values():
-            if not data_utils.is_cloud_store_url(file_mount):
-                path = os.path.expanduser(file_mount)
-                if os.path.isdir(path):
-                    shutil.rmtree(path)
-                else:
-                    os.remove(path)
+            try:
+                if not data_utils.is_cloud_store_url(file_mount):
+                    path = os.path.expanduser(file_mount)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to clean up file mount {file_mount}: {e}')
 
 
 def start(job_id, dag_yaml):

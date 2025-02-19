@@ -102,19 +102,20 @@ def launch(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing managed job')):
 
-        for task_ in dag.tasks:
-            if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+        local_to_controller_file_mounts = {}
+
+        if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+            for task_ in dag.tasks:
                 controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                     task_, task_type='jobs')
-                first_hop_file_mounts = {}
 
-            else:
-                # We do not have any cloud storage available, so fall back to
-                # two-hop file_mount uploading.
-                # Note: we can't easily hack sync_storage_mounts() to upload
-                # directly to the controller, because the controller may not
-                # even be up yet.
-
+        else:
+            # We do not have any cloud storage available, so fall back to
+            # two-hop file_mount uploading.
+            # Note: we can't easily hack sync_storage_mounts() to upload
+            # directly to the controller, because the controller may not
+            # even be up yet.
+            for task_ in dag.tasks:
                 if task_.storage_mounts:
                     # Technically, we could convert COPY storage_mounts that
                     # have a local source and do not specify `store`, but we
@@ -125,7 +126,8 @@ def launch(
                         'storage is available. Please specify local '
                         'file_mounts only.')
 
-                first_hop_file_mounts = (
+                # Merge file mounts from all tasks.
+                local_to_controller_file_mounts.update(
                     controller_utils.translate_local_file_mounts_to_two_hop(
                         task_))
 
@@ -144,7 +146,7 @@ def launch(
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
-            'two_hop_file_mounts': first_hop_file_mounts,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
