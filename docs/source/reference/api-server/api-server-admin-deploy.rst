@@ -138,6 +138,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
         You can manually configure the credentials for other clouds by `kubectl exec` into the API server pod after it is deployed and running the relevant :ref:`installation commands<installation>`.
 
+        Note that manually configured credentials will not be persisted across API server restarts.
+
         Support for configuring other clouds through secrets is coming soon!
 
 
@@ -171,6 +173,19 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 .. tip::
 
     You can configure the password for the API server with the ``WEB_PASSWORD`` variable.
+
+.. tip::
+
+    If you already have a Kubernetes secret containing basic auth credentials, you can use it directly by setting ``ingress.authSecret`` instead of ``ingress.authCredentials``:
+
+    .. code-block:: console
+
+        $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+        --namespace $NAMESPACE \
+        --create-namespace \
+        --set ingress.authSecret=my-existing-auth-secret
+
+    The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
 Step 4: Get the API server URL
 ------------------------------
