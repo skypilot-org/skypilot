@@ -199,6 +199,7 @@ def merge_k8s_configs(
                         else:
                             base_config[key].append(new_volume)
             else:
-                base_config[key].extend(value)
+                # For other list values, merge lists and maintain uniqueness
+                base_config[key] = list(set(base_config[key] + value))
         else:
             base_config[key] = value
