@@ -17,6 +17,10 @@ on:
         description: 'SkyPilot PyPI package name'
         required: true
         type: string
+    outputs:
+      version:
+        description: "The version fetched from PyPI"
+        value: ${{ jobs.build.outputs.version }}
     secrets:
       DOCKER_USERNAME:
         required: true
@@ -39,7 +43,6 @@ jobs:
           # Fetch package info from PyPI
           echo "Fetching package info for ${{ inputs.package_name }}"
           PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
-          echo "PyPI response: $PACKAGE_INFO"
           # Parse JSON and get the latest version
           LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
           echo "Latest version found: $LATEST_VERSION"
