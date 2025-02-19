@@ -12,17 +12,15 @@ resources:
   
 file_mounts:
   /output:
-    name: sky-law-embeddings
+    name: sky-rag-embeddings
     mode: MOUNT
-  /model:
-    name: sky-law-models
-    mode: MOUNT
+
 
 envs:
   START_IDX: 0  # Will be overridden by batch_compute_vectors.py
   END_IDX: 10000  # Will be overridden by batch_compute_vectors.py
   HF_TOKEN: ""  # Will be overridden by batch_compute_vectors.py
-  MODEL_NAME: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+  MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
 
 setup: |
   # Install dependencies for vLLM
@@ -32,16 +30,14 @@ setup: |
   pip install numpy pandas requests tqdm datasets 
   pip install nltk hf_transfer
 
-  # Initialize and check bucket
-  if [ ! "$(ls -A /model)" ]; then
-    HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /model $MODEL_NAME
-  fi
-
 run: |
+  # Initialize and check bucket
+  HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
+  
   # Start vLLM service in background
   python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
-    --model /model \
+    --model /tmp/model \
     --max-model-len 4096 \
     --task embed &
 

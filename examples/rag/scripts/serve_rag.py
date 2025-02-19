@@ -58,7 +58,7 @@ def encode_query(query: str) -> np.ndarray:
     try:
         response = requests.post(f"{embed_endpoint}/v1/embeddings",
                                  json={
-                                     "model": "/model",
+                                     "model": "/tmp/embedding_model",
                                      "input": [query]
                                  },
                                  timeout=30)
@@ -136,7 +136,7 @@ async def query_llm(prompt: str, temperature: float = 0.7) -> tuple[str, str]:
     try:
         response = requests.post(f"{generator_endpoint}/v1/chat/completions",
                                  json={
-                                     "model": "/model",
+                                     "model": "/tmp/generation_model",
                                      "messages": [{
                                          "role": "user",
                                          "content": prompt

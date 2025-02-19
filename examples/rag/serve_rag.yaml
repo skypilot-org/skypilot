@@ -17,10 +17,6 @@ file_mounts:
     name: sky-legal-vectordb
     # this needs to be the same as in build_vectordb.yaml
     mode: MOUNT
-  /model:
-    # this needs to be the same as in compute_vectors.yaml
-    name: sky-law-models
-    mode: MOUNT
 
 setup: |
   # Install dependencies for RAG service
@@ -28,19 +24,26 @@ setup: |
   pip install fastapi uvicorn pydantic chromadb
   
   # Install dependencies for vLLM
-  pip install transformers==4.48.1 vllm==0.6.6.post1
+  pip install transformers==4.48.1 vllm==0.6.6.post1 hf_transfer
 
 service:
   replicas: 1
   readiness_probe:
     path: /health
 
+envs:
+  EMBEDDING_MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
+  GENERATION_MODEL_NAME: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+
 run: |
-  # Start vLLM service in background
+  HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/generation_model $GENERATION_MODEL_NAME
+  HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/embedding_model $EMBEDDING_MODEL_NAME
+  
+  # Start vLLM generationservice in background
   CUDA_VISIBLE_DEVICES=0,1,2 python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8002 \
-    --model /model \
+    --model /tmp/generation_model \
     --max-model-len 28816 \
     --tensor-parallel-size 2 \
     --task generate &
@@ -57,7 +60,7 @@ run: |
   CUDA_VISIBLE_DEVICES=3 python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --port 8003 \
-    --model /model \
+    --model /tmp/embedding_model \
     --max-model-len 4096 \
     --task embed &
 

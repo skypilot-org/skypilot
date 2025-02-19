@@ -157,7 +157,7 @@ def compute_embeddings_batch(chunks: List[Dict],
         try:
             # Print request payload for debugging
             request_payload = {
-                "model": "/model",
+                "model": "/tmp/model",
                 # because this is loaded from the mounted directory
                 "input": prompts
             }

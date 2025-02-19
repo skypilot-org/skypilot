@@ -48,7 +48,7 @@ The script will:
 After computing embeddings, build the vector database:
 
 ```bash
-sky launch build_vectordb.yaml
+sky jobs launch build_vectordb.yaml
 ```
 
 This will:
