@@ -631,6 +631,8 @@ async def logs(
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
+        # TODO(aylei): tail logs should be non-blocking, so that it does not
+        # occupy background workers.
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
     )
