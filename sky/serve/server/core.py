@@ -692,7 +692,6 @@ def status(
             'name': (str) replica name,
             'status': (sky.serve.ReplicaStatus) replica status,
             'version': (int) replica version,
-            'endpoint': (str) endpoint of the replica,
             'is_spot': (bool) whether the replica is a spot instance,
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,

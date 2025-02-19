@@ -11,10 +11,10 @@ from typing import Any, Dict, List, Optional, Tuple
 import colorama
 
 from sky import global_user_state
-from sky import status_lib
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import db_utils
+from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers

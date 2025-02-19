@@ -257,7 +257,6 @@ def _start_external_load_balancer(service_name: str, lb_id: int,
         import sky  # pylint: disable=import-outside-toplevel
         sky.launch(
             task=lb_task,
-            stream_logs=True,
             cluster_name=lb_cluster_name,
             retry_until_up=True,
         )
