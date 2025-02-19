@@ -18,17 +18,21 @@ import yaml
 import sky
 from sky import clouds
 from sky import exceptions
+from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
 from sky.utils import kubernetes_enums
 from sky.utils import schemas
+from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -512,7 +516,7 @@ AUTOSCALER_TO_LABEL_FORMATTER = {
 }
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def detect_gpu_label_formatter(
     context: Optional[str]
 ) -> Tuple[Optional[GPULabelFormatter], Dict[str, List[Tuple[str, str]]]]:
@@ -544,7 +548,7 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
-@functools.lru_cache(maxsize=10)
+@annotations.lru_cache(scope='request', maxsize=10)
 def detect_accelerator_resource(
         context: Optional[str]) -> Tuple[bool, Set[str]]:
     """Checks if the Kubernetes cluster has GPU/TPU resource.
@@ -569,7 +573,7 @@ def detect_accelerator_resource(
     return has_accelerator, cluster_resources
 
 
-@functools.lru_cache(maxsize=10)
+@annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
 def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
@@ -811,7 +815,7 @@ def get_accelerator_label_key_value(
                     f'{supported_formats}. Please refer to '
                     'the documentation on how to set up node labels.'
                     f'{suffix}')
-        if label_formatter is not None:
+        else:
             # Validate the label value on all nodes labels to ensure they are
             # correctly setup and will behave as expected.
             for node_name, label_list in node_labels.items():
@@ -907,6 +911,7 @@ def get_accelerator_label_key_value(
                 f'{GPU_RESOURCE_KEY!r} or {TPU_RESOURCE_KEY!r} resource. '
                 'Please refer to the documentation on how to set up GPUs.'
                 f'{suffix}')
+    assert False, 'This should not be reached'
 
 
 def get_head_ssh_port(cluster_name: str, namespace: str,
@@ -1152,7 +1157,7 @@ def is_kubeconfig_exec_auth(
     return False, None
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def get_current_kube_config_context_name() -> Optional[str]:
     """Get the current kubernetes context from the kubeconfig file
 
@@ -1209,22 +1214,32 @@ def get_all_kube_context_names() -> List[str]:
     return context_names
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def get_kube_config_context_namespace(
         context_name: Optional[str] = None) -> str:
     """Get the current kubernetes context namespace from the kubeconfig file
 
     Returns:
-        str | None: The current kubernetes context namespace if it exists, else
+        str: The current kubernetes context namespace if it exists, else
             the default namespace.
     """
     k8s = kubernetes.kubernetes
     ns_path = '/var/run/secrets/kubernetes.io/serviceaccount/namespace'
-    # If using in-cluster context, get the namespace from the service account
-    # namespace file. Uses the same logic as adaptors.kubernetes._load_config()
-    # to stay consistent with in-cluster config loading.
+    # If using in-cluster context, first check for the environment variable,
+    # then fall back to the service account namespace file. Uses the same logic
+    # as adaptors.kubernetes._load_config() to stay consistent with in-cluster
+    # config loading.
     if (context_name == kubernetes.in_cluster_context_name() or
             context_name is None):
+        # First check for environment variable. We allow the env var to take
+        # effect only when using in-cluster auth because the recommended way to
+        # set the namespace when using kubeconfig is to change the namespace
+        # configured in the context.
+        env_namespace = os.getenv(
+            kubernetes_constants.KUBERNETES_IN_CLUSTER_NAMESPACE_ENV_VAR)
+        if env_namespace:
+            return env_namespace
+        # Fall back to service account namespace file
         if os.path.exists(ns_path):
             with open(ns_path, encoding='utf-8') as f:
                 return f.read().strip()
@@ -1526,7 +1541,10 @@ def create_proxy_command_script() -> str:
     # Set the permissions to 700 to ensure only the owner can read, write,
     # and execute the file.
     os.chmod(port_fwd_proxy_cmd_path, 0o700)
-    return port_fwd_proxy_cmd_path
+    # Return the path to the proxy command script without expanding the user
+    # home directory to be compatible when a SSH is called from a client in
+    # client-server mode.
+    return PORT_FORWARD_PROXY_CMD_PATH
 
 
 def setup_ssh_jump_svc(ssh_jump_name: str, namespace: str,
@@ -1846,54 +1864,12 @@ def get_endpoint_debug_message() -> str:
                                           debug_cmd=debug_cmd)
 
 
-def merge_dicts(source: Dict[Any, Any], destination: Dict[Any, Any]):
-    """Merge two dictionaries into the destination dictionary.
-
-    Updates nested dictionaries instead of replacing them.
-    If a list is encountered, it will be appended to the destination list.
-
-    An exception is when the key is 'containers', in which case the
-    first container in the list will be fetched and merge_dict will be
-    called on it with the first container in the destination list.
-    """
-    for key, value in source.items():
-        if isinstance(value, dict) and key in destination:
-            merge_dicts(value, destination[key])
-        elif isinstance(value, list) and key in destination:
-            assert isinstance(destination[key], list), \
-                f'Expected {key} to be a list, found {destination[key]}'
-            if key in ['containers', 'imagePullSecrets']:
-                # If the key is 'containers' or 'imagePullSecrets, we take the
-                # first and only container/secret in the list and merge it, as
-                # we only support one container per pod.
-                assert len(value) == 1, \
-                    f'Expected only one container, found {value}'
-                merge_dicts(value[0], destination[key][0])
-            elif key in ['volumes', 'volumeMounts']:
-                # If the key is 'volumes' or 'volumeMounts', we search for
-                # item with the same name and merge it.
-                for new_volume in value:
-                    new_volume_name = new_volume.get('name')
-                    if new_volume_name is not None:
-                        destination_volume = next(
-                            (v for v in destination[key]
-                             if v.get('name') == new_volume_name), None)
-                        if destination_volume is not None:
-                            merge_dicts(new_volume, destination_volume)
-                        else:
-                            destination[key].append(new_volume)
-            else:
-                destination[key].extend(value)
-        else:
-            destination[key] = value
-
-
 def combine_pod_config_fields(
     cluster_yaml_path: str,
     cluster_config_overrides: Dict[str, Any],
 ) -> None:
-    """Adds or updates fields in the YAML with fields from the ~/.sky/config's
-    kubernetes.pod_spec dict.
+    """Adds or updates fields in the YAML with fields from the
+    ~/.sky/config.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
     SkyPilot yet, or require simple configuration (e.g., adding an
     imagePullSecrets field).
@@ -1940,12 +1916,12 @@ def combine_pod_config_fields(
                                                    override_configs={})
     override_pod_config = (cluster_config_overrides.get('kubernetes', {}).get(
         'pod_config', {}))
-    merge_dicts(override_pod_config, kubernetes_config)
+    config_utils.merge_k8s_configs(kubernetes_config, override_pod_config)
 
     # Merge the kubernetes config into the YAML for both head and worker nodes.
-    merge_dicts(
-        kubernetes_config,
-        yaml_obj['available_node_types']['ray_head_default']['node_config'])
+    config_utils.merge_k8s_configs(
+        yaml_obj['available_node_types']['ray_head_default']['node_config'],
+        kubernetes_config)
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
@@ -1953,7 +1929,7 @@ def combine_pod_config_fields(
 
 def combine_metadata_fields(cluster_yaml_path: str) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
-    fields from the ~/.sky/config's kubernetes.custom_metadata dict.
+    fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
@@ -1979,7 +1955,7 @@ def combine_metadata_fields(cluster_yaml_path: str) -> None:
     ]
 
     for destination in combination_destinations:
-        merge_dicts(custom_metadata, destination)
+        config_utils.merge_k8s_configs(destination, custom_metadata)
 
     # Write the updated YAML back to the file
     common_utils.dump_yaml(cluster_yaml_path, yaml_obj)
@@ -1992,7 +1968,7 @@ def merge_custom_metadata(original_metadata: Dict[str, Any]) -> None:
     """
     custom_metadata = skypilot_config.get_nested(
         ('kubernetes', 'custom_metadata'), {})
-    merge_dicts(custom_metadata, original_metadata)
+    config_utils.merge_k8s_configs(original_metadata, custom_metadata)
 
 
 def check_nvidia_runtime_class(context: Optional[str] = None) -> bool:
@@ -2141,18 +2117,8 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
 
 
-@dataclasses.dataclass
-class KubernetesNodeInfo:
-    """Dataclass to store Kubernetes node information."""
-    name: str
-    accelerator_type: Optional[str]
-    # Resources available on the node. E.g., {'nvidia.com/gpu': '2'}
-    total: Dict[str, int]
-    free: Dict[str, int]
-
-
 def get_kubernetes_node_info(
-        context: Optional[str] = None) -> Dict[str, KubernetesNodeInfo]:
+        context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
     """Gets the resource information for all the nodes in the cluster.
 
     Currently only GPU resources are supported. The function returns the total
@@ -2182,7 +2148,7 @@ def get_kubernetes_node_info(
     else:
         label_keys = lf.get_label_keys()
 
-    node_info_dict: Dict[str, KubernetesNodeInfo] = {}
+    node_info_dict: Dict[str, models.KubernetesNodeInfo] = {}
 
     for node in nodes:
         accelerator_name = None
@@ -2221,7 +2187,7 @@ def get_kubernetes_node_info(
         if is_multi_host_tpu(node.metadata.labels):
             continue
 
-        node_info_dict[node.metadata.name] = KubernetesNodeInfo(
+        node_info_dict[node.metadata.name] = models.KubernetesNodeInfo(
             name=node.metadata.name,
             accelerator_type=accelerator_name,
             total={'accelerator_count': int(accelerator_count)},
@@ -2493,6 +2459,31 @@ class KubernetesSkyPilotClusterInfo:
     launched_at: float
     resources: 'resources_lib.Resources'
     resources_str: str
+
+
+@dataclasses.dataclass
+class KubernetesSkyPilotClusterInfoPayload:
+    """SkyPilot Cluster on Kubernetes payload."""
+    cluster_name_on_cloud: str
+    cluster_name: str
+    user: str
+    status: status_lib.ClusterStatus
+    resources_str: str
+    launched_at: float
+
+    @classmethod
+    def from_cluster(
+        cls, cluster: KubernetesSkyPilotClusterInfo
+    ) -> 'KubernetesSkyPilotClusterInfoPayload':
+        resources_str = f'{len(cluster.pods)}x {cluster.resources}'
+        return cls(
+            cluster_name_on_cloud=cluster.cluster_name_on_cloud,
+            cluster_name=cluster.cluster_name,
+            user=cluster.user,
+            status=cluster.status,
+            resources_str=resources_str,
+            launched_at=cluster.launched_at,
+        )
 
 
 def process_skypilot_pods(

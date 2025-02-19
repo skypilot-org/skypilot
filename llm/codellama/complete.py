@@ -1,10 +1,9 @@
 import openai
 
 import sky
-from sky import serve
 
 service_records = sky.serve.status('code-llama')
-endpoint = serve.get_endpoint(service_records[0])
+endpoint = service_records[0]['endpoint']
 
 print('Using endpoint:', endpoint)
 

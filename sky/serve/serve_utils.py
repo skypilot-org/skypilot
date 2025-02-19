@@ -24,15 +24,15 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky import status_lib
-from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -40,8 +40,6 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
 
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
@@ -360,7 +358,7 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
             raise ValueError(f'Failed to update service: {resp.text}')
 
     service_msg = resp.json()['message']
-    return common_utils.encode_payload(service_msg)
+    return message_utils.encode_payload(service_msg)
 
 
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
@@ -434,13 +432,28 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return common_utils.encode_payload(service_statuses)
+    # We have to use payload_type here to avoid the issue of
+    # message_utils.decode_payload() not being able to correctly decode the
+    # message with <sky-payload> tags.
+    return message_utils.encode_payload(service_statuses,
+                                        payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = common_utils.decode_payload(payload)
+    try:
+        service_statuses_encoded = message_utils.decode_payload(
+            payload, payload_type='service_status')
+    except ValueError as e:
+        if 'Invalid payload string' in str(e):
+            # Backward compatibility for serve controller started before #4660
+            # where the payload type is not added.
+            service_statuses_encoded = message_utils.decode_payload(payload)
+        else:
+            raise
     service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
+        if not isinstance(service_status, dict):
+            raise ValueError(f'Invalid service status: {service_status}')
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
             for k, v in service_status.items()
@@ -450,11 +463,11 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
 
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
-    return common_utils.encode_payload(new_version)
+    return message_utils.encode_payload(new_version)
 
 
 def load_version_string(payload: str) -> str:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def _terminate_failed_services(
@@ -577,7 +590,31 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
     # external LB status.
     # timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS
     timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB
+    setup_completed = False
     while True:
+        job_status = job_lib.get_status(job_id)
+        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+            # Wait for the controller process to finish setting up. It can be
+            # slow if a lot cloud dependencies are being installed.
+            if (time.time() - start_time >
+                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to start the controller '
+                        f'process for the service {service_name!r} '
+                        f'within '
+                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
+                    )
+            # No need to check the service status as the controller process
+            # is still setting up.
+            time.sleep(1)
+            continue
+
+        if not setup_completed:
+            setup_completed = True
+            # Reset the start time to wait for the service to be registered.
+            start_time = time.time()
+
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
             if job_id != record['controller_job_id']:
@@ -591,8 +628,8 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
             if lb_port is not None:
                 if record['dns_endpoint'] is not None:
                     endpoint = f'{record["dns_endpoint"]}:{lb_port}'
-                    return common_utils.encode_payload(endpoint)
-                return common_utils.encode_payload(lb_port)
+                    return message_utils.encode_payload(endpoint)
+                return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
@@ -615,7 +652,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
 
 
 def load_service_initialization_result(payload: str) -> Union[int, str]:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -829,33 +866,6 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def get_endpoint(service_record: Dict[str, Any]) -> str:
-    if service_record['dns_endpoint'] is not None:
-        dns = service_record['dns_endpoint']
-        lb_port = service_record['load_balancer_port']
-        return f'{dns}:{lb_port}'
-    # Don't use backend_utils.is_controller_accessible since it is too slow.
-    handle = global_user_state.get_handle_from_cluster_name(
-        SKY_SERVE_CONTROLLER_NAME)
-    if handle is None:
-        return '-'
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    load_balancer_port = service_record['load_balancer_port']
-    if load_balancer_port is None:
-        return '-'
-    try:
-        endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                               load_balancer_port).get(
-                                                   load_balancer_port, None)
-    except exceptions.ClusterNotUpError:
-        return '-'
-    if endpoint is None:
-        return '-'
-    assert isinstance(endpoint, str), endpoint
-    protocol = 'https' if service_record['tls_encrypted'] else 'http'
-    return f'{protocol}://{endpoint}'
-
-
 def format_service_table(service_records: List[Dict[str, Any]],
                          show_all: bool) -> str:
     if not service_records:
@@ -889,7 +899,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_status = record['status']
         status_str = service_status.colored_str()
         replicas = _get_replicas(record)
-        endpoint = get_endpoint(record)
+        endpoint = record['endpoint']
+        if endpoint is None:
+            endpoint = '-'
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
         load_balancing_policy = record['load_balancing_policy']
@@ -1109,7 +1121,11 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return (f'{skylet_constants.SKY_PYTHON_CMD} '
+        # Use the local user id to make sure the operation goes to the correct
+        # user.
+        return (f'export {skylet_constants.USER_ID_ENV_VAR}='
+                f'"{common_utils.get_user_hash()}"; '
+                f'{skylet_constants.SKY_PYTHON_CMD} '
                 f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod

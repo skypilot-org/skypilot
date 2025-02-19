@@ -5,7 +5,6 @@ VMs, GPUs, and TPUs. The script takes about 1-2 minutes to run.
 """
 
 import argparse
-import functools
 import io
 import multiprocessing
 import os
@@ -20,6 +19,7 @@ import numpy as np
 
 from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
+from sky.utils import annotations
 from sky.utils import common_utils
 
 if typing.TYPE_CHECKING:
@@ -60,8 +60,8 @@ HIDDEN_TPU_DF = pd.read_csv(
  ,tpu-v3-2048,1,,,tpu-v3-2048,2048.0,614.4,us-east1,us-east1-d
  """)))
 
-# TPU V6e price for us-central2 is missing in the SKUs.
-TPU_V6E_MISSING_REGIONS = ['us-central2']
+# TPU V6e price for the following regions is missing in the SKUs.
+TPU_V6E_MISSING_REGIONS = ['us-central2', 'southamerica-west1']
 
 # TPU V5 is not visible in specific zones. We hardcode the missing zones here.
 # NOTE(dev): Keep the zones and the df in sync.
@@ -281,7 +281,7 @@ def filter_zones(func: Callable[[], List[str]]) -> Callable[[], List[str]]:
 
 
 @filter_zones
-@functools.lru_cache(maxsize=None)
+@annotations.lru_cache(scope='global', maxsize=None)
 def _get_all_zones() -> List[str]:
     zones_request = gcp_client.zones().list(project=project_id)
     zones = []

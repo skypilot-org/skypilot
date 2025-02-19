@@ -1,4 +1,5 @@
 """Task: a coarse-grained stage in an application."""
+import collections
 import inspect
 import json
 import os
@@ -204,6 +205,8 @@ class Task:
         docker_image: Optional[str] = None,
         event_callback: Optional[str] = None,
         blocked_resources: Optional[Iterable['resources_lib.Resources']] = None,
+        # Internal use only.
+        file_mounts_mapping: Optional[Dict[str, str]] = None,
     ):
         """Initializes a Task.
 
@@ -300,21 +303,33 @@ class Task:
 
         # Filled in by the optimizer.  If None, this Task is not planned.
         self.best_resources = None
-        # Check if the task is legal.
-        self._validate()
+
+        # For internal use only.
+        self.file_mounts_mapping = file_mounts_mapping
 
         dag = sky.dag.get_current_dag()
         if dag is not None:
             dag.add(self)
 
-    def _validate(self):
-        """Checks if the Task fields are valid."""
+    def validate(self, workdir_only: bool = False):
+        """Validate all fields of the task."""
+        self.validate_name()
+        self.validate_run()
+        self.expand_and_validate_workdir()
+        if not workdir_only:
+            self.expand_and_validate_file_mounts()
+        for r in self.resources:
+            r.validate()
+
+    def validate_name(self):
+        """Validates if the task name is valid."""
         if not _is_valid_name(self.name):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Invalid task name {self.name}. Valid name: '
                                  f'{_VALID_NAME_DESCR}')
 
-        # Check self.run
+    def validate_run(self):
+        """Validates if the run command is valid."""
         if callable(self.run):
             run_sig = inspect.signature(self.run)
             # Check that run is a function with 2 arguments.
@@ -353,15 +368,65 @@ class Task:
                                  f'a command generator ({CommandGen}). '
                                  f'Got {type(self.run)}')
 
-        # Workdir.
-        if self.workdir is not None:
-            full_workdir = os.path.abspath(os.path.expanduser(self.workdir))
-            if not os.path.isdir(full_workdir):
-                # Symlink to a dir is legal (isdir() follows symlinks).
+    def expand_and_validate_file_mounts(self):
+        """Expand file_mounts paths to absolute paths and validate them.
+
+        Note: if this function is called on a remote SkyPilot API server,
+        it must be after the client side has sync-ed all files to the
+        remote server.
+        """
+        if self.file_mounts is None:
+            return
+        for target, source in self.file_mounts.items():
+            if target.endswith('/') or source.endswith('/'):
                 with ux_utils.print_exception_no_traceback():
                     raise ValueError(
-                        'Workdir must exist and must be a directory (or '
-                        f'a symlink to a directory). {self.workdir} not found.')
+                        'File mount paths cannot end with a slash '
+                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
+                        f'Found: target={target} source={source}')
+            if data_utils.is_cloud_store_url(target):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'File mount destination paths cannot be cloud storage')
+            if not data_utils.is_cloud_store_url(source):
+                self.file_mounts[target] = os.path.abspath(
+                    os.path.expanduser(source))
+                if not os.path.exists(self.file_mounts[target]
+                                     ) and not source.startswith('skypilot:'):
+                    with ux_utils.print_exception_no_traceback():
+                        raise ValueError(
+                            f'File mount source {source!r} does not exist '
+                            'locally. To fix: check if it exists, and correct '
+                            'the path.')
+            # TODO(zhwu): /home/username/sky_workdir as the target path need
+            # to be filtered out as well.
+            if (target == constants.SKY_REMOTE_WORKDIR and
+                    self.workdir is not None):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
+                        'destination path of a file mount, as it will be used '
+                        'by the workdir. If uploading a file/folder to the '
+                        'workdir is needed, please specify the full path to '
+                        'the file/folder.')
+
+    def expand_and_validate_workdir(self):
+        """Expand workdir to absolute path and validate it.
+
+        Note: if this function is called on a remote SkyPilot API server,
+        it must be after the client side has sync-ed all files to the
+        remote server.
+        """
+        if self.workdir is None:
+            return
+        user_workdir = self.workdir
+        self.workdir = os.path.abspath(os.path.expanduser(user_workdir))
+        if not os.path.isdir(self.workdir):
+            # Symlink to a dir is legal (isdir() follows symlinks).
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'Workdir must be a valid directory (or '
+                    f'a symlink to a directory). {user_workdir} not found.')
 
     @staticmethod
     def from_yaml_config(
@@ -426,6 +491,7 @@ class Task:
             num_nodes=config.pop('num_nodes', None),
             envs=config.pop('envs', None),
             event_callback=config.pop('event_callback', None),
+            file_mounts_mapping=config.pop('file_mounts_mapping', None),
         )
 
         # Create lists to store storage objects inlined in file_mounts.
@@ -757,45 +823,7 @@ class Task:
 
         Returns:
           self: the current task, with file mounts set.
-
-        Raises:
-          ValueError: if input paths are invalid.
         """
-        if file_mounts is None:
-            self.file_mounts = None
-            return self
-        for target, source in file_mounts.items():
-            if target.endswith('/') or source.endswith('/'):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount paths cannot end with a slash '
-                        '(try "/mydir: /mydir" or "/myfile: /myfile"). '
-                        f'Found: target={target} source={source}')
-            if data_utils.is_cloud_store_url(target):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'File mount destination paths cannot be cloud storage')
-            if not data_utils.is_cloud_store_url(source):
-                if (not os.path.exists(
-                        os.path.abspath(os.path.expanduser(source))) and
-                        not source.startswith('skypilot:')):
-                    with ux_utils.print_exception_no_traceback():
-                        raise ValueError(
-                            f'File mount source {source!r} does not exist '
-                            'locally. To fix: check if it exists, and correct '
-                            'the path.')
-            # TODO(zhwu): /home/username/sky_workdir as the target path need
-            # to be filtered out as well.
-            if (target == constants.SKY_REMOTE_WORKDIR and
-                    self.workdir is not None):
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Cannot use {constants.SKY_REMOTE_WORKDIR!r} as a '
-                        'destination path of a file mount, as it will be used '
-                        'by the workdir. If uploading a file/folder to the '
-                        'workdir is needed, please specify the full path to '
-                        'the file/folder.')
-
         self.file_mounts = file_mounts
         return self
 
@@ -831,8 +859,8 @@ class Task:
             self.file_mounts = {}
         assert self.file_mounts is not None
         self.file_mounts.update(file_mounts)
-        # For validation logic:
-        return self.set_file_mounts(self.file_mounts)
+        self.expand_and_validate_file_mounts()
+        return self
 
     def set_storage_mounts(
         self,
@@ -973,37 +1001,53 @@ class Task:
         store_type = storage_lib.StoreType.from_cloud(storage_cloud_str)
         return store_type, storage_region
 
-    def sync_storage_mounts(self, force_sync: bool = False) -> None:
+    def sync_storage_mounts(self) -> None:
         """(INTERNAL) Eagerly syncs storage mounts to cloud storage.
 
         After syncing up, COPY-mode storage mounts are translated into regular
         file_mounts of the form ``{ /remote/path: {s3,gs,..}://<bucket path>
         }``.
-
-        Args:
-            force_sync: If True, forces the synchronization of storage mounts.
-                        If the store object is added via storage.add_store(),
-                        the sync will happen automatically via add_store.
-                        However, if it is passed via the construction function
-                        of storage, it is usually because the user passed an
-                        intermediate bucket name in the config and we need to
-                        construct from the user config. In this case, set
-                        force_sync to True.
         """
+        # The same storage can be used multiple times, and we should construct
+        # the storage with stores first, so that the storage will be created on
+        # the correct cloud.
+        name_to_storage = collections.defaultdict(list)
         for storage in self.storage_mounts.values():
-            if not storage.stores:
-                store_type, store_region = self._get_preferred_store()
-                self.storage_plans[storage] = store_type
-                storage.add_store(store_type, store_region)
-            else:
-                if force_sync:
-                    storage.sync_all_stores()
-                # We will download the first store that is added to remote.
-                self.storage_plans[storage] = list(storage.stores.keys())[0]
+            name_to_storage[storage.name].append(storage)
+        for storages in name_to_storage.values():
+            # Place the storage with most stores first, so that the storage will
+            # be created on the correct cloud.
+            storage_to_construct = sorted(storages,
+                                          key=lambda x: len(x.stores),
+                                          reverse=True)
+            for storage in storage_to_construct:
+                storage.construct()
+                assert storage.name is not None, storage
+                if not storage.stores:
+                    store_type, store_region = self._get_preferred_store()
+                    self.storage_plans[storage] = store_type
+                    storage.add_store(store_type, store_region)
+                else:
+                    # We don't need to sync the storage here as if the stores
+                    # are not empty, it measn the storage has been synced during
+                    # construct() above.
+                    # We will download the first store that is added to remote.
+                    assert all(store is not None
+                               for store in storage.stores.values()), storage
+                    self.storage_plans[storage] = list(storage.stores.keys())[0]
 
+        # The following logic converts the storage mounts with COPY mode into
+        # inline file mounts with cloud URIs, so that the _execute_file_mounts()
+        # in cloud_vm_ray_backend.py can correctly download from the specific
+        # cloud storage on the remote cluster.
+        # Note that this will cause duplicate destination paths in file_mounts,
+        # and storage_mounts, which should be fine as our to_yaml_config() will
+        # only dump the storage mount version, i.e. what user specified.
         storage_mounts = self.storage_mounts
         storage_plans = self.storage_plans
         for mnt_path, storage in storage_mounts.items():
+            assert storage.name is not None, storage
+
             if storage.mode == storage_lib.StorageMode.COPY:
                 store_type = storage_plans[storage]
                 if store_type is storage_lib.StoreType.S3:
@@ -1182,6 +1226,8 @@ class Task:
                 mount_path: storage.to_yaml_config()
                 for mount_path, storage in self.storage_mounts.items()
             })
+
+        add_if_not_none('file_mounts_mapping', self.file_mounts_mapping)
         return config
 
     def get_required_cloud_features(
