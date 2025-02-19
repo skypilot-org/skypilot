@@ -24,6 +24,7 @@ jobs:
               "commit": "HEAD",
               "branch": "master",
               "message": "Weekly Smoke Tests on (${{ matrix.cloud }})",
+              "ignore_pipeline_branch_filters": true,
               "env": {
                 "ARGS": "--${{ matrix.cloud }}"
               }
