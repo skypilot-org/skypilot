@@ -20,8 +20,8 @@ jobs:
             -X POST "$BUILDKITE_API_URL" \
             -d '{
               "commit": "HEAD",
-              "branch": "main",
-              "message": "Weekly Smoke Tests (${{ matrix.cloud }})",
+              "branch": "master",
+              "message": "Weekly Smoke Tests on (${{ matrix.cloud }})",
               "env": {
                 "ARGS": "--${{ matrix.cloud }}"
               }
