@@ -49,7 +49,7 @@ def main():
                         help='Global start index in dataset')
     parser.add_argument('--end-idx',
                         type=int,
-                        default=500000,
+                        default=109740,
                         help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,
