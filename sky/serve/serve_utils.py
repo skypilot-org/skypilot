@@ -626,7 +626,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
-                if record['dns_endpoint'] is not None:
+                if record.get('dns_endpoint', None) is not None:
                     endpoint = f'{record["dns_endpoint"]}:{lb_port}'
                     return message_utils.encode_payload(endpoint)
                 return message_utils.encode_payload(lb_port)

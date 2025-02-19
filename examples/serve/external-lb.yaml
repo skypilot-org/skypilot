@@ -18,18 +18,17 @@ service:
     - resources:
         cloud: aws
         region: us-east-2
-        # cloud: gcp
-        # region: us-east1
       load_balancing_policy: round_robin
     - resources:
         cloud: aws
         region: ap-northeast-1
-        # cloud: gcp
-        # region: asia-northeast1
       load_balancing_policy: round_robin
 
 resources:
   cloud: aws
+  any_of:
+    - region: us-east-2
+    - region: ap-northeast-1
   ports: 8080
   cpus: 2+
 

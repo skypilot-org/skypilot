@@ -766,7 +766,7 @@ def status(
     for service_record in service_records:
         service_record['endpoint'] = None
         if service_record['load_balancer_port'] is not None:
-            if service_record['dns_endpoint'] is not None:
+            if service_record.get('dns_endpoint', None) is not None:
                 dns = service_record['dns_endpoint']
                 lb_port = service_record['load_balancer_port']
                 service_record['endpoint'] = f'{dns}:{lb_port}'
