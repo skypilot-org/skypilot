@@ -17,6 +17,11 @@ on:
         description: 'SkyPilot PyPI package name'
         required: true
         type: string
+    secrets:
+      DOCKER_USERNAME:
+        required: true
+      DOCKER_PASSWORD:
+        required: true
 
 jobs:
   
