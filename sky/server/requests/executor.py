@@ -234,7 +234,7 @@ def _request_execution_wrapper(request_id: str,
 
     pid = multiprocessing.current_process().pid
     request = api_requests.get_request(request_id)
-    logger.info(f'REQD: Running request {request_id} with pid {pid}, queued duration: {time.time() - request.created_at:.2f}s')
+    logger.info(f'Executor: Running request {request_id} with pid {pid}, name: {request.name}, queued duration: {time.time() - request.created_at:.2f}s')
     with api_requests.update_request(request_id) as request_task:
         assert request_task is not None, request_id
         log_path = request_task.log_path
@@ -275,7 +275,7 @@ def _request_execution_wrapper(request_id: str,
                 if not ignore_return_value:
                     request_task.set_return_value(return_value)
             _restore_output(original_stdout, original_stderr)
-            logger.info(f'REQD: Request {request_id} finished, total duration: {time.time() - request.created_at:.2f}s')
+            logger.info(f'Executor: Request {request_id} finished, name: {request.name}, total duration: {time.time() - request.created_at:.2f}s')
 
 
 def schedule_request(request_id: str,
