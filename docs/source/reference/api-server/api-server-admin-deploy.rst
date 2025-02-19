@@ -160,7 +160,7 @@ Install the SkyPilot Helm chart with the following command:
     $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
     --create-namespace \
-    --set ingress.auth=$AUTH_STRING
+    --set ingress.authCredentials=$AUTH_STRING
 
 The ``--namespace`` flag specifies which namespace to deploy the API server in, and ``--create-namespace`` will create the namespace if it doesn't exist.
 
