@@ -33,15 +33,11 @@ def _is_running_on_jobs_controller() -> bool:
             pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text(
                 encoding='utf-8'))
         cluster_name = config.get('cluster_name', '')
-        candidate_controller_names = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.
-            candidate_cluster_names)
         # We use startswith instead of exact match because the cluster name in
         # the yaml file is cluster_name_on_cloud which may have additional
         # suffices.
-        return any(
-            cluster_name.startswith(name)
-            for name in candidate_controller_names)
+        return cluster_name.startswith(
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
     return False
 
 
@@ -91,10 +87,13 @@ JOB_TABLE_COLUMNS = [
     'Recoveries', 'Details', 'Actions'
 ]
 
+# This column is given by format_job_table but should be ignored.
+SCHED_STATE_COLUMN = 12
+
 
 def _extract_launch_history(log_content: str) -> str:
     """Extract launch history from log content.
-    
+
     Args:
         log_content: Content of the log file.
     Returns:
@@ -151,8 +150,12 @@ def home():
             status_counts[task['status'].value] += 1
 
     # Add an empty column for the dropdown button and actions column
-    rows = [[''] + row + [''] + [''] for row in rows
-           ]  # Add empty cell for failover and actions column
+    # Exclude SCHED. STATE column
+    rows = [
+        [''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
+        # Add empty cell for failover and actions column
+        [''] + [''] for row in rows
+    ]
 
     # Add log content as failover history for each job
     for row in rows:

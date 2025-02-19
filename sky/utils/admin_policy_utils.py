@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky import task as task_lib
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -55,7 +56,7 @@ def apply(
     entrypoint: Union['dag_lib.Dag', 'task_lib.Task'],
     use_mutated_config_in_current_request: bool = True,
     request_options: Optional[admin_policy.RequestOptions] = None,
-) -> Tuple['dag_lib.Dag', skypilot_config.Config]:
+) -> Tuple['dag_lib.Dag', config_utils.Config]:
     """Applies an admin policy (if registered) to a DAG or a task.
 
     It mutates a Dag by applying any registered admin policy and also

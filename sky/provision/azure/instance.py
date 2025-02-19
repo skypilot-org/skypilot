@@ -11,12 +11,11 @@ from uuid import uuid4
 
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import azure
 from sky.provision import common
 from sky.provision import constants
-from sky.provision.azure import config as config_lib
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -52,10 +51,6 @@ _RESOURCE_NETWORK_INTERFACE_TYPE = 'Microsoft.Network/networkInterfaces'
 
 _RESOURCE_GROUP_NOT_FOUND_ERROR_MESSAGE = 'ResourceGroupNotFound'
 _POLL_INTERVAL = 1
-# TODO(Doyoung): _LEGACY_NSG_NAME can be remove this after 0.8.0 to ignore
-# legacy nsg names.
-_LEGACY_NSG_NAME = 'ray-{cluster_name_on_cloud}-nsg'
-_SECOND_LEGACY_NSG_NAME = 'sky-{cluster_name_on_cloud}-nsg'
 
 
 class AzureInstanceStatus(enum.Enum):
@@ -985,32 +980,6 @@ def query_instances(
                   [(node, resource_group) for node in nodes])
 
     return statuses
-
-
-# TODO(Doyoung): _get_cluster_nsg can be remove this after 0.8.0 to ignore
-# legacy nsg names.
-def _get_cluster_nsg(network_client: Client, resource_group: str,
-                     cluster_name_on_cloud: str) -> NetworkSecurityGroup:
-    """Retrieve the NSG associated with the given name of the cluster."""
-    list_network_security_groups = _get_azure_sdk_function(
-        client=network_client.network_security_groups, function_name='list')
-    legacy_nsg_name = _LEGACY_NSG_NAME.format(
-        cluster_name_on_cloud=cluster_name_on_cloud)
-    second_legacy_nsg_name = _SECOND_LEGACY_NSG_NAME.format(
-        cluster_name_on_cloud=cluster_name_on_cloud)
-    _, nsg_name = config_lib.get_cluster_id_and_nsg_name(
-        resource_group=resource_group,
-        cluster_name_on_cloud=cluster_name_on_cloud)
-    possible_nsg_names = [nsg_name, legacy_nsg_name, second_legacy_nsg_name]
-    for nsg in list_network_security_groups(resource_group):
-        if nsg.name in possible_nsg_names:
-            return nsg
-
-    # Raise an error if no matching NSG is found
-    raise ValueError('Failed to find a matching NSG for cluster '
-                     f'{cluster_name_on_cloud!r} in resource group '
-                     f'{resource_group!r}. Expected NSG names were: '
-                     f'{possible_nsg_names}.')
 
 
 def open_ports(

@@ -1,0 +1,49 @@
+name: clip-batch-compute-vectors
+
+workdir: .
+
+resources:
+  accelerators: 
+    # ordered by pricing (cheapest to most expensive)
+    T4: 1
+    L4: 1
+    A10G: 1
+    A10: 1
+    V100: 1
+  memory: 32+
+  any_of:
+    - use_spot: true 
+    - use_spot: false
+
+num_nodes: 1
+
+file_mounts:
+  /output:
+    name: sky-demo-embedding
+    # this needs to be the same as the source in the build_vectordb.yaml
+    mode: MOUNT
+  /images:
+    name: sky-demo-image
+    # this needs to be the same as the source in the build_vectordb.yaml
+    mode: MOUNT
+
+envs:
+  # These env vars are required but should be passed in at launch time.
+  HF_TOKEN: ''
+  START_IDX: ''
+  END_IDX: ''
+
+setup: |
+  pip install numpy==1.26.4
+  pip install torch==2.5.1 torchvision==0.20.1 ftfy regex tqdm
+  pip install datasets webdataset requests Pillow open_clip_torch
+  pip install fastapi uvicorn aiohttp pandas pyarrow tenacity
+
+run: |
+  python scripts/compute_vectors.py \
+    --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
+    --start-idx ${START_IDX} \
+    --end-idx ${END_IDX} \
+    --batch-size 64 \
+    --checkpoint-size 1000 
+  echo "Processing complete. Results saved in node-specific files under /output/"

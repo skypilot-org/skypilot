@@ -4,10 +4,10 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 from sky.provision.paperspace import utils
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 # The maximum number of times to poll for the status of an operation.

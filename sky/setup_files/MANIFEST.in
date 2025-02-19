@@ -14,3 +14,4 @@ include sky/jobs/dashboard/templates/*
 include sky/jobs/dashboard/static/*
 include sky/templates/*
 include sky/utils/kubernetes/*
+include sky/server/html/*

@@ -81,10 +81,18 @@ class RayUpLineProcessor(LineProcessor):
 class SkyLocalUpLineProcessor(LineProcessor):
     """A processor for `sky local up` log lines."""
 
+    def __init__(self, log_path: str, is_local: bool):
+        self.log_path = log_path
+        self.is_local = is_local
+
     def __enter__(self):
+        # TODO(romilb): Use ux_utils.INDENT_SYMBOL to be consistent with other
+        #  messages.
+        msg = 'Creating local cluster - initializing Kubernetes'
         status = rich_utils.safe_status(
-            ux_utils.spinner_message('Creating local cluster - '
-                                     'initializing Kubernetes'))
+            ux_utils.spinner_message(msg,
+                                     log_path=self.log_path,
+                                     is_local=self.is_local))
         self.status_display = status
         self.status_display.start()
 
@@ -94,13 +102,18 @@ class SkyLocalUpLineProcessor(LineProcessor):
                         f'{colorama.Style.RESET_ALL}')
         if 'Installing NVIDIA GPU operator...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message('Creating local cluster - '
-                                         'Installing NVIDIA GPU operator'))
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'Installing NVIDIA GPU operator',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'Starting wait for GPU operator installation...' in log_line:
             self.status_display.update(
                 ux_utils.spinner_message(
                     'Creating local cluster - '
-                    'waiting for NVIDIA GPU operator installation to complete'))
+                    'waiting for NVIDIA GPU operator installation to complete',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
             logger.info('To check NVIDIA GPU operator status, '
                         'see pods: kubectl get pods -n gpu-operator')
         if 'GPU operator installed' in log_line:
@@ -110,20 +123,27 @@ class SkyLocalUpLineProcessor(LineProcessor):
             self.status_display.update(
                 ux_utils.spinner_message(
                     'Creating local cluster - '
-                    'pulling and loading SkyPilot GPU image'))
+                    'pulling and loading SkyPilot GPU image',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'SkyPilot GPU image loaded into kind cluster' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SkyPilot GPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Labelling nodes with GPUs...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message('Creating local cluster - '
-                                         'launching GPU labelling jobs'))
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'launching GPU labelling jobs',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if ('Starting wait for SkyPilot GPU labeling jobs to complete'
                 in log_line):
             self.status_display.update(
                 ux_utils.spinner_message(
                     'Creating local cluster - '
-                    'waiting for GPU labelling jobs to complete'))
+                    'waiting for GPU labelling jobs to complete',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
             logger.info(
                 'To check GPU labelling status, see jobs: '
                 'kubectl get jobs -n kube-system -l job=sky-gpu-labeler')
@@ -134,18 +154,27 @@ class SkyLocalUpLineProcessor(LineProcessor):
             self.status_display.update(
                 ux_utils.spinner_message(
                     'Creating local cluster - '
-                    'pulling and loading SkyPilot CPU image'))
+                    'pulling and loading SkyPilot CPU image',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'SkyPilot CPU image loaded into kind cluster' in log_line:
             logger.info(f'{colorama.Fore.GREEN}SkyPilot CPU image pulled.'
                         f'{colorama.Style.RESET_ALL}')
         if 'Starting installation of Nginx Ingress Controller...' in log_line:
             self.status_display.update(
-                ux_utils.spinner_message('Creating local cluster - '
-                                         'creating Nginx Ingress Controller'))
+                ux_utils.spinner_message(
+                    'Creating local cluster - '
+                    'creating Nginx Ingress Controller',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'Nginx Ingress Controller installed' in log_line:
             logger.info(
                 f'{colorama.Fore.GREEN}Nginx Ingress Controller installed.'
                 f'{colorama.Style.RESET_ALL}')
+            self.status_display.update(
+                ux_utils.spinner_message('Wrapping up local cluster setup',
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
 
     def __exit__(self, except_type: Optional[Type[BaseException]],
                  except_value: Optional[BaseException],
@@ -157,8 +186,17 @@ class SkyLocalUpLineProcessor(LineProcessor):
 class SkyRemoteUpLineProcessor(LineProcessor):
     """A processor for deploy_remote_cluster.sh log lines."""
 
+    def __init__(self, log_path: str, is_local: bool):
+        self.log_path = log_path
+        self.is_local = is_local
+
     def __enter__(self) -> None:
-        status = rich_utils.safe_status('[bold cyan]Creating remote cluster')
+        # TODO(romilb): Use ux_utils.INDENT_SYMBOL to be consistent with other
+        #  messages.
+        status = rich_utils.safe_status(
+            ux_utils.spinner_message('Creating remote cluster',
+                                     log_path=self.log_path,
+                                     is_local=self.is_local))
         self.status_display = status
         self.status_display.start()
 
@@ -170,8 +208,12 @@ class SkyRemoteUpLineProcessor(LineProcessor):
 
         # Kubernetes installation steps
         if 'Deploying Kubernetes on head node' in log_line:
-            self.status_display.update('[bold cyan]Creating remote cluster - '
-                                       'deploying Kubernetes on head node')
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Creating remote cluster - '
+                    'deploying Kubernetes on head node',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'K3s deployed on head node.' in log_line:
             logger.info(f'{colorama.Fore.GREEN}'
                         '✔ K3s successfully deployed on head node.'
@@ -179,8 +221,12 @@ class SkyRemoteUpLineProcessor(LineProcessor):
 
         # Worker nodes
         if 'Deploying Kubernetes on worker node' in log_line:
-            self.status_display.update('[bold cyan]Creating remote cluster - '
-                                       'deploying Kubernetes on worker nodes')
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Creating remote cluster - '
+                    'deploying Kubernetes on worker nodes',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'Kubernetes deployed on worker node' in log_line:
             logger.info(f'{colorama.Fore.GREEN}'
                         '✔ K3s successfully deployed on worker node.'
@@ -188,8 +234,12 @@ class SkyRemoteUpLineProcessor(LineProcessor):
 
         # Cluster configuration
         if 'Configuring local kubectl to connect to the cluster...' in log_line:
-            self.status_display.update('[bold cyan]Creating remote cluster - '
-                                       'configuring local kubectl')
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Creating remote cluster - '
+                    'configuring local kubectl',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'kubectl configured to connect to the cluster.' in log_line:
             logger.info(f'{colorama.Fore.GREEN}'
                         '✔ kubectl configured for the remote cluster.'
@@ -197,8 +247,12 @@ class SkyRemoteUpLineProcessor(LineProcessor):
 
         # GPU operator installation
         if 'Installing Nvidia GPU Operator...' in log_line:
-            self.status_display.update('[bold cyan]Creating remote cluster - '
-                                       'installing Nvidia GPU Operator')
+            self.status_display.update(
+                ux_utils.spinner_message(
+                    'Creating remote cluster - '
+                    'installing Nvidia GPU Operator',
+                    log_path=self.log_path,
+                    is_local=self.is_local))
         if 'GPU Operator installed.' in log_line:
             logger.info(f'{colorama.Fore.GREEN}'
                         '✔ Nvidia GPU Operator installed successfully.'
@@ -206,9 +260,15 @@ class SkyRemoteUpLineProcessor(LineProcessor):
 
         # Cleanup steps
         if 'Cleaning up head node' in log_line:
-            self.status_display.update('[bold cyan]Cleaning up head node')
+            self.status_display.update(
+                ux_utils.spinner_message('Cleaning up head node',
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
         if 'Cleaning up node' in log_line:
-            self.status_display.update('[bold cyan]Cleaning up worker node')
+            self.status_display.update(
+                ux_utils.spinner_message('Cleaning up worker node',
+                                         log_path=self.log_path,
+                                         is_local=self.is_local))
         if 'cleaned up successfully' in log_line:
             logger.info(f'{colorama.Fore.GREEN}'
                         f'{log_line.strip()}{colorama.Style.RESET_ALL}')
@@ -253,7 +313,8 @@ def readable_time_duration(start: Optional[float],
           e.g. "1h 2m 23s"
     """
     # start < 0 means that the starting time is not specified yet.
-    # It is only used in spot_utils.show_jobs() for job duration calculation.
+    # It is only used in jobs_utils.format_job_table() for job duration
+    # calculation.
     if start is None or start < 0:
         return '-'
     if end == start == 0:

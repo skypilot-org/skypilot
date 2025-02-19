@@ -1,0 +1,30 @@
+name: vectordb-build
+
+workdir: .
+
+file_mounts:
+  /clip_embeddings:
+    name: sky-demo-embedding
+    # this needs to be the same as the source in the compute_vectors.yaml
+    mode: MOUNT
+  
+  /vectordb:
+    name: sky-vectordb 
+    # this needs to be the same as the source in the serve_vectordb.yaml
+    mode: MOUNT
+
+  /images:
+    name: sky-demo-image
+    # this needs to be the same as the source in compute_vectors.yaml
+    mode: MOUNT
+
+setup: |
+  pip install chromadb pandas tqdm pyarrow
+
+
+run: |
+  python scripts/build_vectordb.py \
+    --collection-name clip_embeddings \
+    --persist-dir /vectordb/chroma \
+    --embeddings-dir /clip_embeddings \
+    --batch-size 1000 

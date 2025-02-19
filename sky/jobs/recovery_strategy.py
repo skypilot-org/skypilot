@@ -13,15 +13,17 @@ from typing import Optional
 import sky
 from sky import backends
 from sky import exceptions
+from sky import execution
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.jobs import scheduler
 from sky.jobs import utils as managed_job_utils
 from sky.skylet import job_lib
 from sky.usage import usage_lib
 from sky.utils import common_utils
+from sky.utils import registry
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -29,9 +31,6 @@ if typing.TYPE_CHECKING:
     from sky import task as task_lib
 
 logger = sky_logging.init_logger(__name__)
-
-RECOVERY_STRATEGIES = {}
-DEFAULT_RECOVERY_STRATEGY = None
 
 # Waiting time for job from INIT/PENDING to RUNNING
 # 10 * JOB_STARTED_STATUS_CHECK_GAP_SECONDS = 10 * 5 = 50 seconds
@@ -68,14 +67,6 @@ class StrategyExecutor:
         self.job_id = job_id
         self.restart_cnt_on_failure = 0
 
-    def __init_subclass__(cls, name: str, default: bool = False):
-        RECOVERY_STRATEGIES[name] = cls
-        if default:
-            global DEFAULT_RECOVERY_STRATEGY
-            assert DEFAULT_RECOVERY_STRATEGY is None, (
-                'Only one strategy can be default.')
-            DEFAULT_RECOVERY_STRATEGY = name
-
     @classmethod
     def make(cls, cluster_name: str, backend: 'backends.Backend',
              task: 'task_lib.Task', job_id: int) -> 'StrategyExecutor':
@@ -95,17 +86,18 @@ class StrategyExecutor:
         # original task.resources
         task.set_resources(type(task.resources)(new_resources_list))
         if isinstance(job_recovery, dict):
-            job_recovery_name = job_recovery.pop('strategy',
-                                                 DEFAULT_RECOVERY_STRATEGY)
+            job_recovery_name = job_recovery.pop(
+                'strategy', registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default)
             max_restarts_on_errors = job_recovery.pop('max_restarts_on_errors',
                                                       0)
         else:
             job_recovery_name = job_recovery
             max_restarts_on_errors = 0
-        return RECOVERY_STRATEGIES[job_recovery_name](cluster_name, backend,
-                                                      task,
-                                                      max_restarts_on_errors,
-                                                      job_id)
+        job_recovery_strategy = (registry.JOBS_RECOVERY_STRATEGY_REGISTRY.
+                                 from_str(job_recovery_name))
+        assert job_recovery_strategy is not None, job_recovery_name
+        return job_recovery_strategy(cluster_name, backend, task,
+                                     max_restarts_on_errors, job_id)
 
     def launch(self) -> float:
         """Launch the cluster for the first time.
@@ -134,6 +126,8 @@ class StrategyExecutor:
         raise NotImplementedError
 
     def _try_cancel_all_jobs(self):
+        from sky import core  # pylint: disable=import-outside-toplevel
+
         handle = global_user_state.get_handle_from_cluster_name(
             self.cluster_name)
         if handle is None:
@@ -159,9 +153,9 @@ class StrategyExecutor:
             # should be functional with the `_try_cancel_if_cluster_is_init`
             # flag, i.e. it sends the cancel signal to the head node, which will
             # then kill the user process on remaining worker nodes.
-            sky.cancel(cluster_name=self.cluster_name,
-                       all=True,
-                       _try_cancel_if_cluster_is_init=True)
+            core.cancel(cluster_name=self.cluster_name,
+                        all=True,
+                        _try_cancel_if_cluster_is_init=True)
         except Exception as e:  # pylint: disable=broad-except
             logger.info('Failed to cancel the job on the cluster. The cluster '
                         'might be already down or the head node is preempted.'
@@ -263,8 +257,8 @@ class StrategyExecutor:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when
-                all prechecks passed but the maximum number of retries is
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
                 due to:
                 1. Any of the underlying failover exceptions is due to resources
@@ -283,7 +277,7 @@ class StrategyExecutor:
                     usage_lib.messages.usage.set_internal()
                     # Detach setup, so that the setup failure can be detected
                     # by the controller process (job_status -> FAILED_SETUP).
-                    sky.launch(
+                    execution.launch(
                         self.dag,
                         cluster_name=self.cluster_name,
                         # We expect to tear down the cluster as soon as the job
@@ -291,8 +285,6 @@ class StrategyExecutor:
                         # autodown to try and avoid a resource leak.
                         idle_minutes_to_autostop=_AUTODOWN_MINUTES,
                         down=True,
-                        detach_setup=True,
-                        detach_run=True,
                         _is_launched_by_jobs_controller=True)
                     logger.info('Managed job cluster launched.')
                 except (exceptions.InvalidClusterNameError,
@@ -385,8 +377,9 @@ class StrategyExecutor:
         return True
 
 
-class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
-                               default=False):
+@registry.JOBS_RECOVERY_STRATEGY_REGISTRY.type_register(name='FAILOVER',
+                                                        default=False)
+class FailoverStrategyExecutor(StrategyExecutor):
     """Failover strategy: wait in same region and failover after timeout."""
 
     _MAX_RETRY_CNT = 240  # Retry for 4 hours.
@@ -468,9 +461,9 @@ class FailoverStrategyExecutor(StrategyExecutor, name='FAILOVER',
             return job_submitted_at
 
 
-class EagerFailoverStrategyExecutor(FailoverStrategyExecutor,
-                                    name='EAGER_NEXT_REGION',
-                                    default=True):
+@registry.JOBS_RECOVERY_STRATEGY_REGISTRY.type_register(
+    name='EAGER_NEXT_REGION', default=True)
+class EagerFailoverStrategyExecutor(FailoverStrategyExecutor):
     """Eager failover strategy.
 
     This strategy is an extension of the FAILOVER strategy. Instead of waiting

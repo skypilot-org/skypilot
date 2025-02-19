@@ -67,17 +67,20 @@ DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
     'export PATH='
     f'$(echo $PATH | sed "s|$(echo ~)/{SKY_REMOTE_PYTHON_ENV_NAME}/bin:||")')
 
+# Prefix for SkyPilot environment variables
+SKYPILOT_ENV_VAR_PREFIX = 'SKYPILOT_'
+
 # The name for the environment variable that stores the unique ID of the
 # current task. This will stay the same across multiple recoveries of the
 # same managed task.
-TASK_ID_ENV_VAR = 'SKYPILOT_TASK_ID'
+TASK_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_ID'
 # This environment variable stores a '\n'-separated list of task IDs that
 # are within the same managed job (DAG). This can be used by the user to
 # retrieve the task IDs of any tasks that are within the same managed job.
 # This environment variable is pre-assigned before any task starts
 # running within the same job, and will remain constant throughout the
 # lifetime of the job.
-TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
+TASK_ID_LIST_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}TASK_IDS'
 
 # The version of skylet. MUST bump this version whenever we need the skylet to
 # be restarted on existing clusters updated with the new version of SkyPilot,
@@ -86,7 +89,7 @@ TASK_ID_LIST_ENV_VAR = 'SKYPILOT_TASK_IDS'
 # cluster yaml is updated.
 #
 # TODO(zongheng,zhanghao): make the upgrading of skylet automatic?
-SKYLET_VERSION = '11'
+SKYLET_VERSION = '12'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
@@ -101,14 +104,16 @@ SPOT_DASHBOARD_REMOTE_PORT = 5000
 # Docker default options
 DEFAULT_DOCKER_CONTAINER_NAME = 'sky_container'
 DEFAULT_DOCKER_PORT = 10022
-DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_DOCKER_USERNAME'
-DOCKER_PASSWORD_ENV_VAR = 'SKYPILOT_DOCKER_PASSWORD'
-DOCKER_SERVER_ENV_VAR = 'SKYPILOT_DOCKER_SERVER'
+DOCKER_USERNAME_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}DOCKER_USERNAME'
+DOCKER_PASSWORD_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}DOCKER_PASSWORD'
+DOCKER_SERVER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}DOCKER_SERVER'
 DOCKER_LOGIN_ENV_VARS = {
     DOCKER_USERNAME_ENV_VAR,
     DOCKER_PASSWORD_ENV_VAR,
     DOCKER_SERVER_ENV_VAR,
 }
+
+RUNPOD_DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_RUNPOD_DOCKER_USERNAME'
 
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
@@ -254,12 +259,12 @@ RAY_SKYPILOT_INSTALLATION_COMMANDS = (
 # is mainly used to make sure sky commands runs on a VM launched by SkyPilot
 # will be recognized as the same user (e.g., jobs controller or sky serve
 # controller).
-USER_ID_ENV_VAR = 'SKYPILOT_USER_ID'
+USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 
 # The name for the environment variable that stores SkyPilot user name.
 # Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
 # runs on a VM launched by SkyPilot will be recognized as the same user.
-USER_ENV_VAR = 'SKYPILOT_USER'
+USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
@@ -271,6 +276,11 @@ CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'
 FILE_MOUNTS_BUCKET_NAME = 'skypilot-filemounts-{username}-{user_hash}-{id}'
 FILE_MOUNTS_LOCAL_TMP_DIR = 'skypilot-filemounts-files-{id}'
 FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
+# For API server, the use a temporary directory in the same path as the upload
+# directory to avoid using a different block device, which may not allow hard
+# linking. E.g., in our API server deployment on k8s, ~/.sky/ is mounted from a
+# persistent volume, so any contents in ~/.sky/ cannot be hard linked elsewhere.
+FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
@@ -278,7 +288,13 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
-# The default idle timeout for SkyPilot controllers. This include spot
+# Used when an managed jobs are created and
+# files are synced up to the cloud.
+FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
+FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
+FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
+
+# The default idle timeout for SkyPilot controllers. This include jobs
 # controller and sky serve controller.
 # TODO(tian): Refactor to controller_utils. Current blocker: circular import.
 CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
@@ -291,12 +307,20 @@ CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
 # Serve: A default controller with 4 vCPU and 16 GB memory can run up to 16
 # services.
 CONTROLLER_PROCESS_CPU_DEMAND = 0.25
+# The log for SkyPilot API server.
+API_SERVER_LOGS = '~/.sky/api_server/server.log'
+# The lock for creating the SkyPilot API server.
+API_SERVER_CREATION_LOCK_PATH = '~/.sky/api_server/.creation.lock'
+
+# The name for the environment variable that stores the URL of the SkyPilot
+# API server.
+SKY_API_SERVER_URL_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}API_SERVER_ENDPOINT'
 
 # SkyPilot environment variables
-SKYPILOT_NUM_NODES = 'SKYPILOT_NUM_NODES'
-SKYPILOT_NODE_IPS = 'SKYPILOT_NODE_IPS'
-SKYPILOT_NUM_GPUS_PER_NODE = 'SKYPILOT_NUM_GPUS_PER_NODE'
-SKYPILOT_NODE_RANK = 'SKYPILOT_NODE_RANK'
+SKYPILOT_NUM_NODES = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_NODES'
+SKYPILOT_NODE_IPS = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_IPS'
+SKYPILOT_NUM_GPUS_PER_NODE = f'{SKYPILOT_ENV_VAR_PREFIX}NUM_GPUS_PER_NODE'
+SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.
@@ -304,13 +328,18 @@ SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
-OVERRIDEABLE_CONFIG_KEYS: List[Tuple[str, ...]] = [
+OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),
     ('nvidia_gpus', 'disable_ecc'),
     ('kubernetes', 'pod_config'),
     ('kubernetes', 'provision_timeout'),
     ('gcp', 'managed_instance_group'),
 ]
+# When overriding the SkyPilot configs on the API server with the client one,
+# we skip the following keys because they are meant to be client-side configs.
+SKIPPED_CLIENT_OVERRIDE_KEYS: List[Tuple[str, ...]] = [('admin_policy',),
+                                                       ('api_server',),
+                                                       ('allowed_clouds',)]
 
 # Constants for Azure blob storage
 WAIT_FOR_STORAGE_ACCOUNT_CREATION = 60
@@ -320,3 +349,10 @@ RETRY_INTERVAL_AFTER_ROLE_ASSIGNMENT = 10
 ROLE_ASSIGNMENT_FAILURE_ERROR_MSG = (
     'Failed to assign Storage Blob Data Owner role to the '
     'storage account {storage_account_name}.')
+
+# The placeholder for the local skypilot config path in file mounts for
+# controllers.
+LOCAL_SKYPILOT_CONFIG_PATH_PLACEHOLDER = 'skypilot:local_skypilot_config_path'
+
+# Path to the generated cluster config yamls and ssh configs.
+SKY_USER_FILE_PATH = '~/.sky/generated'
