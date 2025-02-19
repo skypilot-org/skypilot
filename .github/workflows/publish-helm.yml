@@ -33,6 +33,8 @@ on:
     secrets:
       DOCKER_USERNAME:
         required: true
+      HELM_DEPLOY_KEY:
+        required: true
   workflow_dispatch:
     inputs:
       version:
@@ -51,6 +53,8 @@ on:
     secrets:
       DOCKER_USERNAME:
         required: true
+      HELM_DEPLOY_KEY:
+        required: true
 
 jobs:
   publish-helm:
@@ -63,13 +67,25 @@ jobs:
         with:
           path: 'src'
           fetch-depth: 0
-      - name: Checkout
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.HELM_DEPLOY_KEY }}" > ~/.ssh/deploy_key
+          chmod 600 ~/.ssh/deploy_key
+          cat >> ~/.ssh/config << EOF
+          Host github.com
+            IdentityFile ~/.ssh/deploy_key
+            StrictHostKeyChecking no
+          EOF
+
+      - name: Checkout Helm Repository
         uses: actions/checkout@v3
         with:
           path: 'dest'
-          ref: 'helm/repo'
+          repository: 'skypilot-org/skypilot-helm'
+          ssh-key: ${{ secrets.HELM_DEPLOY_KEY }}
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Helm
         uses: azure/setup-helm@v4
@@ -114,4 +130,4 @@ jobs:
           # Show what's being committed for debugging
           git status
           git commit -m "${{ inputs.commit_message || format('Updated from ref: {0}', github.sha) }}"
-          git push origin helm/repo
+          git push origin main

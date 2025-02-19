@@ -146,6 +146,9 @@ Step 3: Deploy the API Server Helm Chart
 
 Install the SkyPilot Helm chart with the following command:
 
+..
+   TODO: We should add a tab for stable release and a tab for nightly release once we have a stable release with API server.
+
 .. code-block:: console
 
     $ helm repo add skypilot https://helm.skypilot.co
