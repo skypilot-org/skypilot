@@ -53,6 +53,7 @@ CLOUD="aws"
 # Function to activate a given environment
 activate_env() {
   local env_name="$1"
+  local restart_api_server="${2:-1}"
   local env_dir
   local absolute_dir
 
@@ -73,8 +74,12 @@ activate_env() {
   esac
 
   # Argument validation
-  if [ "$#" -ne 1 ]; then
-    echo "Usage: activate_env <environment (base or current)>"
+  if [ "$#" -ne 2 ]; then
+    echo "Usage: activate_env <environment (base or current)> <restart_api_server (0 or 1)>"
+    exit 1
+  fi
+  if ! [[ "$restart_api_server" =~ ^[01]$ ]]; then
+    echo "Invalid restart_api_server value: '$restart_api_server'. Must be 0 or 1."
     exit 1
   fi
 
@@ -92,6 +97,15 @@ activate_env() {
     echo "Failed to change directory to $absolute_dir"
     exit 1
   }
+
+  # API operations: Restart the API if restart_api_server is 1
+  if [ "$restart_api_server" -eq 1 ]; then
+    sky api stop || true  # Stop, ignoring errors if it's not running
+    if ! sky api start; then
+      echo "Failed to start sky API"
+      exit 1
+    fi
+  fi
 }
 
 deactivate_env() {
@@ -121,21 +135,21 @@ if ! gcloud --version; then
   source ~/google-cloud-sdk/path.bash.inc
 fi
 
-activate_env "base"
+activate_env "base" 0
 git pull origin ${base_branch}
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate_env
 
-activate_env "current"
+activate_env "current" 0
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate_env
 
 cleanup_resources() {
-  activate_current_env
+  activate_env "current"
   sky down ${CLUSTER_NAME}* -y || true
   sky jobs cancel -n ${MANAGED_JOB_JOB_NAME}* -y || true
   sky serve down ${CLUSTER_NAME}-* -y || true
@@ -149,7 +163,6 @@ trap cleanup_resources EXIT
 # exec + launch
 if [ "$start_from" -le 1 ]; then
 activate_env "base"
-which sky
 # Job 1
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME} examples/minimal.yaml
 sky autostop -i 10 -y ${CLUSTER_NAME}
