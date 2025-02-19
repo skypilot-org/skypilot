@@ -1333,6 +1333,8 @@ class KubernetesInstanceType:
             # valid logical instance type name.
             assert self.accelerator_type is not None, self.accelerator_count
             acc_name = self.accelerator_type.replace(' ', '_')
+            # Use double underscores to separate accelerator count and type
+            # to avoid confusion for the number-only accelerator type.
             name += f'--{self.accelerator_count}__{acc_name}'
         return name
 
