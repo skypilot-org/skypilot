@@ -3,9 +3,11 @@ import os
 import pytest
 
 from sky.server.requests import executor
+from sky.skylet.constants import API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR
+from sky.skylet.constants import API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR
 
 
-def test_parallel_size_blocking():
+def test_parallel_size_long():
     # Test with insufficient memory
     cpu_count = 4
     mem_size_gb = 0
@@ -28,21 +30,21 @@ def test_parallel_size_blocking():
                                                     mem_size_gb) == expected
 
     # Test with environment variable override
-    os.environ['SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS'] = '3'
+    os.environ[API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR] = '3'
     executor._max_parallel_size_for_blocking.cache_clear()
     assert executor._max_parallel_size_for_blocking(cpu_count, mem_size_gb) == 3
-    del os.environ['SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS']
+    del os.environ[API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR]
     executor._max_parallel_size_for_blocking.cache_clear()
 
     # Test with invalid environment variable
-    os.environ['SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS'] = 'invalid'
+    os.environ[API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR] = 'invalid'
     executor._max_parallel_size_for_blocking.cache_clear()
     assert executor._max_parallel_size_for_blocking(cpu_count, mem_size_gb) == 1
 
-    del os.environ['SKYPILOT_MAX_PARALLEL_BLOCKING_REQUESTS']
+    del os.environ[API_SERVER_LONG_REQ_PARALLELISM_ENV_VAR]
 
 
-def test_parallel_size_non_blocking():
+def test_parallel_size_short():
     # Test with insufficient memory
     blocking_size = 1
     mem_size_gb = 0
@@ -65,16 +67,16 @@ def test_parallel_size_non_blocking():
         mem_size_gb, blocking_size) == expected
 
     # Test with environment variable override
-    os.environ['SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS'] = '10'
+    os.environ[API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR] = '10'
     executor._max_parallel_size_for_non_blocking.cache_clear()
     assert executor._max_parallel_size_for_non_blocking(mem_size_gb,
                                                         blocking_size) == 10
-    del os.environ['SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS']
+    del os.environ[API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR]
     executor._max_parallel_size_for_non_blocking.cache_clear()
 
     # Test with invalid environment variable
-    os.environ['SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS'] = 'invalid'
+    os.environ[API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR] = 'invalid'
     executor._max_parallel_size_for_non_blocking.cache_clear()
     assert executor._max_parallel_size_for_non_blocking(mem_size_gb,
                                                         blocking_size) == 2
-    del os.environ['SKYPILOT_MAX_PARALLEL_NONBLOCKING_REQUESTS']
+    del os.environ[API_SERVER_SHORT_REQ_PARALLELISM_ENV_VAR]
