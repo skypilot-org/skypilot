@@ -47,4 +47,4 @@ Average CPU: 11.5%
 Average Memory: 63.1%
 ==================================================
 ```
-5. Update the `_PER_BLOCKING_REQUEST_MEM_GB` and `_PER_NON_BLOCKING_REQUEST_MEM_GB` constants in `sky/server/requests/executor.py` based on the peak memory usage of the blocking and non-blocking workers.
+5. Update the `_LONG_WORKER_MEM_GB` and `_SHORT_WORKER_MEM_GB` constants in `sky/server/requests/executor.py` based on the peak memory usage of the blocking and non-blocking workers.
