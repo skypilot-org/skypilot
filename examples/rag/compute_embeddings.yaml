@@ -6,9 +6,11 @@ resources:
   accelerators: 
     L4: 1
     # A10G: 1
-    V100: 1
+    # V100: 1
   memory: 32+
-  use_spot: true
+  any_of:
+    - use_spot: true
+    - use_spot: false
   
 file_mounts:
   /output:
@@ -38,7 +40,7 @@ run: |
   python -m vllm.entrypoints.openai.api_server \
     --host 0.0.0.0 \
     --model /tmp/model \
-    --max-model-len 4096 \
+    --max-model-len 3072 \
     --task embed &
 
   # Wait for vLLM to be ready by checking the health endpoint
