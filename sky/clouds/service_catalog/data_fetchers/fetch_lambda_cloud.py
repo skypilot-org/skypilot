@@ -26,6 +26,7 @@ REGIONS = [
     'europe-south-1',
     'asia-northeast-1',
     'asia-northeast-2',
+    'australia-east-1',
     'us-east-1',
     'us-east-2',
     'us-east-3',

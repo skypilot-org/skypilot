@@ -251,6 +251,7 @@ class Resources:
         self._set_accelerators(accelerators, accelerator_args)
 
     def validate(self):
+        """Validate the resources and infer the missing fields if possible."""
         self._try_canonicalize_accelerators()
         self._try_validate_and_set_region_zone()
         self._try_validate_instance_type()
@@ -1267,17 +1268,17 @@ class Resources:
     def is_empty(self) -> bool:
         """Is this Resources an empty request (all fields None)?"""
         return all([
-            self.cloud is None,
+            self._cloud is None,
             self._instance_type is None,
             self._cpus is None,
-            self.memory is None,
-            self.accelerators is None,
-            self.accelerator_args is None,
+            self._memory is None,
+            self._accelerators is None,
+            self._accelerator_args is None,
             not self._use_spot_specified,
-            self.disk_size == _DEFAULT_DISK_SIZE_GB,
-            self.disk_tier is None,
+            self._disk_size == _DEFAULT_DISK_SIZE_GB,
+            self._disk_tier is None,
             self._image_id is None,
-            self.ports is None,
+            self._ports is None,
             self._docker_login_config is None,
         ])
 
