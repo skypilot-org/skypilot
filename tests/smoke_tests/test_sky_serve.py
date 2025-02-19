@@ -71,6 +71,8 @@ _AWK_ALL_LINES_BELOW_REPLICAS = r'/Replicas/{flag=1; next} flag'
 _SERVICE_LAUNCHING_STATUS_REGEX = 'PROVISIONING\|STARTING'
 
 _SHOW_SERVE_STATUS = (
+    'echo "+ sky serve status {name}"; '
+    'sky serve status {name}; '
     'echo "+ sky serve logs --controller {name} --no-follow"; '
     'sky serve logs --controller {name} --no-follow; '
     'echo "+ sky serve logs --load-balancer {name} --no-follow"; '
