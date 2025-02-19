@@ -1,5 +1,4 @@
 """SkyServe core APIs."""
-import os
 import re
 import signal
 import tempfile
