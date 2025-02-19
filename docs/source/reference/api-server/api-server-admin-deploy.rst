@@ -165,7 +165,7 @@ The ``--namespace`` flag specifies which namespace to deploy the API server in, 
 
 To install a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
 
-If you are using AWS credentials configured in the previous step, you can enable them by adding ``--set awsCredentials.enabled=true`` to the command.
+If you configured any cloud credentials in the previous step, make sure to enable them by adding the relevant flags (e.g., ``--set awsCredentials.enabled=true``) to the command.
 
 .. tip::
 
