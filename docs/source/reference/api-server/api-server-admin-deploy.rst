@@ -147,6 +147,7 @@ Step 3: Deploy the API Server Helm Chart
 Install the SkyPilot Helm chart with the following command:
 
 ..
+   Note that helm requires --devel flag to use any version marked with pre-release flags (e.g., 1.0.0-dev.YYYYMMDD in our versioning).
    TODO: We should add a tab for stable release and a tab for nightly release once we have a stable release with API server.
 
 .. code-block:: console
@@ -189,7 +190,8 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ NODE_PORT=$(kubectl get svc nginx-ingress-controller-np -n skypilot -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
+            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
+            $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np -n $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
             $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
             $ echo $ENDPOINT
@@ -226,7 +228,8 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ ENDPOINT=$(kubectl get svc skypilot-ingress-nginx-controller -n skypilot -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
+            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
+            $ ENDPOINT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
             $ echo $ENDPOINT
             http://1.1.1.1
 
