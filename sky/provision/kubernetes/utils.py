@@ -1333,9 +1333,9 @@ class KubernetesInstanceType:
             # valid logical instance type name.
             assert self.accelerator_type is not None, self.accelerator_count
             acc_name = self.accelerator_type.replace(' ', '_')
-            # Use double underscores to separate accelerator count and type
+            # Use `:` to separate accelerator count and type
             # to avoid confusion for the number-only accelerator type.
-            name += f'--{self.accelerator_count}__{acc_name}'
+            name += f'--{self.accelerator_count}:{acc_name}'
         return name
 
     @staticmethod
@@ -1356,7 +1356,7 @@ class KubernetesInstanceType:
             accelerator_type | str: Type of accelerator
         """
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+)__(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+):(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
         )
         match = pattern.match(name)
         if match:
@@ -1402,7 +1402,7 @@ class KubernetesInstanceType:
         # Round up accelerator_count if it is not an int.
         accelerator_count = math.ceil(accelerator_count)
         if accelerator_count > 0:
-            name += f'--{accelerator_count}__{accelerator_type}'
+            name += f'--{accelerator_count}:{accelerator_type}'
         return cls(cpus=cpus,
                    memory=memory,
                    accelerator_count=accelerator_count,
