@@ -1419,13 +1419,16 @@ def _handle_jobs_queue_request(
         try:
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the jobs.
-            controller_type = controller_utils.Controllers.JOBS_CONTROLLER
+            # Since we are client-side, we may not know the exact name of the
+            # controller, so use the prefix with a wildcard.
             # Query status of the controller cluster.
             records = sdk.get(
-                sdk.status(cluster_names=[controller_type.value.cluster_name]))
+                sdk.status(cluster_names=[common.JOB_CONTROLLER_PREFIX + '*'],
+                           all_users=True))
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
-                msg = controller_type.value.default_hint_if_non_existent
+                controller = controller_utils.Controllers.JOBS_CONTROLLER.value
+                msg = controller.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
@@ -1491,13 +1494,18 @@ def _handle_services_request(
             # Check the controller status again, as the RuntimeError is likely
             # due to the controller being autostopped when querying the
             # services.
-            controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+            # Since we are client-side, we may not know the exact name of the
+            # controller, so use the prefix with a wildcard.
             # Query status of the controller cluster.
             records = sdk.get(
-                sdk.status(cluster_names=[controller_type.value.cluster_name]))
+                sdk.status(
+                    cluster_names=[common.SKY_SERVE_CONTROLLER_PREFIX + '*'],
+                    all_users=True))
             if (not records or
                     records[0]['status'] == status_lib.ClusterStatus.STOPPED):
-                msg = controller_type.value.default_hint_if_non_existent
+                controller = (
+                    controller_utils.Controllers.SKY_SERVE_CONTROLLER.value)
+                msg = controller.default_hint_if_non_existent
         except Exception:  # pylint: disable=broad-except
             # This is to an best effort to find the latest controller status to
             # print more helpful message, so we can ignore any exception to
