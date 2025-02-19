@@ -153,15 +153,15 @@ def launch(
 
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
-        os.environ[skylet_constants.USER_ID_ENV_VAR] = utils_common.SERVER_ID
-        return execution.launch(task=controller_task,
-                                cluster_name=controller_name,
-                                stream_logs=stream_logs,
-                                idle_minutes_to_autostop=skylet_constants.
-                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                                retry_until_up=True,
-                                fast=True,
-                                _disable_controller_check=True)
+        with utils_common.with_server_user_hash():
+            return execution.launch(task=controller_task,
+                                    cluster_name=controller_name,
+                                    stream_logs=stream_logs,
+                                    idle_minutes_to_autostop=skylet_constants.
+                                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                    retry_until_up=True,
+                                    fast=True,
+                                    _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(

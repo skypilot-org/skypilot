@@ -1,7 +1,11 @@
 """Common enumerators and classes."""
 
+import contextlib
 import enum
+import os
+from typing import Generator
 
+from sky.skylet import constants
 from sky.utils import common_utils
 
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
@@ -18,6 +22,17 @@ JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 SERVER_ID = common_utils.get_user_hash()
 SKY_SERVE_CONTROLLER_NAME: str = f'{SKY_SERVE_CONTROLLER_PREFIX}{SERVER_ID}'
 JOB_CONTROLLER_NAME: str = f'{JOB_CONTROLLER_PREFIX}{SERVER_ID}'
+
+
+@contextlib.contextmanager
+def with_server_user_hash() -> Generator[None, None, None]:
+    """Temporarily set the user hash to common.SERVER_ID."""
+    old_user_hash = common_utils.get_user_hash()
+    os.environ[constants.USER_ID_ENV_VAR] = SERVER_ID
+    try:
+        yield
+    finally:
+        os.environ[constants.USER_ID_ENV_VAR] = old_user_hash
 
 
 class StatusRefreshMode(enum.Enum):
