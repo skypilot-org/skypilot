@@ -63,7 +63,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly \
+            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
             --set kubernetesCredentials.useKubeconfig=true \
             --set kubernetesCredentials.useApiServerCluster=true
 
@@ -107,7 +107,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --set awsCredentials.enabled=true
+            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
     
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -127,7 +127,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly \
+            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
             --set gcpCredentials.enabled=true \
             --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
@@ -156,7 +156,7 @@ Install the SkyPilot Helm chart with the following command:
     $ WEB_USERNAME=skypilot
     $ WEB_PASSWORD=yourpassword
     $ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly \
+    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
     --namespace $NAMESPACE \
     --create-namespace \
     --set ingress.auth=$AUTH_STRING
@@ -217,7 +217,7 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly \
+            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
             --set ingress.httpNodePort=null \
             --set ingress.httpsNodePort=null \
             --set ingress-nginx.controller.service.type=LoadBalancer
@@ -305,7 +305,7 @@ Apply the configuration using:
 
 .. code-block:: console
 
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly -f values.yaml
+    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
 
 Additional setup for EKS
@@ -356,7 +356,7 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
     EOF
 
     # Install the API server with the config file
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly \
+    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
     --set-file apiService.config=config.yaml
 
 You can also directly set config values in the ``values.yaml`` file.
@@ -383,7 +383,7 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
 .. code-block:: console
 
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly -f values.yaml
+    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
 
 .. _sky-api-server-cloud-deploy:
