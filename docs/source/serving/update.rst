@@ -270,6 +270,3 @@ Eventually, same as the rolling update, we will only have new replicas ready to 
     http-server   3   2        3.93.241.163   3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
     http-server   4   2        18.206.226.82  3 mins ago  1x AWS(vCPU=4)  READY   us-east-1
     http-server   5   2        3.26.232.31    1 min ago   1x AWS(vCPU=4)  READY   us-east-1
-
-
-
