@@ -21,10 +21,11 @@ from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
-from sky.provision import common
+from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -149,14 +150,18 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        return execution.launch(task=controller_task,
-                                cluster_name=controller_name,
-                                stream_logs=stream_logs,
-                                idle_minutes_to_autostop=skylet_constants.
-                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                                retry_until_up=True,
-                                fast=True,
-                                _disable_controller_check=True)
+
+        # Launch with the api server's user hash, so that sky status does not
+        # show the owner of the controller as whatever user launched it first.
+        with common.with_server_user_hash():
+            return execution.launch(task=controller_task,
+                                    cluster_name=controller_name,
+                                    stream_logs=stream_logs,
+                                    idle_minutes_to_autostop=skylet_constants.
+                                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                    retry_until_up=True,
+                                    fast=True,
+                                    _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -194,16 +199,16 @@ def queue_from_kubernetes_pod(
     provider_config = {'context': context}
     instances = {
         pod_name: [
-            common.InstanceInfo(instance_id=pod_name,
-                                internal_ip='',
-                                external_ip='',
-                                tags={})
+            provision_common.InstanceInfo(instance_id=pod_name,
+                                          internal_ip='',
+                                          external_ip='',
+                                          tags={})
         ]
     }  # Internal IP is not required for Kubernetes
-    cluster_info = common.ClusterInfo(provider_name='kubernetes',
-                                      head_instance_id=pod_name,
-                                      provider_config=provider_config,
-                                      instances=instances)
+    cluster_info = provision_common.ClusterInfo(provider_name='kubernetes',
+                                                head_instance_id=pod_name,
+                                                provider_config=provider_config,
+                                                instances=instances)
     managed_jobs_runner = provision_lib.get_command_runners(
         'kubernetes', cluster_info)[0]
 
