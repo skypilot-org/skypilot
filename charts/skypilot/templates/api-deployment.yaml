@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ .Release.Name }}-api-server
-  namespace: {{ .Release.namespace }}
+  namespace: {{ .Release.Namespace }}
 spec:
   # Note: replicas > 1 is not well tested, and requires a PVC that supports ReadWriteMany.
   replicas: {{ .Values.apiService.replicas }}
