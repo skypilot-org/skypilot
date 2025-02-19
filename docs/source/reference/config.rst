@@ -128,7 +128,7 @@ Configure the SkyPilot API server.
 .. _config-yaml-api-server-endpoint:
 
 ``api_server.endpoint``
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~
 
 Endpoint of the SkyPilot API server (optional).
 
