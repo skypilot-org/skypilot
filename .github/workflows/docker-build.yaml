@@ -37,10 +37,14 @@ jobs:
         id: version
         run: |
           # Fetch package info from PyPI
+          echo "Fetching package info for ${{ inputs.package_name }}"
           PACKAGE_INFO=$(curl -s https://pypi.org/pypi/${{ inputs.package_name }}/json)
+          echo "PyPI response: $PACKAGE_INFO"
           # Parse JSON and get the latest version
           LATEST_VERSION=$(echo $PACKAGE_INFO | jq -r '.info.version')
+          echo "Latest version found: $LATEST_VERSION"
           echo "latest_version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          cat $GITHUB_OUTPUT
 
       - name: Update Dockerfile version
         run: |
