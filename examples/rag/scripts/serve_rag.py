@@ -77,7 +77,7 @@ def encode_query(query: str) -> np.ndarray:
 
 
 def query_collection(query_embedding: np.ndarray,
-                     n_results: int = 3) -> List[SearchResult]:
+                     n_results: int = 10) -> List[SearchResult]:
     """Query the collection and return top matches."""
     global collection
 
@@ -109,22 +109,31 @@ def query_collection(query_embedding: np.ndarray,
 
 def generate_prompt(query: str, context_docs: List[SearchResult]) -> str:
     """Generate prompt for DeepSeek R1."""
+    # Format context with clear document boundaries
     context = "\n\n".join([
-        f"Source: {doc.source}\nContent: {doc.content}" for doc in context_docs
+        f"[Document {i+1} begin]\nSource: {doc.source}\nContent: {doc.content}\n[Document {i+1} end]"
+        for i, doc in enumerate(context_docs)
     ])
 
-    return f"""You are a helpful AI assistant that answers questions about legal documents from the Pile of Law dataset.
-Below is some relevant context from the dataset that may or may not be relevant to the question, followed by a question.
-If you cannot find the answer in the context, say so - do not make up information. Some of them may be random reddit posts,
-so don't be too strict about the legal format.
+    return f"""# The following contents are search results from legal documents and related discussions:
+{context}
+
+You are a helpful AI assistant analyzing legal documents and related content. When responding, please follow these guidelines:
+- In the search results provided, each document is formatted as [Document X begin]...[Document X end], where X represents the numerical index of each document.
+- Cite your documents using [citation:X] format where X is the document number, placing citations immediately after the relevant information.
+- Include citations throughout your response, not just at the end.
+- If information comes from multiple documents, use multiple citations like [citation:1][citation:2].
+- Not all search results may be relevant - evaluate and use only pertinent information.
+- Structure longer responses into clear paragraphs or sections for readability.
+- If you cannot find the answer in the provided documents, say so - do not make up information.
+- Some documents may be informal discussions or reddit posts - adjust your interpretation accordingly.
+- Put citation as much as possible in your response.
 
 First, explain your thinking process between <think> tags.
 Then provide your final answer after the thinking process.
 
-Context:
-{context}
-
-Question: {query}
+# Question:
+{query}
 
 Let's approach this step by step:"""
 
@@ -210,7 +219,7 @@ async def get_search_page():
     return """
     <html>
         <head>
-            <title>Legal Document RAG System</title>
+            <title>SkyPilot Legal RAG System</title>
             <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 body { 
@@ -332,17 +341,40 @@ async def get_search_page():
                     font-size: 0.9rem;
                     margin-top: 0.5rem;
                 }
+                /* Add new styles for citations */
+                .citation {
+                    color: #3498db;
+                    cursor: pointer;
+                    text-decoration: underline;
+                }
+                .citation:hover {
+                    color: #2980b9;
+                }
+                .highlighted-source {
+                    animation: highlight 2s;
+                }
+                @keyframes highlight {
+                    0% { background-color: #fff3cd; }
+                    100% { background-color: #f8f9fa; }
+                }
+                .disclaimer {
+                    color: #666;
+                    font-size: 1rem;
+                    margin-bottom: 2rem;
+                    font-style: italic;
+                }
             </style>
         </head>
         <body>
             <div class="container">
                 <div class="search-container">
-                    <h1>Legal Document RAG System</h1>
+                    <h1>SkyPilot Legal RAG System</h1>
                     <div class="search-box">
                         <input type="text" id="searchInput" placeholder="Ask a question about legal documents..."
                             onkeypress="if(event.key === 'Enter') search()">
                         <button onclick="search()">Ask</button>
                     </div>
+                    <!-- <p class="disclaimer">This website is just a demonstration that SkyPilot can streamline the RAG generation with cheaper and faster processing. This does not and would not give any legal advice.</p> -->
                 </div>
                 <div id="loading">Processing your question...</div>
                 <div id="results" class="results-container"></div>
@@ -356,6 +388,31 @@ async def get_search_page():
                     .replace(/>/g, "&gt;")
                     .replace(/"/g, "&quot;")
                     .replace(/'/g, "&#039;");
+            }
+
+            function highlightSource(docNumber) {
+                // Remove previous highlights
+                document.querySelectorAll('.highlighted-source').forEach(el => {
+                    el.classList.remove('highlighted-source');
+                });
+                
+                // Add highlight to clicked source
+                const sourceElement = document.querySelector(`[data-doc-number="${docNumber}"]`);
+                if (sourceElement) {
+                    sourceElement.classList.add('highlighted-source');
+                    sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+            }
+
+            function processCitations(text) {
+                // Handle both [citation:X] and Document X formats
+                return text
+                    .replace(/\[citation:(\d+)\]/g, (match, docNumber) => {
+                        return `<span class="citation" onclick="highlightSource(${docNumber})">[${docNumber}]</span>`;
+                    })
+                    .replace(/Document (\d+)/g, (match, docNumber) => {
+                        return `<span class="citation" onclick="highlightSource(${docNumber})">Document ${docNumber}</span>`;
+                    });
             }
 
             async function search() {
@@ -377,7 +434,7 @@ async def get_search_page():
                         },
                         body: JSON.stringify({
                             query: searchInput.value.trim(),
-                            n_results: 3,
+                            n_results: 10,
                             temperature: 0.7
                         })
                     });
@@ -389,27 +446,27 @@ async def get_search_page():
                     
                     const result = await response.json();
                     
-                    // Display final answer first
+                    // Update the answer HTML to process citations
                     const answerHtml = `
                         <div class="result-section">
                             <h2 class="section-title">Final Answer</h2>
-                            <div class="final-answer">${escapeHtml(result.answer)}</div>
+                            <div class="final-answer">${processCitations(escapeHtml(result.answer)).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>
                         </div>
                     `;
                     
-                    // Display thinking process second
+                    // Update the thinking process HTML to process citations
                     const thinkingHtml = `
                         <div class="result-section">
                             <h2 class="section-title">Thinking Process</h2>
-                            <div class="thinking-process">${escapeHtml(result.thinking_process)}</div>
+                            <div class="thinking-process">${processCitations(escapeHtml(result.thinking_process))}</div>
                         </div>
                     `;
                     
-                    // Display source documents last
+                    // Update source documents HTML to include data attributes
                     let sourcesHtml = '<div class="result-section"><h2 class="section-title">Source Documents</h2>';
-                    result.sources.forEach(source => {
+                    result.sources.forEach((source, index) => {
                         sourcesHtml += `
-                            <div class="source-document">
+                            <div class="source-document" data-doc-number="${index + 1}">
                                 <div class="source-header">Source: ${escapeHtml(source.source)}</div>
                                 <div class="source-url">URL: ${escapeHtml(source.name)}</div>
                                 <div>${escapeHtml(source.content)}</div>
@@ -447,7 +504,7 @@ def main():
                         help='Host to serve on')
     parser.add_argument('--port',
                         type=int,
-                        default=8001,
+                        default=8000,
                         help='Port to serve on')
     parser.add_argument(
         '--collection-name',
