@@ -53,7 +53,6 @@ CLOUD="aws"
 # Function to activate a given environment
 activate_env() {
   local env_name="$1"
-  local restart_api_server="$2"
   local env_dir
   local absolute_dir
 
@@ -97,52 +96,14 @@ activate_env() {
     echo "Failed to change directory to $absolute_dir"
     exit 1
   }
-
-  # API operations: Restart the API if restart_api_server is 1
-  if [ "$restart_api_server" -eq 1 ]; then
-    sky api stop || true  # Stop, ignoring errors if it's not running
-    if ! sky api start; then
-      echo "Failed to start sky API"
-      exit 1
-    fi
-  fi
 }
 
 deactivate_env() {
   set +vx  # Temporarily disable verbose tracing
+  sky api stop || true  # Stop, ignoring errors if it's not running
   deactivate
   set -vx  # Re-enable verbose tracing
 }
-
-# Function to activate the base environment and change directory
-activate_base_env() {
-  activate_env "base" "${1:-1}"
-}
-
-# Function to activate the current environment and return to the initial directory
-activate_current_env() {
-  activate_env "current" "${1:-1}"
-}
-
-wait_until_cluster_up() {
-  local cluster_name=$1
-  for i in {1..30}; do
-    # Could still be in INIT state, waiting until UP
-    status_output=$(sky status ${cluster_name})
-    echo "${status_output}" | grep UP && break
-    sleep 10
-    echo "Waiting for cluster ${cluster_name} to be UP"
-  done
-
-  status_output=$(sky status ${cluster_name})
-  echo "${status_output}" | grep UP || {
-    echo "Cluster ${cluster_name} failed to reach UP status"
-    echo "${status_output}"
-    exit 1
-  }
-}
-
-
 
 git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLUTE_BASE_VERSION_DIR || true
 ~/.local/bin/uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh
@@ -164,14 +125,14 @@ if ! gcloud --version; then
   source ~/google-cloud-sdk/path.bash.inc
 fi
 
-activate_base_env 0
+activate_env "base"
 git pull origin ${base_branch}
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate_env
 
-activate_current_env 0
+activate_env "current"
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
@@ -191,7 +152,7 @@ trap cleanup_resources EXIT
 
 # exec + launch
 if [ "$start_from" -le 1 ]; then
-activate_base_env
+activate_env "base"
 which sky
 # Job 1
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME} examples/minimal.yaml
@@ -200,7 +161,7 @@ sky autostop -i 10 -y ${CLUSTER_NAME}
 sky exec -d --cloud ${CLOUD} --num-nodes 2 ${CLUSTER_NAME} sleep 100
 deactivate_env
 
-activate_current_env
+activate_env "current"
 # The original cluster should exist in the status output
 sky status ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
 sky status -r ${CLUSTER_NAME} | grep ${CLUSTER_NAME} | grep UP
@@ -227,13 +188,12 @@ fi
 
 # sky stop + sky start + sky exec
 if [ "$start_from" -le 2 ]; then
-activate_base_env
+activate_env "base"
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-2 examples/minimal.yaml
 deactivate_env
-activate_current_env
+activate_env "current"
 sky stop -y ${CLUSTER_NAME}-2
 sky start -y ${CLUSTER_NAME}-2
-wait_until_cluster_up ${CLUSTER_NAME}-2
 s=$(sky exec --cloud ${CLOUD} -d ${CLUSTER_NAME}-2 examples/minimal.yaml)
 echo "$s"
 echo "$s" | sed -r "s/\x1B\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2" || exit 1
@@ -242,10 +202,10 @@ fi
 
 # `sky autostop` + `sky status -r`
 if [ "$start_from" -le 3 ]; then
-activate_base_env
+activate_env "base"
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-3 examples/minimal.yaml
 deactivate_env
-activate_current_env
+activate_env "current"
 sky autostop -y -i0 ${CLUSTER_NAME}-3
 sleep 120
 sky status -r ${CLUSTER_NAME}-3 | grep STOPPED || exit 1
@@ -255,11 +215,11 @@ fi
 
 # (1 node) sky launch --cloud ${CLOUD} + sky exec + sky queue + sky logs
 if [ "$start_from" -le 4 ]; then
-activate_base_env
+activate_env "base"
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-4
 deactivate_env
-activate_current_env
+activate_env "current"
 sky launch --cloud ${CLOUD} -y --num-nodes 2 -c ${CLUSTER_NAME}-4 examples/minimal.yaml
 sky queue ${CLUSTER_NAME}-4
 sky logs ${CLUSTER_NAME}-4 1 --status
@@ -271,13 +231,12 @@ fi
 
 # (1 node) sky start + sky exec + sky queue + sky logs
 if [ "$start_from" -le 5 ]; then
-activate_base_env
+activate_env "base"
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-5 examples/minimal.yaml
 sky stop -y ${CLUSTER_NAME}-5
 deactivate_env
-activate_current_env
+activate_env "current"
 sky start -y ${CLUSTER_NAME}-5
-wait_until_cluster_up ${CLUSTER_NAME}-5
 sky queue ${CLUSTER_NAME}-5
 sky logs ${CLUSTER_NAME}-5 1 --status
 sky logs ${CLUSTER_NAME}-5 1
@@ -290,13 +249,12 @@ fi
 
 # (2 nodes) sky launch --cloud ${CLOUD} + sky exec + sky queue + sky logs
 if [ "$start_from" -le 6 ]; then
-activate_base_env
+activate_env "base"
 sky launch --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -c ${CLUSTER_NAME}-6 examples/multi_hostname.yaml
 sky stop -y ${CLUSTER_NAME}-6
 deactivate_env
-activate_current_env
+activate_env "current"
 sky start -y ${CLUSTER_NAME}-6
-wait_until_cluster_up ${CLUSTER_NAME}-6
 sky queue ${CLUSTER_NAME}-6
 sky logs ${CLUSTER_NAME}-6 1 --status
 sky logs ${CLUSTER_NAME}-6 1
@@ -308,11 +266,11 @@ deactivate_env
 fi
 
 if [ "$start_from" -le 7 ]; then
-activate_base_env
+activate_env "base"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
 deactivate_env
-activate_current_env
+activate_env "current"
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7 | grep "RUNNING" | wc -l)
 s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
 echo "$s"
@@ -335,12 +293,12 @@ fi
 
 # sky serve
 if [ "$start_from" -le 8 ]; then
-activate_base_env
+activate_env "base"
 sky serve up --cloud ${CLOUD} -y --cpus 2 -y -n ${CLUSTER_NAME}-8-0 examples/serve/http_server/task.yaml
 sky serve status ${CLUSTER_NAME}-8-0
 deactivate_env
 
-activate_current_env
+activate_env "current"
 sky serve status
 sky serve logs ${CLUSTER_NAME}-8-0 2 --no-follow
 sky serve logs --controller ${CLUSTER_NAME}-8-0  --no-follow

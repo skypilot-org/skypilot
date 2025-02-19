@@ -33,7 +33,6 @@ import shutil
 import subprocess
 import sys
 import textwrap
-import time
 import traceback
 import typing
 from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
@@ -109,33 +108,6 @@ _STATUS_PROPERTY_CLUSTER_NUM_ERROR_MESSAGE = (
 _DAG_NOT_SUPPORTED_MESSAGE = ('YAML specifies a DAG which is only supported by '
                               '`sky jobs launch`. `{command}` supports a '
                               'single task only.')
-
-
-def _wait_until_cluster_status_not_init(cluster_name: str,
-                                        timeout_s: float = 30) -> None:
-    """Waits until a cluster is found and no longer in INIT state.
-
-    Polls the cluster status until it is found and no longer in INIT state or
-    timeout occurs.
-
-    Args:
-        cluster_name: Name of the cluster to check status for.
-        timeout_s: Maximum time to wait in seconds before timing out.
-
-    Raises:
-        sky.exceptions.ClusterNotUpError: If cluster is not found or remains in
-            INIT state after timeout_s seconds.
-    """
-    start_time = time.time()
-    records: List[Dict[str, Any]] = []
-    while (not records or
-           records[0]['status'] == status_lib.ClusterStatus.INIT):
-        if time.time() - start_time > timeout_s:
-            raise sky.exceptions.ClusterNotUpError(
-                f'Cluster {cluster_name} not found or remained in INIT state '
-                f'after {timeout_s} seconds')
-        records = sdk.get(sdk.status(cluster_names=[cluster_name]))
-        time.sleep(1)
 
 
 def _get_cluster_records_and_set_ssh_config(
@@ -1252,9 +1224,6 @@ def launch(
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
         if not detach_run and job_id is not None:
-            # The cluster could be in INIT state which cause tail_logs raise
-            # sky.exceptions.ClusterNotUpError
-            _wait_until_cluster_status_not_init(handle.get_cluster_name())
             sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
