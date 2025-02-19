@@ -81,8 +81,8 @@ multiprocessing.set_start_method('spawn', force=True)
 # TODO(aylei): maintaining these constants is error-prone, we may need to
 # automatically tune parallelism at runtime according to system usage stats
 # in the future.
-_LONG_WORKER_MEM_GB = 0.4
-_SHORT_WORKER_MEM_GB = 0.25
+_LONG_WORKER_MEM_GB = 0.25
+_SHORT_WORKER_MEM_GB = 0.15
 # To control the number of long workers.
 _CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
 # Limit the number of long workers of local API server, since local server is
