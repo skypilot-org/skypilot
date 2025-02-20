@@ -3,9 +3,7 @@
 SkyPilot YAML
 =============
 
-SkyPilot provides an intuitive YAML interface to specify clusters, jobs, or
-services (resource requirements, setup commands, run commands, file mounts,
-storage mounts, and so on).
+SkyPilot provides an intuitive YAML interface to specify clusters, jobs, or services (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
 YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (e.g., :meth:`sky.Task.from_yaml`).
 
@@ -13,7 +11,9 @@ YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (e.g., :met
 Syntax
 ------
 
-Below is the configuration syntax and some example values. See detailed explanations under each field.
+Below is the configuration syntax and some example values.
+
+See detailed explanations under each field.
 
 .. parsed-literal::
 
@@ -88,6 +88,7 @@ Properties
 
 Task name (optional), used for display purposes.
 
+
 .. _yaml-spec-workdir:
 
 ``workdir``
@@ -101,6 +102,7 @@ If a relative path is used, it's evaluated relative to the location from which `
 
 To exclude files from syncing, see https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
 
+
 .. _yaml-spec-num-nodes:
 
 ``num_nodes``
@@ -110,12 +112,14 @@ Number of nodes (optional; defaults to 1) to launch including the head node.
 
 A task can set this to a smaller value than the size of a cluster.
 
+
 .. _yaml-spec-resources:
 
 ``resources``
 ~~~~~~~~~~~~~
 
 Per-node resource requirements (optional).
+
 
 .. _yaml-spec-resources-cloud:
 
@@ -124,19 +128,26 @@ Per-node resource requirements (optional).
 
 The cloud to use (optional).
 
+
 .. _yaml-spec-resources-region:
 
 ``resources.region``
 ~~~~~~~~~~~~~~~~~~~~
 
-The region to use (optional). Auto-failover will be disabled if this is specified.
+The region to use (optional).
+
+Auto-failover will be disabled if this is specified.
+
 
 .. _yaml-spec-resources-zone:
 
 ``resources.zone``
 ~~~~~~~~~~~~~~~~~~
 
-The zone to use (optional). Auto-failover will be disabled if this is specified.
+The zone to use (optional).
+
+Auto-failover will be disabled if this is specified.
+
 
 .. _yaml-spec-resources-accelerators:
 
@@ -167,6 +178,7 @@ The following three ways are valid for specifying accelerators for a cluster:
 
   Example: ``{'L4:1', 'H100:1', 'A100:1'}``
 
+
 .. _yaml-spec-resources-cpus:
 
 ``resources.cpus``
@@ -180,6 +192,7 @@ Format:
 - ``<count>+``: at least ``<count>`` vCPUs
 
 Example: ``4+`` means first try to find an instance type with >= 4 vCPUs. If not found, use the next cheapest instance with more than 4 vCPUs.
+
 
 .. _yaml-spec-resources-memory:
 
@@ -195,12 +208,16 @@ Format:
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
+
 .. _yaml-spec-resources-instance-type:
 
 ``resources.instance_type``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Instance type to use (optional). If ``accelerators`` is specified, the corresponding instance type is automatically inferred.
+Instance type to use (optional).
+
+If ``accelerators`` is specified, the corresponding instance type is automatically inferred.
+
 
 .. _yaml-spec-resources-use-spot:
 
@@ -210,6 +227,7 @@ Instance type to use (optional). If ``accelerators`` is specified, the correspon
 Whether the cluster should use spot instances (optional).
 
 If unspecified, defaults to ``false`` (on-demand instances).
+
 
 .. _yaml-spec-resources-job-recovery:
 
@@ -234,12 +252,16 @@ Example:
     strategy: EAGER_NEXT_REGION
     max_restarts_on_errors: 3
 
+
 .. _yaml-spec-resources-disk-size:
 
 ``resources.disk_size``
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Disk size in GB to allocate for OS (mounted at ``/``). Increase this if you have a large working directory or tasks that write out large outputs.
+Disk size in GB to allocate for OS (mounted at ``/``).
+
+Increase this if you have a large working directory or tasks that write out large outputs.
+
 
 .. _yaml-spec-resources-disk-tier:
 
@@ -260,6 +282,7 @@ Rough performance estimate:
 
 Measured by ``examples/perf/storage_rawperf.yaml``
 
+
 .. _yaml-spec-resources-ports:
 
 ``resources.ports``
@@ -267,7 +290,9 @@ Measured by ``examples/perf/storage_rawperf.yaml``
 
 Ports to expose (optional).
 
-All ports specified here will be exposed to the public Internet. Under the hood, a firewall rule / inbound rule is automatically added to allow inbound traffic to these ports. Applies to all VMs of a cluster created with this field set.
+All ports specified here will be exposed to the public Internet. Under the hood, a firewall rule / inbound rule is automatically added to allow inbound traffic to these ports.
+
+Applies to all VMs of a cluster created with this field set.
 
 Currently only TCP protocol is supported.
 
@@ -286,6 +311,7 @@ Could be an integer, a range, or a list of integers and ranges:
     ports:
       - 8080
       - 10022-10040
+
 
 .. _yaml-spec-resources-accelerator-args:
 
@@ -323,11 +349,14 @@ Example:
   # tpu_name: mytpu
   # tpu_vm: True  # True to use TPU VM (the default); False to use TPU node.
 
+
 .. _yaml-spec-resources-image-id:
 
 ``resources.image_id``
 ~~~~~~~~~~~~~~~~~~~~~~
-Custom image id (optional, advanced). The image id used to boot the instances. Only supported for AWS, GCP, OCI and IBM (for non-docker image).
+Custom image id (optional, advanced).
+
+The image id used to boot the instances. Only supported for AWS, GCP, OCI and IBM (for non-docker image).
 
 If not specified, SkyPilot will use the default debian-based image suitable for machine learning tasks.
 
@@ -427,6 +456,7 @@ https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-
 To use a more limited but easier to manage tool:
 https://github.com/IBM/vpc-img-inst
 
+
 .. _yaml-spec-resources-labels:
 
 ``resources.labels``
@@ -434,7 +464,9 @@ https://github.com/IBM/vpc-img-inst
 Labels to apply to the instances (optional).
 
 If specified, these labels will be applied to the VMs or pods created by SkyPilot.
+
 These are useful for assigning metadata that may be used by external tools.
+
 Implementation differs by cloud provider:
 
 - AWS: Labels are mapped to instance tags
@@ -451,11 +483,14 @@ Example:
     labels:
       my-label: my-value
 
+
 .. _yaml-spec-resources-any-of:
 
 ``resources.any_of``
 ~~~~~~~~~~~~~~~~~~~~
-Candidate resources (optional). If specified, SkyPilot will only use these candidate resources to launch the cluster.
+Candidate resources (optional).
+
+If specified, SkyPilot will only use these candidate resources to launch the cluster.
 
 The fields specified outside of ``any_of``, ``ordered`` will be used as the default values for all candidate resources, and any duplicate fields specified inside ``any_of``, ``ordered`` will override the default values.
 
@@ -475,12 +510,15 @@ Example:
     - cloud: gcp
       accelerators: H100
 
+
 .. _yaml-spec-envs:
 
 ``envs``
 ~~~~~~~~
 
-Environment variables (optional). These values can be accessed in the ``file_mounts``, ``setup``, and ``run`` sections below.
+Environment variables (optional).
+
+These values can be accessed in the ``file_mounts``, ``setup``, and ``run`` sections below.
 
 Values set here can be overridden by a CLI flag: ``sky launch/exec --env ENV=val`` (if ``ENV`` is present).
 
@@ -504,6 +542,7 @@ You could also specify any of them through the CLI flag if you don't want to sto
   sky launch --env SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1).
 
 For more information about docker support in SkyPilot, please refer to the ``image_id`` section above.
+
 
 .. _yaml-spec-file-mounts:
 
@@ -549,6 +588,7 @@ Example:
       name: ${MY_BUCKET}  # Name of the bucket.
       mode: MOUNT
 
+
 .. _yaml-spec-setup:
 
 ``setup``
@@ -575,6 +615,7 @@ The ``|`` separator indicates a multiline string.
     pip install -r requirements.txt
     echo "Setup complete."
 
+
 .. _yaml-spec-run:
 
 ``run``
@@ -592,6 +633,7 @@ Example:
 
     # Demoing env var usage.
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
 
 .. _task-yaml-experimental:
 
@@ -666,88 +708,152 @@ Properties
 ``service.readiness_probe``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Readiness probe configuration (required). Used by SkyServe to check if your service replicas are ready for accepting traffic. If the readiness probe returns a 200, SkyServe will start routing traffic to that replica. Can be defined as a path string (for GET requests with defaults) or a detailed dictionary.
+Readiness probe configuration (required).
+
+Used by SkyServe to check if your service replicas are ready for accepting traffic.
+
+If the readiness probe returns a 200, SkyServe will start routing traffic to that replica.
+
+Can be defined as a path string (for GET requests with defaults) or a detailed dictionary.
+
 
 .. _yaml-spec-service-readiness-probe-path:
 
 ``service.readiness_probe.path``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Endpoint path for readiness checks (required). Path to probe. SkyServe sends periodic requests to this path after the initial delay.
+Endpoint path for readiness checks (required).
+
+Path to probe. SkyServe sends periodic requests to this path after the initial delay.
+
 
 .. _yaml-spec-service-readiness-probe-post-data:
 
 ``service.readiness_probe.post_data``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-POST request payload (optional). If this is specified, the readiness probe will use POST instead of GET, and the post data will be sent as the request body.
+POST request payload (optional).
+
+If this is specified, the readiness probe will use POST instead of GET, and the post data will be sent as the request body.
+
 
 .. _yaml-spec-service-readiness-probe-initial-delay-seconds:
 
 ``service.readiness_probe.initial_delay_seconds``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Grace period before initiating health checks (default: 1200). Initial delay in seconds. Any readiness probe failures during this period will be ignored. This is highly related to your service, so it is recommended to set this value based on your service's startup time.
+Grace period before initiating health checks (default: 1200).
+
+Initial delay in seconds. Any readiness probe failures during this period will be ignored.
+
+This is highly related to your service, so it is recommended to set this value based on your service's startup time.
+
 
 .. _yaml-spec-service-readiness-probe-timeout-seconds:
 
 ``service.readiness_probe.timeout_seconds``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Maximum wait time per probe request (default: 15). The Timeout in seconds for a readiness probe request. If the readiness probe takes longer than this time to respond, the probe will be considered as failed. This is useful when your service is slow to respond to readiness probe requests. Note, having a too high timeout will delay the detection of a real failure of your service replica.
+Maximum wait time per probe request (default: 15).
+
+The Timeout in seconds for a readiness probe request.
+
+If the readiness probe takes longer than this time to respond, the probe will be considered as failed.
+
+This is useful when your service is slow to respond to readiness probe requests.
+
+Note, having a too high timeout will delay the detection of a real failure of your service replica.
+
 
 .. _yaml-spec-service-replica-policy:
 
 ``service.replica_policy``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Autoscaling configuration for service replicas (one of replica_policy or replicas is required). Describes how SkyServe autoscales your service based on the QPS (queries per second) of your service.
+Autoscaling configuration for service replicas (one of replica_policy or replicas is required).
+
+Describes how SkyServe autoscales your service based on the QPS (queries per second) of your service.
+
 
 .. _yaml-spec-service-replica-policy-min-replicas:
 
 ``service.replica_policy.min_replicas``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Minimum number of active replicas (required). Service never scales below this count.
+Minimum number of active replicas (required).
+
+Service never scales below this count.
+
 
 .. _yaml-spec-service-replica-policy-max-replicas:
 
 ``service.replica_policy.max_replicas``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Maximum allowed replicas (optional). If not specified, SkyServe will use a fixed number of replicas (the same as min_replicas) and ignore any QPS threshold specified below.
+Maximum allowed replicas (optional).
+
+If not specified, SkyServe will use a fixed number of replicas (the same as min_replicas) and ignore any QPS threshold specified below.
+
 
 .. _yaml-spec-service-replica-policy-target-qps-per-replica:
 
 ``service.replica_policy.target_qps_per_replica``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Target queries per second per replica (optional). SkyServe will scale your service so that, ultimately, each replica manages approximately target_qps_per_replica queries per second. **Autoscaling will only be enabled if this value is specified.**
+Target queries per second per replica (optional).
+
+SkyServe will scale your service so that, ultimately, each replica manages approximately target_qps_per_replica queries per second.
+
+**Autoscaling will only be enabled if this value is specified.**
+
 
 .. _yaml-spec-service-replica-policy-upscale-delay-seconds:
 
 ``service.replica_policy.upscale_delay_seconds``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Stabilization period before adding replicas (default: 300). Upscale delay in seconds. To avoid aggressive autoscaling, SkyServe will only upscale your service if the QPS of your service is higher than the target QPS for a period of time. This period of time is controlled by upscale_delay_seconds. The default values should work in most cases. If you want to scale your service more aggressively, you can set these values to a smaller number.
+Stabilization period before adding replicas (default: 300).
+
+Upscale delay in seconds. To avoid aggressive autoscaling, SkyServe will only upscale your service if the QPS of your service is higher than the target QPS for a period of time.
+
+This period of time is controlled by upscale_delay_seconds.
+
+The default values should work in most cases. If you want to scale your service more aggressively, you can set these values to a smaller number.
+
 
 .. _yaml-spec-service-replica-policy-downscale-delay-seconds:
 
 ``service.replica_policy.downscale_delay_seconds``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Cooldown period before removing replicas (default: 1200). Downscale delay in seconds. To avoid aggressive autoscaling, SkyServe will only downscale your service if the QPS of your service is lower than the target QPS for a period of time. This period of time is controlled by downscale_delay_seconds. The default values should work in most cases. If you want to scale your service more aggressively, you can set these values to a smaller number.
+Cooldown period before removing replicas (default: 1200).
+
+Downscale delay in seconds. To avoid aggressive autoscaling, SkyServe will only downscale your service if the QPS of your service is lower than the target QPS for a period of time.
+
+This period of time is controlled by downscale_delay_seconds.
+
+The default values should work in most cases. If you want to scale your service more aggressively, you can set these values to a smaller number.
+
 
 .. _yaml-spec-service-replicas:
 
 ``service.replicas``
 ~~~~~~~~~~~~~~~~~~~~
 
-Fixed replica count alternative to autoscaling. Simplified version of replica policy that uses a fixed number of replicas.
+Fixed replica count alternative to autoscaling.
+
+Simplified version of replica policy that uses a fixed number of replicas.
+
 
 .. _yaml-spec-service-resources-ports:
 
 ``resources.ports``
 ~~~~~~~~~~~~~~~~~~~
 
-Required exposed port for service traffic. Port to run your service on each replica. This port will be automatically exposed to the public internet by SkyServe. SkyServe automatically configures public access and load balancing for this port.
+Required exposed port for service traffic.
+
+Port to run your service on each replica.
+
+This port will be automatically exposed to the public internet by SkyServe.
+
+SkyServe automatically configures public access and load balancing for this port.
