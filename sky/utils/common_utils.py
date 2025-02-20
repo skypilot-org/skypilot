@@ -18,6 +18,7 @@ import uuid
 
 import jinja2
 import jsonschema
+import psutil
 import yaml
 
 from sky import exceptions
@@ -755,3 +756,40 @@ def is_port_available(port: int, reuse_addr: bool = True) -> bool:
             return True
         except OSError:
             return False
+
+
+# TODO(aylei): should be aware of cgroups
+def get_cpu_count() -> int:
+    """Get the number of CPUs.
+
+    If the API server is deployed as a pod in k8s cluster, we assume the
+    number of CPUs is provided by the downward API.
+    """
+    cpu_count = os.getenv('SKYPILOT_POD_CPU_CORE_LIMIT')
+    if cpu_count is not None:
+        try:
+            return int(float(cpu_count))
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the number of CPUs from {cpu_count}'
+                ) from e
+    return psutil.cpu_count()
+
+
+# TODO(aylei): should be aware of cgroups
+def get_mem_size_gb() -> float:
+    """Get the memory size in GB.
+
+    If the API server is deployed as a pod in k8s cluster, we assume the
+    memory size is provided by the downward API.
+    """
+    mem_size = os.getenv('SKYPILOT_POD_MEMORY_GB_LIMIT')
+    if mem_size is not None:
+        try:
+            return float(mem_size)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the memory size from {mem_size}') from e
+    return psutil.virtual_memory().total / (1024**3)

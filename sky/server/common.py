@@ -15,7 +15,6 @@ import uuid
 
 import colorama
 import filelock
-import psutil
 import pydantic
 import requests
 
@@ -148,13 +147,14 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
+def start_api_server_in_background(deploy: bool = False,
+                                   host: str = '127.0.0.1'):
     if not is_api_server_local():
         raise RuntimeError(
             f'Cannot start API server: {get_server_url()} is not a local URL')
 
     # Check available memory before starting the server.
-    avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
+    avail_mem_size_gb: float = common_utils.get_mem_size_gb()
     if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
         logger.warning(
             f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only has '
@@ -165,8 +165,6 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    # The command to run uvicorn. Adjust the app:app to your application's
-    # location.
     api_server_cmd = API_SERVER_CMD
     if deploy:
         api_server_cmd += ' --deploy'
@@ -174,7 +172,7 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
         api_server_cmd += f' --host {host}'
     cmd = f'{api_server_cmd} > {log_path} 2>&1'
 
-    # Start the uvicorn process in the background and don't wait for it.
+    # Start the API server process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
     # that SIGINT on the CLI will not also kill the API server.
     subprocess.Popen(cmd, shell=True, start_new_session=True)
@@ -234,7 +232,7 @@ def _start_api_server(deploy: bool = False, host: str = '127.0.0.1'):
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        start_uvicorn_in_background(deploy=deploy, host=host)
+        start_api_server_in_background(deploy=deploy, host=host)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
