@@ -168,7 +168,7 @@ CONDA_INSTALLATION_COMMANDS = (
     # with python -m venv.
     # --python 3.10 will ensure the specific python version is downloaded and
     # installed in the venv. SkyPilot requires Python<3.12, and using 3.10 is
-    # preferrable.
+    # preferable.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
