@@ -1,3 +1,4 @@
+{{- if .Values.ingress.enabled }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -10,6 +11,9 @@ metadata:
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-body-size: "1000m"
+    {{- if ne .Values.ingress.path "/" }}
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    {{- end }}
     nginx.ingress.kubernetes.io/server-snippets: |
       location / {
         proxy_set_header Upgrade $http_upgrade;
@@ -27,19 +31,16 @@ spec:
   rules:
   - http:
       paths:
-      - pathType: Prefix
-        path: "/"
+      {{- /* TODO(aylei): check whether this works for ingress-controllers other than nginx */}}
+      - pathType: {{ if eq .Values.ingress.path "/" }}Prefix{{ else }}ImplementationSpecific{{ end }}
+        path: {{ .Values.ingress.path }}{{ if ne .Values.ingress.path "/" }}(/|$)(.*){{ end }}
         backend:
           service:
             name: {{ .Release.Name }}-api-service
             port:
               number: 80
----
-# GKE load balancer used for ingress does not work with websocket connections
-# (required for our k8s SSH tunneling), so we create a NodePort service that
-# exposes the ingress controller.
-# NOTE: If httpNodePort is not set, Kubernetes will assign random ports in the 
-# NodePort range (default 30000-32767).
+{{- end }}
+{{- if and .Values.ingress.nodePort.enable .Values.ingress.nginx.enabled }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -64,3 +65,4 @@ spec:
     app.kubernetes.io/component: controller
     app.kubernetes.io/instance: skypilot
     app.kubernetes.io/name: ingress-nginx
+{{- end}}
