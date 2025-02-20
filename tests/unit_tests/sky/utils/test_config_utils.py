@@ -390,3 +390,51 @@ def test_merge_k8s_configs_list_deduplication():
     assert base_config['allowed_contexts'] == [
         'context1', 'context2', 'context3', 'context4', 'context5'
     ]
+
+    # Test deduplication when list items are dictionaries
+    base_config = {
+        'volumes': [{
+            'name': 'vol1',
+            'persistentVolumeClaim': {
+                'claimName': 'pvc1'
+            }
+        }, {
+            'name': 'vol2', 
+            'persistentVolumeClaim': {
+                'claimName': 'pvc2'
+            }
+        }]
+    }
+    override_config = {
+        'volumes': [{
+            'name': 'vol2',
+            'persistentVolumeClaim': {
+                'claimName': 'pvc2-new'
+            }
+        }, {
+            'name': 'vol3',
+            'persistentVolumeClaim': {
+                'claimName': 'pvc3'
+            }
+        }]
+    }
+
+    config_utils.merge_k8s_configs(base_config, override_config)
+    
+    # Should merge vol2 and append vol3
+    assert base_config['volumes'] == [{
+        'name': 'vol1',
+        'persistentVolumeClaim': {
+            'claimName': 'pvc1'
+        }
+    }, {
+        'name': 'vol2',
+        'persistentVolumeClaim': {
+            'claimName': 'pvc2-new'
+        }
+    }, {
+        'name': 'vol3',
+        'persistentVolumeClaim': {
+            'claimName': 'pvc3'
+        }
+    }]
