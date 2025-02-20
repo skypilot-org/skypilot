@@ -196,19 +196,3 @@ To restart the local API server, run any SkyPilot command.
     $ # Stop the local API server
     $ sky api stop
     $ # Any subsequent SkyPilot command will restart the local API server.
-
-Shared SkyServe controller
-^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-The SkyPilot API server will share the same SkyServe controller for all users.
-
-.. code-block:: console
-
-    $ # Show SkyServe serices from all users.
-    $ sky serve status
-
-
-.. toctree::
-   :hidden:
-
-   Deploying API Server <api-server-admin-deploy>
