@@ -1339,7 +1339,8 @@ class KubernetesInstanceType:
     @staticmethod
     def is_valid_instance_type(name: str) -> bool:
         """Returns whether the given name is a valid instance type."""
-        pattern = re.compile(r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--[\w\d-]+:\d+)?$')
+        pattern = re.compile(
+            r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--[\w\d-]+:\d+)?$')
         return bool(pattern.match(name))
 
     @classmethod
@@ -1355,7 +1356,7 @@ class KubernetesInstanceType:
         """
         pattern = re.compile(
             r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
-)
+        )
         match = pattern.match(name)
         if match:
             cpus = float(match.group('cpus'))
