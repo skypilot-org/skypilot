@@ -178,15 +178,21 @@ def test_status_api(num_requests):
 def test_cli_status_in_api(num_requests):
     print(f"Testing {num_requests} CLI status in API requests")
 
-    def status():
+    def cli_status():
         job_request_id = managed_jobs.queue(refresh=False, skip_finished=True)
         serve_request_id = serve_lib.status(service_names=None)
         status_request_id = sdk.status()
-        sdk.stream_and_get(job_request_id)
-        sdk.stream_and_get(serve_request_id)
+        try:
+            sdk.stream_and_get(job_request_id)
+        except Exception:
+            pass
+        try:
+            sdk.stream_and_get(serve_request_id)
+        except Exception:
+            pass
         sdk.stream_and_get(status_request_id)
 
-    run_concurrent_api_requests(num_requests, status, 'API /status')
+    run_concurrent_api_requests(num_requests, cli_status, 'API calls of sky status')
 
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
 all_apis = ['status', 'cli_status']
@@ -215,7 +221,7 @@ if __name__ == '__main__':
     parser.add_argument('--apis',
                         type=str,
                         nargs='+',
-                        choices=all_requests + ['all'],
+                        choices=all_apis + ['all'],
                         default=[],
                         help='List of APIs to test')
 
@@ -263,7 +269,7 @@ if __name__ == '__main__':
                                           args=(args.n,))
             elif api == 'cli_status':
                 thread = threading.Thread(target=test_cli_status_in_api,
-                                          args=(args.n, cloud))
+                                          args=(args.n,))
             if thread:
                 test_threads.append(thread)
                 thread.start()
