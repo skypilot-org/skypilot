@@ -176,7 +176,12 @@ def test_status_api(num_requests):
     run_concurrent_api_requests(num_requests, status, 'API /status')
 
 
-# Naive simlutaion of API requests made by `sky status` command
+# Naive simlutaion of API requests made by `sky status` command. We can't
+# directly test with CLIs as the client can be congested by 100 parallel module
+# loading, which is not critical as multiple users will call the CLI from
+# different machines.
+# TODO(aylei): once we fixed the module loading issue for our CLI, we should
+# revert this to actual CLI calls.
 def test_cli_status_in_api(num_requests):
     print(f"Testing {num_requests} CLI status in API requests")
 
