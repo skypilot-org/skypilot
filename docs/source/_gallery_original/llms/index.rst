@@ -1,0 +1,29 @@
+LLM Serving
+============
+
+.. toctree::
+   :maxdepth: 1
+
+   vLLM <../frameworks/vllm>
+   SGLang <../frameworks/sglang>
+   Ollama <../frameworks/ollama>
+   Hugging Face TGI <../frameworks/tgi>
+   LoRAX <../frameworks/lorax>
+
+   DeepSeek-R1 <deepseek-r1>
+   DeepSeek-R1 Distilled <deepseek-r1-distilled>
+   DeepSeek-Janus <deepseek-janus>
+   Llama 3.2 <llama-3_2>
+   Llama 3.1 <llama-3_1>
+   Llama 3 <llama-3>
+   Llama 2 <llama-2>
+   CodeLlama <codellama>
+   Pixtral <pixtral>
+   Mixtral <mixtral>
+   Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot/>
+   Qwen 2.5 <qwen>
+   Yi <yi>
+   Gemma <gemma>
+   DBRX <dbrx>
+   GPT-2 via llm.c <gpt-2>
+   Vicuna <vicuna>

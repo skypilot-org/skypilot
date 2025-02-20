@@ -77,39 +77,6 @@ Learn more
 
 To learn more, see :ref:`Concept: Sky Computing <sky-computing>` and `SkyPilot blog <https://blog.skypilot.co/>`_.
 
-Runnable examples:
-
-.. Keep this section in sync with README.md in SkyPilot repo
-
-* :ref:`AI Gallery <ai-gallery>`
-
-* **LLMs on SkyPilot**
-
-  * `DeepSeek-R1 <https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-r1>`_
-  * `DeepSeek-Janus <https://github.com/skypilot-org/skypilot/tree/master/llm/deepseek-janus>`_
-  * `Llama 3.2: lightweight and vision models <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_2>`_
-  * `Pixtral <https://github.com/skypilot-org/skypilot/tree/master/llm/pixtral>`_
-  * `Llama 3.1 finetuning <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1-finetuning>`_ and `serving <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3_1>`_
-  * `GPT-2 via llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`_
-  * `Llama 3 <https://github.com/skypilot-org/skypilot/tree/master/llm/llama-3>`_
-  * `Qwen <https://github.com/skypilot-org/skypilot/tree/master/llm/qwen>`_
-  * `Gemma <https://github.com/skypilot-org/skypilot/tree/master/llm/gemma>`_
-  * `Mixtral 8x7B <https://github.com/skypilot-org/skypilot/tree/master/llm/mixtral>`_; `Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot>`_ (from official Mistral team)
-  * `Code Llama <https://github.com/skypilot-org/skypilot/tree/master/llm/codellama/>`_
-  * `vLLM: Serving LLM 24x Faster On the Cloud <https://github.com/skypilot-org/skypilot/tree/master/llm/vllm>`_ (from official vLLM team)
-  * `SGLang: Fast and Expressive LLM Serving On the Cloud <https://github.com/skypilot-org/skypilot/tree/master//llm/sglang/>`_ (from official SGLang team)
-  * `Vicuna chatbots: Training & Serving <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_ (from official Vicuna team)
-  * `Train your own Vicuna on Llama-2 <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna-llama-2>`_
-  * `Ollama: Quantized LLMs on CPUs <https://github.com/skypilot-org/skypilot/tree/master/llm/ollama>`_
-  * `LoRAX <https://github.com/skypilot-org/skypilot/tree/master/llm/lorax/>`_
-  * `QLoRA <https://github.com/artidoro/qlora/pull/132>`_
-  * `LLaMA-LoRA-Tuner <https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot>`_
-  * `Tabby: Self-hosted AI coding assistant <https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml>`_
-  * `LocalGPT <https://github.com/skypilot-org/skypilot/tree/master/llm/localgpt>`_
-  * Add yours here & see more in `llm/ <https://github.com/skypilot-org/skypilot/tree/master/llm>`_!
-
-* Framework examples: `Vector Database <https://github.com/skypilot-org/skypilot/tree/master/examples/vector_database>`_, `PyTorch DDP <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml>`_, `DeepSpeed <https://github.com/skypilot-org/skypilot/blob/master/examples/deepspeed-multinode/sky.yaml>`_, `JAX/Flax on TPU <https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml>`_, `Stable Diffusion <https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion>`_, `Detectron2 <https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml>`_, `Distributed <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py>`_ `TensorFlow <https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml>`_, `NeMo <https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/nemo_gpt_train.yaml>`_, `programmatic grid search <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py>`_, `Docker <https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml>`_, `Cog <https://github.com/skypilot-org/skypilot/blob/master/examples/cog/>`_, `Unsloth <https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml>`_, `Ollama <https://github.com/skypilot-org/skypilot/blob/master/llm/ollama>`_, `llm.c <https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2>`__, `Airflow <https://github.com/skypilot-org/skypilot/blob/master/examples/airflow/training_workflow>`_ and `many more <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
-
 Case Studies and Integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
 
 Tutorials: `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_
@@ -127,7 +94,6 @@ Read the research:
 * `Sky Computing vision paper <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ (HotOS 2021)
 
 
-
 .. toctree::
    :hidden:
    :maxdepth: 1
@@ -136,7 +102,7 @@ Read the research:
    ../overview
    ../getting-started/installation
    ../getting-started/quickstart
-   Example: AI Training <../getting-started/tutorial>
+   ../examples/index
    ../sky-computing
 
 .. toctree::

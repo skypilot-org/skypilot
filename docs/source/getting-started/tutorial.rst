@@ -1,6 +1,6 @@
 .. _ai-training:
 
-Tutorial: AI Training
+Quickstart: AI Training
 ======================
 This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) with Distributed Data Parallel (DDP) in PyTorch.
 
