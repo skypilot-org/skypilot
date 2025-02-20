@@ -1009,7 +1009,7 @@ def realtime_kubernetes_gpu_availability(
 # =================
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool) -> None:
+             ssh_key: Optional[str], cleanup: bool, context_name: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key, cleanup):
@@ -1035,7 +1035,7 @@ def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
     if ips:
         assert ssh_user is not None and ssh_key is not None
         kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup)
+                                                      cleanup, context_name)
     else:
         # Run local deployment (kind) if no remote args are specified
         kubernetes_deploy_utils.deploy_local_cluster(gpus)

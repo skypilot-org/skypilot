@@ -12,18 +12,19 @@ NC='\033[0m' # No color
 IPS_FILE=$1
 USER=$2
 SSH_KEY=$3
+CONTEXT_NAME=${4:-default}  # Optional context name, defaults to "default"
 K3S_TOKEN=mytoken  # Any string can be used as the token
 CLEANUP=false
 INSTALL_GPU=false
 
-if [[ "$4" == "--cleanup" ]]; then
+if [[ "$5" == "--cleanup" ]]; then
     CLEANUP=true
 fi
 
 # Basic argument checks
 if [ -z "$IPS_FILE" ] || [ -z "$USER" ] || [ -z "$SSH_KEY" ]; then
     >&2 echo -e "${RED}Error: Missing required arguments.${NC}"
-    >&2 echo "Usage: ./deploy_remote_cluster.sh ips.txt username path/to/ssh/key [--cleanup]"
+    >&2 echo "Usage: ./deploy_remote_cluster.sh ips.txt username path/to/ssh/key [context-name] [--cleanup]"
     exit 1
 fi
 
@@ -180,9 +181,8 @@ fi
 # Temporary file to hold the modified kubeconfig
 TEMP_FILE=$(mktemp)
 
-# Remove the certificate-authority-data, and replace the server with the master address
-awk '
-  BEGIN { in_cluster = 0 }
+# Remove the certificate-authority-data, update context name if set and replace the server with the master address
+awk -v context="$CONTEXT_NAME" '
   /^clusters:/ { in_cluster = 1 }
   /^users:/ { in_cluster = 0 }
   in_cluster && /^ *certificate-authority-data:/ { next }
@@ -191,6 +191,10 @@ awk '
     print "    insecure-skip-tls-verify: true"
     next
   }
+  /name: default/ { sub("name: default", "name: " context) }
+  /cluster: default/ { sub("cluster: default", "cluster: " context) }
+  /user: default/ { sub("user: default", "user: " context) }
+  /current-context: default/ { sub("current-context: default", "current-context: " context) }
   { print }
 ' "$KUBECONFIG_FILE" > "$TEMP_FILE"
 

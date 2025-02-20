@@ -3,7 +3,7 @@ import os
 import shlex
 import subprocess
 import tempfile
-from typing import List
+from typing import List, Optional
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -20,7 +20,7 @@ logger = sky_logging.init_logger(__name__)
 
 
 def deploy_remote_cluster(ip_list: List[str], ssh_user: str, ssh_key: str,
-                          cleanup: bool):
+                          cleanup: bool, context_name: Optional[str] = None):
     success = False
     path_to_package = os.path.dirname(__file__)
     up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.sh')
@@ -41,6 +41,8 @@ def deploy_remote_cluster(ip_list: List[str], ssh_user: str, ssh_key: str,
 
         deploy_command = (f'{up_script_path} {ip_file.name} '
                           f'{ssh_user} {key_file.name}')
+        if context_name is not None:
+            deploy_command += f' {context_name}'
         if cleanup:
             deploy_command += ' --cleanup'
 
