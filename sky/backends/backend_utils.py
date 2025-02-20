@@ -211,7 +211,7 @@ def _optimize_file_mounts(yaml_path: str) -> None:
     Format is {dst: src}.
 
     Raises:
-        subprocess.CalledProcessError: If the file mounts are filed to be
+        subprocess.CalledProcessError: If the file mounts are failed to be
             copied.
     """
     yaml_config = common_utils.read_yaml(yaml_path)
