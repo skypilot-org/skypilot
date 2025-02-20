@@ -157,7 +157,7 @@ This will stop all Kubernetes services on the remote machines.
 Setting up Multiple Clusters
 ----------------------------
 
-You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster:
+You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster and merging the kubeconfigs:
 
 .. code-block:: bash
 
