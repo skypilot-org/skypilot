@@ -15,6 +15,8 @@ from typing import Dict, List
 
 import numpy as np
 
+from sky.client import sdk
+
 results_lock = threading.Lock()
 request_latencies: Dict[str, List[float]] = defaultdict(list)
 
@@ -68,14 +70,14 @@ def print_latency_statistics():
     print("\nLatency Statistics:")
     print("-" * 100)  # Increased width to accommodate more columns
     print(
-        f"{'Command':<20} {'Count':<8} {'Total(s)':<10} {'Avg(s)':<10} {'Min(s)':<10} {'Max(s)':<10} {'P95(s)':<10} {'P99(s)':<10}"
+        f"{'Kind':<20} {'Count':<8} {'Total(s)':<10} {'Avg(s)':<10} {'Min(s)':<10} {'Max(s)':<10} {'P95(s)':<10} {'P99(s)':<10}"
     )
     print("-" * 100)
 
-    for cmd, latencies in request_latencies.items():
+    for kind, latencies in request_latencies.items():
         stats = calculate_statistics(latencies)
         print(
-            f"{cmd:<20} {stats['count']:<8d} {stats['total']:<10.2f} "
+            f"{kind:<20} {stats['count']:<8d} {stats['total']:<10.2f} "
             f"{stats['avg']:<10.2f} {stats['min']:<10.2f} {stats['max']:<10.2f} "
             f"{stats['p95']:<10.2f} {stats['p99']:<10.2f}")
 
@@ -92,6 +94,25 @@ def run_concurrent_requests(num_requests, cmd):
     # Wait for all threads to complete
     for thread in threads:
         thread.join()
+
+
+def run_concurrent_api_requests(num_requests, fn, kind):
+    threads = []
+    for i in range(num_requests):
+        thread = threading.Thread(target=run_single_api_request, args=(i + 1, fn, kind))
+        threads.append(thread)
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+
+def run_single_api_request(idx, fn, kind):
+    print(f"API Request {idx} submitted")
+    begin = time.time()
+    fn()
+    duration = time.time() - begin
+    with results_lock:
+        request_latencies[kind].append(duration)
 
 
 def test_launch_requests(num_requests, cloud, is_async=True):
@@ -142,6 +163,19 @@ def test_serve_requests(num_requests, cloud):
     run_single_request(0, cleanup_cmd)
 
 
+def test_status_api(num_requests):
+    print(f"Testing {num_requests} status API requests")
+
+    def status():
+        request_id = sdk.status()
+        sdk.stream_and_get(request_id)
+
+    run_concurrent_api_requests(num_requests, status, 'API /status')
+
+
+all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
+all_apis = ['status', 'tail_logs']
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-n',
@@ -153,7 +187,8 @@ if __name__ == '__main__':
         '--requests',
         type=str,
         nargs='+',
-        choices=['launch', 'status', 'logs', 'jobs', 'serve', 'all'],
+        choices=all_requests + ['all'],
+        default=[],
         help='List of SkyPilot requests to test (e.g., launch status logs)')
     # Test worker memory consumption when operates multiple clouds.
     parser.add_argument('-c',
@@ -162,11 +197,20 @@ if __name__ == '__main__':
                         nargs='+',
                         default=['aws'],
                         help='List of clouds to test')
+    parser.add_argument('--apis',
+                        type=str,
+                        nargs='+',
+                        choices=all_requests + ['all'],
+                        default=[],
+                        help='List of APIs to test')
 
     args = parser.parse_args()
 
     if 'all' in args.requests:
-        args.requests = ['launch', 'status', 'logs', 'jobs', 'serve']
+        args.requests = all_requests
+
+    if 'all' in args.apis:
+        args.apis = all_apis
 
     print("Starting concurrent sky requests...")
     start_time = time.time()
@@ -193,6 +237,18 @@ if __name__ == '__main__':
                 thread = threading.Thread(target=test_serve_requests,
                                           args=(args.n, cloud))
 
+            if thread:
+                test_threads.append(thread)
+                thread.start()
+
+        for api in args.apis:
+            thread = None
+            if api == 'status':
+                thread = threading.Thread(target=test_status_api,
+                                          args=(args.n,))
+            elif api == 'tail_logs':
+                thread = threading.Thread(target=test_tail_logs_api,
+                                          args=(args.n, cloud))
             if thread:
                 test_threads.append(thread)
                 thread.start()

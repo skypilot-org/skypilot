@@ -63,7 +63,8 @@ def monitor_system():
                                                nb_avg)
             b_top, b_avg = get_worker_memory('SkyPilot:executor:long')
             long_worker_memory_peak = max(long_worker_memory_peak, b_top)
-            long_worker_memory_avg_peak = max(long_worker_memory_avg_peak, b_avg)
+            long_worker_memory_avg_peak = max(long_worker_memory_avg_peak,
+                                              b_avg)
 
             # CPU Usage
             cpu_percent = psutil.cpu_percent(interval=interval)
