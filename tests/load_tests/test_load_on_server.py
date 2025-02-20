@@ -202,7 +202,8 @@ def test_tail_logs_api(num_requests, cloud):
     print(f"Testing {num_requests} tail logs API requests")
     cluster_name = 'test'
     job_id = 1
-    setup_cmd = f'sky launch -c {cluster_name} --cloud={cloud} --cpus=2 -y'
+    # Launch a job and wait the first tail success
+    setup_cmd = f'sky launch -c {cluster_name} --cloud={cloud} --cpus=2 -y && sky logs {cluster_name} {job_id}'
     run_single_request(0, setup_cmd)
 
     def tail_logs():
