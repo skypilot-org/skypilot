@@ -1302,13 +1302,13 @@ class KubernetesInstanceType:
         - Accelerators
     The name format is "{n}CPU--{k}GB" where n is the number of vCPUs and
     k is the amount of memory in GB. Accelerators can be specified by
-    appending "--{a}{type}" where a is the number of accelerators and
-    type is the accelerator type.
+    appending "--{type}:{a}" where type is the accelerator type and a
+    is the number of accelerators.
     CPU and memory can be specified as floats. Accelerator count must be int.
     Examples:
         - 4CPU--16GB
         - 0.5CPU--1.5GB
-        - 4CPU--16GB--1V100
+        - 4CPU--16GB--V100:1
     """
 
     def __init__(self,
@@ -1333,15 +1333,13 @@ class KubernetesInstanceType:
             # valid logical instance type name.
             assert self.accelerator_type is not None, self.accelerator_count
             acc_name = self.accelerator_type.replace(' ', '_')
-            # Use `:` to separate accelerator count and type
-            # to avoid confusion for the number-only accelerator type.
-            name += f'--{self.accelerator_count}:{acc_name}'
+            name += f'--{acc_name}:{self.accelerator_count}'
         return name
 
     @staticmethod
     def is_valid_instance_type(name: str) -> bool:
         """Returns whether the given name is a valid instance type."""
-        pattern = re.compile(r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--\d+\S+)?$')
+        pattern = re.compile(r'^(\d+(\.\d+)?CPU--\d+(\.\d+)?GB)(--[\w\d-]+:\d+)?$')
         return bool(pattern.match(name))
 
     @classmethod
@@ -1356,8 +1354,8 @@ class KubernetesInstanceType:
             accelerator_type | str: Type of accelerator
         """
         pattern = re.compile(
-            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_count>\d+):(?P<accelerator_type>\S+))?$'  # pylint: disable=line-too-long
-        )
+            r'^(?P<cpus>\d+(\.\d+)?)CPU--(?P<memory>\d+(\.\d+)?)GB(?:--(?P<accelerator_type>[\w\d-]+):(?P<accelerator_count>\d+))?$'  # pylint: disable=line-too-long
+)
         match = pattern.match(name)
         if match:
             cpus = float(match.group('cpus'))
@@ -1402,7 +1400,7 @@ class KubernetesInstanceType:
         # Round up accelerator_count if it is not an int.
         accelerator_count = math.ceil(accelerator_count)
         if accelerator_count > 0:
-            name += f'--{accelerator_count}:{accelerator_type}'
+            name += f'--{accelerator_type}:{accelerator_count}'
         return cls(cpus=cpus,
                    memory=memory,
                    accelerator_count=accelerator_count,
