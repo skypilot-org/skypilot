@@ -81,29 +81,45 @@ def query_collection(query_embedding: np.ndarray,
     """Query the collection and return top matches."""
     global collection
 
+    # Request more results initially to account for potential duplicates
+    max_results = min(n_results * 2, 20)  # Get more results but cap at 20
+    
     results = collection.query(query_embeddings=[query_embedding.tolist()],
-                               n_results=n_results,
+                               n_results=max_results,
                                include=['metadatas', 'distances', 'documents'])
 
     # Get results
-    documents = results['documents'][0]  # This contains the actual content
+    documents = results['documents'][0] 
     metadatas = results['metadatas'][0]
     distances = results['distances'][0]
 
     # Convert distances to similarities
     similarities = [1 - (d / 2) for d in distances]
 
+    # Create a set to track unique content
+    seen_content = set()
+    unique_results = []
+
     for doc, meta, sim in zip(documents, metadatas, similarities):
-        logger.info(f"Found {meta} with similarity {sim}")
-        logger.info(f"Content: {doc}")
+        # Use content as the uniqueness key
+        if doc not in seen_content:
+            seen_content.add(doc)
+            logger.info(f"Found {meta} with similarity {sim}")
+            logger.info(f"Content: {doc}")
+            unique_results.append((doc, meta, sim))
+            
+            # Break if we have enough unique results
+            if len(unique_results) >= n_results:
+                break
+
     return [
         SearchResult(
-            content=doc,  # Get content directly from documents
+            content=doc,
             name=meta['name'],
             split=meta['split'],
             source=meta['source'],
             similarity=sim)
-        for doc, meta, sim in zip(documents, metadatas, similarities)
+        for doc, meta, sim in unique_results
     ]
 
 
