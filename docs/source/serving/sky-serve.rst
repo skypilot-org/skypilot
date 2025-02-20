@@ -242,6 +242,9 @@ Under the hood, :code:`sky serve up`:
 #. Meanwhile, the controller provisions replica VMs which later run the services;
 #. Once any replica is ready, the requests sent to the Service Endpoint will be distributed to one of the endpoint replicas.
 
+.. note::
+  SkyServe uses least load load balancing to distribute the traffic to the replicas. It keeps track of the number of requests each replica has handled and routes the next request to the replica with the least load.
+
 After the controller is provisioned, you'll see the following in :code:`sky serve status` output:
 
 .. image:: ../images/sky-serve-status-output-provisioning.png
@@ -274,7 +277,7 @@ sending requests to :code:`<endpoint-url>` (e.g., ``44.201.119.3:30001``):
     </body>
     </html>
 
-Tutorial: Serve a Chatbot LLM!
+Tutorial: Serve a chatbot LLM!
 ------------------------------
 
 Let's bring up a real LLM chat service with FastChat + Vicuna. We'll use the `Vicuna OpenAI API Endpoint YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/serve-openai-api-endpoint.yaml>`_ as an example:
@@ -450,7 +453,7 @@ Authorization
 See :ref:`Authorization <serve-auth>` for more information.
 
 
-SkyServe Architecture
+SkyServe architecture
 ---------------------
 
 .. image:: ../images/sky-serve-architecture.png

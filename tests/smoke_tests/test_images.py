@@ -19,10 +19,14 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_images.py --generic-cloud aws
 
+import os
+import subprocess
+
 import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.skylet import constants
 
 
 # ---------- Test the image ----------
@@ -145,7 +149,7 @@ def test_aws_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
             # Ensure exec works.
             f'sky exec {name} --region us-east-2 examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
@@ -178,7 +182,7 @@ def test_gcp_image_id_dict_region():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-west3',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-west3',  # Ensure the region is correct.
             # Ensure exec works.
             f'sky exec {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
@@ -216,7 +220,7 @@ def test_aws_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east-2a',  # Ensure the zone is correct.
             # Ensure exec works.
             f'sky exec {name} --zone us-east-2a examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
@@ -250,7 +254,7 @@ def test_gcp_image_id_dict_zone():
             f'sky logs {name} 1 --status',
             f'sky logs {name} 2 --status',
             f'sky logs {name} 3 --status',
-            f'sky status --all | grep {name} | grep us-central1',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-central1',  # Ensure the zone is correct.
             # Ensure exec works.
             f'sky exec {name} --cloud gcp --zone us-central1-a tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
@@ -266,6 +270,8 @@ def test_gcp_image_id_dict_zone():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.skip(reason='Skipping this test as clone-disk-from is not '
+                  'supported yet with the new client-server architecture.')
 @pytest.mark.aws
 def test_clone_disk_aws():
     name = smoke_tests_utils.get_cluster_name()
@@ -293,6 +299,8 @@ def test_clone_disk_aws():
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.skip(reason='Skipping this test as clone-disk-from is not '
+                  'supported yet with the new client-server architecture.')
 @pytest.mark.gcp
 def test_clone_disk_gcp():
     name = smoke_tests_utils.get_cluster_name()
@@ -319,33 +327,69 @@ def test_gcp_mig():
     test = smoke_tests_utils.Test(
         'gcp_mig',
         [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
             f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check MIG exists.
-            f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'gcloud compute instance-groups managed list --format="value(name)" | grep "^sky-mig-{name}"'
+                )),
             f'sky autostop -i 0 --down -y {name}',
             smoke_tests_utils.get_cmd_wait_until_cluster_is_not_found(
                 cluster_name=name, timeout=120),
-            f'gcloud compute instance-templates list | grep "sky-it-{name}"',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'gcloud compute instance-templates list | grep "sky-it-{name}"'
+                )),
             # Launch again with the same region. The original instance template
             # should be removed.
             f'sky launch -y -c {name} --gpus L4 --num-nodes 2 --region {region} nvidia-smi',
             f'sky logs {name} 1 | grep "L4"',
             f'sky down -y {name}',
-            f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true',
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'gcloud compute instance-templates list | grep "sky-it-{name}" && exit 1 || true'
+                )),
         ],
-        f'sky down -y {name}',
-        env={'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml'})
+        f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        env={
+            'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml',
+            constants.SKY_API_SERVER_URL_ENV_VAR:
+                sky.server.common.get_server_url()
+        })
     smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.gcp
 def test_gcp_force_enable_external_ips():
     name = smoke_tests_utils.get_cluster_name()
+
+    # Command to check if the instance is on GCP
+    is_on_gcp_command = (
+        'curl -s -H "Metadata-Flavor: Google" '
+        '"http://metadata.google.internal/computeMetadata/v1/instance/name"')
+
+    is_on_k8s = os.getenv('KUBERNETES_SERVICE_HOST') is not None
+
+    # Run the GCP check
+    result = subprocess.run(f'{is_on_gcp_command}',
+                            shell=True,
+                            check=False,
+                            text=True,
+                            capture_output=True)
+    is_on_gcp = result.returncode == 0 and result.stdout.strip()
+    if not is_on_gcp or is_on_k8s:
+        pytest.skip('Not on GCP, skipping test')
+
     test_commands = [
+        is_on_gcp_command,
         f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
         (f'gcloud compute instances list --filter=name~"{name}" --format='
@@ -360,7 +404,11 @@ def test_gcp_force_enable_external_ips():
     test = smoke_tests_utils.Test('gcp_force_enable_external_ips',
                                   test_commands,
                                   f'sky down -y {name}',
-                                  env={'SKYPILOT_CONFIG': skypilot_config})
+                                  env={
+                                      'SKYPILOT_CONFIG': skypilot_config,
+                                      constants.SKY_API_SERVER_URL_ENV_VAR:
+                                          sky.server.common.get_server_url()
+                                  })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -385,6 +433,7 @@ def test_image_no_conda():
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
+@pytest.mark.no_nebius  # Nebius does not support autostop
 def test_custom_default_conda_env(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [

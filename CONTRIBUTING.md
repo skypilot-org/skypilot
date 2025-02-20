@@ -10,7 +10,7 @@ all contributions to the project, including but not limited to:
 * Documentation
 * Tutorials, blog posts and talks on SkyPilot
 
-## Contributing Code
+## Contributing code
 
 We use GitHub to track issues and features. For new contributors, we recommend looking at issues labeled ["good first issue"](https://github.com/sky-proj/sky/issues?q=is%3Aopen+is%3Aissue+label%3A%22good+first+issue%22+).
 
@@ -50,9 +50,10 @@ pytest tests/test_smoke.py --generic-cloud azure
 
 For profiling code, use:
 ```
-pip install tuna # Tuna is used for visualization of profiling data.
-python3 -m cProfile -o sky.prof -m sky.cli status # Or some other command
-tuna sky.prof
+pip install py-spy # py-spy is a sampling profiler for Python programs
+py-spy record -t -o sky.svg -- python -m sky.cli status # Or some other command
+py-spy top -- python -m sky.cli status # Get a live top view
+py-spy -h # For more options
 ```
 
 #### Testing in a container

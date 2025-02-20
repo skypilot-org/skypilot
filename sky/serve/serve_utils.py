@@ -1,6 +1,7 @@
 """User interface with the SkyServe."""
 import base64
 import collections
+import dataclasses
 import enum
 import os
 import pathlib
@@ -23,15 +24,15 @@ import requests
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
-from sky import status_lib
-from sky.backends import backend_utils
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -39,8 +40,6 @@ if typing.TYPE_CHECKING:
 
     from sky.serve import replica_managers
 
-SKY_SERVE_CONTROLLER_NAME: str = (
-    f'sky-serve-controller-{common_utils.get_user_hash()}')
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
                          constants.CONTROLLER_MEMORY_USAGE_GB)
@@ -92,6 +91,19 @@ class UpdateMode(enum.Enum):
     BLUE_GREEN = 'blue_green'
 
 
+@dataclasses.dataclass
+class TLSCredential:
+    """TLS credential for the service."""
+    keyfile: str
+    certfile: str
+
+    def dump_uvicorn_kwargs(self) -> Dict[str, str]:
+        return {
+            'ssl_keyfile': os.path.expanduser(self.keyfile),
+            'ssl_certfile': os.path.expanduser(self.certfile),
+        }
+
+
 DEFAULT_UPDATE_MODE = UpdateMode.ROLLING
 
 _SIGNAL_TO_ERROR = {
@@ -110,7 +122,7 @@ ValueType = TypeVar('ValueType')
 class ThreadSafeDict(Generic[KeyType, ValueType]):
     """A thread-safe dict."""
 
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
         self._dict: Dict[KeyType, ValueType] = dict(*args, **kwargs)
         self._lock = threading.Lock()
 
@@ -243,6 +255,18 @@ def generate_replica_log_file_name(service_name: str, replica_id: int) -> str:
     return os.path.join(dir_name, f'replica_{replica_id}.log')
 
 
+def generate_remote_tls_keyfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'tls_keyfile')
+
+
+def generate_remote_tls_certfile_name(service_name: str) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, 'tls_certfile')
+
+
 def generate_replica_cluster_name(service_name: str, replica_id: int) -> str:
     return f'{service_name}-{replica_id}'
 
@@ -325,7 +349,7 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
             raise ValueError(f'Failed to update service: {resp.text}')
 
     service_msg = resp.json()['message']
-    return common_utils.encode_payload(service_msg)
+    return message_utils.encode_payload(service_msg)
 
 
 def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
@@ -383,7 +407,7 @@ def _get_service_status(
 
 
 def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
-    service_statuses = []
+    service_statuses: List[Dict[str, str]] = []
     if service_names is None:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
@@ -395,13 +419,28 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
             k: base64.b64encode(pickle.dumps(v)).decode('utf-8')
             for k, v in service_status.items()
         })
-    return common_utils.encode_payload(service_statuses)
+    # We have to use payload_type here to avoid the issue of
+    # message_utils.decode_payload() not being able to correctly decode the
+    # message with <sky-payload> tags.
+    return message_utils.encode_payload(service_statuses,
+                                        payload_type='service_status')
 
 
 def load_service_status(payload: str) -> List[Dict[str, Any]]:
-    service_statuses_encoded = common_utils.decode_payload(payload)
-    service_statuses = []
+    try:
+        service_statuses_encoded = message_utils.decode_payload(
+            payload, payload_type='service_status')
+    except ValueError as e:
+        if 'Invalid payload string' in str(e):
+            # Backward compatibility for serve controller started before #4660
+            # where the payload type is not added.
+            service_statuses_encoded = message_utils.decode_payload(payload)
+        else:
+            raise
+    service_statuses: List[Dict[str, Any]] = []
     for service_status in service_statuses_encoded:
+        if not isinstance(service_status, dict):
+            raise ValueError(f'Invalid service status: {service_status}')
         service_statuses.append({
             k: pickle.loads(base64.b64decode(v))
             for k, v in service_status.items()
@@ -411,11 +450,11 @@ def load_service_status(payload: str) -> List[Dict[str, Any]]:
 
 def add_version_encoded(service_name: str) -> str:
     new_version = serve_state.add_version(service_name)
-    return common_utils.encode_payload(new_version)
+    return message_utils.encode_payload(new_version)
 
 
 def load_version_string(payload: str) -> str:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def _terminate_failed_services(
@@ -432,7 +471,7 @@ def _terminate_failed_services(
         A message indicating potential resource leak (if any). If no
         resource leak is detected, return None.
     """
-    remaining_replica_clusters = []
+    remaining_replica_clusters: List[str] = []
     # The controller should have already attempted to terminate those
     # replicas, so we don't need to try again here.
     for replica_info in serve_state.get_replica_infos(service_name):
@@ -459,8 +498,8 @@ def _terminate_failed_services(
 
 def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     service_names = serve_state.get_glob_service_names(service_names)
-    terminated_service_names = []
-    messages = []
+    terminated_service_names: List[str] = []
+    messages: List[str] = []
     for service_name in service_names:
         service_status = _get_service_status(service_name,
                                              with_replica_info=False)
@@ -506,7 +545,7 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
                     f.write(UserSignal.TERMINATE.value)
                     f.flush()
         terminated_service_names.append(f'{service_name!r}')
-    if len(terminated_service_names) == 0:
+    if not terminated_service_names:
         messages.append('No service to terminate.')
     else:
         identity_str = f'Service {terminated_service_names[0]} is'
@@ -531,7 +570,31 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    setup_completed = False
     while True:
+        job_status = job_lib.get_status(job_id)
+        if job_status is None or job_status < job_lib.JobStatus.RUNNING:
+            # Wait for the controller process to finish setting up. It can be
+            # slow if a lot cloud dependencies are being installed.
+            if (time.time() - start_time >
+                    constants.CONTROLLER_SETUP_TIMEOUT_SECONDS):
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        f'Failed to start the controller '
+                        f'process for the service {service_name!r} '
+                        f'within '
+                        f'{constants.CONTROLLER_SETUP_TIMEOUT_SECONDS} seconds.'
+                    )
+            # No need to check the service status as the controller process
+            # is still setting up.
+            time.sleep(1)
+            continue
+
+        if not setup_completed:
+            setup_completed = True
+            # Reset the start time to wait for the service to be registered.
+            start_time = time.time()
+
         record = serve_state.get_service_from_name(service_name)
         if record is not None:
             if job_id != record['controller_job_id']:
@@ -543,7 +606,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
-                return common_utils.encode_payload(lb_port)
+                return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
@@ -566,7 +629,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
 
 
 def load_service_initialization_result(payload: str) -> int:
-    return common_utils.decode_payload(payload)
+    return message_utils.decode_payload(payload)
 
 
 def check_service_status_healthy(service_name: str) -> Optional[str]:
@@ -780,28 +843,6 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
     return f'{ready_replica_num}/{total_replica_num}'
 
 
-def get_endpoint(service_record: Dict[str, Any]) -> str:
-    # Don't use backend_utils.is_controller_accessible since it is too slow.
-    handle = global_user_state.get_handle_from_cluster_name(
-        SKY_SERVE_CONTROLLER_NAME)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle)
-    if handle is None:
-        return '-'
-    load_balancer_port = service_record['load_balancer_port']
-    if load_balancer_port is None:
-        return '-'
-    try:
-        endpoint = backend_utils.get_endpoints(handle.cluster_name,
-                                               load_balancer_port).get(
-                                                   load_balancer_port, None)
-    except exceptions.ClusterNotUpError:
-        return '-'
-    if endpoint is None:
-        return '-'
-    assert isinstance(endpoint, str), endpoint
-    return endpoint
-
-
 def format_service_table(service_records: List[Dict[str, Any]],
                          show_all: bool) -> str:
     if not service_records:
@@ -811,10 +852,12 @@ def format_service_table(service_records: List[Dict[str, Any]],
         'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
     ]
     if show_all:
-        service_columns.extend(['POLICY', 'REQUESTED_RESOURCES'])
+        service_columns.extend([
+            'AUTOSCALING_POLICY', 'LOAD_BALANCING_POLICY', 'REQUESTED_RESOURCES'
+        ])
     service_table = log_utils.create_table(service_columns)
 
-    replica_infos = []
+    replica_infos: List[Dict[str, Any]] = []
     for record in service_records:
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
@@ -829,9 +872,12 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_status = record['status']
         status_str = service_status.colored_str()
         replicas = _get_replicas(record)
-        endpoint = get_endpoint(record)
+        endpoint = record['endpoint']
+        if endpoint is None:
+            endpoint = '-'
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
+        load_balancing_policy = record['load_balancing_policy']
 
         service_values = [
             service_name,
@@ -842,7 +888,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
             endpoint,
         ]
         if show_all:
-            service_values.extend([policy, requested_resources_str])
+            service_values.extend(
+                [policy, load_balancing_policy, requested_resources_str])
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
@@ -884,7 +931,8 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         region = '-'
         zone = '-'
 
-        replica_handle: 'backends.CloudVmRayResourceHandle' = record['handle']
+        replica_handle: Optional['backends.CloudVmRayResourceHandle'] = record[
+            'handle']
         if replica_handle is not None:
             resources_str = resources_utils.get_readable_resources_repr(
                 replica_handle, simplify=not show_all)
@@ -999,7 +1047,11 @@ class ServeCodeGen:
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)
-        return (f'{skylet_constants.SKY_PYTHON_CMD} '
+        # Use the local user id to make sure the operation goes to the correct
+        # user.
+        return (f'export {skylet_constants.USER_ID_ENV_VAR}='
+                f'"{common_utils.get_user_hash()}"; '
+                f'{skylet_constants.SKY_PYTHON_CMD} '
                 f'-u -c {shlex.quote(generated_code)}')
 
     @classmethod

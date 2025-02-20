@@ -1,29 +1,38 @@
 """SDK functions for cluster/job management."""
-import getpass
+import os
+import shlex
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
 from sky import backends
+from sky import check as sky_check
 from sky import clouds
 from sky import dag
 from sky import data
 from sky import exceptions
 from sky import global_user_state
-from sky import jobs as managed_jobs
+from sky import models
 from sky import sky_logging
-from sky import status_lib
 from sky import task
 from sky.backends import backend_utils
+from sky.clouds import service_catalog
+from sky.jobs.server import core as managed_jobs_core
+from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
+from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import common
+from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+from sky.utils.kubernetes import kubernetes_deploy_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
@@ -34,14 +43,15 @@ logger = sky_logging.init_logger(__name__)
 # = Cluster Management =
 # ======================
 
-# pylint: disable=redefined-builtin
-
 
 @usage_lib.entrypoint
-def status(cluster_names: Optional[Union[str, List[str]]] = None,
-           refresh: bool = False) -> List[Dict[str, Any]]:
+def status(
+    cluster_names: Optional[Union[str, List[str]]] = None,
+    refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
+    all_users: bool = False,
+) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get cluster statuses.
+    """Gets cluster statuses.
 
     If cluster_names is given, return those clusters. Otherwise, return all
     clusters.
@@ -60,6 +70,10 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
             'autostop': (int) idle time before autostop,
             'to_down': (bool) whether autodown is used instead of autostop,
             'metadata': (dict) metadata of the cluster,
+            'user_hash': (str) user hash of the cluster owner,
+            'user_name': (str) user name of the cluster owner,
+            'resources_str': (str) the resource string representation of the
+              cluster,
         }
 
     Each cluster can have one of the following statuses:
@@ -108,16 +122,17 @@ def status(cluster_names: Optional[Union[str, List[str]]] = None,
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
-    return backend_utils.get_clusters(include_controller=True,
-                                      refresh=refresh,
-                                      cluster_names=cluster_names)
+    clusters = backend_utils.get_clusters(refresh=refresh,
+                                          cluster_names=cluster_names,
+                                          all_users=all_users)
+    return clusters
 
 
 def status_kubernetes(
-) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfo'],
-           List['kubernetes_utils.KubernetesSkyPilotClusterInfo'], List[Dict[
-               str, Any]], Optional[str]]:
-    """Get all SkyPilot clusters and jobs in the Kubernetes cluster.
+) -> Tuple[List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+           List['kubernetes_utils.KubernetesSkyPilotClusterInfoPayload'],
+           List[Dict[str, Any]], Optional[str]]:
+    """Gets all SkyPilot clusters and jobs in the Kubernetes cluster.
 
     Managed jobs and services are also included in the clusters returned.
     The caller must parse the controllers to identify which clusters are run
@@ -125,11 +140,11 @@ def status_kubernetes(
 all_clusters, unmanaged_clusters, all_jobs, context
     Returns:
         A tuple containing:
-        - all_clusters: List of KubernetesSkyPilotClusterInfo with info for
-            all clusters, including managed jobs, services and controllers.
-        - unmanaged_clusters: List of KubernetesSkyPilotClusterInfo with info
-            for all clusters excluding managed jobs and services. Controllers
-            are included.
+        - all_clusters: List of KubernetesSkyPilotClusterInfoPayload with info
+            for all clusters, including managed jobs, services and controllers.
+        - unmanaged_clusters: List of KubernetesSkyPilotClusterInfoPayload with
+            info for all clusters excluding managed jobs and services.
+            Controllers are included.
         - all_jobs: List of managed jobs from all controllers. Each entry is a
             dictionary job info, see jobs.queue_from_kubernetes_pod for details.
         - context: Kubernetes context used to fetch the cluster information.
@@ -155,7 +170,7 @@ all_clusters, unmanaged_clusters, all_jobs, context
                 status_message += f's ({i + 1}/{len(jobs_controllers)})'
             spinner.update(f'{status_message}[/]')
             try:
-                job_list = managed_jobs.queue_from_kubernetes_pod(
+                job_list = managed_jobs_core.queue_from_kubernetes_pod(
                     pod.metadata.name)
             except RuntimeError as e:
                 logger.warning('Failed to get managed jobs from controller '
@@ -182,6 +197,14 @@ all_clusters, unmanaged_clusters, all_jobs, context
     unmanaged_clusters = [
         c for c in all_clusters
         if c.cluster_name not in managed_job_cluster_names
+    ]
+    all_clusters = [
+        kubernetes_utils.KubernetesSkyPilotClusterInfoPayload.from_cluster(c)
+        for c in all_clusters
+    ]
+    unmanaged_clusters = [
+        kubernetes_utils.KubernetesSkyPilotClusterInfoPayload.from_cluster(c)
+        for c in unmanaged_clusters
     ]
     return all_clusters, unmanaged_clusters, all_jobs, context
 
@@ -253,6 +276,9 @@ def cost_report() -> List[Dict[str, Any]]:
 
     for cluster_report in cluster_reports:
         cluster_report['total_cost'] = get_total_cost(cluster_report)
+        cluster_report['cloud'] = str(cluster_report['resources'].cloud)
+        cluster_report['accelerators'] = cluster_report[
+            'resources'].accelerators
 
     return cluster_reports
 
@@ -393,9 +419,44 @@ def _stop_not_supported_message(resources: 'resources_lib.Resources') -> str:
 
 
 @usage_lib.entrypoint
+def down(cluster_name: str, purge: bool = False) -> None:
+    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
+    """Tears down a cluster.
+
+    Tearing down a cluster will delete all associated resources (all billing
+    stops), and any data on the attached disks will be lost.  Accelerators
+    (e.g., TPUs) that are part of the cluster will be deleted too.
+
+    Args:
+        cluster_name: name of the cluster to down.
+        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
+            table, even if the actual cluster termination failed on the cloud.
+            WARNING: This flag should only be set sparingly in certain manual
+            troubleshooting scenarios; with it set, it is the user's
+            responsibility to ensure there are no leaked instances and related
+            resources.
+
+    Raises:
+        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
+          exist.
+        RuntimeError: failed to tear down the cluster.
+        sky.exceptions.NotSupportedError: the specified cluster is the managed
+          jobs controller.
+    """
+    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise exceptions.ClusterDoesNotExist(
+            f'Cluster {cluster_name!r} does not exist.')
+
+    usage_lib.record_cluster_name_for_current_operation(cluster_name)
+    backend = backend_utils.get_backend_from_handle(handle)
+    backend.teardown(handle, terminate=True, purge=purge)
+
+
+@usage_lib.entrypoint
 def stop(cluster_name: str, purge: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Stop a cluster.
+    """Stops a cluster.
 
     Data on attached disks is not lost when a cluster is stopped.  Billing for
     the instances will stop, while the disks will still be charged.  Those
@@ -453,48 +514,13 @@ def stop(cluster_name: str, purge: bool = False) -> None:
 
 
 @usage_lib.entrypoint
-def down(cluster_name: str, purge: bool = False) -> None:
-    # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tear down a cluster.
-
-    Tearing down a cluster will delete all associated resources (all billing
-    stops), and any data on the attached disks will be lost.  Accelerators
-    (e.g., TPUs) that are part of the cluster will be deleted too.
-
-    Args:
-        cluster_name: name of the cluster to down.
-        purge: (Advanced) Forcefully remove the cluster from SkyPilot's cluster
-            table, even if the actual cluster termination failed on the cloud.
-            WARNING: This flag should only be set sparingly in certain manual
-            troubleshooting scenarios; with it set, it is the user's
-            responsibility to ensure there are no leaked instances and related
-            resources.
-
-    Raises:
-        sky.exceptions.ClusterDoesNotExist: the specified cluster does not
-          exist.
-        RuntimeError: failed to tear down the cluster.
-        sky.exceptions.NotSupportedError: the specified cluster is the managed
-          jobs controller.
-    """
-    handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    if handle is None:
-        raise exceptions.ClusterDoesNotExist(
-            f'Cluster {cluster_name!r} does not exist.')
-
-    usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend = backend_utils.get_backend_from_handle(handle)
-    backend.teardown(handle, terminate=True, purge=purge)
-
-
-@usage_lib.entrypoint
 def autostop(
         cluster_name: str,
         idle_minutes: int,
         down: bool = False,  # pylint: disable=redefined-outer-name
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Schedule an autostop/autodown for a cluster.
+    """Schedules an autostop/autodown for a cluster.
 
     Autostop/autodown will automatically stop or teardown a cluster when it
     becomes idle for a specified duration.  Idleness means there are no
@@ -601,7 +627,7 @@ def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> List[dict]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get the job queue of a cluster.
+    """Gets the job queue of a cluster.
 
     Please refer to the sky.cli.queue for the document.
 
@@ -612,6 +638,7 @@ def queue(cluster_name: str,
                 'job_id': (int) job id,
                 'job_name': (str) job name,
                 'username': (str) username,
+                'user_hash': (str) user hash,
                 'submitted_at': (int) timestamp of submitted,
                 'start_at': (int) timestamp of started,
                 'end_at': (int) timestamp of ended,
@@ -632,10 +659,10 @@ def queue(cluster_name: str,
         exceptions.CommandError: if failed to get the job queue with ssh.
     """
     all_jobs = not skip_finished
-    username: Optional[str] = getpass.getuser()
+    user_hash: Optional[str] = common_utils.get_user_hash()
     if all_users:
-        username = None
-    code = job_lib.JobLibCodeGen.get_job_queue(username, all_jobs)
+        user_hash = None
+    code = job_lib.JobLibCodeGen.get_job_queue(user_hash, all_jobs)
 
     handle = backend_utils.check_cluster_available(
         cluster_name,
@@ -662,19 +689,22 @@ def queue(cluster_name: str,
 def cancel(
     cluster_name: str,
     all: bool = False,
+    all_users: bool = False,
     job_ids: Optional[List[int]] = None,
     # pylint: disable=invalid-name
+    # Internal only:
     _try_cancel_if_cluster_is_init: bool = False,
 ) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Cancel jobs on a cluster.
+    """Cancels jobs on a cluster.
 
     Please refer to the sky.cli.cancel for the document.
 
-    When `all` is False and `job_ids` is None, cancel the latest running job.
+    When none of `job_ids`, `all` and `all_users` is set, cancel the latest
+    running job.
 
     Additional arguments:
-        _try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
+        try_cancel_if_cluster_is_init: (bool) whether to try cancelling the job
             even if the cluster is not UP, but the head node is still alive.
             This is used by the jobs controller to cancel the job when the
             worker node is preempted in the spot cluster.
@@ -693,9 +723,9 @@ def cancel(
     controller_utils.check_cluster_name_not_controller(
         cluster_name, operation_str='Cancelling jobs')
 
-    if all and job_ids:
-        raise ValueError('Cannot specify both `all` and `job_ids`. To cancel '
-                         'all jobs, set `job_ids` to None.')
+    if all and job_ids is not None:
+        raise exceptions.NotSupportedError(
+            'Cannot specify both --all and job IDs.')
 
     # Check the status of the cluster.
     handle = None
@@ -722,28 +752,32 @@ def cancel(
 
     backend = backend_utils.get_backend_from_handle(handle)
 
-    if all:
-        sky_logging.print(f'{colorama.Fore.YELLOW}'
-                          f'Cancelling all jobs on cluster {cluster_name!r}...'
-                          f'{colorama.Style.RESET_ALL}')
-    elif job_ids is None:
-        # all = False, job_ids is None => cancel the latest running job.
+    if all_users:
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
-            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'Cancelling all users\' jobs on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
-    elif len(job_ids):
-        # all = False, len(job_ids) > 0 => cancel the specified jobs.
+    elif all:
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling all your jobs on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
+    elif job_ids is not None:
         jobs_str = ', '.join(map(str, job_ids))
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
             f'Cancelling jobs ({jobs_str}) on cluster {cluster_name!r}...'
             f'{colorama.Style.RESET_ALL}')
     else:
-        # all = False, len(job_ids) == 0 => no jobs to cancel.
-        return
+        sky_logging.print(
+            f'{colorama.Fore.YELLOW}'
+            f'Cancelling latest running job on cluster {cluster_name!r}...'
+            f'{colorama.Style.RESET_ALL}')
 
-    backend.cancel_jobs(handle, job_ids, all)
+    backend.cancel_jobs(handle,
+                        job_ids,
+                        cancel_all=all or all_users,
+                        user_hash=common_utils.get_user_hash())
 
 
 @usage_lib.entrypoint
@@ -752,7 +786,7 @@ def tail_logs(cluster_name: str,
               follow: bool = True,
               tail: int = 0) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Tail the logs of a job.
+    """Tails the logs of a job.
 
     Please refer to the sky.cli.tail_logs for the document.
 
@@ -774,14 +808,6 @@ def tail_logs(cluster_name: str,
     )
     backend = backend_utils.get_backend_from_handle(handle)
 
-    job_str = f'job {job_id}'
-    if job_id is None:
-        job_str = 'the last job'
-    sky_logging.print(
-        f'{colorama.Fore.YELLOW}'
-        f'Tailing logs of {job_str} on cluster {cluster_name!r}...'
-        f'{colorama.Style.RESET_ALL}')
-
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
     backend.tail_logs(handle, job_id, follow=follow, tail=tail)
 
@@ -792,7 +818,7 @@ def download_logs(
         job_ids: Optional[List[str]],
         local_dir: str = constants.SKY_LOGS_DIRECTORY) -> Dict[str, str]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Download the logs of jobs.
+    """Downloads the logs of jobs.
 
     Args:
         cluster_name: (str) name of the cluster.
@@ -817,7 +843,7 @@ def download_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
@@ -866,7 +892,7 @@ def job_status(cluster_name: str,
             f'of type {backend.__class__.__name__!r}.')
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
 
-    if job_ids is not None and len(job_ids) == 0:
+    if job_ids is not None and not job_ids:
         return {}
 
     sky_logging.print(f'{colorama.Fore.YELLOW}'
@@ -884,7 +910,7 @@ def job_status(cluster_name: str,
 @usage_lib.entrypoint
 def storage_ls() -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Get the storages.
+    """Gets the storages.
 
     Returns:
         [
@@ -906,7 +932,7 @@ def storage_ls() -> List[Dict[str, Any]]:
 @usage_lib.entrypoint
 def storage_delete(name: str) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Delete a storage.
+    """Deletes a storage.
 
     Raises:
         ValueError: If the storage does not exist.
@@ -920,3 +946,144 @@ def storage_delete(name: str) -> None:
                                       source=handle.source,
                                       sync_on_reconstruction=False)
         storage_object.delete()
+
+
+# ===================
+# = Catalog Observe =
+# ===================
+@usage_lib.entrypoint
+def enabled_clouds() -> List[clouds.Cloud]:
+    return global_user_state.get_cached_enabled_clouds()
+
+
+@usage_lib.entrypoint
+def realtime_kubernetes_gpu_availability(
+    context: Optional[str] = None,
+    name_filter: Optional[str] = None,
+    quantity_filter: Optional[int] = None
+) -> List[models.RealtimeGpuAvailability]:
+
+    counts, capacity, available = service_catalog.list_accelerator_realtime(
+        gpus_only=True,
+        clouds='kubernetes',
+        name_filter=name_filter,
+        region_filter=context,
+        quantity_filter=quantity_filter,
+        case_sensitive=False)
+    assert (set(counts.keys()) == set(capacity.keys()) == set(
+        available.keys())), (f'Keys of counts ({list(counts.keys())}), '
+                             f'capacity ({list(capacity.keys())}), '
+                             f'and available ({list(available.keys())}) '
+                             'must be same.')
+    if len(counts) == 0:
+        err_msg = 'No GPUs found in Kubernetes cluster. '
+        debug_msg = 'To further debug, run: sky check '
+        if name_filter is not None:
+            gpu_info_msg = f' {name_filter!r}'
+            if quantity_filter is not None:
+                gpu_info_msg += (' with requested quantity'
+                                 f' {quantity_filter}')
+            err_msg = (f'Resources{gpu_info_msg} not found '
+                       'in Kubernetes cluster. ')
+            debug_msg = ('To show available accelerators on kubernetes,'
+                         ' run: sky show-gpus --cloud kubernetes ')
+        full_err_msg = (err_msg + kubernetes_constants.NO_GPU_HELP_MESSAGE +
+                        debug_msg)
+        raise ValueError(full_err_msg)
+
+    realtime_gpu_availability_list: List[models.RealtimeGpuAvailability] = []
+
+    for gpu, _ in sorted(counts.items()):
+        realtime_gpu_availability_list.append(
+            models.RealtimeGpuAvailability(
+                gpu,
+                counts.pop(gpu),
+                capacity[gpu],
+                available[gpu],
+            ))
+    return realtime_gpu_availability_list
+
+
+# =================
+# = Local Cluster =
+# =================
+@usage_lib.entrypoint
+def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
+             ssh_key: Optional[str], cleanup: bool) -> None:
+    """Creates a local or remote cluster."""
+
+    def _validate_args(ips, ssh_user, ssh_key, cleanup):
+        # If any of --ips, --ssh-user, or --ssh-key-path is specified,
+        # all must be specified
+        if bool(ips) or bool(ssh_user) or bool(ssh_key):
+            if not (ips and ssh_user and ssh_key):
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'All ips, ssh_user, and ssh_key must be specified '
+                        'together.')
+
+        # --cleanup can only be used if --ips, --ssh-user and --ssh-key-path
+        # are all provided
+        if cleanup and not (ips and ssh_user and ssh_key):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    'cleanup can only be used with ips, ssh_user and ssh_key.')
+
+    _validate_args(ips, ssh_user, ssh_key, cleanup)
+
+    # If remote deployment arguments are specified, run remote up script
+    if ips:
+        assert ssh_user is not None and ssh_key is not None
+        kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
+                                                      cleanup)
+    else:
+        # Run local deployment (kind) if no remote args are specified
+        kubernetes_deploy_utils.deploy_local_cluster(gpus)
+
+
+def local_down() -> None:
+    """Tears down the Kubernetes cluster started by local_up."""
+    cluster_removed = False
+
+    path_to_package = os.path.dirname(__file__)
+    down_script_path = os.path.join(path_to_package, 'utils/kubernetes',
+                                    'delete_cluster.sh')
+
+    cwd = os.path.dirname(os.path.abspath(down_script_path))
+    run_command = shlex.split(down_script_path)
+
+    # Setup logging paths
+    run_timestamp = sky_logging.get_run_timestamp()
+    log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
+                            'local_down.log')
+
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Removing local cluster',
+                                     log_path=log_path,
+                                     is_local=True)):
+
+        returncode, stdout, stderr = log_lib.run_with_log(cmd=run_command,
+                                                          log_path=log_path,
+                                                          require_outputs=True,
+                                                          stream_logs=False,
+                                                          cwd=cwd)
+        stderr = stderr.replace('No kind clusters found.\n', '')
+
+        if returncode == 0:
+            cluster_removed = True
+        elif returncode == 100:
+            logger.info(ux_utils.error_message('Local cluster does not exist.'))
+        else:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('Failed to create local cluster. '
+                                   f'Stdout: {stdout}'
+                                   f'\nError: {stderr}')
+    if cluster_removed:
+        # Run sky check
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Running sky check...')):
+            sky_check.check(clouds=['kubernetes'], quiet=True)
+        logger.info(
+            ux_utils.finishing_message('Local cluster removed.',
+                                       log_path=log_path,
+                                       is_local=True))

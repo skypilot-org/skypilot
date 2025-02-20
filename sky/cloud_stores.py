@@ -7,6 +7,7 @@ TODO:
 * Better interface.
 * Better implementation (e.g., fsspec, smart_open, using each cloud's SDK).
 """
+import os
 import shlex
 import subprocess
 import time
@@ -18,6 +19,7 @@ from sky.adaptors import aws
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
+from sky.adaptors import oci
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data.data_utils import Rclone
@@ -52,7 +54,8 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || pip3 install awscli',
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -82,7 +85,8 @@ class S3CloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        download_via_awscli = ('aws s3 sync --no-follow-symlinks '
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
                                f'{source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
@@ -91,7 +95,8 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = f'aws s3 cp {source} {destination}'
+        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
@@ -111,8 +116,16 @@ class GcsCloudStorage(CloudStorage):
     @property
     def _gsutil_command(self):
         gsutil_alias, alias_gen = data_utils.get_gsutil_command()
-        return (f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
-                f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH} {gsutil_alias}')
+        return (
+            f'{alias_gen}; GOOGLE_APPLICATION_CREDENTIALS='
+            f'{gcp.DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH}; '
+            # Explicitly activate service account. Unlike the gcp packages
+            # and other GCP commands, gsutil does not automatically pick up
+            # the default credential keys when it is a service account.
+            'gcloud auth activate-service-account '
+            '--key-file=$GOOGLE_APPLICATION_CREDENTIALS '
+            '2> /dev/null || true; '
+            f'{gsutil_alias}')
 
     def is_directory(self, url: str) -> bool:
         """Returns whether 'url' is a directory.
@@ -133,7 +146,7 @@ class GcsCloudStorage(CloudStorage):
         # If <url> is a bucket root, then we only need `gsutil` to succeed
         # to make sure the bucket exists. It is already a directory.
         _, key = data_utils.split_gcs_path(url)
-        if len(key) == 0:
+        if not key:
             return True
         # Otherwise, gsutil ls -d url will return:
         #   --> url.rstrip('/')          if url is not a directory
@@ -344,7 +357,8 @@ class R2CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || pip3 install awscli',
+        'aws --version >/dev/null 2>&1 || '
+        f'{constants.SKY_UV_PIP_CMD} install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -379,7 +393,8 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               'aws s3 sync --no-follow-symlinks '
+                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               'sync --no-follow-symlinks '
                                f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
@@ -395,7 +410,8 @@ class R2CloudStorage(CloudStorage):
             source = source.replace('r2://', 's3://')
         download_via_awscli = ('AWS_SHARED_CREDENTIALS_FILE='
                                f'{cloudflare.R2_CREDENTIALS_PATH} '
-                               f'aws s3 cp {source} {destination} '
+                               f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
+                               f'cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={cloudflare.R2_PROFILE_NAME}')
 
@@ -470,6 +486,64 @@ class IBMCosCloudStorage(CloudStorage):
         return self.make_sync_dir_command(source, destination)
 
 
+class OciCloudStorage(CloudStorage):
+    """OCI Cloud Storage."""
+
+    def is_directory(self, url: str) -> bool:
+        """Returns whether OCI 'url' is a directory.
+        In cloud object stores, a "directory" refers to a regular object whose
+        name is a prefix of other objects.
+        """
+        bucket_name, path = data_utils.split_oci_path(url)
+
+        client = oci.get_object_storage_client()
+        namespace = client.get_namespace(
+            compartment_id=oci.get_oci_config()['tenancy']).data
+
+        objects = client.list_objects(namespace_name=namespace,
+                                      bucket_name=bucket_name,
+                                      prefix=path).data.objects
+
+        if len(objects) == 0:
+            # A directory with few or no items
+            return True
+
+        if len(objects) > 1:
+            # A directory with more than 1 items
+            return True
+
+        object_name = objects[0].name
+        if path.endswith(object_name):
+            # An object path
+            return False
+
+        # A directory with only 1 item
+        return True
+
+    @oci.with_oci_env
+    def make_sync_dir_command(self, source: str, destination: str) -> str:
+        """Downloads using OCI CLI."""
+        bucket_name, path = data_utils.split_oci_path(source)
+
+        download_via_ocicli = (f'oci os object sync --no-follow-symlinks '
+                               f'--bucket-name {bucket_name} '
+                               f'--prefix "{path}" --dest-dir "{destination}"')
+
+        return download_via_ocicli
+
+    @oci.with_oci_env
+    def make_sync_file_command(self, source: str, destination: str) -> str:
+        """Downloads a file using OCI CLI."""
+        bucket_name, path = data_utils.split_oci_path(source)
+        filename = os.path.basename(path)
+        destination = os.path.join(destination, filename)
+
+        download_via_ocicli = (f'oci os object get --bucket-name {bucket_name} '
+                               f'--name "{path}" --file "{destination}"')
+
+        return download_via_ocicli
+
+
 def get_storage_from_path(url: str) -> CloudStorage:
     """Returns a CloudStorage by identifying the scheme:// in a URL."""
     result = urllib.parse.urlsplit(url)
@@ -485,6 +559,7 @@ _REGISTRY = {
     's3': S3CloudStorage(),
     'r2': R2CloudStorage(),
     'cos': IBMCosCloudStorage(),
+    'oci': OciCloudStorage(),
     # TODO: This is a hack, as Azure URL starts with https://, we should
     # refactor the registry to be able to take regex, so that Azure blob can
     # be identified with `https://(.*?)\.blob\.core\.windows\.net`

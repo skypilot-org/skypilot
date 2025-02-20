@@ -6,22 +6,28 @@ from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import click
 import colorama
-import rich
 
 from sky import clouds as sky_clouds
 from sky import exceptions
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.utils import registry
+from sky.utils import rich_utils
 from sky.utils import ux_utils
+
+CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
+PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
 
 
 def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-) -> None:
-    echo = (lambda *_args, **_kwargs: None) if quiet else click.echo
+) -> List[str]:
+    echo = (lambda *_args, **_kwargs: None
+           ) if quiet else lambda *args, **kwargs: click.echo(
+               *args, **kwargs, color=True)
     echo('Checking credentials to enable clouds for SkyPilot.')
     enabled_clouds = []
     disabled_clouds = []
@@ -30,14 +36,13 @@ def check(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
                                           ModuleType]]) -> None:
         cloud_repr, cloud = cloud_tuple
-        echo(f'  Checking {cloud_repr}...', nl=False)
-        try:
-            ok, reason = cloud.check_credentials()
-        except Exception:  # pylint: disable=broad-except
-            # Catch all exceptions to prevent a single cloud from blocking the
-            # check for other clouds.
-            ok, reason = False, traceback.format_exc()
-        echo('\r', nl=False)
+        with rich_utils.safe_status(f'Checking {cloud_repr}...'):
+            try:
+                ok, reason = cloud.check_credentials()
+            except Exception:  # pylint: disable=broad-except
+                # Catch all exceptions to prevent a single cloud from blocking
+                # the check for other clouds.
+                ok, reason = False, traceback.format_exc()
         status_msg = 'enabled' if ok else 'disabled'
         styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
         echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
@@ -61,12 +66,12 @@ def check(
         if cloud_name.lower().startswith('cloudflare'):
             return cloudflare.SKY_CHECK_NAME, cloudflare
         else:
-            cloud_obj = sky_clouds.CLOUD_REGISTRY.from_str(cloud_name)
+            cloud_obj = registry.CLOUD_REGISTRY.from_str(cloud_name)
             assert cloud_obj is not None, f'Cloud {cloud_name!r} not found'
             return repr(cloud_obj), cloud_obj
 
     def get_all_clouds():
-        return tuple([repr(c) for c in sky_clouds.CLOUD_REGISTRY.values()] +
+        return tuple([repr(c) for c in registry.CLOUD_REGISTRY.values()] +
                      [cloudflare.SKY_CHECK_NAME])
 
     if clouds is not None:
@@ -94,7 +99,7 @@ def check(
     for cloud_tuple in sorted(clouds_to_check):
         check_one_cloud(cloud_tuple)
 
-    # Cloudflare is not a real cloud in sky_clouds.CLOUD_REGISTRY, and should
+    # Cloudflare is not a real cloud in registry.CLOUD_REGISTRY, and should
     # not be inserted into the DB (otherwise `sky launch` and other code would
     # error out when it's trying to look it up in the registry).
     enabled_clouds_set = {
@@ -127,7 +132,7 @@ def check(
             '\nNote: The following clouds were disabled because they were not '
             'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
-    if len(all_enabled_clouds) == 0:
+    if not all_enabled_clouds:
         echo(
             click.style(
                 'No cloud is enabled. SkyPilot will not be able to run any '
@@ -154,10 +159,14 @@ def check(
 
         # Pretty print for UX.
         if not quiet:
-            enabled_clouds_str = '\n  :heavy_check_mark: '.join(
-                [''] + sorted(all_enabled_clouds))
-            rich.print('\n[green]:tada: Enabled clouds :tada:'
-                       f'{enabled_clouds_str}[/green]')
+            enabled_clouds_str = '\n  ' + '\n  '.join([
+                _format_enabled_cloud(cloud)
+                for cloud in sorted(all_enabled_clouds)
+            ])
+            echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
+                 f'Enabled clouds {PARTY_POPPER_EMOJI}'
+                 f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
+    return enabled_clouds
 
 
 def get_cached_enabled_clouds_or_refresh(
@@ -204,7 +213,7 @@ def get_cloud_credential_file_mounts(
     # enabled clouds because users may have partial credentials for some
     # clouds to access their specific resources (e.g. cloud storage) but
     # not have the complete credentials to pass sky check.
-    clouds = sky_clouds.CLOUD_REGISTRY.values()
+    clouds = registry.CLOUD_REGISTRY.values()
     file_mounts = {}
     for cloud in clouds:
         if (excluded_clouds is not None and
@@ -222,3 +231,36 @@ def get_cloud_credential_file_mounts(
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
     return file_mounts
+
+
+def _format_enabled_cloud(cloud_name: str) -> str:
+
+    def _green_color(cloud_name: str) -> str:
+        return f'{colorama.Fore.GREEN}{cloud_name}{colorama.Style.RESET_ALL}'
+
+    if cloud_name == repr(sky_clouds.Kubernetes()):
+        # Get enabled contexts for Kubernetes
+        existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
+        if not existing_contexts:
+            return _green_color(cloud_name)
+
+        # Check if allowed_contexts is explicitly set in config
+        allowed_contexts = skypilot_config.get_nested(
+            ('kubernetes', 'allowed_contexts'), None)
+
+        # Format the context info with consistent styling
+        if allowed_contexts is not None:
+            contexts_formatted = []
+            for i, context in enumerate(existing_contexts):
+                symbol = (ux_utils.INDENT_LAST_SYMBOL
+                          if i == len(existing_contexts) -
+                          1 else ux_utils.INDENT_SYMBOL)
+                contexts_formatted.append(f'\n    {symbol}{context}')
+            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+        else:
+            context_info = f'Active context: {existing_contexts[0]}'
+
+        return (f'{_green_color(cloud_name)}\n'
+                f'  {colorama.Style.DIM}{context_info}'
+                f'{colorama.Style.RESET_ALL}')
+    return _green_color(cloud_name)

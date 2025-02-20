@@ -14,7 +14,8 @@ resources:
   cpus: 2+
   use_spot: true
 
-workdir: examples/serve/http_server
+setup: |
+  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
 
 # Use 8080 to test jupyter service is terminated
 run: python3 server.py --port 8080

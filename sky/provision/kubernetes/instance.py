@@ -8,7 +8,6 @@ import uuid
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
@@ -19,6 +18,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -180,6 +180,7 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                             #  case we will need to update this logic.
                             # TODO(Doyoung): Update the error message raised
                             # with the multi-host TPU support.
+                            gpu_resource_key = kubernetes_utils.get_gpu_resource_key()  # pylint: disable=line-too-long
                             if 'Insufficient google.com/tpu' in event_message:
                                 extra_msg = (
                                     f'Verify if '
@@ -192,14 +193,15 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                                                        pod,
                                                        extra_msg,
                                                        details=event_message))
-                            elif (('Insufficient nvidia.com/gpu'
+                            elif ((f'Insufficient {gpu_resource_key}'
                                    in event_message) or
                                   ('didn\'t match Pod\'s node affinity/selector'
                                    in event_message)):
                                 extra_msg = (
-                                    f'Verify if '
-                                    f'{pod.spec.node_selector[label_key]}'
-                                    ' is available in the cluster.')
+                                    f'Verify if any node matching label  '
+                                    f'{pod.spec.node_selector[label_key]} and '
+                                    f'sufficient resource {gpu_resource_key} '
+                                    f'is available in the cluster.')
                                 raise config_lib.KubernetesError(
                                     _lack_resource_msg('GPU',
                                                        pod,
@@ -728,7 +730,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     limits = pod_spec['spec']['containers'][0].get('resources',
                                                    {}).get('limits')
     if limits is not None:
-        needs_gpus = limits.get(kubernetes_utils.GPU_RESOURCE_KEY, 0) > 0
+        needs_gpus = limits.get(kubernetes_utils.get_gpu_resource_key(), 0) > 0
 
     # TPU pods provisioned on GKE use the default containerd runtime.
     # Reference: https://cloud.google.com/kubernetes-engine/docs/how-to/migrate-containerd#overview  # pylint: disable=line-too-long
@@ -795,14 +797,19 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'value': 'present',
                 'effect': 'NoSchedule'
             }
-            pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                tpu_toleration
+            ]
 
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
 
     # Create pods in parallel
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
-                                            range(to_start_count), _NUM_THREADS)
+                                            list(range(to_start_count)),
+                                            _NUM_THREADS)
 
     # Process created pods
     for pod in pods:
@@ -973,7 +980,7 @@ def terminate_instances(
         _terminate_node(namespace, context, pod_name)
 
     # Run pod termination in parallel
-    subprocess_utils.run_in_parallel(_terminate_pod_thread, pods.items(),
+    subprocess_utils.run_in_parallel(_terminate_pod_thread, list(pods.items()),
                                      _NUM_THREADS)
 
 

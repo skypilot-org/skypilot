@@ -1,6 +1,5 @@
 """Google Cloud Platform."""
 import enum
-import functools
 import json
 import os
 import re
@@ -18,14 +17,16 @@ from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
-    from sky import status_lib
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -132,8 +133,11 @@ class GCPIdentityType(enum.Enum):
 
     SHARED_CREDENTIALS_FILE = ''
 
+    def can_credential_expire(self) -> bool:
+        return self == GCPIdentityType.SHARED_CREDENTIALS_FILE
 
-@clouds.CLOUD_REGISTRY.register
+
+@registry.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
@@ -345,7 +349,7 @@ class GCP(clouds.Cloud):
         return find_machine is not None
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
@@ -830,7 +834,7 @@ class GCP(clouds.Cloud):
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if len(diffs) > 0:
+        if diffs:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
@@ -863,6 +867,12 @@ class GCP(clouds.Cloud):
             pass
         return credentials
 
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._get_identity_type()
+        return (identity_type is not None and
+                identity_type.can_credential_expire())
+
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
@@ -877,7 +887,8 @@ class GCP(clouds.Cloud):
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='request',
+                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:

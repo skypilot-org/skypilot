@@ -10,6 +10,9 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
+  {%- for controller_file_mount_path, local_file_mount_path in local_to_controller_file_mounts.items() %}
+  {{controller_file_mount_path}}: {{local_file_mount_path}}
+  {%- endfor %}
 
 setup: |
   {{ sky_activate_python_env }}
@@ -21,21 +24,44 @@ setup: |
   {{cmd}}
   {%- endfor %}
 
-  {% if is_dev %}
-  # Internal: disable logging for manually logging into the jobs controller for debugging.
-  echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  {% if controller_envs.get('SKYPILOT_DEV') != '0' %}
+  grep -q 'export SKYPILOT_DEV=' ~/.bashrc || echo 'export SKYPILOT_DEV=1' >> ~/.bashrc
+  grep -q 'alias sky-env=' ~/.bashrc || echo 'alias sky-env="{{ sky_activate_python_env }}"' >> ~/.bashrc
   {% endif %}
 
-  # Dashboard.
-  ps aux | grep -v nohup | grep -v grep | grep -- "-m sky.spot.dashboard" | awk '{print $2}' | xargs kill > /dev/null 2>&1 || true
-  pip list | grep flask  > /dev/null 2>&1 || pip install flask 2>&1 > /dev/null
-  ((ps aux | grep -v nohup | grep -v grep | grep -q -- "-m sky.jobs.dashboard.dashboard") || (nohup {{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard >> ~/.sky/job-dashboard.log 2>&1 &));
+  # Create systemd service file
+  mkdir -p ~/.config/systemd/user/
+
+  # Create systemd user service file
+  cat << EOF > ~/.config/systemd/user/skypilot-dashboard.service
+  [Unit]
+  Description=SkyPilot Jobs Dashboard
+  After=network.target
+
+  [Service]
+  Environment="PATH={{ sky_python_env_path }}:\$PATH"
+  Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
+  Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
+  Restart=always
+  StandardOutput=append:/home/$USER/.sky/job-dashboard.log
+  StandardError=append:/home/$USER/.sky/job-dashboard.log
+  ExecStart={{ sky_python_cmd }} -m sky.jobs.dashboard.dashboard
+
+  [Install]
+  WantedBy=default.target
+  EOF
+
+  {{ dashboard_setup_cmd }}
 
 run: |
   {{ sky_activate_python_env }}
-  # Start the controller for the current managed job.
-  python -u -m sky.jobs.controller {{remote_user_yaml_path}} \
-    --job-id $SKYPILOT_INTERNAL_JOB_ID {% if retry_until_up %}--retry-until-up{% endif %}
+  # Submit the job to the scheduler.
+  # Note: The job is already in the `spot` table, marked as PENDING.
+  # CloudVmRayBackend._exec_code_on_head() calls
+  # managed_job_codegen.set_pending() before we get here.
+  python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
+    --job-id $SKYPILOT_INTERNAL_JOB_ID
+
 
 envs:
 {%- for env_name, env_value in controller_envs.items() %}

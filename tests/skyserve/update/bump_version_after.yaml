@@ -12,7 +12,7 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 20
+    initial_delay_seconds: 180  # Use a large delay for EKS LB to be ready
   replicas: 3
 
 resources:

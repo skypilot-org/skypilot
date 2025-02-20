@@ -11,6 +11,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.utils import admin_policy_utils
+from sky.utils import config_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -37,7 +38,7 @@ def _load_task_and_apply_policy(
     task: sky.Task,
     config_path: str,
     idle_minutes_to_autostop: Optional[int] = None,
-) -> Tuple[sky.Dag, skypilot_config.Config]:
+) -> Tuple[sky.Dag, config_utils.Config]:
     os.environ['SKYPILOT_CONFIG'] = config_path
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(

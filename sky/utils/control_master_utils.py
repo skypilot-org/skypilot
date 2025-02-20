@@ -1,8 +1,7 @@
 """Utils to check if the ssh control master should be disabled."""
 
-import functools
-
 from sky import sky_logging
+from sky.utils import annotations
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -34,7 +33,7 @@ def is_tmp_9p_filesystem() -> bool:
     return filesystem_types[1].lower() == '9p'
 
 
-@functools.lru_cache
+@annotations.lru_cache(scope='global')
 def should_disable_control_master() -> bool:
     """Whether disable ssh control master based on file system.
 

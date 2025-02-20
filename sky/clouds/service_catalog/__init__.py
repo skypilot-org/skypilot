@@ -10,6 +10,7 @@ from sky.clouds.service_catalog.constants import CATALOG_DIR
 from sky.clouds.service_catalog.constants import CATALOG_SCHEMA_VERSION
 from sky.clouds.service_catalog.constants import HOSTED_CATALOG_DIR_URL
 from sky.utils import resources_utils
+from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
     from sky.clouds import cloud
@@ -31,8 +32,7 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
     if single:
         clouds = [clouds]  # type: ignore
 
-    results = []
-    for cloud in clouds:
+    def _execute_catalog_method(cloud: str):
         try:
             cloud_module = importlib.import_module(
                 f'sky.clouds.service_catalog.{cloud.lower()}_catalog')
@@ -46,7 +46,11 @@ def _map_clouds_catalog(clouds: CloudFilter, method_name: str, *args, **kwargs):
             raise AttributeError(
                 f'Module "{cloud}_catalog" does not '
                 f'implement the "{method_name}" method') from None
-        results.append(method(*args, **kwargs))
+        return method(*args, **kwargs)
+
+    results = subprocess_utils.run_in_parallel(_execute_catalog_method,
+                                               args=list(clouds),
+                                               num_threads=len(clouds))
     if single:
         return results[0]
     return results
@@ -63,7 +67,7 @@ def list_accelerators(
     all_regions: bool = False,
     require_price: bool = True,
 ) -> 'Dict[str, List[common.InstanceTypeInfo]]':
-    """List the names of all accelerators offered by Sky.
+    """Lists the names of all accelerators offered by Sky.
 
     This will include all accelerators offered by Sky, including those
     that may not be available in the user's account.
@@ -91,7 +95,7 @@ def list_accelerator_counts(
     quantity_filter: Optional[int] = None,
     clouds: CloudFilter = None,
 ) -> Dict[str, List[int]]:
-    """List all accelerators offered by Sky and available counts.
+    """Lists all accelerators offered by Sky and available counts.
 
     Returns: A dictionary of canonical accelerator names mapped to a list
     of available counts. See usage in cli.py.
@@ -125,7 +129,7 @@ def list_accelerator_realtime(
     clouds: CloudFilter = None,
     case_sensitive: bool = True,
 ) -> Tuple[Dict[str, List[int]], Dict[str, int], Dict[str, int]]:
-    """List all accelerators offered by Sky with their realtime availability.
+    """Lists all accelerators offered by Sky with their realtime availability.
 
     Realtime availability is the total number of accelerators in the cluster
     and number of accelerators available at the time of the call.

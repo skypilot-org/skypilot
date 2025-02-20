@@ -10,19 +10,21 @@ import pathlib
 import shlex
 import signal
 import sqlite3
-import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Sequence
 
 import colorama
 import filelock
 import psutil
 
+from sky import global_user_state
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
+from sky.utils import message_utils
+from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -83,6 +85,7 @@ def create_table(cursor, conn):
     #    backward compatibility).
     # >=0: The job has been started. The pid is the driver process's pid.
     #      The driver can be actually running or finished.
+    # TODO(SKY-1213): username is actually user hash, should rename.
     cursor.execute("""\
         CREATE TABLE IF NOT EXISTS jobs (
         job_id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -116,7 +119,7 @@ _CONN = _DB.conn
 
 
 class JobStatus(enum.Enum):
-    """Job status"""
+    """Job status enum."""
 
     # 3 in-flux states: each can transition to any state below it.
     # The `job_id` has been generated, but the generated ray program has
@@ -125,50 +128,61 @@ class JobStatus(enum.Enum):
     # In the 'jobs' table, the `submitted_at` column will be set to the current
     # time, when the job is firstly created (in the INIT state).
     INIT = 'INIT'
+    """The job has been submitted, but not started yet."""
     # The job is waiting for the required resources. (`ray job status`
     # shows RUNNING as the generated ray program has started, but blocked
     # by the placement constraints.)
     PENDING = 'PENDING'
-    # Running the user's setup script (only in effect if --detach-setup is
-    # set). Our update_job_status() can temporarily (for a short period) set
+    """The job is waiting for required resources."""
+    # Running the user's setup script.
+    # Our update_job_status() can temporarily (for a short period) set
     # the status to SETTING_UP, if the generated ray program has not set
     # the status to PENDING or RUNNING yet.
     SETTING_UP = 'SETTING_UP'
+    """The job is running the user's setup script."""
     # The job is running.
     # In the 'jobs' table, the `start_at` column will be set to the current
     # time, when the job is firstly transitioned to RUNNING.
     RUNNING = 'RUNNING'
+    """The job is running."""
     # The job driver process failed. This happens when the job driver process
     # finishes when the status in job table is still not set to terminal state.
     # We should keep this state before the SUCCEEDED, as our job status update
     # relies on the order of the statuses to keep the latest status.
     FAILED_DRIVER = 'FAILED_DRIVER'
+    """The job driver process failed."""
     # 3 terminal states below: once reached, they do not transition.
     # The job finished successfully.
     SUCCEEDED = 'SUCCEEDED'
+    """The job finished successfully."""
     # The job fails due to the user code or a system restart.
     FAILED = 'FAILED'
-    # The job setup failed (only in effect if --detach-setup is set). It
-    # needs to be placed after the `FAILED` state, so that the status
-    # set by our generated ray program will not be overwritten by
-    # ray's job status (FAILED).
-    # This is for a better UX, so that the user can find out the reason
-    # of the failure quickly.
+    """The job fails due to the user code."""
+    # The job setup failed. It needs to be placed after the `FAILED` state,
+    # so that the status set by our generated ray program will not be
+    # overwritten by ray's job status (FAILED). This is for a better UX, so
+    # that the user can find out the reason of the failure quickly.
     FAILED_SETUP = 'FAILED_SETUP'
+    """The job setup failed."""
     # The job is cancelled by the user.
     CANCELLED = 'CANCELLED'
+    """The job is cancelled by the user."""
 
     @classmethod
     def nonterminal_statuses(cls) -> List['JobStatus']:
         return [cls.INIT, cls.SETTING_UP, cls.PENDING, cls.RUNNING]
 
-    def is_terminal(self):
+    def is_terminal(self) -> bool:
         return self not in self.nonterminal_statuses()
 
-    def __lt__(self, other):
+    @classmethod
+    def user_code_failure_states(cls) -> Sequence['JobStatus']:
+        return (cls.FAILED, cls.FAILED_SETUP)
+
+    def __lt__(self, other: 'JobStatus') -> bool:
         return list(JobStatus).index(self) < list(JobStatus).index(other)
 
-    def colored_str(self):
+    def colored_str(self) -> str:
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
@@ -205,31 +219,7 @@ class JobScheduler:
         _CURSOR.execute((f'UPDATE pending_jobs SET submit={int(time.time())} '
                          f'WHERE job_id={job_id!r}'))
         _CONN.commit()
-        # Use nohup to ensure the job driver process is a separate process tree,
-        # instead of being a child of the current process. This is important to
-        # avoid a chain of driver processes (job driver can call schedule_step()
-        # to submit new jobs, and the new job can also call schedule_step()
-        # recursively).
-        #
-        # echo $! will output the PID of the last background process started
-        # in the current shell, so we can retrieve it and record in the DB.
-        #
-        # TODO(zhwu): A more elegant solution is to use another daemon process
-        # to be in charge of starting these driver processes, instead of
-        # starting them in the current process.
-        wrapped_cmd = (f'nohup bash -c {shlex.quote(run_cmd)} '
-                       '</dev/null >/dev/null 2>&1 & echo $!')
-        proc = subprocess.run(wrapped_cmd,
-                              stdout=subprocess.PIPE,
-                              stderr=subprocess.PIPE,
-                              stdin=subprocess.DEVNULL,
-                              start_new_session=True,
-                              check=True,
-                              shell=True,
-                              text=True)
-        # Get the PID of the detached process
-        pid = int(proc.stdout.strip())
-
+        pid = subprocess_utils.launch_new_process_tree(run_cmd)
         # TODO(zhwu): Backward compatibility, remove this check after 0.10.0.
         # This is for the case where the job is submitted with SkyPilot older
         # than #4318, using ray job submit.
@@ -405,12 +395,12 @@ def get_statuses_payload(job_ids: List[Optional[int]]) -> str:
     statuses = {job_id: None for job_id in job_ids}
     for (job_id, status) in rows:
         statuses[job_id] = status
-    return common_utils.encode_payload(statuses)
+    return message_utils.encode_payload(statuses)
 
 
 def load_statuses_payload(
         statuses_payload: str) -> Dict[Optional[int], Optional[JobStatus]]:
-    original_statuses = common_utils.decode_payload(statuses_payload)
+    original_statuses = message_utils.decode_payload(statuses_payload)
     statuses = dict()
     for job_id, status in original_statuses.items():
         # json.dumps will convert all keys to strings. Integers will
@@ -448,8 +438,8 @@ def get_job_submitted_or_ended_timestamp_payload(job_id: int,
     rows = _CURSOR.execute(f'SELECT {field} FROM jobs WHERE job_id=(?)',
                            (job_id,))
     for (timestamp,) in rows:
-        return common_utils.encode_payload(timestamp)
-    return common_utils.encode_payload(None)
+        return message_utils.encode_payload(timestamp)
+    return message_utils.encode_payload(None)
 
 
 def get_ray_port():
@@ -501,30 +491,20 @@ def _get_records_from_rows(rows) -> List[Dict[str, Any]]:
 
 
 def _get_jobs(
-        username: Optional[str],
+        user_hash: Optional[str],
         status_list: Optional[List[JobStatus]] = None) -> List[Dict[str, Any]]:
     """Returns jobs with the given fields, sorted by job_id, descending."""
     if status_list is None:
         status_list = list(JobStatus)
-    status_str_list = [status.value for status in status_list]
-    if username is None:
-        rows = _CURSOR.execute(
-            f"""\
-            SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))})
-            ORDER BY job_id DESC""",
-            (*status_str_list,),
-        )
-    else:
-        rows = _CURSOR.execute(
-            f"""\
-            SELECT * FROM jobs
-            WHERE status IN ({','.join(['?'] * len(status_list))})
-            AND username=(?)
-            ORDER BY job_id DESC""",
-            (*status_str_list, username),
-        )
-
+    status_str_list = [repr(status.value) for status in status_list]
+    filter_str = f'WHERE status IN ({",".join(status_str_list)})'
+    params = []
+    if user_hash is not None:
+        # We use the old username field for compatibility.
+        filter_str += ' AND username=(?)'
+        params.append(user_hash)
+    rows = _CURSOR.execute(
+        f'SELECT * FROM jobs {filter_str} ORDER BY job_id DESC', params)
     records = _get_records_from_rows(rows)
     return records
 
@@ -586,7 +566,7 @@ def update_job_status(job_ids: List[int],
     This function should only be run on the remote instance with ray>=2.4.0.
     """
     echo = logger.info if not silent else logger.debug
-    if len(job_ids) == 0:
+    if not job_ids:
         return []
 
     statuses = []
@@ -727,7 +707,7 @@ def fail_all_jobs_in_progress() -> None:
 def update_status() -> None:
     # This will be called periodically by the skylet to update the status
     # of the jobs in the database, to avoid stale job status.
-    nonterminal_jobs = _get_jobs(username=None,
+    nonterminal_jobs = _get_jobs(user_hash=None,
                                  status_list=JobStatus.nonterminal_statuses())
     nonterminal_job_ids = [job['job_id'] for job in nonterminal_jobs]
 
@@ -757,13 +737,14 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
         print(format_job_queue(jobs))
     """
     job_table = log_utils.create_table([
-        'ID', 'NAME', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES', 'STATUS',
-        'LOG'
+        'ID', 'NAME', 'USER', 'SUBMITTED', 'STARTED', 'DURATION', 'RESOURCES',
+        'STATUS', 'LOG'
     ])
     for job in jobs:
         job_table.add_row([
             job['job_id'],
             job['job_name'],
+            job['username'],
             log_utils.readable_time_duration(job['submitted_at']),
             log_utils.readable_time_duration(job['start_at']),
             log_utils.readable_time_duration(job['start_at'],
@@ -776,11 +757,11 @@ def format_job_queue(jobs: List[Dict[str, Any]]):
     return job_table
 
 
-def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
+def dump_job_queue(user_hash: Optional[str], all_jobs: bool) -> str:
     """Get the job queue in encoded json format.
 
     Args:
-        username: The username to show jobs for. Show all the users if None.
+        user_hash: The user hash to show jobs for. Show all the users if None.
         all_jobs: Whether to show all jobs, not just the pending/running ones.
     """
     status_list: Optional[List[JobStatus]] = [
@@ -789,12 +770,12 @@ def dump_job_queue(username: Optional[str], all_jobs: bool) -> str:
     if all_jobs:
         status_list = None
 
-    jobs = _get_jobs(username, status_list=status_list)
+    jobs = _get_jobs(user_hash, status_list=status_list)
     for job in jobs:
         job['status'] = job['status'].value
         job['log_path'] = os.path.join(constants.SKY_LOGS_DIRECTORY,
                                        job.pop('run_timestamp'))
-    return common_utils.encode_payload(jobs)
+    return message_utils.encode_payload(jobs)
 
 
 def load_job_queue(payload: str) -> List[Dict[str, Any]]:
@@ -803,9 +784,11 @@ def load_job_queue(payload: str) -> List[Dict[str, Any]]:
     Args:
         payload: The encoded payload string to load.
     """
-    jobs = common_utils.decode_payload(payload)
+    jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = JobStatus(job['status'])
+        job['user_hash'] = job['username']
+        job['username'] = global_user_state.get_user(job['user_hash']).name
     return jobs
 
 
@@ -835,34 +818,31 @@ def _make_ray_job_id(sky_job_id: int) -> str:
 
 
 def cancel_jobs_encoded_results(jobs: Optional[List[int]],
-                                cancel_all: bool = False) -> str:
+                                cancel_all: bool = False,
+                                user_hash: Optional[str] = None) -> str:
     """Cancel jobs.
 
     Args:
-        jobs: Job IDs to cancel. (See `cancel_all` for special semantics.)
-        cancel_all: Whether to cancel all jobs. If True, asserts `jobs` is
-            set to None. If False and `jobs` is None, cancel the latest
-            running job.
+        jobs: Job IDs to cancel.
+        cancel_all: Whether to cancel all jobs.
+        user_hash: If specified, cancels the jobs for the specified user only.
+            Otherwise, applies to all users.
 
     Returns:
         Encoded job IDs that are actually cancelled. Caller should use
-        common_utils.decode_payload() to parse.
+        message_utils.decode_payload() to parse.
     """
-    if cancel_all:
-        # Cancel all in-progress jobs.
-        assert jobs is None, ('If cancel_all=True, usage is to set jobs=None')
-        job_records = _get_jobs(
-            None, [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING])
-    else:
-        if jobs is None:
-            # Cancel the latest (largest job ID) running job.
-            job_records = _get_jobs(None, [JobStatus.RUNNING])[:1]
-        else:
-            # Cancel jobs with specified IDs.
-            job_records = _get_jobs_by_ids(jobs)
+    job_records = []
+    all_status = [JobStatus.PENDING, JobStatus.SETTING_UP, JobStatus.RUNNING]
+    if jobs is None and not cancel_all:
+        # Cancel the latest (largest job ID) running job from current user.
+        job_records = _get_jobs(user_hash, [JobStatus.RUNNING])[:1]
+    elif cancel_all:
+        job_records = _get_jobs(user_hash, all_status)
+    if jobs is not None:
+        job_records.extend(_get_jobs_by_ids(jobs))
 
     cancelled_ids = []
-
     # Sequentially cancel the jobs to avoid the resource number bug caused by
     # ray cluster (tracked in #1262).
     for job_record in job_records:
@@ -915,7 +895,7 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 cancelled_ids.append(job['job_id'])
 
         scheduler.schedule_step()
-    return common_utils.encode_payload(cancelled_ids)
+    return message_utils.encode_payload(cancelled_ids)
 
 
 def get_run_timestamp(job_id: Optional[int]) -> Optional[str]:
@@ -944,7 +924,7 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
         job_id = row[JobInfoLoc.JOB_ID.value]
         run_timestamp = row[JobInfoLoc.RUN_TIMESTAMP.value]
         run_timestamps[str(job_id)] = run_timestamp
-    return common_utils.encode_payload(run_timestamps)
+    return message_utils.encode_payload(run_timestamps)
 
 
 class JobLibCodeGen:
@@ -998,24 +978,36 @@ class JobLibCodeGen:
         return cls._build(code)
 
     @classmethod
-    def get_job_queue(cls, username: Optional[str], all_jobs: bool) -> str:
+    def get_job_queue(cls, user_hash: Optional[str], all_jobs: bool) -> str:
+        # TODO(SKY-1214): combine get_job_queue with get_job_statuses.
         code = [
             'job_queue = job_lib.dump_job_queue('
-            f'{username!r}, {all_jobs})', 'print(job_queue, flush=True)'
+            f'{user_hash!r}, {all_jobs})',
+            'print(job_queue, flush=True)',
         ]
         return cls._build(code)
 
     @classmethod
     def cancel_jobs(cls,
                     job_ids: Optional[List[int]],
-                    cancel_all: bool = False) -> str:
+                    cancel_all: bool = False,
+                    user_hash: Optional[str] = None) -> str:
         """See job_lib.cancel_jobs()."""
         code = [
             (f'cancelled = job_lib.cancel_jobs_encoded_results('
-             f' {job_ids!r}, {cancel_all})'),
+             f'jobs={job_ids!r}, cancel_all={cancel_all}, '
+             f'user_hash={user_hash!r})'),
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
+        # TODO(zhwu): Backward compatibility, remove after 0.9.0.
+        if user_hash is None:
+            code = [
+                (f'cancelled = job_lib.cancel_jobs_encoded_results('
+                 f' {job_ids!r}, {cancel_all})'),
+                # Print cancelled IDs. Caller should parse by decoding.
+                'print(cancelled, flush=True)',
+            ]
         return cls._build(code)
 
     @classmethod

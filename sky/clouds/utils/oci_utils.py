@@ -6,13 +6,19 @@ History:
    configuration.
  - Hysun He (hysun.he@oracle.com) @ Nov.12, 2024: Add the constant
    SERVICE_PORT_RULE_TAG
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Set the default image
+   from ubuntu 20.04 to ubuntu 22.04, including:
+   - GPU: skypilot:gpu-ubuntu-2004 -> skypilot:gpu-ubuntu-2204
+   - CPU: skypilot:cpu-ubuntu-2004 -> skypilot:cpu-ubuntu-2204
+ - Hysun He (hysun.he@oracle.com) @ Jan.01, 2025: Support reuse existing
+   VCN for SkyServe.
 """
 import os
 
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.utils import resources_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -106,7 +112,14 @@ class OCIConfig:
         return compartment
 
     @classmethod
+    def get_vcn_ocid(cls, region):
+        # Will reuse the regional VCN if specified.
+        vcn = skypilot_config.get_nested(('oci', region, 'vcn_ocid'), None)
+        return vcn
+
+    @classmethod
     def get_vcn_subnet(cls, region):
+        # Will reuse the subnet if specified.
         vcn = skypilot_config.get_nested(('oci', region, 'vcn_subnet'), None)
         return vcn
 
@@ -117,7 +130,7 @@ class OCIConfig:
         # the sky's user-config file (if not specified, use the hardcode one at
         # last)
         return skypilot_config.get_nested(('oci', 'default', 'image_tag_gpu'),
-                                          'skypilot:gpu-ubuntu-2004')
+                                          'skypilot:gpu-ubuntu-2204')
 
     @classmethod
     def get_default_image_tag(cls) -> str:
@@ -125,7 +138,7 @@ class OCIConfig:
         # set the default image tag in the sky's user-config file. (if not
         # specified, use the hardcode one at last)
         return skypilot_config.get_nested(
-            ('oci', 'default', 'image_tag_general'), 'skypilot:cpu-ubuntu-2004')
+            ('oci', 'default', 'image_tag_general'), 'skypilot:cpu-ubuntu-2204')
 
     @classmethod
     def get_sky_user_config_file(cls) -> str:

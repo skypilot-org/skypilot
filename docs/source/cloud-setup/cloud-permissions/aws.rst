@@ -6,7 +6,7 @@ AWS
 
 .. _cloud-permissions-aws-user-creation:
 
-Minimal Permissions
+Minimal permissions
 -----------------------
 
 Minimizing AWS permissions should be set up in two places:
@@ -14,7 +14,7 @@ Minimizing AWS permissions should be set up in two places:
 1. **User Account**: the user account is the individual account of an user created by the administrator.
 2. **IAM role**: the IAM role is assigned to all EC2 instances created by SkyPilot, which is used by the instances to access AWS resources, e.g., read/write S3 buckets or create other EC2 nodes. The IAM role is shared by all users under the same organization/root account. (If a user account has the permission to create IAM roles, SkyPilot can automatically create the role.)
 
-User Account
+User account
 ~~~~~~~~~~~~~~~~~~
 
 AWS accounts can be attached with a policy that limits the permissions of the account. Follow these steps to create an AWS user with the minimum permissions required by SkyPilot:
@@ -195,7 +195,7 @@ With the steps above you are almost ready to have the users in your organization
 2. Alternatively, you can create the ``skypilot-v1`` IAM role manually. The following section describes how to create the IAM role manually.
 
 
-IAM Role Creation
+IAM role creation
 ~~~~~~~~~~~~~~~~~~
 
 .. note::
@@ -223,7 +223,7 @@ IAM Role Creation
 
 Using a specific VPC
 -----------------------
-By default, SkyPilot uses the "default" VPC in each region.
+By default, SkyPilot uses the "default" VPC in each region. If a region does not have a `default VPC <https://docs.aws.amazon.com/vpc/latest/userguide/work-with-default-vpc.html#create-default-vpc>`_, SkyPilot will not be able to use the region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
 file ``~/.sky/config.yaml`` to specify the VPC name in the ``aws.vpc_name``

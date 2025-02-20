@@ -23,7 +23,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky import status_lib
+    from sky.utils import status_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -535,6 +535,10 @@ class Cloud:
         Returns a dictionary that will be added to a task's file mounts.
         """
         raise NotImplementedError
+
+    def can_credential_expire(self) -> bool:
+        """Returns whether the cloud credential can expire."""
+        return False
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:
