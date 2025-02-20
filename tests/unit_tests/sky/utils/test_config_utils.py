@@ -391,7 +391,8 @@ def test_merge_k8s_configs_list_deduplication():
         'context1', 'context2', 'context3', 'context4', 'context5'
     ]
 
-    # Test deduplication when list items are dictionaries
+    # Test deduplication when list items are dictionaries that are specially
+    # handled by the merge function (e.g., volumes).
     base_config = {
         'volumes': [{
             'name': 'vol1',
@@ -399,7 +400,7 @@ def test_merge_k8s_configs_list_deduplication():
                 'claimName': 'pvc1'
             }
         }, {
-            'name': 'vol2', 
+            'name': 'vol2',
             'persistentVolumeClaim': {
                 'claimName': 'pvc2'
             }
@@ -420,7 +421,7 @@ def test_merge_k8s_configs_list_deduplication():
     }
 
     config_utils.merge_k8s_configs(base_config, override_config)
-    
+
     # Should merge vol2 and append vol3
     assert base_config['volumes'] == [{
         'name': 'vol1',
@@ -438,3 +439,32 @@ def test_merge_k8s_configs_list_deduplication():
             'claimName': 'pvc3'
         }
     }]
+
+    # Test deduplication when list items are dictionaries that are not specially
+    # handled by the merge function (e.g., env)
+    base_config = {
+        'containers': [{
+            'name': 'container-1',
+            'env': [
+                {'name': 'ENV1', 'value': 'v1'},
+                {'name': 'ENV2', 'value': 'v2'}
+            ]
+        }]
+    }
+    override_config = {
+        'containers': [{
+            'env': [
+                {'name': 'ENV2', 'value': 'v2'},     # duplicate exactly
+                {'name': 'ENV3', 'value': 'v3'}      # new env variable
+            ]
+        }]
+    }
+    # Expected: base env is preserved and only new env var ENV3 is appended.
+    expected_env = [
+        {'name': 'ENV1', 'value': 'v1'},
+        {'name': 'ENV2', 'value': 'v2'},
+        {'name': 'ENV3', 'value': 'v3'}
+    ]
+    config_utils.merge_k8s_configs(base_config, override_config)
+    merged_env = base_config['containers'][0]['env']
+    assert merged_env == expected_env

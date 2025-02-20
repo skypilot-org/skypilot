@@ -200,14 +200,12 @@ def merge_k8s_configs(
                             base_config[key].append(new_volume)
             else:
                 # For other list values, merge lists and maintain uniqueness.
-                # Preserve the order - first list is the base_config list, and
-                # the second list is the override list. This is required for
-                # order sensitive lists like allowed_contexts.
-                seen = set(base_config[key])
-                # Append new items from override in-place while preserving order
+                # Preserve order by keeping original items and appending any 
+                # new item not already present.
+                result = list(base_config[key])
                 for item in value:
-                    if item not in seen:
-                        seen.add(item)
-                        base_config[key].append(item)
+                    if item not in result:
+                        result.append(item)
+                base_config[key] = result
         else:
             base_config[key] = value
