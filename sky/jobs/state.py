@@ -116,7 +116,8 @@ def create_table(cursor, conn):
         name TEXT,
         schedule_state TEXT,
         controller_pid INTEGER DEFAULT NULL,
-        dag_yaml_path TEXT)""")
+        dag_yaml_path TEXT,
+        env_file_path TEXT)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -125,6 +126,9 @@ def create_table(cursor, conn):
                                  'INTEGER DEFAULT NULL')
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'dag_yaml_path',
+                                 'TEXT')
+
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'env_file_path',
                                  'TEXT')
 
     conn.commit()
@@ -975,14 +979,16 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 # scheduler lock to work correctly.
 
 
-def scheduler_set_waiting(job_id: int, dag_yaml_path: str) -> None:
+def scheduler_set_waiting(job_id: int, dag_yaml_path: str,
+                          env_file_path: str) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
-            'schedule_state = (?), dag_yaml_path = (?) '
+            'schedule_state = (?), dag_yaml_path = (?), env_file_path = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
-            (ManagedJobScheduleState.WAITING.value, dag_yaml_path, job_id,
+            (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
+             env_file_path, job_id,
              ManagedJobScheduleState.INACTIVE.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
@@ -1082,7 +1088,7 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         row = cursor.execute(
-            'SELECT spot_job_id, schedule_state, dag_yaml_path '
+            'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
             'WHERE schedule_state in (?, ?) '
             'ORDER BY spot_job_id LIMIT 1',
@@ -1092,4 +1098,5 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
             'job_id': row[0],
             'schedule_state': ManagedJobScheduleState(row[1]),
             'dag_yaml_path': row[2],
+            'env_file_path': row[3],
         } if row is not None else None
