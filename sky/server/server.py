@@ -630,8 +630,9 @@ async def logs(
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
-        # TODO(aylei): tail logs should be non-blocking, so that it does not
-        # occupy background workers.
+        # TODO(aylei): We have tail logs scheduled as SHORT request, because it should
+        # be responsive. However, it can be long running if the user's job keeps running, and
+        # we should avoid it taking the SHORT worker.
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
     )
