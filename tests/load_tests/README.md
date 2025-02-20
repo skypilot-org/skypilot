@@ -5,7 +5,12 @@ This folder contains tools for load testing and profiling the SkyPilot API serve
 * System Profiling (`sys_profiling.py`): monitors system resource usage (CPU and memory) over time
 * Load Testing (`test_load_on_server.py`): sends concurrent requests to stress test the SkyPilot API server
 
+> **Note**: The load testing workload is simple and may not reflect the usage of the SkyPilot API server in real-world scenarios.
+> You may consider running part of or all smoke tests to get a more accurate measurement.
+
 ## Instructions
+
+### Load Testing
 
 1. Start the SkyPilot API server on a remote machine
 ```bash
@@ -17,27 +22,41 @@ python tests/load_tests/sys_profiling.py
 ```
 3. Run the load testing script locally to send requests to the server
 ```bash
-python tests/load_tests/test_load_on_server.py -n 100 -r launch
+python tests/load_tests/test_load_on_server.py -n 50 -r all --cloud aws
 ```
 4. Once the load testing is done, terminate the profiling process to get a resource usage summary printed in the terminal, e.g.
 ```bash
 ==================================================
 MONITORING SUMMARY
 ==================================================
-Duration: 28.6 seconds (0.01 hours)
+Duration: 1481.7 seconds (0.41 hours)
 
 BASELINE USAGE:
-Baseline CPU: 2.5%
-Baseline Memory: 14.17GB (47.6%)
+Baseline CPU: 1.2%
+Baseline Memory: 2.99GB (21.6%)
 
 PEAK USAGE:
-Peak CPU: 100.0%
-Peak Memory: 15.88GB (53.2%)
-Memory Delta: 1.7GB
+Peak CPU: 96.9%
+Peak Memory: 11.78GB (79.0%)
+Memory Delta: 8.8GB
+Peak Non-blocking Executor Memory: 0.37GB
+Peak Non-blocking Executor Memory Average: 0.23GB
+Peak Blocking Executor Memory: 0.35GB
+Peak Blocking Executor Memory Average: 0.30GB
 
 AVERAGE USAGE:
-Average CPU: 19.3%
-Average Memory: 49.5%
+Average CPU: 11.5%
+Average Memory: 63.1%
 ==================================================
 ```
+5. Update the `_LONG_WORKER_MEM_GB` and `_SHORT_WORKER_MEM_GB` constants in `sky/server/requests/executor.py` based on the peak memory usage of the blocking and non-blocking workers.
 
+### Benchmarking
+
+The load testing script can be used to benchmark.
+The caveat here is spinning up high concurrent `sky` CLI processes can greatly increase the latency on client side.
+It is recommended to run benchmark using `--api` args if you want the benchmark focus on the API performance.
+
+```bash
+python tests/load_tests/test_load_on_server.py -n 100 --api status
+```
