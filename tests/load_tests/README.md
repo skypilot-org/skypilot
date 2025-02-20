@@ -10,6 +10,8 @@ This folder contains tools for load testing and profiling the SkyPilot API serve
 
 ## Instructions
 
+### Load Testing
+
 1. Start the SkyPilot API server on a remote machine
 ```bash
 sky api stop && sky api start
@@ -48,3 +50,13 @@ Average Memory: 63.1%
 ==================================================
 ```
 5. Update the `_LONG_WORKER_MEM_GB` and `_SHORT_WORKER_MEM_GB` constants in `sky/server/requests/executor.py` based on the peak memory usage of the blocking and non-blocking workers.
+
+### Benchmarking
+
+The load testing script can be used to benchmark.
+The caveat here is spinning up high concurrent `sky` CLI processes can greatly increase the latency on client side.
+It is recommended to run benchmark using `--api` args if you want the benchmark focus on the API performance.
+
+```bash
+python tests/load_tests/test_load_on_server.py -n 100 --api status
+```
