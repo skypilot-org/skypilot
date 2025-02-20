@@ -799,7 +799,9 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             }
             # Preserve existing tolerations if any
             existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
-            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [tpu_toleration]
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                tpu_toleration
+            ]
 
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
