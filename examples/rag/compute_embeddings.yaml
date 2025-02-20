@@ -54,7 +54,7 @@ run: |
   # Process the assigned range of documents
   echo "Processing documents from $START_IDX to $END_IDX"
   
-  python scripts/compute_vectors.py \
+  python scripts/compute_embeddings.py \
     --output-path "/output/embeddings_${START_IDX}_${END_IDX}.parquet" \
     --start-idx $START_IDX \
     --end-idx $END_IDX \

@@ -47,10 +47,12 @@ def main():
                         type=int,
                         default=0,
                         help='Global start index in dataset')
-    parser.add_argument('--end-idx',
-                        type=int,
-                        default=109740,
-                        help='Global end index in dataset, not inclusive')
+    parser.add_argument(
+        '--end-idx',
+        type=int,
+        # this is the last index of the reddit post dataset
+        default=109740,  
+        help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,
                         default=10,
@@ -91,10 +93,7 @@ def main():
             'HF_TOKEN': hf_token,
         })
 
-        sky.jobs.launch(
-            task_copy,
-            name=f'rag-compute-{job_start}-{job_end}'
-        )
+        sky.jobs.launch(task_copy, name=f'rag-compute-{job_start}-{job_end}')
 
 
 if __name__ == '__main__':

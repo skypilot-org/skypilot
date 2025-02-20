@@ -8,6 +8,7 @@ resources:
   memory: 32+
   ports: 
     - 8000 
+  use_spot: true
   # any_of:
   #   - use_spot: true
   #   - use_spot: false

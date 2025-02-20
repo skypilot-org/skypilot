@@ -1,4 +1,4 @@
-name: build-law-vectordb
+name: build-legal-rag
 
 workdir: .
 
@@ -20,7 +20,7 @@ setup: |
   pip install chromadb pandas tqdm pyarrow
 
 run: |
-  python scripts/build_vectordb.py \
+  python scripts/build_rag.py \
     --collection-name legal_docs \
     --persist-dir /vectordb/chroma \
     --embeddings-dir /embeddings \

@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 def list_local_parquet_files(mount_path: str, prefix: str) -> list:
-    """List all parquet files in the mounted S3 directory."""
+    """List all parquet files in the mounted directory."""
     search_path = os.path.join(mount_path, prefix, '**/*.parquet')
     parquet_files = glob.glob(search_path, recursive=True)
     return parquet_files
@@ -62,7 +62,7 @@ def process_parquet_file(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='Build ChromaDB from mounted S3 parquet files')
+        description='Build ChromaDB from mounted parquet files')
     parser.add_argument('--collection-name',
                         type=str,
                         default='rag_embeddings',
@@ -78,7 +78,7 @@ def main():
         help='Batch size for processing, this needs to fit in memory')
     parser.add_argument('--embeddings-dir',
                         type=str,
-                        default='/clip_embeddings',
+                        default='/embeddings',
                         help='Path to mounted bucket containing parquet files')
     parser.add_argument(
         '--prefix',

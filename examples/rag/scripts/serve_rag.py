@@ -509,7 +509,7 @@ def main():
     parser.add_argument(
         '--collection-name',
         type=str,
-        default='rag_embeddings',  # Use RAG-specific name
+        default='legal_docs',  
         help='ChromaDB collection name')
     parser.add_argument('--persist-dir',
                         type=str,
