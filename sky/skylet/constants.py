@@ -281,12 +281,9 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # linking. E.g., in our API server deployment on k8s, ~/.sky/ is mounted from a
 # persistent volume, so any contents in ~/.sky/ cannot be hard linked elsewhere.
 FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
-
-# Used when an managed jobs are created and
-# files are synced up to the cloud.
-FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
-FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
-FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
+# Base path for two-hop file mounts translation. See
+# controller_utils.translate_local_file_mounts_to_two_hop().
+FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH = '~/.sky/tmp/controller'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
