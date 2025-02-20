@@ -16,6 +16,8 @@ from typing import Dict, List
 import numpy as np
 
 from sky.client import sdk
+from sky import jobs as managed_jobs
+from sky import serve as serve_lib
 
 results_lock = threading.Lock()
 request_latencies: Dict[str, List[float]] = defaultdict(list)
@@ -172,9 +174,22 @@ def test_status_api(num_requests):
 
     run_concurrent_api_requests(num_requests, status, 'API /status')
 
+# Naive simlutaion of API requests made by `sky status` command
+def test_cli_status_in_api(num_requests):
+    print(f"Testing {num_requests} CLI status in API requests")
+
+    def status():
+        job_request_id = managed_jobs.queue(refresh=False, skip_finished=True)
+        serve_request_id = serve_lib.status(service_names=None)
+        status_request_id = sdk.status()
+        sdk.stream_and_get(job_request_id)
+        sdk.stream_and_get(serve_request_id)
+        sdk.stream_and_get(status_request_id)
+
+    run_concurrent_api_requests(num_requests, status, 'API /status')
 
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'tail_logs']
+all_apis = ['status', 'cli_status']
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -246,8 +261,8 @@ if __name__ == '__main__':
             if api == 'status':
                 thread = threading.Thread(target=test_status_api,
                                           args=(args.n,))
-            elif api == 'tail_logs':
-                thread = threading.Thread(target=test_tail_logs_api,
+            elif api == 'cli_status':
+                thread = threading.Thread(target=test_cli_status_in_api,
                                           args=(args.n, cloud))
             if thread:
                 test_threads.append(thread)
