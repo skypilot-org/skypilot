@@ -8,7 +8,8 @@ import os
 import time
 import traceback
 import typing
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import (Any, Callable, ContextManager, Dict, Generator, List,
+                    Optional, Type, TypeVar, Union)
 
 import click
 
@@ -35,6 +36,8 @@ else:
     inspect = adaptors_common.LazyImport('inspect')
 
 logger = sky_logging.init_logger(__name__)
+
+T = TypeVar('T')
 
 
 def _get_current_timestamp_ns() -> int:
@@ -269,16 +272,34 @@ class UsageMessageToReport(MessageToReport):
         self.is_new_cluster = True
 
     @contextlib.contextmanager
-    def update_runtime_context(self, name: str):
+    def update_runtime_context(self, name: str) -> Generator[None, None, None]:
+        """Context manager for runtime tracking.
+
+        Args:
+            name: The name of the runtime to track.
+
+        Yields:
+            None
+        """
         start = time.time()
         try:
             yield
         finally:
             self.runtimes[name] = time.time() - start
 
-    def update_runtime(self, name_or_fn: str):
-        return common_utils.make_decorator(self.update_runtime_context,
-                                           name_or_fn)
+    def update_runtime(
+        self, name_or_fn: Union[str, Callable[..., T]]
+    ) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[...,
+                                                                       T]]]:
+        """Decorator for runtime tracking.
+
+        Args:
+            name_or_fn: The name of the runtime or the function to be wrapped.
+
+        Returns:
+            A decorator that wraps the function with runtime tracking.
+        """
+        return update_runtime(name_or_fn)
 
 
 class HeartbeatMessageToReport(MessageToReport):
@@ -465,50 +486,70 @@ def send_heartbeat(interval_seconds: int = 600):
     _send_to_loki(MessageType.HEARTBEAT)
 
 
-@contextlib.contextmanager
-def entrypoint_context(name: str, fallback: bool = False):
-    """Context manager for entrypoint.
+class EntrypointContext(common_utils.ContextManager[None]):
+    """Context manager for entrypoint."""
 
-    The context manager will send the usage message to Loki when exiting.
-    The message will only be sent at the outermost level of the context.
+    def __init__(self, name: str, fallback: bool = False) -> None:
+        self.name = name
+        self.fallback = fallback
 
-    When the outermost context does not cover all the codepaths, an
-    additional entrypoint_context with fallback=True can be used to wrap
-    the global entrypoint to catch any exceptions that are not caught.
-    """
-    # Show the policy message only when the entrypoint is used.
-    # An indicator for PRIVACY_POLICY has already been shown.
-    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
-    if not env_options.Options.DISABLE_LOGGING.get():
-        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
+    def __enter__(self) -> None:
+        # Show the policy message only when the entrypoint is used.
+        # An indicator for PRIVACY_POLICY has already been shown.
+        privacy_policy_indicator = os.path.expanduser(
+            constants.PRIVACY_POLICY_PATH)
+        if not env_options.Options.DISABLE_LOGGING.get():
+            os.makedirs(os.path.dirname(privacy_policy_indicator),
+                        exist_ok=True)
+            try:
+                with open(privacy_policy_indicator, 'x', encoding='utf-8'):
+                    click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
+            except FileExistsError:
+                pass
+
+        is_entry = messages.usage.entrypoint is None
+        if is_entry and not self.fallback:
+            for message in messages.values():
+                message.start()
+            messages.usage.update_entrypoint(self.name)
+        return None
+
+    def __exit__(self, exc_type: Optional[Type[BaseException]],
+                 exc_val: Optional[BaseException],
+                 exc_tb: Optional[Any]) -> Optional[bool]:
         try:
-            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
-                click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
-        except FileExistsError:
-            pass
-
-    is_entry = messages.usage.entrypoint is None
-    if is_entry and not fallback:
-        for message in messages.values():
-            message.start()
-        messages.usage.update_entrypoint(name)
-    if env_options.Options.DISABLE_LOGGING.get() or not is_entry:
-        yield
-        return
-
-    # Should be the outermost entrypoint or the fallback entrypoint.
-    try:
-        yield
-    except (Exception, SystemExit, KeyboardInterrupt) as e:
-        store_exception(e)
-        raise
-    finally:
-        if fallback:
-            messages.usage.update_entrypoint(name)
-        _send_local_messages()
+            if exc_val is not None:
+                if isinstance(exc_val,
+                              (Exception, SystemExit, KeyboardInterrupt)):
+                    store_exception(exc_val)
+                raise exc_val
+        finally:
+            if self.fallback:
+                messages.usage.update_entrypoint(self.name)
+            if not env_options.Options.DISABLE_LOGGING.get():
+                _send_local_messages()
+        return None
 
 
-T = typing.TypeVar('T')
+class RuntimeContext(common_utils.ContextManager[None]):
+    """Context manager for runtime tracking."""
+
+    def __init__(self,
+                 name: str,
+                 message: Optional[UsageMessageToReport] = None) -> None:
+        self.name = name
+        self.message = message or messages.usage
+        self.start_time = 0.0
+
+    def __enter__(self) -> None:
+        self.start_time = time.time()
+        return None
+
+    def __exit__(self, exc_type: Optional[Type[BaseException]],
+                 exc_val: Optional[BaseException],
+                 exc_tb: Optional[Any]) -> Optional[bool]:
+        self.message.runtimes[self.name] = time.time() - self.start_time
+        return None
 
 
 @typing.overload
@@ -529,9 +570,43 @@ def entrypoint(
     name_or_fn: Union[str, Callable[..., T]],
     fallback: bool = False
 ) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
-    return common_utils.make_decorator(entrypoint_context,
+    """Decorator for entrypoint functions.
+
+    Args:
+        name_or_fn: The name of the entrypoint or the function to be wrapped.
+        fallback: Whether this is a fallback entrypoint.
+
+    Returns:
+        A decorator that wraps the function with entrypoint context.
+    """
+    return common_utils.make_decorator(EntrypointContext,
                                        name_or_fn,
                                        fallback=fallback)
+
+
+@typing.overload
+def update_runtime(
+        name_or_fn: str) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def update_runtime(name_or_fn: Callable[..., T]) -> Callable[..., T]:
+    ...
+
+
+def update_runtime(
+    name_or_fn: Union[str, Callable[..., T]]
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
+    """Decorator for runtime tracking.
+
+    Args:
+        name_or_fn: The name of the runtime or the function to be wrapped.
+
+    Returns:
+        A decorator that wraps the function with runtime tracking.
+    """
+    return common_utils.make_decorator(RuntimeContext, name_or_fn)
 
 
 # Convenience methods below.

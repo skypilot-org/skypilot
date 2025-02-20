@@ -13,7 +13,9 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+import typing
+from typing import (Any, Callable, Dict, List, Optional, Protocol, Type,
+                    TypeVar, Union)
 import uuid
 
 import jinja2
@@ -392,8 +394,42 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn: Union[str, Callable],
-                   **ctx_kwargs) -> Callable:
+T = TypeVar('T', covariant=True)
+R = TypeVar('R')
+
+
+class ContextManager(Protocol[T]):
+    """Protocol defining the context manager interface."""
+
+    def __init__(self, name: str, **kwargs: Any) -> None:
+        ...
+
+    def __enter__(self) -> T:
+        ...
+
+    def __exit__(self, exc_type: Optional[Type[BaseException]],
+                 exc_val: Optional[BaseException],
+                 exc_tb: Optional[Any]) -> Optional[bool]:
+        ...
+
+
+@typing.overload
+def make_decorator(
+        cls: Type[ContextManager[Any]], name_or_fn: str,
+        **ctx_kwargs: Any) -> Callable[[Callable[..., R]], Callable[..., R]]:
+    ...
+
+
+@typing.overload
+def make_decorator(cls: Type[ContextManager[Any]], name_or_fn: Callable[..., R],
+                   **ctx_kwargs: Any) -> Callable[..., R]:
+    ...
+
+
+def make_decorator(
+    cls: Type[ContextManager[Any]], name_or_fn: Union[str, Callable[..., R]],
+    **ctx_kwargs: Any
+) -> Union[Callable[..., R], Callable[[Callable[..., R]], Callable[..., R]]]:
     """Make the cls a decorator.
 
     class cls:
@@ -405,39 +441,38 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
             pass
 
     Args:
+        cls: The class to be used as a decorator. Must implement the context manager protocol.
         name_or_fn: The name of the event or the function to be wrapped.
-        message: The message attached to the event.
+        **ctx_kwargs: Additional keyword arguments passed to cls.__init__.
+
+    Returns:
+        A decorator that wraps the function with the class context.
     """
     if isinstance(name_or_fn, str):
 
-        def _wrapper(f):
+        def _wrapper(f: Callable[..., R]) -> Callable[..., R]:
 
             @functools.wraps(f)
-            def _record(*args, **kwargs):
-                with cls(name_or_fn, **ctx_kwargs):
+            def _record(*args: Any, **kwargs: Any) -> R:
+                with cls(name_or_fn, **ctx_kwargs):  # type: ignore
                     return f(*args, **kwargs)
 
             return _record
 
         return _wrapper
-    else:
-        if not inspect.isfunction(name_or_fn):
-            raise ValueError(
-                'Should directly apply the decorator to a function.')
 
-        @functools.wraps(name_or_fn)
-        def _record(*args, **kwargs):
-            f = name_or_fn
-            func_name = getattr(f, '__qualname__', f.__name__)
-            module_name = getattr(f, '__module__', '')
-            if module_name:
-                full_name = f'{module_name}.{func_name}'
-            else:
-                full_name = func_name
-            with cls(full_name, **ctx_kwargs):
-                return f(*args, **kwargs)
+    # At this point name_or_fn must be a callable since we checked isinstance(str)
+    f = name_or_fn
+    func_name = getattr(f, '__qualname__', getattr(f, '__name__', str(f)))
+    module_name = getattr(f, '__module__', '')
+    full_name = f'{module_name}.{func_name}' if module_name else func_name
 
-        return _record
+    @functools.wraps(f)
+    def _record(*args: Any, **kwargs: Any) -> R:
+        with cls(full_name, **ctx_kwargs):  # type: ignore
+            return f(*args, **kwargs)
+
+    return _record
 
 
 def retry(method, max_retries=3, initial_backoff=1):

@@ -17,11 +17,12 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
+                    Tuple, Union)
 
 import colorama
 import filelock
+import rich.status as rich_status
 
 import sky
 from sky import backends
@@ -4475,6 +4476,66 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      f'{returncode}: {stdout+stderr}\n'
                      f'Command: {code}')
         return False
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = None,
+        log_path: str = '/dev/null',
+        stream_logs: bool = False,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
+        require_outputs: Literal[False] = False,
+        separate_stderr: bool = False,
+        process_stream: bool = True,
+        source_bashrc: bool = False,
+        **kwargs,
+    ) -> int:
+        ...
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = None,
+        log_path: str = '/dev/null',
+        stream_logs: bool = False,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
+        require_outputs: Literal[True],
+        separate_stderr: bool = False,
+        process_stream: bool = True,
+        source_bashrc: bool = False,
+        **kwargs,
+    ) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = None,
+        log_path: str = '/dev/null',
+        stream_logs: bool = False,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
+        require_outputs: bool = False,
+        separate_stderr: bool = False,
+        process_stream: bool = True,
+        source_bashrc: bool = False,
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        ...
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.

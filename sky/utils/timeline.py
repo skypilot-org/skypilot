@@ -10,13 +10,16 @@ import os
 import threading
 import time
 import traceback
-from typing import Callable, Optional, Union
+import typing
+from typing import Callable, Optional, TypeVar, Union
 
 import filelock
 
 from sky.utils import common_utils
 
 _events = []
+
+T = TypeVar('T')
 
 
 class Event:
@@ -72,7 +75,33 @@ class Event:
         self.end()
 
 
-def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
+@typing.overload
+def event(
+    name_or_fn: str,
+    message: Optional[str] = None
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def event(name_or_fn: Callable[..., T],
+          message: Optional[str] = None) -> Callable[..., T]:
+    ...
+
+
+def event(
+    name_or_fn: Union[str, Callable[..., T]],
+    message: Optional[str] = None
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
+    """Decorator to record an event.
+
+    Args:
+        name_or_fn: The name of the event or the function to be wrapped.
+        message: The message attached to the event.
+
+    Returns:
+        A decorator that wraps the function with event recording.
+    """
     return common_utils.make_decorator(Event, name_or_fn, message=message)
 
 
