@@ -9,7 +9,7 @@ from pathlib import Path
 import pickle
 import shutil
 import time
-from typing import Dict, List
+from typing import Dict, List, Tuple
 
 from datasets import load_dataset
 import nltk
@@ -22,7 +22,7 @@ from tqdm import tqdm
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize NLTK data
+# Initialize NLTK to chunk documents
 try:
     nltk.data.find('tokenizers/punkt')
 except LookupError:
@@ -32,8 +32,16 @@ except LookupError:
     logger.info('Download complete')
 
 
-def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
-    """Load documents from Pile of Law dataset."""
+def load_law_documents(start_idx: int = 0, end_idx: int = 1000) -> List[Dict]:
+    """Load documents from Pile of Law dataset.
+    
+    Args:
+        start_idx: Starting index in dataset
+        end_idx: Ending index in dataset
+        
+    Returns:
+        List of documents
+    """
     dataset = load_dataset('pile-of-law/pile-of-law',
                            'all',
                            split='train',
@@ -60,7 +68,10 @@ def load_law_documents(start_idx: int = 0, end_idx: int = 1000):
     return documents
 
 
-def chunk_document(document, chunk_size=512, overlap=50, start_chunk_idx=0):
+def chunk_document(document,
+                   chunk_size=512,
+                   overlap=50,
+                   start_chunk_idx=0) -> Tuple[List[Dict], int]:
     """Split document into overlapping chunks using sentence-aware splitting.
     
     Args:
@@ -142,7 +153,13 @@ def compute_embeddings_batch(chunks: List[Dict],
                              output_path: str,
                              batch_size: int = 32,
                              partition_size: int = 1000) -> None:
-    """Compute embeddings for document chunks using DeepSeek R1 and save in partitions."""
+    """Compute embeddings for document chunks using DeepSeek R1 and save in partitions.
+    
+    Args:
+        chunks: List of document chunks
+        vllm_endpoint: Endpoint for vLLM service
+        output_path: Path to save embeddings
+    """
     current_partition = []
     partition_counter = 0
 
@@ -214,8 +231,14 @@ def compute_embeddings_batch(chunks: List[Dict],
 
 
 def save_partition(results: List[Dict], output_path: str,
-                   partition_counter: int):
-    """Save a partition of embeddings to a parquet file with atomic write."""
+                   partition_counter: int) -> None:
+    """Save a partition of embeddings to a parquet file with atomic write.
+    
+    Args:
+        results: List of embeddings
+        output_path: Path to save embeddings
+        partition_counter: Partition counter
+    """
     if not results:
         return
 
