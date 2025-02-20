@@ -15,9 +15,9 @@ from typing import Dict, List
 
 import numpy as np
 
-from sky.client import sdk
 from sky import jobs as managed_jobs
 from sky import serve as serve_lib
+from sky.client import sdk
 
 results_lock = threading.Lock()
 request_latencies: Dict[str, List[float]] = defaultdict(list)
@@ -101,7 +101,8 @@ def run_concurrent_requests(num_requests, cmd):
 def run_concurrent_api_requests(num_requests, fn, kind):
     threads = []
     for i in range(num_requests):
-        thread = threading.Thread(target=run_single_api_request, args=(i + 1, fn, kind))
+        thread = threading.Thread(target=run_single_api_request,
+                                  args=(i + 1, fn, kind))
         threads.append(thread)
         thread.start()
     for thread in threads:
@@ -174,6 +175,7 @@ def test_status_api(num_requests):
 
     run_concurrent_api_requests(num_requests, status, 'API /status')
 
+
 # Naive simlutaion of API requests made by `sky status` command
 def test_cli_status_in_api(num_requests):
     print(f"Testing {num_requests} CLI status in API requests")
@@ -192,10 +194,28 @@ def test_cli_status_in_api(num_requests):
             pass
         sdk.stream_and_get(status_request_id)
 
-    run_concurrent_api_requests(num_requests, cli_status, 'API calls of sky status')
+    run_concurrent_api_requests(num_requests, cli_status,
+                                'API calls of sky status')
+
+
+def test_tail_logs_api(num_requests, cloud):
+    print(f"Testing {num_requests} tail logs API requests")
+    cluster_name = 'test'
+    job_id = 1
+    setup_cmd = f'sky launch -c {cluster_name} --cloud={cloud} --cpus=2 -y'
+    run_single_request(0, setup_cmd)
+
+    def tail_logs():
+        sdk.tail_logs(cluster_name, job_id, follow=True)
+
+    run_concurrent_api_requests(num_requests, tail_logs, 'API /tail_logs')
+
+    cleanup_cmd = f'sky down -y {cluster_name}'
+    run_single_request(0, cleanup_cmd)
+
 
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status']
+all_apis = ['status', 'cli_status', 'tail_logs']
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -270,6 +290,9 @@ if __name__ == '__main__':
             elif api == 'cli_status':
                 thread = threading.Thread(target=test_cli_status_in_api,
                                           args=(args.n,))
+            elif api == 'tail_logs':
+                thread = threading.Thread(target=test_tail_logs_api,
+                                          args=(args.n, cloud))
             if thread:
                 test_threads.append(thread)
                 thread.start()
