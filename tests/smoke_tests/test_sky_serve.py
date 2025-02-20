@@ -862,6 +862,7 @@ def test_skyserve_failures(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_https(generic_cloud: str):
@@ -900,6 +901,7 @@ def test_skyserve_https(generic_cloud: str):
         smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_multi_ports(generic_cloud: str):
