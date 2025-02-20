@@ -5,18 +5,23 @@ workdir: .
 resources:
   accelerators: 
     L4: 4
+    L40S: 4
   memory: 32+
   ports: 
     - 8000 
-  use_spot: true
-  # any_of:
-  #   - use_spot: true
-  #   - use_spot: false
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
 file_mounts:
   /vectordb:
     name: sky-rag-vectordb
     # this needs to be the same as in build_vectordb.yaml
     mode: MOUNT
+
+envs:
+  EMBEDDING_MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
+  GENERATION_MODEL_NAME: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 
 setup: |
   # Install dependencies for RAG service
@@ -25,15 +30,6 @@ setup: |
   
   # Install dependencies for vLLM
   pip install transformers==4.48.1 vllm==0.6.6.post1 hf_transfer
-
-service:
-  replicas: 1
-  readiness_probe:
-    path: /health
-
-envs:
-  EMBEDDING_MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
-  GENERATION_MODEL_NAME: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
 
 run: |
   HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/generation_model $GENERATION_MODEL_NAME
@@ -78,3 +74,9 @@ run: |
     --persist-dir /vectordb/chroma \
     --generator-endpoint http://localhost:8002 \
     --embed-endpoint http://localhost:8003 
+  
+service:
+  replicas: 1
+  readiness_probe:
+    path: /health
+

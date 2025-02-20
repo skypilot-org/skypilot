@@ -5,8 +5,6 @@ workdir: .
 resources:
   accelerators: 
     L4: 1
-    # A10G: 1
-    # V100: 1
   memory: 32+
   any_of:
     - use_spot: true

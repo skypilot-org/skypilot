@@ -51,7 +51,7 @@ def main():
         '--end-idx',
         type=int,
         # this is the last index of the reddit post dataset
-        default=109740,  
+        default=109740,
         help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,

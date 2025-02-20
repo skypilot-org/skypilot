@@ -506,11 +506,10 @@ def main():
                         type=int,
                         default=8000,
                         help='Port to serve on')
-    parser.add_argument(
-        '--collection-name',
-        type=str,
-        default='legal_docs',  
-        help='ChromaDB collection name')
+    parser.add_argument('--collection-name',
+                        type=str,
+                        default='legal_docs',
+                        help='ChromaDB collection name')
     parser.add_argument('--persist-dir',
                         type=str,
                         default='/vectordb/chroma',
