@@ -445,26 +445,40 @@ def test_merge_k8s_configs_list_deduplication():
     base_config = {
         'containers': [{
             'name': 'container-1',
-            'env': [
-                {'name': 'ENV1', 'value': 'v1'},
-                {'name': 'ENV2', 'value': 'v2'}
-            ]
+            'env': [{
+                'name': 'ENV1',
+                'value': 'v1'
+            }, {
+                'name': 'ENV2',
+                'value': 'v2'
+            }]
         }]
     }
     override_config = {
         'containers': [{
             'env': [
-                {'name': 'ENV2', 'value': 'v2'},     # duplicate exactly
-                {'name': 'ENV3', 'value': 'v3'}      # new env variable
+                {
+                    'name': 'ENV2',
+                    'value': 'v2'
+                },  # duplicate exactly
+                {
+                    'name': 'ENV3',
+                    'value': 'v3'
+                }  # new env variable
             ]
         }]
     }
     # Expected: base env is preserved and only new env var ENV3 is appended.
-    expected_env = [
-        {'name': 'ENV1', 'value': 'v1'},
-        {'name': 'ENV2', 'value': 'v2'},
-        {'name': 'ENV3', 'value': 'v3'}
-    ]
+    expected_env = [{
+        'name': 'ENV1',
+        'value': 'v1'
+    }, {
+        'name': 'ENV2',
+        'value': 'v2'
+    }, {
+        'name': 'ENV3',
+        'value': 'v3'
+    }]
     config_utils.merge_k8s_configs(base_config, override_config)
     merged_env = base_config['containers'][0]['env']
     assert merged_env == expected_env

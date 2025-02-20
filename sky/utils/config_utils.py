@@ -200,7 +200,7 @@ def merge_k8s_configs(
                             base_config[key].append(new_volume)
             else:
                 # For other list values, merge lists and maintain uniqueness.
-                # Preserve order by keeping original items and appending any 
+                # Preserve order by keeping original items and appending any
                 # new item not already present.
                 result = list(base_config[key])
                 for item in value:
