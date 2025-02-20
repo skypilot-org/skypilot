@@ -1008,8 +1008,12 @@ def realtime_kubernetes_gpu_availability(
 # = Local Cluster =
 # =================
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool, context_name: Optional[str] = None) -> None:
+def local_up(gpus: bool,
+             ips: Optional[List[str]],
+             ssh_user: Optional[str],
+             ssh_key: Optional[str],
+             cleanup: bool,
+             context_name: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key, cleanup):

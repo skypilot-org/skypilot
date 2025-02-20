@@ -75,7 +75,8 @@ Deploying SkyPilot
       IP_FILE=ips.txt
       SSH_USER=username
       SSH_KEY=path/to/ssh/key
-      sky local up --ips $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY
+      CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
+      sky local up --ips $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
 
    SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 

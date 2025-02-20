@@ -1265,8 +1265,12 @@ def storage_delete(name: str) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool, context_name: Optional[str] = None) -> server_common.RequestId:
+def local_up(gpus: bool,
+             ips: Optional[List[str]],
+             ssh_user: Optional[str],
+             ssh_key: Optional[str],
+             cleanup: bool,
+             context_name: Optional[str] = None) -> server_common.RequestId:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:

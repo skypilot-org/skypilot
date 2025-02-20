@@ -5380,10 +5380,11 @@ def local():
 @click.option('--cleanup',
               is_flag=True,
               help='Clean up the remote cluster instead of deploying it.')
-@click.option('--context-name',
-              type=str,
-              required=False,
-              help='Name to use for the kubeconfig context. Defaults to "default".')
+@click.option(
+    '--context-name',
+    type=str,
+    required=False,
+    help='Name to use for the kubeconfig context. Defaults to "default".')
 @local.command('up', cls=_DocumentedCodeCommand)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
@@ -5433,7 +5434,8 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
             raise click.BadParameter(
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup, context_name)
+    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
+                              context_name)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
