@@ -1,7 +1,7 @@
 # Retrieval Augmented Generation with DeepSeek R1
 
 <p align="center">
-<img src="[Add a relevant diagram/image here]" alt="RAG with DeepSeek R1" style="width: 70%;">
+<img src="https://i.imgur.com/fI6Mzpi.png" alt="RAG with DeepSeek R1" style="width: 70%;">
 </p>
 
 ## Large-Scale Legal Document Search and Analysis
@@ -33,7 +33,7 @@ Convert legal documents into vector representations using DeepSeek R1. These emb
 
 Launch the embedding computation:
 ```bash
-python3 batch_compute_vectors.py
+python3 batch_compute_embeddings.py
 ```
 
 This processes documents from the Pile of Law dataset and computes embeddings in batches:
@@ -43,11 +43,11 @@ Saving embeddings to: embeddings_0_1000.parquet
 ...
 ```
 
-## Step 2: Build the Vector Database
+## Step 2: Build RAG with Vector Database
 After computing embeddings, construct a ChromaDB vector database for efficient similarity search:
 
 ```bash
-sky jobs launch build_vectordb.yaml
+sky jobs launch build_rag.yaml
 ```
 
 The process builds the database in batches:
@@ -57,7 +57,7 @@ Adding vectors to ChromaDB: 100%|██████████| 1000/1000 [00:1
 ...
 ```
 
-## Step 3: Serve the RAG System
+## Step 3: Serve the RAG
 Deploy the RAG service to handle queries and generate answers:
 
 ```bash
@@ -78,7 +78,6 @@ You can visit the website and input your query there! A few queries to try out:
 
 > I want to break my lease. my landlord doesn't allow me to do that. 
 > My employer has not provided the final paycheck after termination. 
-> I'm assaulted. can I self-defend myself  
 
 ## Disclaimer
 This document provides instruction for building a RAG system with SkyPilot. The system and its outputs should not be considered as legal advice. Please consult qualified legal professionals for any legal matters.
