@@ -5,6 +5,8 @@ SkyPilot YAML
 
 SkyPilot provides an intuitive YAML interface to specify clusters, jobs, or services (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
+**All fields in the YAML specification are optional.** You can specify only the fields that are relevant to your task.
+
 YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (e.g., :meth:`sky.Task.from_yaml`).
 
 
@@ -88,6 +90,9 @@ Properties
 
 Task name (optional), used for display purposes.
 
+.. code-block:: yaml
+
+  name: my-task
 
 .. _yaml-spec-workdir:
 
@@ -102,6 +107,16 @@ If a relative path is used, it's evaluated relative to the location from which `
 
 To exclude files from syncing, see https://docs.skypilot.co/en/latest/examples/syncing-code-artifacts.html#exclude-uploading-files
 
+.. code-block:: yaml
+
+  workdir: ~/my-task-code
+
+OR
+
+.. code-block:: yaml
+
+  workdir: ../my-project  # Relative path
+
 
 .. _yaml-spec-num-nodes:
 
@@ -112,6 +127,10 @@ Number of nodes (optional; defaults to 1) to launch including the head node.
 
 A task can set this to a smaller value than the size of a cluster.
 
+.. code-block:: yaml
+
+  num_nodes: 4
+
 
 .. _yaml-spec-resources:
 
@@ -120,6 +139,12 @@ A task can set this to a smaller value than the size of a cluster.
 
 Per-node resource requirements (optional).
 
+.. code-block:: yaml
+
+  resources:
+    cloud: aws
+    instance_type: p3.8xlarge
+
 
 .. _yaml-spec-resources-cloud:
 
@@ -127,6 +152,18 @@ Per-node resource requirements (optional).
 ~~~~~~~~~~~~~~~~~~~
 
 The cloud to use (optional).
+
+.. code-block:: yaml
+
+  resources:
+    cloud: aws
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    cloud: gcp
 
 
 .. _yaml-spec-resources-region:
@@ -138,6 +175,11 @@ The region to use (optional).
 
 Auto-failover will be disabled if this is specified.
 
+.. code-block:: yaml
+
+  resources:
+    region: us-east-1
+
 
 .. _yaml-spec-resources-zone:
 
@@ -147,6 +189,11 @@ Auto-failover will be disabled if this is specified.
 The zone to use (optional).
 
 Auto-failover will be disabled if this is specified.
+
+.. code-block:: yaml
+
+  resources:
+    zone: us-east-1a
 
 
 .. _yaml-spec-resources-accelerators:
@@ -178,6 +225,27 @@ The following three ways are valid for specifying accelerators for a cluster:
 
   Example: ``{'L4:1', 'H100:1', 'A100:1'}``
 
+.. code-block:: yaml
+
+  resources:
+    accelerators: V100:8
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    accelerators:
+      - A100:1
+      - V100:1
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+      accelerators: {A100: 1, V100: 1}
+
 
 .. _yaml-spec-resources-cpus:
 
@@ -192,6 +260,18 @@ Format:
 - ``<count>+``: at least ``<count>`` vCPUs
 
 Example: ``4+`` means first try to find an instance type with >= 4 vCPUs. If not found, use the next cheapest instance with more than 4 vCPUs.
+
+.. code-block:: yaml
+
+  resources:
+    cpus: 4+
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    cpus: 16
 
 
 .. _yaml-spec-resources-memory:
@@ -208,6 +288,17 @@ Format:
 
 Example: ``32+`` means first try to find an instance type with >= 32 GiB. If not found, use the next cheapest instance with more than 32 GiB.
 
+.. code-block:: yaml
+
+  resources:
+    memory: 32+
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    memory: 64
 
 .. _yaml-spec-resources-instance-type:
 
@@ -218,6 +309,11 @@ Instance type to use (optional).
 
 If ``accelerators`` is specified, the corresponding instance type is automatically inferred.
 
+.. code-block:: yaml
+
+  resources:
+    instance_type: p3.8xlarge
+
 
 .. _yaml-spec-resources-use-spot:
 
@@ -227,6 +323,11 @@ If ``accelerators`` is specified, the corresponding instance type is automatical
 Whether the cluster should use spot instances (optional).
 
 If unspecified, defaults to ``false`` (on-demand instances).
+
+.. code-block:: yaml
+
+  resources:
+    use_spot: true
 
 
 .. _yaml-spec-resources-job-recovery:
@@ -247,11 +348,18 @@ Example:
 
 .. code-block:: yaml
 
-  # Or, to allow up to 3 restarts (default: 0) on user code errors:
-  job_recovery:
-    strategy: EAGER_NEXT_REGION
-    max_restarts_on_errors: 3
+  resources:
+    job_recovery:
+        strategy: FAILOVER
 
+OR
+
+.. code-block:: yaml
+
+  resources:
+      job_recovery:
+          strategy: EAGER_NEXT_REGION
+          max_restarts_on_errors: 3
 
 .. _yaml-spec-resources-disk-size:
 
@@ -261,6 +369,11 @@ Example:
 Disk size in GB to allocate for OS (mounted at ``/``).
 
 Increase this if you have a large working directory or tasks that write out large outputs.
+
+.. code-block:: yaml
+
+  resources:
+    disk_size: 256
 
 
 .. _yaml-spec-resources-disk-tier:
@@ -281,6 +394,18 @@ Rough performance estimate:
 - ultra: 60000 IOPS;  read 4000 MB/s; write 3000 MB/s
 
 Measured by ``examples/perf/storage_rawperf.yaml``
+
+.. code-block:: yaml
+
+  resources:
+    disk_tier: medium
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    disk_tier: best
 
 
 .. _yaml-spec-resources-ports:
@@ -306,8 +431,31 @@ Could be an integer, a range, or a list of integers and ranges:
 - To specify a port range: ``10052-10100``
 - To specify multiple ports / port ranges:
 
-  .. code-block:: yaml
+.. code-block:: yaml
 
+  ports:
+    - 8080
+    - 10022-10040
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    ports: 8081
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    ports: 10052-10100
+
+OR
+
+.. code-block:: yaml
+
+  resources:
     ports:
       - 8080
       - 10022-10040
@@ -327,7 +475,7 @@ Example usage:
   .. code-block:: yaml
 
     accelerator_args:
-      tpu_vm: True  # optional, default: True
+      tpu_vm: true  # optional, default: True
 
 - To request a TPU node:
 
@@ -343,11 +491,12 @@ Example:
 
 .. code-block:: yaml
 
-  accelerator_args:
-    # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
-    runtime_version: tpu-vm-base
-  # tpu_name: mytpu
-  # tpu_vm: True  # True to use TPU VM (the default); False to use TPU node.
+  resources:
+    accelerator_args:
+      # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
+      runtime_version: tpu-vm-base
+    # tpu_name: mytpu
+    # tpu_vm: false  # True to use TPU VM (the default); False to use TPU node.
 
 
 .. _yaml-spec-resources-image-id:
@@ -445,7 +594,7 @@ Create a private VPC image and paste its ID in the following format:
 
 .. code-block:: yaml
 
-    image_id: <unique_image_id>
+  image_id: <unique_image_id>
 
 To create an image manually:
 https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume.
@@ -456,6 +605,21 @@ https://www.ibm.com/cloud/blog/use-ibm-packer-plugin-to-create-custom-images-on-
 To use a more limited but easier to manage tool:
 https://github.com/IBM/vpc-img-inst
 
+.. code-block:: yaml
+
+  resources:
+    image_id: ami-0868a20f5a3bf9702  # AWS example
+    # image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310  # GCP example
+    # image_id: docker:pytorch/pytorch:1.13.1-cuda11.6-cudnn8-runtime # Docker example
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+    image_id:
+      us-east-1: ami-123
+      us-west-2: ami-456
 
 .. _yaml-spec-resources-labels:
 
@@ -480,8 +644,10 @@ Example:
 
 .. code-block:: yaml
 
+  resources:
     labels:
-      my-label: my-value
+      project: my-project
+      department: research
 
 
 .. _yaml-spec-resources-any-of:
@@ -510,6 +676,16 @@ Example:
     - cloud: gcp
       accelerators: H100
 
+OR
+
+.. code-block:: yaml
+
+  resources:
+    ordered:
+      - cloud: aws
+        region: us-east-1
+      - cloud: aws
+        region: us-west-2
 
 .. _yaml-spec-envs:
 
@@ -543,6 +719,14 @@ You could also specify any of them through the CLI flag if you don't want to sto
 
 For more information about docker support in SkyPilot, please refer to the ``image_id`` section above.
 
+Example of using envs:
+
+.. code-block:: yaml
+
+  envs:
+    MY_BUCKET: skypilot-data
+    MODEL_SIZE: 13b
+    MY_LOCAL_PATH: tmp-workdir
 
 .. _yaml-spec-file-mounts:
 
@@ -588,6 +772,18 @@ Example:
       name: ${MY_BUCKET}  # Name of the bucket.
       mode: MOUNT
 
+OR
+
+.. code-block:: yaml
+
+  file_mounts:
+    /remote/data: ./local_data  # Local to remote
+    /remote/output: s3://my-bucket/outputs  # Cloud storage
+    /remote/models:
+        name: my-models-bucket
+        source: ~/local_models
+        store: gcs
+        mode: MOUNT
 
 .. _yaml-spec-setup:
 
@@ -615,6 +811,14 @@ The ``|`` separator indicates a multiline string.
     pip install -r requirements.txt
     echo "Setup complete."
 
+OR
+
+.. code-block:: yaml
+
+  setup: |
+    conda create -n myenv python=3.9 -y
+    conda activate myenv
+    pip install torch torchvision
 
 .. _yaml-spec-run:
 
@@ -633,6 +837,14 @@ Example:
 
     # Demoing env var usage.
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
+
+OR
+
+.. code-block:: yaml
+
+  run: |
+    conda activate myenv
+    python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
 .. _task-yaml-experimental:
@@ -664,8 +876,6 @@ In additional to the above fields, SkyPilot also supports the following experime
             managed_instance_group: ...
         nvidia_gpus:
             disable_ecc: ...
-
-
 
 .. _service-yaml-spec:
 
@@ -716,6 +926,22 @@ If the readiness probe returns a 200, SkyServe will start routing traffic to tha
 
 Can be defined as a path string (for GET requests with defaults) or a detailed dictionary.
 
+.. code-block:: yaml
+
+  service:
+    readiness_probe: /v1/models
+
+OR
+
+.. code-block:: yaml
+
+  service:
+    readiness_probe:
+      path: /v1/models
+      post_data: '{"model_name": "my_model"}'
+      initial_delay_seconds: 600
+      timeout_seconds: 10
+
 
 .. _yaml-spec-service-readiness-probe-path:
 
@@ -725,6 +951,12 @@ Can be defined as a path string (for GET requests with defaults) or a detailed d
 Endpoint path for readiness checks (required).
 
 Path to probe. SkyServe sends periodic requests to this path after the initial delay.
+
+.. code-block:: yaml
+
+  service:
+    readiness_probe:
+      path: /v1/models
 
 
 .. _yaml-spec-service-readiness-probe-post-data:
@@ -736,6 +968,12 @@ POST request payload (optional).
 
 If this is specified, the readiness probe will use POST instead of GET, and the post data will be sent as the request body.
 
+.. code-block:: yaml
+
+  service:
+    readiness_probe:
+      path: /v1/models
+      post_data: '{"model_name": "my_model"}'
 
 .. _yaml-spec-service-readiness-probe-initial-delay-seconds:
 
@@ -748,6 +986,12 @@ Initial delay in seconds. Any readiness probe failures during this period will b
 
 This is highly related to your service, so it is recommended to set this value based on your service's startup time.
 
+
+.. code-block:: yaml
+
+  service:
+    readiness_probe:
+      initial_delay_seconds: 600
 
 .. _yaml-spec-service-readiness-probe-timeout-seconds:
 
@@ -764,6 +1008,12 @@ This is useful when your service is slow to respond to readiness probe requests.
 
 Note, having a too high timeout will delay the detection of a real failure of your service replica.
 
+.. code-block:: yaml
+
+    service:
+      readiness_probe:
+        timeout_seconds: 10
+
 
 .. _yaml-spec-service-replica-policy:
 
@@ -774,6 +1024,13 @@ Autoscaling configuration for service replicas (one of replica_policy or replica
 
 Describes how SkyServe autoscales your service based on the QPS (queries per second) of your service.
 
+.. code-block:: yaml
+
+    service:
+      replica_policy:
+        min_replicas: 1
+        max_replicas: 5
+        target_qps_per_replica: 10
 
 .. _yaml-spec-service-replica-policy-min-replicas:
 
