@@ -1,10 +1,10 @@
 .. _sky-api-server:
 
-Deploy for a Team
-=================
+Team Deployment
+===============
 
-SkyPilot implements a client-server architecture. When a user runs a command or an API call,
-a SkyPilot client issues asynchronous requests to a SkyPilot API server, which
+SkyPilot implements a client-server architecture. When a user runs a command or invokes a SDK,
+a SkyPilot client submits :ref:`asynchronous requests <async>` to a **SkyPilot API server**, which
 handles all requests.
 
 
@@ -41,8 +41,8 @@ SkyPilot API server, so that users can:
     :width: 50%
 
 
-Getting Started with Remote API Server
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Getting started with a remote API server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. grid:: 1 1 2 2
     :gutter: 2
@@ -64,8 +64,8 @@ Getting Started with Remote API Server
 
 .. _sky-api-server-connect:
 
-Connecting to Remote API Server
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Connecting to a SkyPilot API server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can configure your local SkyPilot
 to connect to it.

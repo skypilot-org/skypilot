@@ -148,7 +148,20 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 
     sky api stop
 
-  If you just upgraded from a SkyPilot version ``< 0.8.0``, see the :ref:`migration guide <migration-0.8.0>` for potential changes to your workflow that uses CLIs and SDKs.
+  If you just upgraded from ``SkyPilot<=0.8.0``, see the :ref:`migration guide <migration-0.8.0>` for potential changes to your workflow that uses CLIs and SDKs.
+
+Optional: Connect to a remote API server
+--------------------------------------------------
+
+If your administrator has set up a remote :ref:`SkyPilot API server <sky-api-server>`, you can connect to it by running:
+
+.. code-block:: shell
+
+  sky api login
+
+See more details in :ref:`sky-api-server-connect`.
+
+
 
 .. _verify-cloud-access:
 
@@ -545,8 +558,8 @@ increases before proceeding.
 
 .. _docker-image:
 
-Quick alternative: Trying in Docker
-------------------------------------------------------
+Using SkyPilot in Docker
+-------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.

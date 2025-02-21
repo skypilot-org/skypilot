@@ -1,7 +1,8 @@
 .. _sky-api-server-deploy:
 
-Deploying the SkyPilot API Server
-==================================
+Deploying SkyPilot API Server
+==============================
+
 The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes ingress controller and the API server.
 
 .. tip::

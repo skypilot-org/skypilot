@@ -1,7 +1,7 @@
 .. _pythonapi:
 
-Python SDKs
-=================
+Python SDK
+==========
 
 SkyPilot offers a programmatic SDK in Python, which is used under the hood by the :ref:`CLI <cli>`.
 
@@ -203,7 +203,7 @@ Enums
   :members:
 
 
-API Server SDKs
+API Server SDK
 -----------------
 
 .. _sky-get:

@@ -218,7 +218,7 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
 
 SkyPilot can support :ref:`thousands of managed jobs <many-jobs>` running at once.
 
-Asynchronous Interface
+Asynchronous execution
 ======================
 
 All SkyPilot CLIs and APIs are asynchronous requests, i.e. you can interrupt them at
@@ -234,7 +234,7 @@ the cluster will keep provisioning in the background:
   ├── Or, visit: http://127.0.0.1:46580/api/stream?request_id=73d316ac
   └── To cancel the request, run: sky api cancel 73d316ac
 
-See more details in :ref:`Asynchronous Interface <async>`.
+See more details in :ref:`async`.
 
 
 Next steps
@@ -247,5 +247,6 @@ Next steps:
 - Adapt :ref:`Tutorial: AI Training <ai-training>` to start running your own project on SkyPilot!
 - See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
 - To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
+- Set up SkyPilot for your team, see: :ref:`Team Deployment <api-server>`
 
 We invite you to explore SkyPilot's unique features in the rest of the documentation.

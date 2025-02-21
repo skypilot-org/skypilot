@@ -3,8 +3,28 @@
 Asynchronous Execution
 ======================
 
-All SkyPilot interfaces (commands or APIs) sends asynchronous requests to the SkyPilot API server.
-The output of a request is streamed back to the local client.
+All SkyPilot CLIs and SDKs are asynchronous. When a user runs a CLI or SDK function,
+the request will be sent to a **SkyPilot API server** and the logs will be streamed
+back to the client. That said, you can interrupt the request with ``Ctrl+C`` and the request
+will continue running in the background on the API server.
+
+
+.. _api-server-simple:
+
+SkyPilot API server
+---------------------
+
+SkyPilot is designed to be a client-server system.
+When running locally, the first CLI or SDK call will automatically start a **SkyPilot API server** locally, and
+any subsequent CLIs and SDKs will connect to the same API server.
+
+An administrator can also :ref:`deploy a SkyPilot API server <sky-api-server>` for a team, so that multiple
+users can share the same API server. In that case, you can :ref:`connect to the API server <sky-api-server-connect>`.
+
+.. code-block:: console
+
+  $ sky api login
+  Enter the API server endpoint: http://1.2.3.4:30050
 
 CLIs
 ----
@@ -48,7 +68,7 @@ As a special case, terminating (``sky down my-cluster``) or stopping (``sky stop
 
     Currently, ``sky jobs cancel`` and ``sky serve down`` do not abort other requests.
 
-Running CLIs Asynchronously
+Running CLIs asynchronously
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Most of SkyPilot CLIs support a ``--async`` flag, which will submit the request asynchronously and return immediately. With this
@@ -61,8 +81,8 @@ flag, you can submit multiple requests quickly without waiting for each request 
 
 See more for running many parallel jobs in :ref:`many-jobs`.
   
-SDKs
-----
+Python SDK
+----------
 
 Similar to the CLIs, the SkyPilot SDKs send asynchronous requests to the SkyPilot API server. When a SDK function is invoked, it will return a request ID, which can be used to stream the logs, wait for the request to finish, or cancel the request.
 
@@ -92,14 +112,14 @@ Note that the following log functions are synchronous:
   use the new `sky.stream_and_get` function to retrieve the result of a SDK function call. See the :ref:`migration guide <migration-0.8.0>` for more details.
 
 
-Managing SkyPilot Requests
---------------------------
+Manage SkyPilot requests
+------------------------
 
 You can access the asynchronous SkyPilot requests you submitted through :ref:`sky api <sky-api-cli>` commands.
 
 
-Listing requests
-~~~~~~~~~~~~~~~~
+List requests
+~~~~~~~~~~~~~~
 
 To view all requests on the server, run ``sky api status``.
 
@@ -120,7 +140,7 @@ To view all requests on the server, run ``sky api status``.
   ``sky api status`` shows the full ID for each request, but you can always use the prefix of
   the ID in ``sky api`` commands.
 
-Stream Logs
+Stream logs
 ~~~~~~~~~~~
 
 To stream the logs of a request, run ``sky api logs <request-id>``.
@@ -130,8 +150,8 @@ To stream the logs of a request, run ``sky api logs <request-id>``.
     $ sky api logs 0d35ffa7
 
 
-Cancelling requests
-~~~~~~~~~~~~~~~~~~~
+Cancel requests
+~~~~~~~~~~~~~~~
 
 To cancel requests, run ``sky api cancel <request-id> <request-id> ...``.
 
