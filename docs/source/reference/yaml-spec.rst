@@ -433,6 +433,7 @@ Could be an integer, a range, or a list of integers and ranges:
 
 .. code-block:: yaml
 
+  resources:
   ports:
     - 8080
     - 10022-10040
@@ -474,16 +475,18 @@ Example usage:
 
   .. code-block:: yaml
 
-    accelerator_args:
-      tpu_vm: true  # optional, default: True
+    resources:
+      accelerator_args:
+        tpu_vm: true  # optional, default: True
 
 - To request a TPU node:
 
   .. code-block:: yaml
 
-    accelerator_args:
-      tpu_name: ...
-      tpu_vm: false
+    resources:
+      accelerator_args:
+        tpu_name: ...
+        tpu_vm: false
 
 By default, the value for ``runtime_version`` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.
 
@@ -515,7 +518,8 @@ You can specify docker image to use by setting the image_id to ``docker:<image n
 
 .. code-block:: yaml
 
-  image_id: docker:ubuntu:latest
+  resources:
+    image_id: docker:ubuntu:latest
 
 Currently, only debian and ubuntu images are supported.
 
@@ -529,18 +533,20 @@ You can also change the default OS version by choosing from the following image 
 
 .. code-block:: yaml
 
-  image_id: skypilot:gpu-ubuntu-2004
-  image_id: skypilot:k80-ubuntu-2004
-  image_id: skypilot:gpu-ubuntu-1804
-  image_id: skypilot:k80-ubuntu-1804
+  resources:
+    image_id: skypilot:gpu-ubuntu-2004
+    image_id: skypilot:k80-ubuntu-2004
+    image_id: skypilot:gpu-ubuntu-1804
+    image_id: skypilot:k80-ubuntu-1804
 
 It is also possible to specify a per-region image id (failover will only go through the regions specified as keys; useful when you have the custom images in multiple regions):
 
 .. code-block:: yaml
 
-  image_id:
-    us-east-1: ami-0729d913a335efca7
-    us-west-2: ami-050814f384259894c
+  resources:
+    image_id:
+      us-east-1: ami-0729d913a335efca7
+      us-west-2: ami-050814f384259894c
 
 **GCP**
 
@@ -548,13 +554,15 @@ To find GCP images: https://cloud.google.com/compute/docs/images
 
 .. code-block:: yaml
 
-  image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
+  resources:
+    image_id: projects/deeplearning-platform-release/global/images/common-cpu-v20230615-debian-11-py310
 
 Or machine image: https://cloud.google.com/compute/docs/machine-images
 
 .. code-block:: yaml
 
-  image_id: projects/my-project/global/machineImages/my-machine-image
+  resources:
+    image_id: projects/my-project/global/machineImages/my-machine-image
 
 **Azure**
 
@@ -562,7 +570,8 @@ To find Azure images: https://docs.microsoft.com/en-us/azure/virtual-machines/li
 
 .. code-block:: yaml
 
-  image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
+  resources:
+    image_id: microsoft-dsvm:ubuntu-2004:2004:21.11.04
 
 **OCI**
 
@@ -572,21 +581,23 @@ You can choose the image with OS version from the following image tags provided 
 
 .. code-block:: yaml
 
-  image_id: skypilot:gpu-ubuntu-2204
-  image_id: skypilot:gpu-ubuntu-2004
-  image_id: skypilot:gpu-oraclelinux9
-  image_id: skypilot:gpu-oraclelinux8
-  image_id: skypilot:cpu-ubuntu-2204
-  image_id: skypilot:cpu-ubuntu-2004
-  image_id: skypilot:cpu-oraclelinux9
-  image_id: skypilot:cpu-oraclelinux8
+  resources:
+    image_id: skypilot:gpu-ubuntu-2204
+    image_id: skypilot:gpu-ubuntu-2004
+    image_id: skypilot:gpu-oraclelinux9
+    image_id: skypilot:gpu-oraclelinux8
+    image_id: skypilot:cpu-ubuntu-2204
+    image_id: skypilot:cpu-ubuntu-2004
+    image_id: skypilot:cpu-oraclelinux9
+    image_id: skypilot:cpu-oraclelinux8
 
 It is also possible to specify your custom image's OCID with OS type, for example:
 
 .. code-block:: yaml
 
-  image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaaywwfvy67wwe7f24juvjwhyjn3u7g7s3wzkhduxcbewzaeki2nt5q:oraclelinux
-  image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaa5tnuiqevhoyfnaa5pqeiwjv6w5vf6w4q2hpj3atyvu3yd6rhlhyq:ubuntu
+  resources:
+    image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaaywwfvy67wwe7f24juvjwhyjn3u7g7s3wzkhduxcbewzaeki2nt5q:oraclelinux
+    image_id: ocid1.image.oc1.us-sanjose-1.aaaaaaaa5tnuiqevhoyfnaa5pqeiwjv6w5vf6w4q2hpj3atyvu3yd6rhlhyq:ubuntu
 
 **IBM**
 
@@ -594,7 +605,8 @@ Create a private VPC image and paste its ID in the following format:
 
 .. code-block:: yaml
 
-  image_id: <unique_image_id>
+  resources:
+    image_id: <unique_image_id>
 
 To create an image manually:
 https://cloud.ibm.com/docs/vpc?topic=vpc-creating-and-using-an-image-from-volume.
@@ -669,12 +681,13 @@ Example:
 
 .. code-block:: yaml
 
-  any_of:
-    - cloud: aws
-      region: us-west-2
-      accelerators: H100
-    - cloud: gcp
-      accelerators: H100
+  resources:
+    any_of:
+      - cloud: aws
+        region: us-west-2
+        accelerators: H100
+      - cloud: gcp
+        accelerators: H100
 
 OR
 
