@@ -23,11 +23,12 @@ envs:
 resources:
   cloud: aws
   any_of:
-    # Enable one region in AWS.
+    # Enable all region in AWS.
     - cloud: aws
-      region: us-east-1
-    # Enable all region in GCP.
+    # Enable one in GCP.
     - cloud: gcp
+      region: asia-northeast3
+      zone: asia-northeast3-a
   use_spot: true
   accelerators: L4
   ports: 9000  # Expose to internet traffic.
