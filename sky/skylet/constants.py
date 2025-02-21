@@ -166,9 +166,13 @@ CONDA_INSTALLATION_COMMANDS = (
     # Reference: https://github.com/skypilot-org/skypilot/issues/4097
     # --seed will include pip and setuptools, which are present in venvs created
     # with python -m venv.
-    # --python 3.10 will ensure the specific python version is downloaded and
-    # installed in the venv. SkyPilot requires Python<3.12, and using 3.10 is
-    # preferable.
+    # --python 3.10 will ensure the specific python version is downloaded
+    # and installed in the venv. SkyPilot requires Python<3.12, and 3.10 is
+    # preferred. We have to always pass in `--python` to avoid the issue when a
+    # user has `.python_version` file in their home directory, which will cause
+    # uv to use the python version specified in the `.python_version` file.
+    # TODO(zhwu): consider adding --python-preference only-managed to avoid
+    # using the system python, if a user report such issue.
     f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
