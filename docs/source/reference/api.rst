@@ -3,34 +3,30 @@
 Python SDK
 ==========
 
-SkyPilot offers a programmatic SDK in Python, which is used under the hood by the :ref:`CLI <cli>`.
+SkyPilot offers a Python SDK, which is used under the hood by the :ref:`CLI <cli>`.
 
-Most of the SDK functions are **asynchronous and return a future** (``request ID``). To wait and get the results:
+Most SDK calls are **asynchronous and return a future** (``request ID``).
 
-* :ref:`sky.get(request_id) <sky-get>`: wait and get the results or exceptions of the request.
-* :ref:`sky.stream_and_get(request_id) <sky-stream-and-get>`: stream the logs and get the results or exceptions of the request.
-* :ref:`sky.api_status() <sky-api-status>`: find all requests and their statuses.
-* :ref:`sky.api_cancel(request_id) <sky-api-cancel>`: cancel a request.
+To wait and get the results:
 
-Please refer to the ``Request Returns`` and ``Request Raises`` sections for more details of each SDK function's return values and exceptions.
+* :ref:`sky.get(request_id) <sky-get>`: Wait for a request to finish, and get the results or exceptions.
+* :ref:`sky.stream_and_get(request_id) <sky-stream-and-get>`: Stream the logs of a request, and get the results or exceptions.
 
-.. note::
+To manage asynchronous requests:
 
-  The Python SDK contains more experimental functions/classes than the CLI. That
-  said, it has been used to develop several Python libraries by users.
+* :ref:`sky.api_status() <sky-api-status>`: List all requests and their statuses.
+* :ref:`sky.api_cancel(request_id) <sky-api-cancel>`: Cancel a request.
 
-  For questions or request for support, please reach out to the development team.
-  Your feedback is much appreciated in evolving this SDK!
-
+Refer to the ``Request Returns`` and ``Request Raises`` sections of each API for more details.
 
 .. note::
 
-  If you upgraded SkyPilot from a version before 0.8.0, you need to update your program to adapt to the new
+  **Upgrading from v0.8 or older:** If you upgraded from a version equal to or older than 0.8.0 to any newer version, you need to update your program to adapt to the new
   :ref:`asynchronous execution model <async>`. See the :ref:`migration guide <migration-0.8.0>` for more details.
 
 
-Cluster SDK
------------
+Clusters SDK
+------------
 
 ``sky.launch``
 ~~~~~~~~~~~~~~
@@ -104,7 +100,7 @@ Cluster Jobs SDK
 .. autofunction:: sky.cancel
 
 
-Managed (Spot) Jobs SDK
+Managed Jobs SDK
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``sky.jobs.launch``
@@ -186,7 +182,7 @@ Resources
 
 .. autoclass:: sky.Resources
   :members: copy
-  
+
   .. automethod:: __init__
 
 
@@ -197,11 +193,13 @@ Enums
   :members:
 
 .. autoclass:: sky.JobStatus
-  :members:                                        
+  :members:
 
 .. autoclass:: sky.StatusRefreshMode
   :members:
 
+
+.. _ref-api-server-sdk:
 
 API Server SDK
 -----------------

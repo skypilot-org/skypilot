@@ -26,7 +26,7 @@ You will need to use `file_mounts` to sync your Github SSH private key to your s
   setup: |
     chmod 600 ~/.ssh/id_rsa
     git clone git@github.com:your-proj/your-repo.git
-  
+
   run: |
     cd your-repo
     git pull
@@ -235,13 +235,13 @@ Note that you'll be prompted to authenticate with your GitHub account to launch 
 Migration from ``SkyPilot<=0.8.0``
 ----------------------------------
 
-After ``SkyPilot v0.8.0``, SkyPilot has moved to a new Client-Server architecture, which is more flexible and powerful.
+After ``SkyPilot v0.8.0``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
 It also introduces the :ref:`asynchronous execution model <async>`, which may cause compatibility issues with user programs using
 previous SkyPilot SDKs.
 
-All SkyPilot SDKs (except log related functions, including ``sky.tail_logs``, ``sky.jobs.tail_logs``, ``sky.serve.tail_logs``) are now asynchronous, and returns a request ID that can be used to manage the request.
+All SkyPilot SDKs (except log related functions, including ``sky.tail_logs``, ``sky.jobs.tail_logs``, ``sky.serve.tail_logs``) are now asynchronous, and they return a request ID that can be used to manage the request.
 
-Wrapping all SkyPilot SDK funciton call with ``sky.stream_and_get()`` will make your program behave mostly the same as before, e.g.
+Wrapping all SkyPilot SDK function calls with ``sky.stream_and_get()`` will make your program behave mostly the same as before:
 
 ``SkyPilot<=0.8.0``
 ~~~~~~~~~~~~~~~~~~~~~
@@ -252,7 +252,7 @@ Wrapping all SkyPilot SDK funciton call with ``sky.stream_and_get()`` will make 
   job_id, handle = sky.launch(task)
   sky.logs(job_id)
 
-``SkyPilot>=0.8.0``
+``SkyPilot>0.8.0``
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: python

@@ -232,6 +232,7 @@ You can now launch the job with the following command (``WANDB_API_KEY`` should 
     --env WANDB_API_KEY
 
 
+.. _many-jobs-scale-out:
 
 Scale out to many jobs
 -----------------------

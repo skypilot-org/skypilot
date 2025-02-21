@@ -191,7 +191,7 @@ Read the research:
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: Users Guides
+   :caption: User Guides
 
    ../reference/async
    Secrets and Environment Variables <../running-jobs/environment-variables>

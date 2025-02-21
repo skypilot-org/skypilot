@@ -26,14 +26,12 @@ Remote API server (multi-user teams)
 
 For multi-user teams, SkyPilot can be deployed as a remote
 service. Multiple users in an organization can share the same
-SkyPilot API server, so that users can:
+SkyPilot API server. The benefits include:
 
-- **Deploy it once and use it anywhere**: Deploy SkyPilot API server on a cloud VM or Kubernetes cluster and access it anywhere.
-- **Easy onboarding for new members**: Run SkyPilot commands without setting up local cloud credentials.
-- **Collaborate with your teammates**: Team members can share resources/jobs with each other.
-- **Global view**: Have a single pane of glass for resources/jobs run by the team
-
-
+- **Deploy once and use anywhere**: Deploy a SkyPilot API server in Kubernetes or on a cloud VM and access it anywhere.
+- **Resource sharing in a team**: Team members can share resources with each other.
+- **Easy onboarding for new members**: Users can run SkyPilot commands without setting up local cloud credentials.
+- **Global view and control**: Admins obtain a single pane of glass for the entire team's compute resources---across clusters and regions.
 
 .. image:: ../../images/client-server/remote.png
     :alt: SkyPilot API server remote mode
@@ -64,12 +62,11 @@ Getting started with a remote API server
 
 .. _sky-api-server-connect:
 
-Connecting to a SkyPilot API server
+Connecting to an API server
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Once you have :ref:`deployed <sky-api-server-deploy>` the API server, you can configure your local SkyPilot
 to connect to it.
-
 We recommend using a Python 3.9 or 3.10 environment for the SkyPilot client. See `uv <https://docs.astral.sh/uv/>`_ or `conda <https://docs.conda.io/en/latest/>`_ for creating an environment with different python versions.
 
 :ref:`Install <installation>` the SkyPilot client on your local machine:

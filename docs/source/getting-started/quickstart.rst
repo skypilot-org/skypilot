@@ -245,8 +245,7 @@ Congratulations!  In this quickstart, you have launched a cluster, run a task, a
 Next steps:
 
 - Adapt :ref:`Tutorial: AI Training <ai-training>` to start running your own project on SkyPilot!
-- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
-- To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
-- Set up SkyPilot for your team, see: :ref:`Team Deployment <sky-api-server>`
+- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
+- Set up SkyPilot for a multi-user team: :ref:`Team Deployment <sky-api-server>`.
 
 We invite you to explore SkyPilot's unique features in the rest of the documentation.
