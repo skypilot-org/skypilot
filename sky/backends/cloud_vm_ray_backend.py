@@ -1437,17 +1437,18 @@ class RetryingVmProvisioner(object):
                 zone_str = ','.join(z.name for z in zones)
                 zone_str = f' ({zone_str})'
             try:
-                config_dict = backend_utils.write_cluster_config(
-                    to_provision,
-                    num_nodes,
-                    _get_cluster_config_template(to_provision.cloud),
-                    cluster_name,
-                    self._local_wheel_path,
-                    self._wheel_hash,
-                    region=region,
-                    zones=zones,
-                    dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists)
+                config_dict: Dict[
+                    str, Any] = backend_utils.write_cluster_config(
+                        to_provision,
+                        num_nodes,
+                        _get_cluster_config_template(to_provision.cloud),
+                        cluster_name,
+                        self._local_wheel_path,
+                        self._wheel_hash,
+                        region=region,
+                        zones=zones,
+                        dryrun=dryrun,
+                        keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -3849,7 +3850,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
-            returncode = e.code
+            returncode = int(
+                e.code) if e.code is not None else 1  # Default to 1 if None
         return returncode
 
     def tail_managed_job_logs(self,

@@ -15,7 +15,7 @@ import sys
 import time
 import typing
 from typing import (Any, Callable, Dict, List, Optional, Protocol, Type,
-                    TypeVar, Union)
+                    TypeVar, Union, Generic)
 import uuid
 
 import jinja2
@@ -44,6 +44,8 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
+
+R_co = TypeVar('R_co', covariant=True)
 
 
 @annotations.lru_cache(scope='request')
@@ -395,7 +397,6 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
 
 
 T = TypeVar('T', covariant=True)
-R = TypeVar('R')
 
 
 class ContextManager(Protocol[T]):
@@ -416,20 +417,20 @@ class ContextManager(Protocol[T]):
 @typing.overload
 def make_decorator(
         cls: Type[ContextManager[Any]], name_or_fn: str,
-        **ctx_kwargs: Any) -> Callable[[Callable[..., R]], Callable[..., R]]:
+        **ctx_kwargs: Any) -> Callable[[Callable[..., R_co]], Callable[..., R_co]]:
     ...
 
 
 @typing.overload
-def make_decorator(cls: Type[ContextManager[Any]], name_or_fn: Callable[..., R],
-                   **ctx_kwargs: Any) -> Callable[..., R]:
+def make_decorator(cls: Type[ContextManager[Any]], name_or_fn: Callable[..., R_co],
+                   **ctx_kwargs: Any) -> Callable[..., R_co]:
     ...
 
 
 def make_decorator(
-    cls: Type[ContextManager[Any]], name_or_fn: Union[str, Callable[..., R]],
+    cls: Type[ContextManager[Any]], name_or_fn: Union[str, Callable[..., R_co]],
     **ctx_kwargs: Any
-) -> Union[Callable[..., R], Callable[[Callable[..., R]], Callable[..., R]]]:
+) -> Union[Callable[..., R_co], Callable[[Callable[..., R_co]], Callable[..., R_co]]]:
     """Make the cls a decorator.
 
     class cls:
@@ -450,10 +451,10 @@ def make_decorator(
     """
     if isinstance(name_or_fn, str):
 
-        def _wrapper(f: Callable[..., R]) -> Callable[..., R]:
+        def _wrapper(f: Callable[..., R_co]) -> Callable[..., R_co]:
 
             @functools.wraps(f)
-            def _record(*args: Any, **kwargs: Any) -> R:
+            def _record(*args: Any, **kwargs: Any) -> R_co:
                 with cls(name_or_fn, **ctx_kwargs):  # type: ignore
                     return f(*args, **kwargs)
 
@@ -468,7 +469,7 @@ def make_decorator(
     full_name = f'{module_name}.{func_name}' if module_name else func_name
 
     @functools.wraps(f)
-    def _record(*args: Any, **kwargs: Any) -> R:
+    def _record(*args: Any, **kwargs: Any) -> R_co:
         with cls(full_name, **ctx_kwargs):  # type: ignore
             return f(*args, **kwargs)
 
