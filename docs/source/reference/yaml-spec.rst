@@ -30,16 +30,16 @@ See detailed explanations under each field.
     :ref:`region <yaml-spec-resources-region>`: us-east-1
     :ref:`zone <yaml-spec-resources-zone>`: us-east-1a
     :ref:`accelerators <yaml-spec-resources-accelerators>`: H100:8
+    :ref:`accelerator_args <yaml-spec-resources-accelerator-args>`:
+      runtime_version: tpu-vm-base
     :ref:`cpus <yaml-spec-resources-cpus>`: 4+
     :ref:`memory <yaml-spec-resources-memory>`: 32+
     :ref:`instance_type <yaml-spec-resources-instance-type>`: p3.8xlarge
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
-    :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
     :ref:`ports <yaml-spec-resources-ports>`: 8081
-    :ref:`accelerator_args <yaml-spec-resources-accelerator-args>`:
-      runtime_version: tpu-vm-base
+
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
@@ -49,7 +49,7 @@ See detailed explanations under each field.
         accelerators: H100
       - cloud: gcp
         accelerators: H100
-
+    :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
   :ref:`envs <yaml-spec-envs>`:
     MY_BUCKET: skypilot-temp-gcs-test
     MY_LOCAL_PATH: tmp-workdir
@@ -247,6 +247,47 @@ OR
       accelerators: {A100: 1, V100: 1}
 
 
+.. _yaml-spec-resources-accelerator-args:
+
+``resources.accelerator_args``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Additional accelerator metadata (optional); only used for TPU node and TPU VM.
+
+Example usage:
+
+- To request a TPU VM:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerator_args:
+        tpu_vm: true  # optional, default: True
+
+- To request a TPU node:
+
+  .. code-block:: yaml
+
+    resources:
+      accelerator_args:
+        tpu_name: ...
+        tpu_vm: false
+
+By default, the value for ``runtime_version`` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    accelerator_args:
+      # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
+      runtime_version: tpu-vm-base
+    # tpu_name: mytpu
+    # tpu_vm: false  # True to use TPU VM (the default); False to use TPU node.
+
+
+
 .. _yaml-spec-resources-cpus:
 
 ``resources.cpus``
@@ -329,37 +370,6 @@ If unspecified, defaults to ``false`` (on-demand instances).
   resources:
     use_spot: true
 
-
-.. _yaml-spec-resources-job-recovery:
-
-``resources.job_recovery``
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-The recovery strategy for managed jobs (optional).
-
-In effect for managed jobs. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
-
-If ``FAILOVER`` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
-
-If ``EAGER_NEXT_REGION`` is specified, the job will go to the next region directly if the node fails. This is useful for spot instances, as in practice, preemptions in a region usually indicate a shortage of resources in that region.
-
-Default: ``EAGER_NEXT_REGION``
-
-Example:
-
-.. code-block:: yaml
-
-  resources:
-    job_recovery:
-        strategy: FAILOVER
-
-OR
-
-.. code-block:: yaml
-
-  resources:
-      job_recovery:
-          strategy: EAGER_NEXT_REGION
-          max_restarts_on_errors: 3
 
 .. _yaml-spec-resources-disk-size:
 
@@ -460,46 +470,6 @@ OR
     ports:
       - 8080
       - 10022-10040
-
-
-.. _yaml-spec-resources-accelerator-args:
-
-``resources.accelerator_args``
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Additional accelerator metadata (optional); only used for TPU node and TPU VM.
-
-Example usage:
-
-- To request a TPU VM:
-
-  .. code-block:: yaml
-
-    resources:
-      accelerator_args:
-        tpu_vm: true  # optional, default: True
-
-- To request a TPU node:
-
-  .. code-block:: yaml
-
-    resources:
-      accelerator_args:
-        tpu_name: ...
-        tpu_vm: false
-
-By default, the value for ``runtime_version`` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.
-
-Example:
-
-.. code-block:: yaml
-
-  resources:
-    accelerator_args:
-      # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
-      runtime_version: tpu-vm-base
-    # tpu_name: mytpu
-    # tpu_vm: false  # True to use TPU VM (the default); False to use TPU node.
 
 
 .. _yaml-spec-resources-image-id:
@@ -699,6 +669,39 @@ OR
         region: us-east-1
       - cloud: aws
         region: us-west-2
+
+
+.. _yaml-spec-resources-job-recovery:
+
+``resources.job_recovery``
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+The recovery strategy for managed jobs (optional).
+
+In effect for managed jobs. Possible values are ``FAILOVER`` and ``EAGER_NEXT_REGION``.
+
+If ``FAILOVER`` is specified, the job will be restarted in the same region if the node fails, and go to the next region if no available resources are found in the same region.
+
+If ``EAGER_NEXT_REGION`` is specified, the job will go to the next region directly if the node fails. This is useful for spot instances, as in practice, preemptions in a region usually indicate a shortage of resources in that region.
+
+Default: ``EAGER_NEXT_REGION``
+
+Example:
+
+.. code-block:: yaml
+
+  resources:
+    job_recovery:
+        strategy: FAILOVER
+
+OR
+
+.. code-block:: yaml
+
+  resources:
+      job_recovery:
+          strategy: EAGER_NEXT_REGION
+          max_restarts_on_errors: 3
+
 
 .. _yaml-spec-envs:
 
@@ -1084,7 +1087,7 @@ If not specified, SkyServe will use a fixed number of replicas (the same as min_
 
 Target queries per second per replica (optional).
 
-SkyServe will scale your service so that, ultimately, each replica manages approximately target_qps_per_replica queries per second.
+SkyServe will scale your service so that, ultimately, each replica manages approximately ``target_qps_per_replica`` queries per second.
 
 **Autoscaling will only be enabled if this value is specified.**
 
