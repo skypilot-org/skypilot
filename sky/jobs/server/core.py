@@ -1,6 +1,5 @@
 """SDK functions for managed jobs."""
 import os
-import shlex
 import signal
 import subprocess
 import tempfile
@@ -134,10 +133,8 @@ def launch(
                         task_))
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as controller_yaml, \
-        tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
-                                     mode='w') as controller_env_file:
-        dag_utils.dump_chain_dag_to_yaml(dag, controller_yaml.name)
+                                     mode='w') as f:
+        dag_utils.dump_chain_dag_to_yaml(dag, f.name)
         controller = controller_utils.Controllers.JOBS_CONTROLLER
         controller_name = controller.value.cluster_name
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
@@ -150,13 +147,12 @@ def launch(
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
-            'user_yaml_path': controller_yaml.name,
+            'user_yaml_path': f.name,
             'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
             'remote_user_config_path': remote_user_config_path,
-            'local_env_file_path': controller_env_file.name,
             'remote_env_file_path': remote_env_file_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
@@ -168,7 +164,6 @@ def launch(
             ),
         }
 
-        # Write the contents of the controller yaml file
         yaml_path = os.path.join(
             managed_job_constants.JOBS_CONTROLLER_YAML_PREFIX,
             f'{name}-{dag_uuid}.yaml')
@@ -180,11 +175,6 @@ def launch(
         controller_task.set_resources(controller_resources)
 
         controller_task.managed_job_dag = dag
-
-        # Write the contents of the env file
-        controller_envs = vars_to_fill['controller_envs']
-        assert isinstance(controller_envs, dict)
-        _write_env_file(controller_envs, controller_env_file.name)
 
         sky_logging.print(
             f'{colorama.Fore.YELLOW}'
@@ -202,22 +192,6 @@ def launch(
                                     retry_until_up=True,
                                     fast=True,
                                     _disable_controller_check=True)
-
-
-def _write_env_file(envs: Dict[str, str], env_file_path: str) -> None:
-    """Write the env vars for the controller to a file.
-
-    It's not guaranteed that the controller task we submit will be the same one
-    to spawn the actual controller process. The process will be spawned by the
-    scheduler, which could be running under another process. So, we need to
-    write all the necessary environment variables to a file, which will be
-    sourced before spawning this controller process.
-    """
-    with open(env_file_path, 'w', encoding='utf-8') as f:
-        f.write('env\n')
-        for key, value in envs.items():
-            f.write(f'export {key}={shlex.quote(value)}\n')
-        f.write('env\n')
 
 
 def queue_from_kubernetes_pod(
