@@ -1041,6 +1041,12 @@ Minimum number of active replicas (required).
 
 Service never scales below this count.
 
+.. code-block:: yaml
+
+  service:
+    replica_policy:
+      min_replicas: 1
+
 
 .. _yaml-spec-service-replica-policy-max-replicas:
 
@@ -1050,6 +1056,12 @@ Service never scales below this count.
 Maximum allowed replicas (optional).
 
 If not specified, SkyServe will use a fixed number of replicas (the same as min_replicas) and ignore any QPS threshold specified below.
+
+.. code-block:: yaml
+
+  service:
+    replica_policy:
+      max_replicas: 3
 
 
 .. _yaml-spec-service-replica-policy-target-qps-per-replica:
@@ -1063,6 +1075,12 @@ SkyServe will scale your service so that, ultimately, each replica manages appro
 
 **Autoscaling will only be enabled if this value is specified.**
 
+.. code-block:: yaml
+
+  service:
+    replica_policy:
+      target_qps_per_replica: 5
+
 
 .. _yaml-spec-service-replica-policy-upscale-delay-seconds:
 
@@ -1073,9 +1091,11 @@ Stabilization period before adding replicas (default: 300).
 
 Upscale delay in seconds. To avoid aggressive autoscaling, SkyServe will only upscale your service if the QPS of your service is higher than the target QPS for a period of time.
 
-This period of time is controlled by upscale_delay_seconds.
+.. code-block:: yaml
 
-The default values should work in most cases. If you want to scale your service more aggressively, you can set these values to a smaller number.
+  service:
+    replica_policy:
+      upscale_delay_seconds: 300
 
 
 .. _yaml-spec-service-replica-policy-downscale-delay-seconds:
@@ -1087,9 +1107,11 @@ Cooldown period before removing replicas (default: 1200).
 
 Downscale delay in seconds. To avoid aggressive autoscaling, SkyServe will only downscale your service if the QPS of your service is lower than the target QPS for a period of time.
 
-This period of time is controlled by downscale_delay_seconds.
+.. code-block:: yaml
 
-The default values should work in most cases. If you want to scale your service more aggressively, you can set these values to a smaller number.
+  service:
+    replica_policy:
+      downscale_delay_seconds: 1200
 
 
 .. _yaml-spec-service-replicas:
@@ -1101,6 +1123,11 @@ Fixed replica count alternative to autoscaling.
 
 Simplified version of replica policy that uses a fixed number of replicas.
 
+.. code-block:: yaml
+
+  service:
+    replicas: 2
+
 
 .. _yaml-spec-service-resources-ports:
 
@@ -1111,6 +1138,7 @@ Required exposed port for service traffic.
 
 Port to run your service on each replica.
 
-This port will be automatically exposed to the public internet by SkyServe.
+.. code-block:: yaml
 
-SkyServe automatically configures public access and load balancing for this port.
+  resources:
+    ports: 8080
