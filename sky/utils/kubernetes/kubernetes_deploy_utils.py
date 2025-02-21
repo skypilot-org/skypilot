@@ -56,7 +56,7 @@ def deploy_remote_cluster(ip_list: List[str],
         run_timestamp = sky_logging.get_run_timestamp()
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                                 'local_up.log')
-        
+
         if cleanup:
             msg_str = 'Cleaning up remote cluster...'
         else:
