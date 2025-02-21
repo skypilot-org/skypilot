@@ -1,4 +1,4 @@
-{{- if and .Values.ingress.nodePort.enable .Values.ingress.nginx.enabled }}
+{{- if and .Values.ingress.nodePortEnabled .Values.ingress.nginx.enabled }}
 apiVersion: v1
 kind: Service
 metadata:

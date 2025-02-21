@@ -83,16 +83,15 @@ ingress:
   authCredentials: "username:$apr1$encrypted_password"
   # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
   path: '/'
-  nodePort:
-    # GKE load balancer used for ingress does not work with websocket connections
-    # (required for our k8s SSH tunneling), in such case NodePort should be enabled
-    # to exposes the ingress controller.
-    # Note: nodePort svc will only be created when both ingress.nodePort.enable=true AND ingress-nginx.enabled=true
-    enabled: true
-    # Specific nodePort to use for the ingress controller
-    # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
-    httpNodePort: null # Set to null to automatically assign a random port
-    httpsNodePort: null # Set to null to automatically assign a random port
+  # GKE load balancer used for ingress does not work with websocket connections
+  # (required for our k8s SSH tunneling), in such case NodePort should be enabled
+  # to exposes the ingress controller.
+  # Note: nodePort svc will only be created when both ingress.nodePortEnabled=true AND ingress-nginx.enabled=true
+  nodePortEnabled: true
+  # Specific nodePort to use for the ingress controller
+  # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
+  httpNodePort: 30050 # Set to null to automatically assign a random port
+  httpsNodePort: 30051 # Set to null to automatically assign a random port
 
 ingress-nginx:
   enabled: true
