@@ -1187,7 +1187,7 @@ class ManagedJobCodeGen:
                           job_ids: Optional[List[int]],
                           all_users: bool = False) -> str:
         code = textwrap.dedent(f"""\
-        if managed_job_version < 3:
+        if managed_job_version < 2:
             # For backward compatibility, since all_users is not supported
             # before #4787. Assume th
             # TODO(cooperc): Remove compatibility before 0.12.0
