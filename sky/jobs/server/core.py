@@ -213,7 +213,7 @@ def _write_env_file(envs: Dict[str, str], env_file_path: str) -> None:
     write all the necessary environment variables to a file, which will be
     sourced before spawning this controller process.
     """
-    with open(env_file_path, 'w') as f:
+    with open(env_file_path, 'w', encoding='utf-8') as f:
         f.write('env\n')
         for key, value in envs.items():
             f.write(f'export {key}={shlex.quote(value)}\n')
