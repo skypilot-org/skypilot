@@ -156,20 +156,15 @@ This will stop all Kubernetes services on the remote machines.
 Setting up Multiple Clusters
 ----------------------------
 
-You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster and merging the kubeconfigs:
+You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster:
 
 .. code-block:: bash
 
     # Set up first cluster and save the kubeconfig
     sky local up --ips cluster1-ips.txt --ssh-user user1 --ssh-key-path key1.pem --context-name cluster1
-    cp ~/.kube/config ~/.kube/config.cluster1
-
     # Set up second cluster
     sky local up --ips cluster2-ips.txt --ssh-user user2 --ssh-key-path key2.pem --context-name cluster2
-    cp ~/.kube/config ~/.kube/config.cluster2
 
-    # Combine the kubeconfigs into ~/.kube/config
-    KUBECONFIG=~/.kube/config.cluster1:~/.kube/config.cluster2 kubectl config view --flatten > ~/.kube/config
 
 You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi-kubernetes>` by adding them to ``allowed_contexts`` in your ``~/.sky/config.yaml`` file:
 
