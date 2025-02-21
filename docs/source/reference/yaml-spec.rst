@@ -5,7 +5,9 @@ SkyPilot YAML
 
 SkyPilot provides an intuitive YAML interface to specify clusters, jobs, or services (resource requirements, setup commands, run commands, file mounts, storage mounts, and so on).
 
-**All fields in the YAML specification are optional.** You can specify only the fields that are relevant to your task.
+**All fields in the YAML specification are optional.** When unspecified, its
+default value is used. You can specify only the fields that are relevant to
+your task.
 
 YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (e.g., :meth:`sky.Task.from_yaml`).
 
@@ -13,9 +15,7 @@ YAMLs can be used with the :ref:`CLI <cli>`, or the programmatic API (e.g., :met
 Syntax
 ------
 
-Below is the configuration syntax and some example values.
-
-See detailed explanations under each field.
+Below is the configuration syntax and some example values.  See details under each field.
 
 .. parsed-literal::
 
@@ -26,9 +26,12 @@ See detailed explanations under each field.
   :ref:`num_nodes <yaml-spec-num-nodes>`: 4
 
   :ref:`resources <yaml-spec-resources>`:
+    # Location.
     :ref:`cloud <yaml-spec-resources-cloud>`: aws
     :ref:`region <yaml-spec-resources-region>`: us-east-1
     :ref:`zone <yaml-spec-resources-zone>`: us-east-1a
+
+    # Hardware.
     :ref:`accelerators <yaml-spec-resources-accelerators>`: H100:8
     :ref:`accelerator_args <yaml-spec-resources-accelerator-args>`:
       runtime_version: tpu-vm-base
@@ -38,37 +41,33 @@ See detailed explanations under each field.
     :ref:`use_spot <yaml-spec-resources-use-spot>`: false
     :ref:`disk_size <yaml-spec-resources-disk-size>`: 256
     :ref:`disk_tier <yaml-spec-resources-disk-tier>`: medium
-    :ref:`ports <yaml-spec-resources-ports>`: 8081
 
+    # Config.
     :ref:`image_id <yaml-spec-resources-image-id>`: ami-0868a20f5a3bf9702
+    :ref:`ports <yaml-spec-resources-ports>`: 8081
     :ref:`labels <yaml-spec-resources-labels>`:
       my-label: my-value
+
     :ref:`any_of <yaml-spec-resources-any-of>`:
       - cloud: aws
         region: us-west-2
         accelerators: H100
       - cloud: gcp
         accelerators: H100
+
     :ref:`job_recovery <yaml-spec-resources-job-recovery>`: none
+
   :ref:`envs <yaml-spec-envs>`:
     MY_BUCKET: skypilot-temp-gcs-test
     MY_LOCAL_PATH: tmp-workdir
     MODEL_SIZE: 13b
 
   :ref:`file_mounts <yaml-spec-file-mounts>`:
-    /remote/dir1/file: /local/dir1/file
-    /remote/dir2: /local/dir2
-    /datasets-storage:
-      name: sky-dataset
-      source: /local/path/datasets
-      store: s3
-      persistent: true
+    /remote/path: /local/path
+    /checkpoints:
+      source: s3://existing-bucket
       mode: MOUNT
     /datasets-s3: s3://my-awesome-dataset
-    /checkpoint/${MODEL_SIZE}: ~/${MY_LOCAL_PATH}
-    /mydir:
-      name: ${MY_BUCKET}
-      mode: MOUNT
 
   :ref:`setup <yaml-spec-setup>`: |
     echo "Begin setup."
@@ -76,11 +75,11 @@ See detailed explanations under each field.
     echo "Setup complete."
 
   :ref:`run <yaml-spec-run>`: |
-    echo "Beginning task."
+    echo "Begin run."
     python train.py
     echo Env var MODEL_SIZE has value: ${MODEL_SIZE}
 
-Properties
+Fields
 ----------
 
 .. _yaml-spec-name:
@@ -244,7 +243,7 @@ OR
 .. code-block:: yaml
 
   resources:
-      accelerators: {A100: 1, V100: 1}
+    accelerators: {A100:1, V100:1}
 
 
 .. _yaml-spec-resources-accelerator-args:
@@ -691,16 +690,16 @@ Example:
 
   resources:
     job_recovery:
-        strategy: FAILOVER
+      strategy: FAILOVER
 
 OR
 
 .. code-block:: yaml
 
   resources:
-      job_recovery:
-          strategy: EAGER_NEXT_REGION
-          max_restarts_on_errors: 3
+    job_recovery:
+      strategy: EAGER_NEXT_REGION
+      max_restarts_on_errors: 3
 
 
 .. _yaml-spec-envs:
@@ -796,10 +795,10 @@ OR
     /remote/data: ./local_data  # Local to remote
     /remote/output: s3://my-bucket/outputs  # Cloud storage
     /remote/models:
-        name: my-models-bucket
-        source: ~/local_models
-        store: gcs
-        mode: MOUNT
+      name: my-models-bucket
+      source: ~/local_models
+      store: gcs
+      mode: MOUNT
 
 .. _yaml-spec-setup:
 
@@ -865,14 +864,10 @@ OR
 
 .. _task-yaml-experimental:
 
-Experimental configurations
+Global config overrides
 ---------------------------
 
-.. note::
-
-  Experimental features and APIs may be changed or removed without any notice.
-
-In additional to the above fields, SkyPilot also supports the following experimental fields in the task YAML:
+To override the :ref:`global configs <config-yaml>` in ``~/.sky/config.yaml`` at a task level:
 
 .. code-block:: yaml
 
@@ -883,15 +878,19 @@ In additional to the above fields, SkyPilot also supports the following experime
     # Configuration for more details of those fields:
     # https://docs.skypilot.co/en/latest/reference/config.html
     config_overrides:
-        docker:
-            run_options: ...
-        kubernetes:
-            pod_config: ...
-            provision_timeout: ...
-        gcp:
-            managed_instance_group: ...
-        nvidia_gpus:
-            disable_ecc: ...
+      docker:
+        run_options: ...
+      kubernetes:
+        pod_config: ...
+        provision_timeout: ...
+      gcp:
+        managed_instance_group: ...
+      nvidia_gpus:
+        disable_ecc: ...
+
+.. note::
+
+  Experimental features and APIs may be changed or removed in the future.
 
 .. _service-yaml-spec:
 
@@ -926,7 +925,7 @@ Syntax
     :ref:`ports <yaml-spec-service-resources-ports>`: 8080
 
 
-Properties
+Fields
 ----------
 
 .. _yaml-spec-service-readiness-probe:
