@@ -33,6 +33,7 @@ import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
 import setproctitle
+import threading
 
 from sky import global_user_state
 from sky import models
@@ -43,7 +44,7 @@ from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import mp_queue
-from sky.skylet import constants
+from sky.skylet import constants, log_lib
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import timeline
@@ -245,7 +246,7 @@ def _request_execution_wrapper(request_id: str,
         request_task.status = api_requests.RequestStatus.RUNNING
         func = request_task.entrypoint
         request_body = request_task.request_body
-
+    
     with log_path.open('w', encoding='utf-8') as f:
         # Store copies of the original stdout and stderr file descriptors
         original_stdout, original_stderr = _redirect_output(f)
@@ -254,7 +255,43 @@ def _request_execution_wrapper(request_id: str,
         # captured in the log file.
         try:
             with override_request_env_and_config(request_body):
-                return_value = func(**request_body.to_kwargs())
+                value_or_future = func(**request_body.to_kwargs())
+            # Wait for future in thread to avoid blocking the main thread.
+            if isinstance(value_or_future, log_lib.ProcFuture):
+                # Create a thread to wait for the future
+                fut = value_or_future
+                def wait_for_future():
+                    _restore_output(original_stdout, original_stderr)
+                    logger.info(f'Waiting for process future {fut.pid()}, request {request_id}')
+                    try:
+                        with api_requests.update_request(request_id) as request_task:
+                            assert request_task is not None, request_id
+                            logger.info(f'Updating request {request_id} with pid {fut.pid()}')
+                            request_task.pid = fut.pid()
+                        return_value = fut.wait()
+                        logger.info(f'Return value: {return_value}')
+                    except KeyboardInterrupt:
+                        logger.info(f'Request {request_id} cancelled by user')
+                        return
+                    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+                        logger.error(f'Error waiting for future: {e}')
+                        with api_requests.update_request(request_id) as request_task:
+                            assert request_task is not None, request_id
+                            request_task.status = api_requests.RequestStatus.FAILED
+                            request_task.set_error(e)
+                        return
+                    else:
+                        with api_requests.update_request(request_id) as request_task:
+                            assert request_task is not None, request_id
+                            request_task.status = api_requests.RequestStatus.SUCCEEDED
+                            if not ignore_return_value:
+                                request_task.set_return_value(return_value)
+
+                wait_thread = threading.Thread(target=wait_for_future)
+                wait_thread.daemon = True
+                wait_thread.start()
+            else:
+                return_value = value_or_future
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             _restore_output(original_stdout, original_stderr)

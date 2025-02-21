@@ -598,6 +598,7 @@ def update_job_status(job_ids: List[int],
                     # running, we will change status to PENDING below.
                     failed_driver_transition_message = (
                         f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
+                    logger.info(failed_driver_transition_message)
                     status = JobStatus.FAILED_DRIVER
 
             # job_pid is 0 if the job is not submitted yet.
@@ -622,6 +623,7 @@ def update_job_status(job_ids: List[int],
                         f'Job {job_id} driver process is not running, but '
                         'the job state is not in terminal states, setting '
                         'it to FAILED_DRIVER')
+                    logger.info(failed_driver_transition_message)
                     status = JobStatus.FAILED_DRIVER
             elif job_pid < 0:
                 # TODO(zhwu): Backward compatibility, remove after 0.9.0.
@@ -639,6 +641,7 @@ def update_job_status(job_ids: List[int],
                         f'boot_time={psutil.boot_time()}')
                     # The job is stale as it is created before the instance
                     # is booted, e.g. the instance is rebooted.
+                    logger.info(failed_driver_transition_message)
                     status = JobStatus.FAILED_DRIVER
                 elif pending_job['submit'] <= 0:
                     # The job is not submitted (submit <= 0), we set it to
@@ -669,6 +672,8 @@ def update_job_status(job_ids: List[int],
                     # need to reset the job status to FAILED_DRIVER if its
                     # original status is in nonterminal_statuses.
                     echo(f'Job {job_id} is in a unknown state, setting it to '
+                         'FAILED_DRIVER')
+                    logger.info(f'Job {job_id} is in a unknown state, setting it to '
                          'FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
                     _set_status_no_lock(job_id, status)

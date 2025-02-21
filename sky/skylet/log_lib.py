@@ -17,6 +17,7 @@ from typing import (Deque, Dict, Iterable, Iterator, List, Optional, TextIO,
                     Tuple, Union)
 
 import colorama
+import setproctitle
 
 from sky import sky_logging
 from sky.skylet import constants
@@ -134,6 +135,19 @@ def process_subprocess_stream(proc, args: _ProcessingArgs) -> Tuple[str, str]:
         stderr = ''
     return stdout, stderr
 
+# TODO(aylei): Prototype class to support async call, include process_stream
+# thread to be more general.
+class ProcFuture:
+    """A future that holds the result of a command."""
+    def __init__(self, proc: subprocess.Popen):
+        self.proc = proc
+    
+    def wait(self) -> Union[int, Tuple[int, str, str]]:
+        self.proc.wait()
+        return self.proc.returncode
+    
+    def pid(self) -> int:
+        return self.proc.pid
 
 def run_with_log(
     cmd: Union[List[str], str],
@@ -149,8 +163,9 @@ def run_with_log(
     process_stream: bool = True,
     line_processor: Optional[log_utils.LineProcessor] = None,
     streaming_prefix: Optional[str] = None,
+    async_call: bool = False,
     **kwargs,
-) -> Union[int, Tuple[int, str, str]]:
+) -> Union[int, Tuple[int, str, str], ProcFuture]:
     """Runs a command and logs its output to a file.
 
     Args:
@@ -161,6 +176,8 @@ def run_with_log(
         process_stream: Whether to post-process the stdout/stderr of the
             command, such as replacing or skipping lines on the fly. If
             enabled, lines are printed only when '\r' or '\n' is found.
+        async_call: If True, immediately returns the command process without 
+            waiting for the command to complete.
 
     Returns the returncode or returncode, stdout and stderr of the command.
       Note that the stdout and stderr is already decoded.
@@ -168,7 +185,12 @@ def run_with_log(
     assert process_stream or not require_outputs, (
         process_stream, require_outputs,
         'require_outputs should be False when process_stream is False')
-
+    
+    # TODO(aylei): Support process_stream in async_call.
+    assert not (async_call and process_stream), (
+        async_call, process_stream,
+        'process_stream and async_call cannot both be True')
+    
     log_path = os.path.expanduser(log_path)
     dirname = os.path.dirname(log_path)
     os.makedirs(dirname, exist_ok=True)
@@ -182,54 +204,59 @@ def run_with_log(
     # the terminal output when typing in the terminal that starts the API
     # server.
     stdin = kwargs.pop('stdin', subprocess.DEVNULL)
-    with subprocess.Popen(cmd,
+    logger.info(f'run_with_log: {cmd}, async_call={async_call}')
+    proc = subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
                           stdin=stdin,
-                          **kwargs) as proc:
-        try:
+                          **kwargs)
+    try:
+        if not async_call:
+            # TODO(aylei): skip for test, tailing process might leak
             subprocess_utils.kill_process_daemon(proc.pid)
-            stdout = ''
-            stderr = ''
+        stdout = ''
+        stderr = ''
 
-            if process_stream:
-                if skip_lines is None:
-                    skip_lines = []
-                # Skip these lines caused by `-i` option of bash. Failed to
-                # find other way to turn off these two warning.
-                # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
-                # `ssh -T -i -tt` still cause the problem.
-                skip_lines += [
-                    'bash: cannot set terminal process group',
-                    'bash: no job control in this shell',
-                ]
-                # We need this even if the log_path is '/dev/null' to ensure the
-                # progress bar is shown.
-                # NOTE: Lines are printed only when '\r' or '\n' is found.
-                args = _ProcessingArgs(
-                    log_path=log_path,
-                    stream_logs=stream_logs,
-                    start_streaming_at=start_streaming_at,
-                    end_streaming_at=end_streaming_at,
-                    skip_lines=skip_lines,
-                    line_processor=line_processor,
-                    # Replace CRLF when the output is logged to driver by ray.
-                    replace_crlf=with_ray,
-                    streaming_prefix=streaming_prefix,
-                )
-                stdout, stderr = process_subprocess_stream(proc, args)
-            proc.wait()
-            if require_outputs:
-                return proc.returncode, stdout, stderr
-            return proc.returncode
-        except KeyboardInterrupt:
-            # Kill the subprocess directly, otherwise, the underlying
-            # process will only be killed after the python program exits,
-            # causing the stream handling stuck at `readline`.
-            subprocess_utils.kill_children_processes()
-            raise
+        if async_call:
+            return ProcFuture(proc)
+        if process_stream:
+            if skip_lines is None:
+                skip_lines = []
+            # Skip these lines caused by `-i` option of bash. Failed to
+            # find other way to turn off these two warning.
+            # https://stackoverflow.com/questions/13300764/how-to-tell-bash-not-to-issue-warnings-cannot-set-terminal-process-group-and # pylint: disable=line-too-long
+            # `ssh -T -i -tt` still cause the problem.
+            skip_lines += [
+                'bash: cannot set terminal process group',
+                'bash: no job control in this shell',
+            ]
+            # We need this even if the log_path is '/dev/null' to ensure the
+            # progress bar is shown.
+            # NOTE: Lines are printed only when '\r' or '\n' is found.
+            args = _ProcessingArgs(
+                log_path=log_path,
+                stream_logs=stream_logs,
+                start_streaming_at=start_streaming_at,
+                end_streaming_at=end_streaming_at,
+                skip_lines=skip_lines,
+                line_processor=line_processor,
+                # Replace CRLF when the output is logged to driver by ray.
+                replace_crlf=with_ray,
+                streaming_prefix=streaming_prefix,
+            )
+            stdout, stderr = process_subprocess_stream(proc, args)
+        proc.wait()
+        if require_outputs:
+            return proc.returncode, stdout, stderr
+        return proc.returncode
+    except KeyboardInterrupt:
+        # Kill the subprocess directly, otherwise, the underlying
+        # process will only be killed after the python program exits,
+        # causing the stream handling stuck at `readline`.
+        subprocess_utils.kill_children_processes()
+        raise
 
 
 def make_task_bash_script(codegen: str,
