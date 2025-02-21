@@ -170,7 +170,7 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
         api_server_cmd += ' --deploy'
     if host is not None:
         api_server_cmd += f' --host {host}'
-    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1'
+    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1 < /dev/null'
 
     # Start the uvicorn process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
