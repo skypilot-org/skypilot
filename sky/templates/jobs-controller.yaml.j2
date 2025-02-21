@@ -55,6 +55,12 @@ setup: |
 
 run: |
   {{ sky_activate_python_env }}
+
+  # Write env vars to a file
+  {%- for env_name, env_value in controller_envs.items() %}
+  echo "export {{env_name}}='{{env_value}}'" >> {{remote_env_file_path}}
+  {%- endfor %}
+
   # Submit the job to the scheduler.
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
