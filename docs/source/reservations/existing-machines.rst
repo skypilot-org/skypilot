@@ -76,7 +76,7 @@ Deploying SkyPilot
       SSH_USER=username
       SSH_KEY=path/to/ssh/key
       CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
-      sky local up --ips $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
+      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
 
    SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
@@ -84,8 +84,7 @@ Deploying SkyPilot
 
    .. code-block:: console
 
-      $ sky local up --ips ips.txt --ssh-user gcpuser --ssh-key-path ~/.ssh/id_rsa
-      Found existing kube config. It will be backed up to ~/.kube/config.bak.
+      $ sky local up --ips ips.txt --ssh-user gcpuser --ssh-key-path ~/.ssh/id_rsa --context-name mycluster
       To view detailed progress: tail -n100 -f ~/sky_logs/sky-2024-09-23-18-53-14-165534/local_up.log
       ✔ K3s successfully deployed on head node.
       ✔ K3s successfully deployed on worker node.
