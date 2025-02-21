@@ -422,7 +422,7 @@ If all looks good, you can now start using the API server. Refer to :ref:`sky-ap
 
 .. note::
 
-    API server deployment using the above YAML does not have any authentication by default. We recommend adding a authentication layer (e.g., nginx reverse proxy) or using the helm chart for a more secure deployment.
+    API server deployment using the above YAML does not have any authentication by default. We recommend adding a authentication layer (e.g., nginx reverse proxy) or using the :ref:`SkyPilot helm chart <sky-api-server-deploy>` on a Kubernetes cluster for a more secure deployment.
 
 .. tip::
 
