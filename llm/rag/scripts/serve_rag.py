@@ -83,13 +83,13 @@ def query_collection(query_embedding: np.ndarray,
 
     # Request more results initially to account for potential duplicates
     max_results = min(n_results * 2, 20)  # Get more results but cap at 20
-    
+
     results = collection.query(query_embeddings=[query_embedding.tolist()],
                                n_results=max_results,
                                include=['metadatas', 'distances', 'documents'])
 
     # Get results
-    documents = results['documents'][0] 
+    documents = results['documents'][0]
     metadatas = results['metadatas'][0]
     distances = results['distances'][0]
 
@@ -107,19 +107,17 @@ def query_collection(query_embedding: np.ndarray,
             logger.info(f"Found {meta} with similarity {sim}")
             logger.info(f"Content: {doc}")
             unique_results.append((doc, meta, sim))
-            
+
             # Break if we have enough unique results
             if len(unique_results) >= n_results:
                 break
 
     return [
-        SearchResult(
-            content=doc,
-            name=meta['name'],
-            split=meta['split'],
-            source=meta['source'],
-            similarity=sim)
-        for doc, meta, sim in unique_results
+        SearchResult(content=doc,
+                     name=meta['name'],
+                     split=meta['split'],
+                     source=meta['source'],
+                     similarity=sim) for doc, meta, sim in unique_results
     ]
 
 
