@@ -258,13 +258,16 @@ def up(
         # with the current job id, we know the service is up and running
         # for the first time; otherwise it is a name conflict.
         idle_minutes_to_autostop = constants.CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP
-        controller_job_id, controller_handle = execution.launch(
-            task=controller_task,
-            cluster_name=controller_name,
-            idle_minutes_to_autostop=idle_minutes_to_autostop,
-            retry_until_up=True,
-            _disable_controller_check=True,
-        )
+        # Since the controller may be shared among multiple users, launch the
+        # controller with the API server's user hash.
+        with common.with_server_user_hash():
+            controller_job_id, controller_handle = execution.launch(
+                task=controller_task,
+                cluster_name=controller_name,
+                idle_minutes_to_autostop=idle_minutes_to_autostop,
+                retry_until_up=True,
+                _disable_controller_check=True,
+            )
 
         style = colorama.Style
         fore = colorama.Fore

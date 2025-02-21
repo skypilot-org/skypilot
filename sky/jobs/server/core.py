@@ -19,12 +19,14 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
-from sky.provision import common
+from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -100,9 +102,35 @@ def launch(
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing managed job')):
-        for task_ in dag.tasks:
-            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, task_type='jobs')
+
+        local_to_controller_file_mounts = {}
+
+        if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+            for task_ in dag.tasks:
+                controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                    task_, task_type='jobs')
+
+        else:
+            # We do not have any cloud storage available, so fall back to
+            # two-hop file_mount uploading.
+            # Note: we can't easily hack sync_storage_mounts() to upload
+            # directly to the controller, because the controller may not
+            # even be up yet.
+            for task_ in dag.tasks:
+                if task_.storage_mounts:
+                    # Technically, we could convert COPY storage_mounts that
+                    # have a local source and do not specify `store`, but we
+                    # will not do that for now. Only plain file_mounts are
+                    # supported.
+                    raise exceptions.NotSupportedError(
+                        'Cloud-based file_mounts are specified, but no cloud '
+                        'storage is available. Please specify local '
+                        'file_mounts only.')
+
+                # Merge file mounts from all tasks.
+                local_to_controller_file_mounts.update(
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task_))
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -119,6 +147,7 @@ def launch(
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
@@ -149,14 +178,18 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        return execution.launch(task=controller_task,
-                                cluster_name=controller_name,
-                                stream_logs=stream_logs,
-                                idle_minutes_to_autostop=skylet_constants.
-                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                                retry_until_up=True,
-                                fast=True,
-                                _disable_controller_check=True)
+
+        # Launch with the api server's user hash, so that sky status does not
+        # show the owner of the controller as whatever user launched it first.
+        with common.with_server_user_hash():
+            return execution.launch(task=controller_task,
+                                    cluster_name=controller_name,
+                                    stream_logs=stream_logs,
+                                    idle_minutes_to_autostop=skylet_constants.
+                                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                    retry_until_up=True,
+                                    fast=True,
+                                    _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -194,16 +227,16 @@ def queue_from_kubernetes_pod(
     provider_config = {'context': context}
     instances = {
         pod_name: [
-            common.InstanceInfo(instance_id=pod_name,
-                                internal_ip='',
-                                external_ip='',
-                                tags={})
+            provision_common.InstanceInfo(instance_id=pod_name,
+                                          internal_ip='',
+                                          external_ip='',
+                                          tags={})
         ]
     }  # Internal IP is not required for Kubernetes
-    cluster_info = common.ClusterInfo(provider_name='kubernetes',
-                                      head_instance_id=pod_name,
-                                      provider_config=provider_config,
-                                      instances=instances)
+    cluster_info = provision_common.ClusterInfo(provider_name='kubernetes',
+                                                head_instance_id=pod_name,
+                                                provider_config=provider_config,
+                                                instances=instances)
     managed_jobs_runner = provision_lib.get_command_runners(
         'kubernetes', cluster_info)[0]
 

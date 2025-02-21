@@ -46,6 +46,7 @@ from sky.utils import resources_utils
 @pytest.mark.no_scp  # SCP does not have T4 gpus. Run test_scp_job_queue instead
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
@@ -84,6 +85,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.no_nebius  # Doesn't support Nebius for now
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -226,6 +228,7 @@ def test_scp_job_queue():
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius Cloud does not have T4 gpus.
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -380,6 +383,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
+@pytest.mark.no_nebius  # Doesn't support Nebius for now
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -405,6 +409,7 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus
 @pytest.mark.no_do  # DO does not have T4 gpus
+@pytest.mark.no_nebius  # Nebius does not have T4 gpus
 @pytest.mark.resource_heavy
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -419,7 +424,7 @@ def test_multi_echo(generic_cloud: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 30',
             # Make sure that our job scheduler is fast enough to have at least
-            # 15 RUNNING jobs in parallel.
+            # 18 RUNNING jobs in parallel.
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 18) exit 1}}\'',
             'sleep 30',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
@@ -450,6 +455,7 @@ def test_multi_echo(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not have V100 (16GB) GPUs. Run test_scp_huggingface instead.
+@pytest.mark.no_nebius  # Nebius does not have T4 gpus for now
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_huggingface(generic_cloud: str, accelerator: Dict[str, str]):
@@ -1102,7 +1108,8 @@ def test_container_logs_two_simultaneous_jobs_kubernetes():
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not have V100 gpus
 @pytest.mark.no_ibm  # IBM cloud currently doesn't provide public image with CUDA
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
-@pytest.mark.no_dos  # DO does not have V100 gpus
+@pytest.mark.no_do  # DO does not have V100 gpus
+@pytest.mark.no_nebius  # Nebius does not have V100 gpus
 @pytest.mark.skip(
     reason=
     'The resnet_distributed_tf_app is flaky, due to it failing to detect GPUs.')
@@ -1191,6 +1198,7 @@ def test_azure_start_stop():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not autostop yet
 def test_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -1259,19 +1267,20 @@ def test_autostop(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius does not support stopping in SkyPilot implementation
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
     # the VM is terminated.
     autodown_timeout = 900 if generic_cloud == 'azure' else 240
     total_timeout_minutes = 90 if generic_cloud == 'azure' else 20
+    check_autostop_set = f's=$(sky status) && echo "$s" && echo "==check autostop set==" && echo "$s" | grep {name} | grep "1m (down)"'
     test = smoke_tests_utils.Test(
         'autodown',
         [
             f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
-            # Ensure autostop is set.
-            f'sky status | grep {name} | grep "1m (down)"',
+            check_autostop_set,
             # Ensure the cluster is not terminated early.
             'sleep 40',
             f's=$(sky status {name} --refresh); echo "$s"; echo; echo; echo "$s"  | grep {name} | grep UP',
@@ -1281,7 +1290,7 @@ def test_autodown(generic_cloud: str):
             f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
-            f'sky status | grep {name} | grep "1m (down)"',
+            check_autostop_set,
             f'sleep {autodown_timeout}',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
@@ -1383,6 +1392,7 @@ def test_cancel_azure():
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
+@pytest.mark.no_nebius  # Nebius Cloud does not have V100 gpus
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
@@ -1442,6 +1452,7 @@ def test_cancel_ibm():
 @pytest.mark.no_ibm  # IBM Cloud does not support spot instances
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.no_do
 def test_use_spot(generic_cloud: str):
     """Test use-spot and sky exec."""

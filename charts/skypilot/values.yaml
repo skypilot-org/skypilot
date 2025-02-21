@@ -1,0 +1,124 @@
+apiService:
+  image: berkeleyskypilot/skypilot-nightly:latest
+  # Number of replicas to deploy - replicas > 1 is not well tested, and requires 
+  # a PVC that supports ReadWriteMany (see accessMode in storage section below).
+  replicas: 1
+  preDeployHook: |-
+    # Run commands before deploying the API server, e.g. installing an admin
+    # policy. Remember to set the admin policy in the config section below.
+    echo "Pre-deploy hook"
+    
+    # Uncomment the following lines to install the admin policy
+    
+    # echo "Installing admin policy"
+    # pip install git+https://github.com/michaelvll/admin-policy-examples
+
+  
+  # Set config.yaml content on the API server
+  config: null
+  # config: |
+  #   admin_policy: admin_policy_examples.AddLabelsPolicy
+  #
+  #   kubernetes:
+  #     allowed_contexts:
+  #       - gke_sky-dev-465_us-central1-c_skypilot-test-cluster
+  #       - gke_sky-dev-465_us-central1-c_skypilot-test-cluster-2
+  #
+  #   jobs:
+  #     controller:
+  #       resources:
+  #         cpus: 2+
+  #
+  #   allowed_clouds:
+  #     - aws
+  #     - kubernetes
+
+  # Set resource requests and limits for the API server
+  # TODO: Setting limits causes issues with the API server. For now we advise
+  # not to set limits.
+  resources: null
+  # resources:
+  #   requests:
+  #     cpu: "1"
+  #     memory: "2Gi"
+  #   limits:
+  #     cpu: "2"
+  #     memory: "4Gi"
+  #     # Additional resource types like ephemeral-storage can be specified here
+  
+  # [Internal] Enable developer mode for SkyPilot
+  skypilotDev: false
+
+storage:
+  # Enable/disable persistent storage
+  enabled: true
+  # Storage class name - leave empty to use cluster default
+  storageClassName: ""
+  # Access modes - ReadWriteOnce or ReadWriteMany depending on what is supported by the storage class
+  accessMode: ReadWriteOnce
+  # Storage size
+  size: 10Gi
+  # Optional selector for matching specific PVs
+  selector: {}
+    # matchLabels:
+    #   environment: prod
+  # Optional volume name for binding to specific PV
+  volumeName: ""
+  # Optional annotations
+  annotations: {}
+
+awsCredentials:
+  enabled: false
+
+gcpCredentials:
+  enabled: false
+  # TODO(romilb): This can be made optional by using the project in the key json by default.
+  projectId: null
+
+ingress:
+  enabled: true
+  # Name of the secret containing basic auth credentials for ingress. If not specified, a new secret will be created using authCredentials
+  authSecret: null
+  # Basic auth credentials in format "username:encrypted_password" (only used if ingress.authSecret is not set)
+  authCredentials: "username:$apr1$encrypted_password"
+  # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
+  path: '/'
+  # GKE load balancer used for ingress does not work with websocket connections
+  # (required for our k8s SSH tunneling), in such case NodePort should be enabled
+  # to exposes the ingress controller.
+  # Note: nodePort svc will only be created when both ingress.nodePortEnabled=true AND ingress-nginx.enabled=true
+  nodePortEnabled: true
+  # Specific nodePort to use for the ingress controller
+  # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
+  httpNodePort: 30050 # Set to null to automatically assign a random port
+  httpsNodePort: 30051 # Set to null to automatically assign a random port
+
+ingress-nginx:
+  enabled: true
+  controller:
+    service:
+      # Use ClusterIP here to disable the LoadBalancer created by nginx. 
+      # If not using NodePort, set this to LoadBalancer.
+      type: ClusterIP  
+    config:
+      http-snippet: |
+        map $http_upgrade $connection_upgrade {
+            default upgrade;
+            ''      close;
+        }
+
+kubernetesCredentials:
+  # Enable/disable using the API server's cluster for workloads
+  useApiServerCluster: true
+  # Use the `kube-credentials` secret containing the kubeconfig to authenticate to Kubernetes
+  useKubeconfig: false
+  # Namespace to use for in-cluster resources
+  inclusterNamespace: null
+
+rbac:
+  # Configure the RBAC permissions for the SkyPilot API server
+  rules:
+    # Default configuration with full access - override for restricted environments
+    - apiGroups: ["*"]
+      resources: ["*"]
+      verbs: ["*"]
