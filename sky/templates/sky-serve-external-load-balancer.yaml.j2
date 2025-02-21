@@ -15,8 +15,8 @@ run: |
   python -u -m sky.serve.load_balancer \
     --controller-addr {{controller_addr}} \
     --load-balancer-port {{load_balancer_port}} \
-    --load-balancing-policy {{load_balancing_policy}}
-
+    --load-balancing-policy {{load_balancing_policy}} \
+    --region {{region}}
 envs:
 {%- for env_name, env_value in lb_envs.items() %}
   {{env_name}}: {{env_value}}

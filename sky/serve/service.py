@@ -236,6 +236,9 @@ def _start_external_load_balancer(service_name: str, lb_id: int,
     with tempfile.NamedTemporaryFile(prefix=lb_cluster_name,
                                      mode='w',
                                      delete=False) as f:
+        # TODO(tian): Hack. Support multiple resources.
+        assert len(lbr) == 1, lbr
+        lb_region = lbr[0].region
         vars_to_fill = {
             'load_balancer_port': lb_port,
             'controller_addr': controller_addr,
@@ -243,6 +246,7 @@ def _start_external_load_balancer(service_name: str, lb_id: int,
             'sky_activate_python_env':
                 skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
             'lb_envs': controller_utils.sky_managed_cluster_envs(),
+            'region': lb_region,
         }
         common_utils.fill_template(constants.EXTERNAL_LB_TEMPLATE,
                                    vars_to_fill,

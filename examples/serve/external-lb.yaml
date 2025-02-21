@@ -11,7 +11,7 @@ service:
   readiness_probe:
     path: /health
     initial_delay_seconds: 20
-  replicas: 2
+  replicas: 6
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   external_load_balancers:

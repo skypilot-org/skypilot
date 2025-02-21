@@ -80,6 +80,12 @@ def launch_cluster(replica_id: int,
                 r.copy(**resources_override) for r in resources
             ]
             task.set_resources(type(resources)(overrided_resources))
+        # Sort resources by string representation and select one based on
+        # replica_id. TODO(tian): Hack. Fix it.
+        sorted_resources = sorted(str(r) for r in task.resources)
+        selected_idx = replica_id % len(sorted_resources)
+        task.set_resources([r for r in task.resources 
+                          if str(r) == sorted_resources[selected_idx]])
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
         logger.info(f'Launching replica (id: {replica_id}) cluster '
@@ -599,7 +605,7 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def get_active_replica_urls(self) -> List[str]:
+    def get_active_replica_urls(self) -> Dict[str, str]:
         """Get the urls of the active replicas."""
         raise NotImplementedError
 
@@ -1151,18 +1157,20 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
-    def get_active_replica_urls(self) -> List[str]:
+    def get_active_replica_urls(self) -> Dict[str, str]:
         """Get the urls of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
+        ready_replica_urls = {}
         active_versions = set(record['active_versions'])
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
                 assert info.url is not None, info
-                ready_replica_urls.append(info.url)
+                info_dict = info.to_info_dict(with_handle=True)
+                region = info_dict['handle'].launched_resources.region
+                ready_replica_urls[region] = info.url
         return ready_replica_urls
 
     ###########################################
