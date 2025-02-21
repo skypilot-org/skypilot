@@ -4041,23 +4041,23 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
       $ sky jobs cancel 1 2 3
     """
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all, all_users]) != 1:
+    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
         arguments = []
         arguments += [f'--job-ids {job_id_str}'] if job_ids else []
         arguments += [f'--name {name}'] if name is not None else []
         arguments += ['--all'] if all else []
         arguments += ['--all-users'] if all_users else []
         raise click.UsageError(
-            'Can only specify one of JOB_IDS or --name or --all. '
+            'Can only specify one of JOB_IDS, --name, or --all/--all-users. '
             f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
         job_identity_str = (f'managed jobs with IDs {job_id_str}'
                             if job_ids else repr(name))
-        if all:
-            job_identity_str = 'all managed jobs'
         if all_users:
             job_identity_str = 'all managed jobs FOR ALL USERS'
+        elif all:
+            job_identity_str = 'all managed jobs'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,

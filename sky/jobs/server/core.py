@@ -398,13 +398,14 @@ def queue(refresh: bool,
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
 
     if not all_users:
-        # For backwards compatibility, we show jobs that have user_hash None.
+
         def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
-            if 'user_hash' not in job:
+            user_hash = job.get('user_hash', None)
+            if user_hash is None:
+                # For backwards compatibility, we show jobs that do not have a
+                # user_hash. TODO(cooperc): Remove before 0.12.0.
                 return True
-            if job['user_hash'] is None:
-                return True
-            return job['user_hash'] == common_utils.get_user_hash()
+            return user_hash == common_utils.get_user_hash()
 
         jobs = list(filter(user_hash_matches_or_missing, jobs))
 
@@ -441,23 +442,23 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all, all_users]) != 1:
+    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
         arguments = []
         arguments += [f'job_ids={job_id_str}'] if job_ids else []
         arguments += [f'name={name}'] if name is not None else []
         arguments += ['all'] if all else []
         arguments += ['all_users'] if all_users else []
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Can only specify one of JOB_IDS or name or all. '
-                             f'Provided {" ".join(arguments)!r}.')
+            raise ValueError('Can only specify one of JOB_IDS, name, or all/'
+                             f'all_users. Provided {" ".join(arguments)!r}.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-    if all:
-        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
-    elif all_users:
+    if all_users:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
             None, all_users=True)
+    elif all:
+        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
     else:

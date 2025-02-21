@@ -954,6 +954,7 @@ def format_job_table(
     """
     jobs = collections.defaultdict(list)
     # Check if the tasks have user information from kubernetes.
+    # This is only used for sky status --kubernetes.
     tasks_have_k8s_user = any([task.get('user') for task in tasks])
     if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
@@ -1018,19 +1019,19 @@ def format_job_table(
             return f'Failure: {failure_reason}'
         return '-'
 
-    def generate_user_values(task: Dict[str, Any]) -> List[str]:
+    def get_user_column_values(task: Dict[str, Any]) -> List[str]:
         user_values: List[str] = []
         if show_user:
 
             user_name = '-'
-            user_hash = task['user_hash']
+            user_hash = task.get('user_hash', None)
             if user_hash:
                 user = global_user_state.get_user(user_hash)
                 user_name = user.name if user.name else '-'
             user_values = [user_name]
 
             if show_all:
-                user_values.append(user_hash)
+                user_values.append(user_hash if user_hash is not None else '-')
 
         return user_values
 
@@ -1072,7 +1073,7 @@ def format_job_table(
             if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
-            user_values = generate_user_values(job_tasks[0])
+            user_values = get_user_column_values(job_tasks[0])
 
             job_id = job_hash[1] if tasks_have_k8s_user else job_hash
             job_values = [
@@ -1106,7 +1107,7 @@ def format_job_table(
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
-            user_values = generate_user_values(task)
+            user_values = get_user_column_values(task)
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
@@ -1168,6 +1169,9 @@ class ManagedJobCodeGen:
     _PREFIX = textwrap.dedent("""\
         from sky.jobs import utils
         from sky.jobs import state as managed_job_state
+        from sky.jobs import constants as managed_job_constants
+
+        managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
         """)
 
     @classmethod
@@ -1183,12 +1187,13 @@ class ManagedJobCodeGen:
                           job_ids: Optional[List[int]],
                           all_users: bool = False) -> str:
         code = textwrap.dedent(f"""\
-        try:
-            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
-        except TypeError:
-            # all_users is not supported
-            # Remove compatibility before 0.12.0
+        if managed_job_version < 3:
+            # For backward compatibility, since all_users is not supported
+            # before #4787. Assume th
+            # TODO(cooperc): Remove compatibility before 0.12.0
             msg = utils.cancel_jobs_by_id({job_ids})
+        else:
+            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
