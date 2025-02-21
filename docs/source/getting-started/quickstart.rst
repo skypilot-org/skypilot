@@ -218,6 +218,25 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
 
 SkyPilot can support :ref:`thousands of managed jobs <many-jobs>` running at once.
 
+Asynchronous Interface
+======================
+
+All SkyPilot CLIs and APIs are asynchronous requests, i.e. you can interrupt them at
+any time and let them run in the background. For example, if you KeyInterrupt the ``sky launch`` command,
+the cluster will keep provisioning in the background:
+
+.. code-block:: console
+
+  $ sky launch -c mycluster hello_sky.yaml
+  ^C
+  ⚙︎ Request will continue running asynchronously.
+  ├── View logs: sky api logs 73d316ac
+  ├── Or, visit: http://127.0.0.1:46580/api/stream?request_id=73d316ac
+  └── To cancel the request, run: sky api cancel 73d316ac
+
+See more details in :ref:`Asynchronous Interface <async>`.
+
+
 Next steps
 -----------
 

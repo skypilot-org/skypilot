@@ -1,9 +1,9 @@
 .. _pythonapi:
 
-Python API
+Python SDKs
 =================
 
-SkyPilot offers a programmatic API in Python, which is used under the hood by the :ref:`CLI <cli>`.
+SkyPilot offers a programmatic SDK in Python, which is used under the hood by the :ref:`CLI <cli>`.
 
 Most of the SDK functions are **asynchronous and return a future** (``request ID``). To wait and get the results:
 
@@ -16,141 +16,155 @@ Please refer to the ``Request Returns`` and ``Request Raises`` sections for more
 
 .. note::
 
-  The Python API contains more experimental functions/classes than the CLI. That
+  The Python SDK contains more experimental functions/classes than the CLI. That
   said, it has been used to develop several Python libraries by users.
 
   For questions or request for support, please reach out to the development team.
-  Your feedback is much appreciated in evolving this API!
+  Your feedback is much appreciated in evolving this SDK!
 
 
-Cluster API
+.. note::
+
+  If you upgraded SkyPilot from a version before 0.8.0, you need to update your program to adapt to the new
+  :ref:`asynchronous execution model <async>`. See the :ref:`migration guide <migration-0.8.0>` for more details.
+
+
+Cluster SDK
 -----------
 
-sky.launch
-~~~~~~~~~~
+``sky.launch``
+~~~~~~~~~~~~~~
 
 .. autofunction:: sky.launch
 
-sky.exec
-~~~~~~~~
+``sky.stop``
+~~~~~~~~~~~~~~
 
-.. autofunction:: sky.exec
-
-sky.stop
-~~~~~~~~~
 
 .. autofunction:: sky.stop
 
-sky.start
-~~~~~~~~~~~~~
+``sky.start``
+~~~~~~~~~~~~~~
 
 .. autofunction:: sky.start
 
-sky.down
-~~~~~~~~~
+``sky.down``
+~~~~~~~~~~~~~~
 
 .. autofunction:: sky.down
 
-sky.status
-~~~~~~~~~~~~~
+``sky.status``
+~~~~~~~~~~~~~~
 
 .. autofunction:: sky.status
 
-sky.autostop
-~~~~~~~~~~~~~
+``sky.autostop``
+~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.autostop
 
 
-sky.queue
-~~~~~~~~~~
+Jobs SDK
+--------
+
+Cluster Jobs SDK
+~~~~~~~~~~~~~~~~
+
+``sky.exec``
+^^^^^^^^^^^^^^
+
+.. autofunction:: sky.exec
+
+
+``sky.queue``
+^^^^^^^^^^^^^^
 
 .. autofunction:: sky.queue
 
-sky.job_status
-~~~~~~~~~~~~~~~~
+``sky.job_status``
+^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.job_status
 
 
-sky.tail_logs
-~~~~~~~~~~~~~~~~~
+``sky.tail_logs``
+^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.tail_logs
 
 
-sky.download_logs
-~~~~~~~~~~~~~~~~~~~~~
+``sky.download_logs``
+^^^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.download_logs
 
-sky.cancel
-~~~~~~~~~~~
+``sky.cancel``
+^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.cancel
 
 
-Managed (Spot) Jobs API
------------------------
+Managed (Spot) Jobs SDK
+~~~~~~~~~~~~~~~~~~~~~~~
 
-sky.jobs.launch
-~~~~~~~~~~~~~~~~~
+``sky.jobs.launch``
+^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.jobs.launch
 
-sky.jobs.queue
-~~~~~~~~~~~~~~~
+``sky.jobs.queue``
+^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.jobs.queue
 
-sky.jobs.cancel
-~~~~~~~~~~~~~~~~~
+``sky.jobs.cancel``
+^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.jobs.cancel
 
 
-sky.jobs_tail_logs
-~~~~~~~~~~~~~~~~~~
+``sky.jobs.tail_logs``
+^^^^^^^^^^^^^^^^^^^^^^
 
 .. autofunction:: sky.jobs.tail_logs
 
 
-SkyServe API
+Serving SDK
 -----------------
 
 
-sky.serve.up
-~~~~~~~~~~~~~
+``sky.serve.up``
+~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.serve.up
 
 
-sky.serve.update
-~~~~~~~~~~~~~~~~~
+``sky.serve.update``
+~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.serve.update
 
 
-sky.serve.down
-~~~~~~~~~~~~~~~
+``sky.serve.down``
+~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.serve.down
 
 
-sky.serve.terminate_replica
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+``sky.serve.terminate_replica``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.serve.terminate_replica
 
 
-sky.serve.status
-~~~~~~~~~~~~~~~~~
+``sky.serve.status``
+~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.serve.status
 
 
-sky.serve.tail_logs
-~~~~~~~~~~~~~~~~~~~~~
+``sky.serve.tail_logs``
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.serve.tail_logs
 
@@ -189,49 +203,49 @@ Enums
   :members:
 
 
-API Server APIs
+API Server SDKs
 -----------------
 
 .. _sky-get:
 
-sky.get
-~~~~~~~
+``sky.get``
+~~~~~~~~~~~
 
 .. autofunction:: sky.get
 
 .. _sky-stream-and-get:
 
-sky.stream_and_get
-~~~~~~~~~~~~~~~~~~~
+``sky.stream_and_get``
+~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.stream_and_get
 
-sky.api_status
-~~~~~~~~~~~~~~~
+``sky.api_status``
+~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_status
 
-sky.api_cancel
-~~~~~~~~~~~~~~~
+``sky.api_cancel``
+~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_cancel
 
-sky.api_info
-~~~~~~~~~~~~~~~
+``sky.api_info``
+~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_info
 
-sky.api_start
-~~~~~~~~~~~~~~~
+``sky.api_start``
+~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_start
 
-sky.api_stop
-~~~~~~~~~~~~~~~
+``sky.api_stop``
+~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_stop
 
-sky.api_server_logs
-~~~~~~~~~~~~~~~~~~~~~
+``sky.api_server_logs``
+~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: sky.api_server_logs

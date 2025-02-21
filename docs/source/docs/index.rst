@@ -191,9 +191,9 @@ Read the research:
 .. toctree::
    :hidden:
    :maxdepth: 1
-   :caption: User Guides
+   :caption: Users Guides
 
-   ../reference/api-server/api-server
+   ../reference/async
    Secrets and Environment Variables <../running-jobs/environment-variables>
    Docker Containers <../examples/docker-containers>
    ../examples/ports
@@ -205,6 +205,7 @@ Read the research:
    :maxdepth: 1
    :caption: Administrator Guides
 
+   ../reference/api-server/api-server
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
    ../cloud-setup/quota

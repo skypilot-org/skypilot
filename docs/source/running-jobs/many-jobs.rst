@@ -252,7 +252,8 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
           job_idx=0
           for lr in 0.01 0.03 0.1 0.3 1.0; do
               for max_steps in 100 300 1000; do
-                  sky jobs launch -n train-job${job_idx} -y -d train-template.yaml \
+                  sky jobs launch -n train-job${job_idx} -y --async \
+                    train-template.yaml \
                     --env LR="${lr}" --env MAX_STEPS="${max_steps}" \
                     --env WANDB_API_KEY # pick up from environment
                   ((job_idx++))
@@ -272,16 +273,23 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
           task = sky.Task.from_yaml('train-template.yaml')
 
           job_idx = 1
+          requests_ids = []
           for lr in LR_CANDIDATES:
             for max_steps in MAX_STEPS_CANDIDATES:
               task.update_envs({'LR': lr, 'MAX_STEPS': max_steps})
-              sky.jobs.launch(
-                task,
-                name=f'train-job{job_idx}',
-                detach_run=True,
-                retry_until_up=True,
+              requests_ids.append(
+                sky.jobs.launch(
+                  task,
+                  name=f'train-job{job_idx}',
+                  detach_run=True,
+                  retry_until_up=True,
+                )
               )
               job_idx += 1
+
+          # Wait for all jobs to finish
+          for request_id in requests_ids:
+            sky.get(request_id)
 
 The launched jobs will "detach" once submitted (``-d``), and will run in parallel.
 
@@ -357,7 +365,8 @@ Then, submit all jobs by iterating over the config files and calling ``sky jobs 
     # -y: yes to all prompts.
     # -d: detach from the job's logging, so the next job can be submitted
     #      without waiting for the previous job to finish.
-    sky jobs launch -n train-$job_name -y -d train-template.yaml \
+    sky jobs launch -n train-$job_name -y --async \
+      train-template.yaml \
       --env-file $config_file \
       --env WANDB_API_KEY
   done

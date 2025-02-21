@@ -269,6 +269,19 @@ If you have existing machines, i.e., a list of IP addresses you can SSH into, yo
 
 See :ref:`Using Existing Machines <existing-machines>`.
 
+
+Use SkyPilot Locally or Deploy an API Server for a Team
+----------------------------------------------------------
+
+SkyPilot can be used locally or deployed as a centralized API server for your team, so that you can share and manage compute resources across your team:
+
+- **Deploy it once and use it anywhere**: Deploy SkyPilot API server on a cloud VM or Kubernetes cluster and access it anywhere.
+- **Easy onboarding for new members**: Run SkyPilot commands without setting up local cloud credentials.
+- **Collaborate with your teammates**: Team members can share resources/jobs with each other.
+- **Global view**: Have a single pane of glass for resources/jobs run by the team
+
+See :ref:`sky-api-server` for details.
+
 SkyPilot's cost and capacity optimization
 -------------------------------------------------------------------
 

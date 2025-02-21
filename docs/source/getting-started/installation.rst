@@ -126,7 +126,29 @@ To use more than one cloud, combine the pip extras:
 
           pip install -e ".[kubernetes,aws,gcp]"
 
+
+For those who prefer a faster package manager, ``uv`` has been gaining traction in the SkyPilot community.
+The following sets up a new Python environment and installs SkyPilot with all cloud dependencies:
+
+.. code-block:: shell
+
+  uv venv --seed --python 3.10
+  # Azure CLI has an issue with uv, and requires --prerelease allow
+  uv pip install --prerelease allow azure-cli
+  uv pip install skypilot[all]
+
+
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
+
+.. note::
+
+  If you just upgraded your SkyPilot, you need to stop the old SkyPilot API server (started automatically by any SkyPilot command) to ensure the new version is loaded:
+
+  .. code-block:: shell
+
+    sky api stop
+
+  If you just upgraded from a SkyPilot version ``< 0.8.0``, see the :ref:`migration guide <migration-0.8.0>` for potential changes to your workflow that uses CLIs and SDKs.
 
 .. _verify-cloud-access:
 
