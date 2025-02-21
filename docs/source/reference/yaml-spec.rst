@@ -270,7 +270,7 @@ Example usage:
 
     resources:
       accelerator_args:
-        tpu_name: ...
+        tpu_name: mytpu
         tpu_vm: false
 
 By default, the value for ``runtime_version`` is decided based on which is requested and should work for either case. If passing in an incompatible version, GCP will throw an error during provisioning.
@@ -283,8 +283,8 @@ Example:
     accelerator_args:
       # Default is "tpu-vm-base" for TPU VM and "2.12.0" for TPU node.
       runtime_version: tpu-vm-base
-    # tpu_name: mytpu
-    # tpu_vm: false  # True to use TPU VM (the default); False to use TPU node.
+      # tpu_name: mytpu
+      # tpu_vm: false  # True to use TPU VM (the default); False to use TPU node.
 
 
 
