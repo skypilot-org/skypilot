@@ -49,6 +49,7 @@ from sky import sky_logging
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger('sky.jobs.controller')
@@ -190,9 +191,12 @@ def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
     PENDING. It will tell the scheduler to try and start the job controller, if
     there are resources available. It may block to acquire the lock, so it
     should not be on the critical path for `sky jobs launch -d`.
+
+    The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path)
+        state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path,
+                                    common_utils.get_user_hash())
     maybe_schedule_next_jobs()
 
 
