@@ -889,7 +889,7 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: List[str],
+def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> server_common.RequestId:
     """Gets the job queue of a cluster.
@@ -1503,14 +1503,14 @@ def stream_and_get(
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_cancel(request_ids: Optional[List[str]] = None,
+def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
                all_users: bool = False,
                silent: bool = False) -> server_common.RequestId:
     """Aborts a request or all requests.
 
     Args:
-        request_id: The prefix of the request ID of the request to abort.
-        all: Whether to abort all requests.
+        request_ids: The request ID(s) to abort. Can be a single string or a
+            list of strings.
         all_users: Whether to abort all requests from all users.
         silent: Whether to suppress the output.
 
@@ -1528,6 +1528,11 @@ def api_cancel(request_ids: Optional[List[str]] = None,
     user_id = None
     if not all_users:
         user_id = common_utils.get_user_hash()
+
+    # Convert single request ID to list if needed
+    if isinstance(request_ids, str):
+        request_ids = [request_ids]
+
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
     if all_users:
         echo('Cancelling all users\' requests...')

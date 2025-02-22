@@ -168,7 +168,7 @@ def start_api_server_in_background(deploy: bool = False,
         api_server_cmd += ' --deploy'
     if host is not None:
         api_server_cmd += f' --host {host}'
-    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1'
+    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1 < /dev/null'
 
     # Start the API server process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
