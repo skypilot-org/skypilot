@@ -2,6 +2,11 @@
 
 name: load-balancer
 
+resources:
+  # TODO(tian): Hack. We should figure out the optimal resources.
+  cpus: 2+
+  ports: {{load_balancer_port}}
+
 setup: |
   {{ sky_activate_python_env }}
   # Install serve dependencies.

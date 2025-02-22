@@ -101,7 +101,7 @@ class SkyServeLoadBalancer:
                         self._request_aggregator.clear()
                         response.raise_for_status()
                         response_json = await response.json()
-                        ready_replica_urls: Dict[str, str] = response_json.get(
+                        ready_replica_urls = response_json.get(
                             'ready_replica_urls', {})
                 except aiohttp.ClientError as e:
                     logger.error('An error occurred when syncing with '
@@ -227,7 +227,16 @@ class SkyServeLoadBalancer:
             logger.error(f'Retry in {current_backoff} seconds.')
             await asyncio.sleep(current_backoff)
 
+    async def _health_check(self) -> fastapi.responses.Response:
+        """Health check endpoint."""
+        return fastapi.responses.Response(status_code=200)
+
     def run(self):
+        # Add health check endpoint first so it takes precedence
+        self._app.add_api_route('/sky-lb-health',
+                                self._health_check,
+                                methods=['GET'])
+
         self._app.add_api_route('/{path:path}',
                                 self._proxy_with_retries,
                                 methods=['GET', 'POST', 'PUT', 'DELETE'])

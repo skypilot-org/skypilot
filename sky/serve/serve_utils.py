@@ -287,9 +287,9 @@ def set_service_status_and_active_versions_from_replica(
     if record is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'The service is up-ed in an old version and does not '
-                'support update. Please `sky serve down` '
-                'it first and relaunch the service.')
+                'The service is up-ed in an old version and does not support '
+                'update. Please `sky serve down` it first and relaunch '
+                f'the service. Got service name: {service_name!r}')
     if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
         # When the service is shutting down, there is a period of time which the
         # controller still responds to the request, and the replica is not
@@ -414,8 +414,12 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
     if with_external_lb_info:
-        record['external_lb_info'] = serve_state.get_external_load_balancers(
-            service_name)
+        # record['external_lb_info'] = serve_state.get_external_load_balancers(
+        #     service_name)
+        record['external_lb_info'] = _get_service_status(
+            f'{service_name}-lb',
+            with_replica_info=True,
+            with_external_lb_info=False)
     return record
 
 
@@ -927,8 +931,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
                    f'{replica_table}')
 
     if external_lb_infos:
-        external_lb_table = _format_external_lb_table(external_lb_infos,
-                                                      show_all)
+        # external_lb_table = _format_external_lb_table(external_lb_infos,
+        #                                               show_all)
+        external_lb_table = _format_replica_table(external_lb_infos, show_all)
         final_table += (f'\n\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                         f'External Load Balancers{colorama.Style.RESET_ALL}\n'
                         f'{external_lb_table}')
