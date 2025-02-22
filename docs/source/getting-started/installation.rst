@@ -142,13 +142,8 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 
 .. note::
 
-  If you just upgraded your SkyPilot, you need to stop the old SkyPilot API server (started automatically by any SkyPilot command) to ensure the new version is loaded:
+  If you just upgraded your SkyPilot, use ``sky api stop`` to enable the new version. See :ref:`Upgrade SkyPilot <upgrade-skypilot>` for more details.
 
-  .. code-block:: shell
-
-    sky api stop
-
-  If you just upgraded from ``SkyPilot<=0.8.0``, see the :ref:`migration guide <migration-0.8.0>` for potential changes to your workflow that uses CLIs and SDKs.
 
 Connect to a remote API server (optional)
 --------------------------------------------------
