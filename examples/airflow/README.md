@@ -51,7 +51,7 @@ airflow variables set SKYPILOT_API_SERVER_ENDPOINT https://<api-server-endpoint>
 You can also use the Airflow web UI to set the variable:
 
 <p align="center">
-  <img src="https://i.imgur.com/vjM0FtH.png" width="800">
+  <img src="https://i.imgur.com/vjM0FtH.png" width="600">
 </p>
 
 
