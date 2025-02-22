@@ -71,6 +71,7 @@ class Resources:
         _is_image_managed: Optional[bool] = None,
         _requires_fuse: Optional[bool] = None,
         _cluster_config_overrides: Optional[Dict[str, Any]] = None,
+        _non_existent_cloud: Optional[bool] = None,
     ):
         """Initialize a Resources object.
 
@@ -162,6 +163,7 @@ class Resources:
             ValueError: if some attributes are invalid.
             exceptions.NoCloudAccessError: if no public cloud is enabled.
         """
+        self._non_existent_cloud = _non_existent_cloud
         self._version = self._VERSION
         self._cloud = cloud
         self._region: Optional[str] = region
@@ -1312,6 +1314,8 @@ class Resources:
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
             _cluster_config_overrides=override.pop(
                 '_cluster_config_overrides', self._cluster_config_overrides),
+            _non_existent_cloud=override.pop('_non_existent_cloud',
+                                             self._non_existent_cloud),
         )
         assert not override
         return resources

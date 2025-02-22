@@ -39,7 +39,7 @@ ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && p
 rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
-start_from=${2:-0}
+start_from=${7:-0}
 base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$(whoami)"
@@ -92,12 +92,6 @@ activate_env() {
   # Show which sky is being used.
   which sky
 
-  # Change to the environment directory
-  cd "$absolute_dir" || {
-    echo "Failed to change directory to $absolute_dir"
-    exit 1
-  }
-
   # API operations: Restart the API if restart_api_server is 1
   if [ "$restart_api_server" -eq 1 ]; then
     sky api stop || true  # Stop, ignoring errors if it's not running
@@ -115,7 +109,7 @@ deactivate_env() {
   set -vx  # Re-enable verbose tracing
 }
 
-git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLUTE_BASE_VERSION_DIR || true
+git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLUTE_BASE_VERSION_DIR
 ~/.local/bin/uv --version || curl -LsSf https://astral.sh/uv/install.sh | sh
 UV=~/.local/bin/uv
 
