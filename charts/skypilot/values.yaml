@@ -67,13 +67,6 @@ storage:
   # Optional annotations
   annotations: {}
 
-awsCredentials:
-  enabled: false
-
-gcpCredentials:
-  enabled: false
-  # TODO(romilb): This can be made optional by using the project in the key json by default.
-  projectId: null
 
 ingress:
   enabled: true
@@ -99,14 +92,6 @@ ingress-nginx:
             ''      close;
         }
 
-kubernetesCredentials:
-  # Enable/disable using the API server's cluster for workloads
-  useApiServerCluster: true
-  # Use the `kube-credentials` secret containing the kubeconfig to authenticate to Kubernetes
-  useKubeconfig: false
-  # Namespace to use for in-cluster resources
-  inclusterNamespace: null
-
 rbac:
   # Configure the RBAC permissions for the SkyPilot API server
   rules:
@@ -114,3 +99,21 @@ rbac:
     - apiGroups: ["*"]
       resources: ["*"]
       verbs: ["*"]
+
+kubernetesCredentials:
+  # Enable/disable using the API server's cluster for workloads
+  useApiServerCluster: true
+  # Use the `kube-credentials` secret containing the kubeconfig to authenticate to Kubernetes
+  useKubeconfig: false
+  # Name of the secret containing the kubeconfig file. Only used if useKubeconfig is true.
+  kubeconfigSecretName: kube-credentials
+  # Namespace to use for in-cluster resources
+  inclusterNamespace: null
+
+awsCredentials:
+  enabled: false
+
+gcpCredentials:
+  enabled: false
+  # TODO(romilb): This can be made optional by using the project in the key json by default.
+  projectId: null

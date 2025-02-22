@@ -59,12 +59,13 @@ Following tabs describe how to configure credentials for different clouds on the
             --from-file=config=~/.kube/config
 
 
-        Once the ``kube-credentials`` secret is created, set ``kubernetesCredentials.useKubeconfig=true`` in the Helm chart values to use the kubeconfig file for authentication.
+        Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig file for authentication:
 
         .. code-block:: console
 
             $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
             --set kubernetesCredentials.useKubeconfig=true \
+            --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
             --set kubernetesCredentials.useApiServerCluster=true
 
 

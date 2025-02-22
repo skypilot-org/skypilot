@@ -181,7 +181,7 @@ spec:
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
-          secretName: kube-credentials
+          secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
       - name: kube-config-store
         emptyDir: {}
       {{- end }}
