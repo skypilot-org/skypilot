@@ -21,8 +21,8 @@ Prerequisites
 
     You can also deploy the API server on cloud VMs using an existing SkyPilot installation. See :ref:`sky-api-server-cloud-deploy`.
 
-Step 1: Create a namespace for the API server
----------------------------------------------
+Step 1: Create a namespace and add Helm repository
+--------------------------------------------------
 
 The API server will be deployed in a namespace of your choice. You can either create the namespace manually:
 
@@ -32,6 +32,13 @@ The API server will be deployed in a namespace of your choice. You can either cr
     $ kubectl create namespace $NAMESPACE
 
 Or let Helm create it automatically by adding the ``--create-namespace`` flag to the helm install command in Step 3.
+
+Next, add the SkyPilot Helm repository:
+
+.. code-block:: console
+
+    $ helm repo add skypilot https://helm.skypilot.co
+    $ helm repo update
 
 Step 2: Configure cloud accounts
 --------------------------------
@@ -154,7 +161,6 @@ Install the SkyPilot Helm chart with the following command:
 
 .. code-block:: console
 
-    $ helm repo add skypilot https://helm.skypilot.co
     $ NAMESPACE=skypilot
     $ WEB_USERNAME=skypilot
     $ WEB_PASSWORD=yourpassword
