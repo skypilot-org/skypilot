@@ -109,9 +109,18 @@ async def download_logs(
 @router.get('/dashboard')
 async def dashboard(request: fastapi.Request,
                     user_hash: str) -> fastapi.Response:
+    # TODO(cooperc): Support showing only jobs for a specific user.
+
+    # FIX(zhwu/cooperc/eric): Fix log downloading (assumes global
+    # /download_log/xx route)
+
     # Note: before #4717, each user had their own controller, and thus their own
     # dashboard. Now, all users share the same controller, so this isn't really
     # necessary. TODO(cooperc): clean up.
+
+    # TODO: Put this in an executor to avoid blocking the main server thread.
+    # It can take a long time if it needs to check the controller status.
+
     # Find the port for the dashboard of the user
     os.environ[constants.USER_ID_ENV_VAR] = user_hash
     server_common.reload_for_new_request(client_entrypoint=None,

@@ -318,6 +318,7 @@ class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False
+    all_users: bool = False
 
 
 class JobsCancelBody(RequestBody):
@@ -325,6 +326,7 @@ class JobsCancelBody(RequestBody):
     name: Optional[str]
     job_ids: Optional[List[int]]
     all: bool = False
+    all_users: bool = False
 
 
 class JobsLogsBody(RequestBody):

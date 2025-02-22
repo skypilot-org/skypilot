@@ -140,6 +140,7 @@ def launch(
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
+        remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.JOBS_CONTROLLER,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
@@ -152,6 +153,7 @@ def launch(
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
             'remote_user_config_path': remote_user_config_path,
+            'remote_env_file_path': remote_env_file_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
@@ -318,7 +320,9 @@ def _maybe_restart_controller(
 
 
 @usage_lib.entrypoint
-def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
+def queue(refresh: bool,
+          skip_finished: bool = False,
+          all_users: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -366,6 +370,19 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                            f'{returncode}')
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+
+    if not all_users:
+
+        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
+            user_hash = job.get('user_hash', None)
+            if user_hash is None:
+                # For backwards compatibility, we show jobs that do not have a
+                # user_hash. TODO(cooperc): Remove before 0.12.0.
+                return True
+            return user_hash == common_utils.get_user_hash()
+
+        jobs = list(filter(user_hash_matches_or_missing, jobs))
+
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -374,6 +391,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
     return jobs
 
 
@@ -381,7 +399,8 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
 # pylint: disable=redefined-builtin
 def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
-           all: bool = False) -> None:
+           all: bool = False,
+           all_users: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -397,17 +416,22 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if job_ids else ''
-        argument_str += f' name={name}' if name is not None else ''
-        argument_str += ' all' if all else ''
+    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+        arguments = []
+        arguments += [f'job_ids={job_id_str}'] if job_ids else []
+        arguments += [f'name={name}'] if name is not None else []
+        arguments += ['all'] if all else []
+        arguments += ['all_users'] if all_users else []
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Can only specify one of JOB_IDS or name or all. '
-                             f'Provided {argument_str!r}.')
+            raise ValueError('Can only specify one of JOB_IDS, name, or all/'
+                             f'all_users. Provided {" ".join(arguments)!r}.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-    if all:
+    if all_users:
+        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+            None, all_users=True)
+    elif all:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
