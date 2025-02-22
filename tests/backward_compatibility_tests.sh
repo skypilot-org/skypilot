@@ -130,12 +130,14 @@ if ! gcloud --version; then
 fi
 
 activate_env "base" 0
+cd $ABSOLUTE_BASE_VERSION_DIR
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate_env
 
 activate_env "current" 0
+cd $ABSOLUTE_CURRENT_VERSION_DIR
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
