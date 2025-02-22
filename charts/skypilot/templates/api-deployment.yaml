@@ -79,10 +79,6 @@ spec:
           mountPath: /tmp/config.yaml
           subPath: config.yaml
         {{- end }}
-        {{- if .Values.kubernetesCredentials.useKubeconfig }}
-        - name: kube-config-store
-          mountPath: /root/.kube
-        {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-config
           mountPath: /root/.aws
@@ -95,31 +91,11 @@ spec:
           mountPath: /root/gcp-cred.json
           subPath: gcp-cred.json
         {{- end }}
-      initContainers:
-      {{- if .Values.kubernetesCredentials.useKubeconfig }}
-      - name: setup-kube-credentials
-        image: {{ .Values.apiService.image }}
-        command: ["/bin/sh", "-c"]
-        args:
-        - |
-          echo "Setting up Kubernetes credentials..."
-          mkdir -p /root/.kube
-          echo "Contents of /tmp/kubeconfig:"
-          ls -la /tmp/kubeconfig
-          if [ -z "$(ls -A /tmp/kubeconfig)" ]; then
-            echo "Error: /tmp/kubeconfig is empty!"
-            exit 1
-          fi
-          echo "Copying kubeconfig files from secret to /root/.kube/"
-          # Read and copy the actual content instead of copying the symlink
-          cat /tmp/kubeconfig/config > /root/.kube/config
-          echo "Kubeconfig setup completed."
-        volumeMounts:
+        {{- if .Values.kubernetesCredentials.useKubeconfig }}
         - name: kube-config
-          mountPath: /tmp/kubeconfig
-        - name: kube-config-store
           mountPath: /root/.kube
-      {{- end }}
+        {{- end }}
+      initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
         image: {{ .Values.apiService.image }}
@@ -178,13 +154,6 @@ spec:
       - name: state-volume
         emptyDir: {}
       {{- end }}
-      {{- if .Values.kubernetesCredentials.useKubeconfig }}
-      - name: kube-config
-        secret:
-          secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
-      - name: kube-config-store
-        emptyDir: {}
-      {{- end }}
       {{- if .Values.awsCredentials.enabled }}
       - name: aws-config
         emptyDir: {}
@@ -196,6 +165,11 @@ spec:
           secretName: gcp-credentials
       - name: gcp-config
         emptyDir: {}
+      {{- end }}
+      {{- if .Values.kubernetesCredentials.useKubeconfig }}
+      - name: kube-config
+        secret:
+          secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
       {{- end }}
       {{- if .Values.apiService.config }}
       - name: skypilot-config
