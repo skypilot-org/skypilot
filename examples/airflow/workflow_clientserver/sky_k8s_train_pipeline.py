@@ -4,17 +4,13 @@ import uuid
 from airflow import DAG
 from airflow.decorators import task
 from airflow.utils.dates import days_ago
+from airflow.models import Variable
 import yaml
-
-import sky
 
 default_args = {
     'owner': 'airflow',
     'start_date': days_ago(1),
 }
-
-# Update this path to the root of the mock workflow
-MOCK_WORKFLOW_ROOT = '/Users/romilb/Romil/Berkeley/Research/sky-experiments/examples/airflow/workflow_clientserver/'
 
 # Unique bucket name for this DAG run
 DATA_BUCKET_NAME = str(uuid.uuid4())[:4]
@@ -28,7 +24,9 @@ def task_failure_callback(context):
         print(
             f"Task failed or was cancelled. Shutting down SkyPilot cluster: {cluster_name}"
         )
-        sky.down(cluster_name)
+        import sky
+        down_request = sky.down(cluster_name)
+        sky.stream_and_get(down_request)
 
 
 @task(on_failure_callback=task_failure_callback)
@@ -51,6 +49,12 @@ def run_sky_task(base_path: str,
     """
     import subprocess
     import tempfile
+
+    # Set the SkyPilot API server endpoint from Airflow Variables
+    endpoint = Variable.get('SKYPILOT_API_SERVER_ENDPOINT', None)
+    if not endpoint:
+        raise ValueError('SKYPILOT_API_SERVER_ENDPOINT is not set in airflow.')
+    os.environ['SKYPILOT_API_SERVER_ENDPOINT'] = endpoint
 
     original_cwd = os.getcwd()
     try:
@@ -86,6 +90,8 @@ def run_sky_task(base_path: str,
 
 def _run_sky_task(yaml_path: str, envs_override: dict, kwargs: dict):
     """Internal helper to run the sky task after directory setup."""
+    import sky
+
     with open(os.path.expanduser(yaml_path), 'r', encoding='utf-8') as f:
         task_config = yaml.safe_load(f)
 
@@ -123,7 +129,8 @@ with DAG(dag_id='sky_k8s_train_pipeline',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
-    repo_url = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+    # Path to SkyPilot YAMLs. Can be a git repo or local directory.
+    base_path = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
 
     # Generate bucket UUID as first task
     # See https://stackoverflow.com/questions/55748050/generating-uuid-and-use-it-across-airflow-dag
@@ -136,17 +143,17 @@ with DAG(dag_id='sky_k8s_train_pipeline',
     }
 
     preprocess = run_sky_task.override(task_id="data_preprocess")(
-        repo_url,
+        base_path,
         'data_preprocessing.yaml',
         envs_override=common_envs,
         git_branch='clientserver_example')
     train_task = run_sky_task.override(task_id="train")(
-        repo_url,
+        base_path,
         'train.yaml',
         envs_override=common_envs,
         git_branch='clientserver_example')
     eval_task = run_sky_task.override(task_id="eval")(
-        repo_url,
+        base_path,
         'eval.yaml',
         envs_override=common_envs,
         git_branch='clientserver_example')

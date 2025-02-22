@@ -38,24 +38,22 @@ Here's how you can use SkyPilot to take your dev workflows to production in Airf
 * Airflow installed [locally](https://airflow.apache.org/docs/apache-airflow/stable/start.html) (`SequentialExecutor`)
 * SkyPilot API server endpoint to send requests to.
   * If you do not have one, refer to the [API server docs](https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html) to deploy one.
-  * This API server should have AWS/GCS access to create buckets to store intermediate task outputs.
+  * For this specific example: the API server should have AWS/GCS access to create buckets to store intermediate task outputs.
 
 ## Configuring the API server endpoint
 
-Once your API server is deployed, you will need to configure your Airflow worker to use it. Set the `SKYPILOT_API_SERVER_ENDPOINT` environment variable in your Airflow worker environment to the endpoint of the SkyPilot API server:
+Once your API server is deployed, you will need to configure Airflow to use it. Set the `SKYPILOT_API_SERVER_ENDPOINT` variable in Airflow - it will be used by the `run_sky_task` function to send requests to the API server:
 
 ```bash
-# In your bashrc/zshrc
-export SKYPILOT_API_SERVER_ENDPOINT=<api-server-endpoint>
+airflow variables set SKYPILOT_API_SERVER_ENDPOINT https://<api-server-endpoint>
 ```
 
-Alternatively, you can also set the endpoint in the `~/.sky/config.yaml` file on your Airflow workers:
+You can also use the Airflow web UI to set the variable:
 
-```yaml
-# In ~/.sky/config.yaml on your Airflow worker
-api_server:
-  endpoint: http://<api-server-endpoint>
-```
+<p align="center">
+  <img src="https://i.imgur.com/vjM0FtH.png" width="800">
+</p>
+
 
 ## Defining the tasks
 
@@ -82,7 +80,7 @@ sky launch -c train --env DATA_BUCKET_NAME=<bucket-name> --env DATA_BUCKET_STORE
 
 Hint: You can use `ssh` and VSCode to [interactively develop](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html) and debug the tasks.
 
-Note: `eval` can be optionally run on the same cluster as `train` with `sky exec`. Refer to the `shared_state` airflow example on how to do this.
+Note: `eval` can be optionally run on the same cluster as `train` with `sky exec`.
 
 ## Writing the Airflow DAG
 
@@ -98,7 +96,8 @@ with DAG(dag_id='sky_k8s_train_pipeline',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
-    repo_url = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+    # Path to SkyPilot YAMLs. Can be a git repo or local directory.
+    base_path = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
 
     # Generate bucket UUID as first task
     bucket_uuid = generate_bucket_uuid()
@@ -120,7 +119,9 @@ with DAG(dag_id='sky_k8s_train_pipeline',
     bucket_uuid >> preprocess >> train_task >> eval_task
 ```
 
-Behind the scenes, the `run_sky_task` uses the Airflow native Python operator to invoke the Sky Python API. The task YAML files can be sourced in two ways:
+Behind the scenes, the `run_sky_task` uses the Airflow native Python operator to invoke the SkyPilot API. All SkyPilot API calls are made to the remote API server, which is configured using the `SKYPILOT_API_SERVER_ENDPOINT` variable.
+
+The task YAML files can be sourced in two ways:
 
 1. **From a Git repository** (as shown above):
    ```python
@@ -150,6 +151,8 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
 3. Find the DAG in the Airflow UI (typically http://localhost:8080) and enable it. The UI may take a couple of minutes to reflect the changes. Force unpause the DAG if it is paused with `airflow dags unpause sky_k8s_train_pipeline`
 4. Trigger the DAG from the Airflow UI using the `Trigger DAG` button.
 5. Navigate to the run in the Airflow UI to see the DAG progress and logs of each task.
+
+If a task fails, `task_failure_callback` will automatically tear down the SkyPilot cluster.
 
 
 <p align="center">
