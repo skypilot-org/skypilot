@@ -218,7 +218,7 @@ Read the research:
 
    Task YAML <../reference/yaml-spec>
    CLI <../reference/cli>
-   Python API <../reference/api>
+   ../reference/api
    ../reference/config
    ../developers/index
 
