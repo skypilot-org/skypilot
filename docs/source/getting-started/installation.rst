@@ -142,7 +142,8 @@ Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick w
 
 .. note::
 
-  If you just upgraded your SkyPilot, use ``sky api stop`` to enable the new version. See :ref:`Upgrade SkyPilot <upgrade-skypilot>` for more details.
+  After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
+  See :ref:`upgrade-skypilot` for more details.
 
 
 Connect to a remote API server (optional)
