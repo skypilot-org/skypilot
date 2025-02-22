@@ -22,6 +22,7 @@ from sky.provision import docker_utils
 from sky.serve import service_spec
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -572,6 +573,68 @@ class Task:
         if service is not None:
             service = service_spec.SkyServiceSpec.from_yaml_config(service)
         task.set_service(service)
+        if task.service is not None:
+            # TODO(tian): Fix this in master as well.
+            # NOTE(yi): we only allow one service port now.
+            service_port: Optional[int] = int(
+                task.service.ports) if task.service.ports is not None else None
+            if service_port is None:
+                for requested_resources in list(task.resources):
+                    if requested_resources.ports is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Must specify at least one ports in resources. '
+                                'Each replica will use the port specified as '
+                                'application ingress port if only one port is '
+                                'specified in the replica resources. If there '
+                                'are multiple ports opened in the replica, '
+                                'please set the `service.ports` field '
+                                'in the service config.')
+                    requested_ports = list(
+                        resources_utils.port_ranges_to_set(
+                            requested_resources.ports))
+                    if len(requested_ports) > 1:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Multiple ports specified in resources. Please '
+                                'specify the main port in the `service.ports` '
+                                'field.')
+                    # We request all the replicas using the same port for now,
+                    # but it should be fine to allow different replicas to use
+                    # different ports in the future.
+                    resource_port = requested_ports[0]
+                    if service_port is None:
+                        service_port = resource_port
+                    if service_port != resource_port:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                f'Got multiple ports: {service_port} and '
+                                f'{resource_port} in different resources. '
+                                'Please specify the same port in all replicas, '
+                                'or explicitly set the service port in the '
+                                '`service.ports` section.')
+                assert service_port is not None
+                task.service.set_ports(str(service_port))
+            else:
+                for requested_resources in list(task.resources):
+                    if requested_resources.ports is None:
+                        with ux_utils.print_exception_no_traceback():
+                            raise ValueError(
+                                'Must specify at least one ports in every '
+                                'replica resources.')
+                    ports_set = resources_utils.port_ranges_to_set(
+                        requested_resources.ports)
+                    if service_port not in ports_set:
+                        with ux_utils.print_exception_no_traceback():
+                            # TODO(tian): Automatically infer resource port from
+                            # service port if none of them is specified in the
+                            # replica resources.
+                            raise ValueError(
+                                f'The service port {service_port} specified in '
+                                'the service section is not found in some '
+                                'resources. Please check if the service port '
+                                'is correct or add the service port to '
+                                'replica resources.')
 
         assert not config, f'Invalid task args: {config.keys()}'
         return task

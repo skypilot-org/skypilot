@@ -221,12 +221,21 @@ def up(
                                    vars_to_fill,
                                    output_path=controller_file.name)
         controller_task = task_lib.Task.from_yaml(controller_file.name)
+        # TODO(tian): Currently we exposed the controller port to the public
+        # network, for external load balancer to access. We should implement
+        # encrypted communication between controller and load balancer, and
+        # not expose the controller to the public network.
+        assert task.service is not None
+        ports_to_open_in_controller = (serve_constants.CONTROLLER_PORT_RANGE
+                                       if task.service.external_load_balancers
+                                       is not None else
+                                       serve_constants.LOAD_BALANCER_PORT_RANGE)
         # TODO(tian): Probably run another sky.launch after we get the load
         # balancer port from the controller? So we don't need to open so many
         # ports here. Or, we should have a nginx traffic control to refuse
         # any connection to the unregistered ports.
         controller_resources = {
-            r.copy(ports=[serve_constants.LOAD_BALANCER_PORT_RANGE])
+            r.copy(ports=[ports_to_open_in_controller])
             for r in controller_resources
         }
         controller_task.set_resources(controller_resources)
@@ -278,7 +287,7 @@ def up(
             assert isinstance(backend, backends.CloudVmRayBackend)
             assert isinstance(controller_handle,
                               backends.CloudVmRayResourceHandle)
-            returncode, lb_port_payload, _ = backend.run_on_head(
+            returncode, service_init_payload, _ = backend.run_on_head(
                 controller_handle,
                 code,
                 require_outputs=True,
@@ -286,7 +295,7 @@ def up(
         try:
             subprocess_utils.handle_returncode(
                 returncode, code, 'Failed to wait for service initialization',
-                lb_port_payload)
+                service_init_payload)
         except exceptions.CommandError:
             statuses = backend.get_job_status(controller_handle,
                                               [controller_job_id],
@@ -315,18 +324,25 @@ def up(
                         'Failed to spin up the service. Please '
                         'check the logs above for more details.') from None
         else:
-            lb_port = serve_utils.load_service_initialization_result(
-                lb_port_payload)
-            socket_endpoint = backend_utils.get_endpoints(
-                controller_handle.cluster_name, lb_port,
-                skip_status_check=True).get(lb_port)
-            assert socket_endpoint is not None, (
-                'Did not get endpoint for controller.')
-            # Already checked by _validate_service_task
-            assert task.service is not None
-            protocol = ('http'
-                        if task.service.tls_credential is None else 'https')
-            endpoint = f'{protocol}://{socket_endpoint}'
+            service_init_result = (
+                serve_utils.load_service_initialization_result(
+                    service_init_payload))
+            if task.service.external_load_balancers is None:
+                assert isinstance(service_init_result, int)
+                socket_endpoint = backend_utils.get_endpoints(
+                    controller_handle.cluster_name,
+                    service_init_result,
+                    skip_status_check=True).get(service_init_result)
+                assert socket_endpoint is not None, (
+                    'Did not get endpoint for controller.')
+                # Already checked by _validate_service_task
+                assert task.service is not None
+                protocol = ('http'
+                            if task.service.tls_credential is None else 'https')
+                endpoint = f'{protocol}://{socket_endpoint}'
+            else:
+                assert isinstance(service_init_result, str)
+                endpoint = service_init_result
 
         logger.info(
             f'{fore.CYAN}Service name: '
@@ -375,6 +391,7 @@ def update(
         service_name: Name of the service.
         mode: Update mode.
     """
+    # TODO(tian): Implement update of external LBs.
     task.validate()
     _validate_service_task(task)
 
@@ -663,7 +680,10 @@ def status(
               requested resources,
             'load_balancing_policy': (str) load balancing policy name,
             'tls_encrypted': (bool) whether the service is TLS encrypted,
+            'dns_endpoint': (Optional[str]) DNS endpoint,
             'replica_info': (List[Dict[str, Any]]) replica information,
+            'external_lb_info': (Dict[str, Any]) external load balancer
+              information,
         }
 
     Each entry in replica_info has the following fields:
@@ -675,9 +695,22 @@ def status(
             'name': (str) replica name,
             'status': (sky.serve.ReplicaStatus) replica status,
             'version': (int) replica version,
+            'is_spot': (bool) whether the replica is a spot instance,
             'launched_at': (int) timestamp of launched,
             'handle': (ResourceHandle) handle of the replica cluster,
             'endpoint': (str) endpoint of the replica,
+        }
+
+    Each entry in external_lb_info has the following fields:
+
+    .. code-block:: python
+
+        {
+            'lb_id': (int) index of the external load balancer,
+            'cluster_name': (str) cluster name of the external load balancer,
+            'region': (str) region of the external load balancer,
+            'ip': (str) ip of the external load balancer,
+            'port': (int) port of the external load balancer,
         }
 
     For possible service statuses and replica statuses, please refer to
@@ -736,6 +769,11 @@ def status(
     for service_record in service_records:
         service_record['endpoint'] = None
         if service_record['load_balancer_port'] is not None:
+            if service_record.get('dns_endpoint', None) is not None:
+                dns = service_record['dns_endpoint']
+                lb_port = service_record['load_balancer_port']
+                service_record['endpoint'] = f'{dns}:{lb_port}'
+                continue
             try:
                 endpoint = backend_utils.get_endpoints(
                     cluster=common.SKY_SERVE_CONTROLLER_NAME,
@@ -792,6 +830,8 @@ def tail_logs(
         sky.exceptions.ClusterNotUpError: the sky serve controller is not up.
         ValueError: arguments not valid, or failed to tail the logs.
     """
+    # TODO(tian): Support tail logs for external load balancer. It should be
+    # similar to tail replica logs.
     if isinstance(target, str):
         target = serve_utils.ServiceComponent(target)
     if not isinstance(target, serve_utils.ServiceComponent):

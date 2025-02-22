@@ -5,6 +5,7 @@ import functools
 import multiprocessing
 from multiprocessing import pool as mp_pool
 import os
+import tempfile
 import threading
 import time
 import traceback
@@ -60,6 +61,7 @@ def launch_cluster(replica_id: int,
                    task_yaml_path: str,
                    cluster_name: str,
                    resources_override: Optional[Dict[str, Any]] = None,
+                   j2_vars: Optional[Dict[str, Any]] = None,
                    max_retry: int = 3) -> None:
     """Launch a sky serve replica cluster.
 
@@ -72,6 +74,16 @@ def launch_cluster(replica_id: int,
             if retry.
     """
     try:
+        # TODO(tian): Hack. The resources override is not designed for j2 files.
+        if task_yaml_path.endswith('.j2'):
+            assert j2_vars is not None, task_yaml_path
+            with tempfile.NamedTemporaryFile(prefix=cluster_name,
+                                             mode='w',
+                                             delete=False) as f:
+                common_utils.fill_template(task_yaml_path,
+                                           j2_vars,
+                                           output_path=f.name)
+                task_yaml_path = f.name
         config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
         task = sky.Task.from_yaml_config(config)
         if resources_override is not None:
@@ -80,6 +92,14 @@ def launch_cluster(replica_id: int,
                 r.copy(**resources_override) for r in resources
             ]
             task.set_resources(type(resources)(overrided_resources))
+        # Sort resources by string representation and select one based on
+        # replica_id. TODO(tian): Hack. Fix it.
+        sorted_resources = sorted(str(r) for r in task.resources)
+        selected_idx = replica_id % len(sorted_resources)
+        task.set_resources([
+            r for r in task.resources
+            if str(r) == sorted_resources[selected_idx]
+        ])
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
         logger.info(f'Launching replica (id: {replica_id}) cluster '
@@ -599,7 +619,7 @@ class ReplicaManager:
                        update_mode: serve_utils.UpdateMode) -> None:
         raise NotImplementedError
 
-    def get_active_replica_urls(self) -> List[str]:
+    def get_active_replica_urls(self) -> Dict[str, str]:
         """Get the urls of the active replicas."""
         raise NotImplementedError
 
@@ -643,12 +663,14 @@ class SkyPilotReplicaManager(ReplicaManager):
         self,
         replica_id: int,
         resources_override: Optional[Dict[str, Any]] = None,
+        j2_vars: Optional[Dict[str, Any]] = None,
     ) -> None:
         if replica_id in self._launch_process_pool:
             logger.warning(f'Launch process for replica {replica_id} '
                            'already exists. Skipping.')
             return
-        logger.info(f'Launching replica {replica_id}...')
+        logger.info(f'Launching replica {replica_id} for '
+                    f'service {self._service_name}...')
         cluster_name = serve_utils.generate_replica_cluster_name(
             self._service_name, replica_id)
         log_file_name = serve_utils.generate_replica_launch_log_file_name(
@@ -659,10 +681,16 @@ class SkyPilotReplicaManager(ReplicaManager):
                 log_file_name,
             ).run,
             args=(replica_id, self._task_yaml_path, cluster_name,
-                  resources_override),
+                  resources_override, j2_vars),
         )
-        replica_port = _get_resources_ports(self._task_yaml_path)
-        use_spot = _should_use_spot(self._task_yaml_path, resources_override)
+        if self._task_yaml_path.endswith('.j2'):
+            # TODO(tian): Hack. Fix this.
+            replica_port = str(serve_constants.EXTERNAL_LB_PORT)
+            use_spot = False
+        else:
+            replica_port = _get_resources_ports(self._task_yaml_path)
+            use_spot = _should_use_spot(self._task_yaml_path,
+                                        resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
                            self.latest_version)
@@ -672,8 +700,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         self._launch_process_pool[replica_id] = p
 
     def scale_up(self,
-                 resources_override: Optional[Dict[str, Any]] = None) -> None:
-        self._launch_replica(self._next_replica_id, resources_override)
+                 resources_override: Optional[Dict[str, Any]] = None,
+                 j2_vars: Optional[Dict[str, Any]] = None) -> None:
+        self._launch_replica(self._next_replica_id, resources_override, j2_vars)
         self._next_replica_id += 1
 
     def _terminate_replica(self,
@@ -1151,18 +1180,20 @@ class SkyPilotReplicaManager(ReplicaManager):
             # TODO(MaoZiming): Probe cloud for early preemption warning.
             time.sleep(serve_constants.ENDPOINT_PROBE_INTERVAL_SECONDS)
 
-    def get_active_replica_urls(self) -> List[str]:
+    def get_active_replica_urls(self) -> Dict[str, str]:
         """Get the urls of all active replicas."""
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
+        ready_replica_urls = {}
         active_versions = set(record['active_versions'])
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and
                     info.version in active_versions):
                 assert info.url is not None, info
-                ready_replica_urls.append(info.url)
+                info_dict = info.to_info_dict(with_handle=True)
+                region = info_dict['handle'].launched_resources.region
+                ready_replica_urls[region] = info.url
         return ready_replica_urls
 
     ###########################################

@@ -3,11 +3,14 @@
 Responsible for autoscaling and replica management.
 """
 import contextlib
+import copy
 import logging
+import os
+import subprocess
 import threading
 import time
 import traceback
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import colorama
 import fastapi
@@ -17,10 +20,14 @@ import uvicorn
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
+from sky.serve import constants
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
+from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
+from sky.utils import controller_utils
+from sky.utils import registry
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -31,6 +38,25 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         message = record.getMessage()
         return not ('GET' in message and '200' in message)
+
+
+def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
+                    lb_policy: str) -> Dict[str, Any]:
+    return {
+        'load_balancer_port': lb_port,
+        'controller_addr': controller_addr,
+        'sky_activate_python_env':
+            skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
+        'lb_envs': controller_utils.sky_managed_cluster_envs(),
+        'region': lb_region,
+        'load_balancing_policy': lb_policy,
+    }
+
+
+def _get_external_host():
+    # TODO(tian): Use a more robust way to get the host.
+    return subprocess.check_output('curl ifconfig.me',
+                                   shell=True).decode('utf-8').strip()
 
 
 class SkyServeController:
@@ -48,6 +74,44 @@ class SkyServeController:
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
                                                     task_yaml_path=task_yaml))
+        self._lb_replica_manager: Optional[
+            replica_managers.ReplicaManager] = None
+        if service_spec.external_load_balancers is not None:
+            lb_svc_name = f'{service_name}-lb'
+            # TODO(tian): Fix it by not introducing new service.
+            serve_state.add_service(lb_svc_name, 0, '', '', '',
+                                    serve_state.ServiceStatus.CONTROLLER_INIT,
+                                    True)
+            serve_state.add_or_update_version(lb_svc_name,
+                                              constants.INITIAL_VERSION,
+                                              service_spec)
+            service_dir = os.path.expanduser(
+                serve_utils.generate_remote_service_dir_name(lb_svc_name))
+            os.makedirs(service_dir, exist_ok=True)
+            external_host = _get_external_host()
+            controller_addr = f'http://{external_host}:{port}'
+            lb_service_spec = copy.deepcopy(service_spec)
+            # NOTE(tian): Only readiness probe is used in replica manager. We
+            # manually set it here. Please align with
+            # sky/templates/sky-serve-external-load-balancer.yaml.j2
+            # TODO(tian): Make it configurable.
+            lb_service_spec._readiness_headers = None
+            lb_service_spec._readiness_path = '/sky-lb-health'
+            lb_service_spec._readiness_timeout_seconds = 120
+            lb_service_spec._post_data = None
+            self._lb_replica_manager = replica_managers.SkyPilotReplicaManager(
+                service_name=lb_svc_name,
+                spec=lb_service_spec,
+                task_yaml_path=constants.EXTERNAL_LB_TEMPLATE)
+            for lb_config in service_spec.external_load_balancers:
+                j2_vars = _get_lb_j2_vars(controller_addr,
+                                          constants.EXTERNAL_LB_PORT,
+                                          lb_config['resources']['region'],
+                                          lb_config['load_balancing_policy'])
+                rc = copy.deepcopy(lb_config['resources'])
+                if 'cloud' in rc:
+                    rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])
+                self._lb_replica_manager.scale_up(rc, j2_vars)
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._host = host
@@ -109,11 +173,18 @@ class SkyServeController:
             timestamps: List[int] = request_aggregator.get('timestamps', [])
             logger.info(f'Received {len(timestamps)} inflight requests.')
             self._autoscaler.collect_request_information(request_aggregator)
-            return responses.JSONResponse(content={
-                'ready_replica_urls':
-                    self._replica_manager.get_active_replica_urls()
-            },
-                                          status_code=200)
+            ready_lb_urls = None
+            if self._lb_replica_manager is not None:
+                ready_lb_urls = (
+                    self._lb_replica_manager.get_active_replica_urls())
+            return responses.JSONResponse(
+                content={
+                    'ready_replica_urls':
+                        self._replica_manager.get_active_replica_urls(),
+                    'ready_lb_urls': ready_lb_urls,
+                },
+                status_code=200,
+            )
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:
