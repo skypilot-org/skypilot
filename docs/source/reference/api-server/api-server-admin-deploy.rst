@@ -1,7 +1,8 @@
 .. _sky-api-server-deploy:
 
-Deploying the SkyPilot API Server
-==================================
+Deploying SkyPilot API Server
+==============================
+
 The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes ingress controller and the API server.
 
 .. tip::
@@ -62,8 +63,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
             $ NAMESPACE=skypilot
             $ kubectl create secret generic kube-credentials \
-            -n $NAMESPACE \
-            --from-file=config=~/.kube/config
+            $   -n $NAMESPACE \
+            $   --from-file=config=~/.kube/config
 
 
         Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig file for authentication:
@@ -71,9 +72,9 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: console
 
             $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            --set kubernetesCredentials.useKubeconfig=true \
-            --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
-            --set kubernetesCredentials.useApiServerCluster=true
+            $   --set kubernetesCredentials.useKubeconfig=true \
+            $   --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
+            $   --set kubernetesCredentials.useApiServerCluster=true
 
 
         .. tip::
@@ -105,9 +106,9 @@ Following tabs describe how to configure credentials for different clouds on the
 
             $ NAMESPACE=skypilot
             $ kubectl create secret generic aws-credentials \
-            -n $NAMESPACE \
-            --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
-            --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
+            $   -n $NAMESPACE \
+            $   --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
+            $   --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
 
         Replace ``YOUR_ACCESS_KEY_ID`` and ``YOUR_SECRET_ACCESS_KEY`` with your actual AWS credentials.
 
@@ -128,16 +129,16 @@ Following tabs describe how to configure credentials for different clouds on the
 
             $ NAMESPACE=skypilot
             $ kubectl create secret generic gcp-credentials \
-            -n $NAMESPACE \
-            --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
+            $   -n $NAMESPACE \
+            $   --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
 
         When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` to your project ID:
 
         .. code-block:: console
 
             $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            --set gcpCredentials.enabled=true \
-            --set gcpCredentials.projectId=YOUR_PROJECT_ID
+            $   --set gcpCredentials.enabled=true \
+            $   --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
         Replace ``YOUR_PROJECT_ID`` with your actual GCP project ID.
     
@@ -167,9 +168,9 @@ Install the SkyPilot Helm chart with the following command:
     $ WEB_PASSWORD=yourpassword
     $ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
     $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-    --namespace $NAMESPACE \
-    --create-namespace \
-    --set ingress.authCredentials=$AUTH_STRING
+    $   --namespace $NAMESPACE \
+    $   --create-namespace \
+    $   --set ingress.authCredentials=$AUTH_STRING
 
 The ``--namespace`` flag specifies which namespace to deploy the API server in, and ``--create-namespace`` will create the namespace if it doesn't exist.
 
@@ -188,9 +189,9 @@ If you configured any cloud credentials in the previous step, make sure to enabl
     .. code-block:: console
 
         $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-        --namespace $NAMESPACE \
-        --create-namespace \
-        --set ingress.authSecret=my-existing-auth-secret
+        $   --namespace $NAMESPACE \
+        $   --create-namespace \
+        $   --set ingress.authSecret=my-existing-auth-secret
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
@@ -242,9 +243,9 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. code-block:: console
 
             $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            --set ingress.httpNodePort=null \
-            --set ingress.httpsNodePort=null \
-            --set ingress-nginx.controller.service.type=LoadBalancer
+            $   --set ingress.httpNodePort=null \
+            $   --set ingress.httpsNodePort=null \
+            $   --set ingress-nginx.controller.service.type=LoadBalancer
 
         2. Fetch the ingress controller URL:
 
@@ -363,26 +364,26 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
 
     # Create the config.yaml file
     $ cat <<EOF > config.yaml
-    admin_policy: admin_policy_examples.AddLabelsPolicy
-
-    jobs:
-      controller:
-        resources:
-            cpus: 2+
-
-    allowed_clouds:
-      - aws
-      - kubernetes
-
-    kubernetes:
-      allowed_contexts:
-        - my-context
-        - my-other-context
-    EOF
+    $ admin_policy: admin_policy_examples.AddLabelsPolicy
+    $ 
+    $ jobs:
+    $   controller:
+    $     resources:
+    $         cpus: 2+
+    $ 
+    $ allowed_clouds:
+    $   - aws
+    $   - kubernetes
+    $ 
+    $ kubernetes:
+    $   allowed_contexts:
+    $     - my-context
+    $     - my-other-context
+    $ EOF
 
     # Install the API server with the config file
     $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-    --set-file apiService.config=config.yaml
+    $   --set-file apiService.config=config.yaml
 
 You can also directly set config values in the ``values.yaml`` file.
 
@@ -427,15 +428,15 @@ Write the SkyPilot API server YAML file and use ``sky launch`` to deploy the API
 
     # Write the YAML to a file
     $ cat <<EOF > skypilot-api-server.yaml
-    resources:
-        cpus: 8+
-        memory: 16+
-        ports: 46580
-        image_id: docker:berkeleyskypilot/skypilot-nightly:latest
+    $ resources:
+    $     cpus: 8+
+    $     memory: 16+
+    $     ports: 46580
+    $     image_id: docker:berkeleyskypilot/skypilot-nightly:latest
 
-    run: |
-      sky api start --deploy
-    EOF
+    $ run: |
+    $   sky api start --deploy
+    $ EOF
 
     # Deploy the API server
     $ sky launch -c api-server skypilot-api-server.yaml

@@ -37,8 +37,11 @@ Cluster CLI
    :nested: full
 
 
+Jobs CLI
+--------
+
 Cluster Jobs CLI
-----------------
+~~~~~~~~~~~~~~~~
 
 .. _sky-exec:
 .. click:: sky.cli:exec
@@ -61,7 +64,7 @@ Cluster Jobs CLI
    :nested: full
 
 Managed Jobs CLI
----------------------------
+~~~~~~~~~~~~~~~~~
 
 .. _sky-job-launch:
 .. click:: sky.cli:jobs_launch
@@ -123,11 +126,8 @@ Storage CLI
 
 .. _sky-api-cli:
 
-API Server CLI
---------------
-
-End-user CLI
-~~~~~~~~~~~~~
+API Request CLI
+---------------
 
 .. _sky-api-login:
 .. click:: sky.cli:api_login
@@ -155,7 +155,7 @@ End-user CLI
    :nested: full
 
 Admin CLI
-~~~~~~~~~~
+~~~~~~~~~
 
 .. click:: sky.cli:api_stop
    :prog: sky api stop

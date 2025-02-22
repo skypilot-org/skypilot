@@ -126,7 +126,38 @@ To use more than one cloud, combine the pip extras:
 
           pip install -e ".[kubernetes,aws,gcp]"
 
+
+Installing via ``uv`` is also supported:
+
+.. code-block:: shell
+
+  uv venv --seed --python 3.10
+  uv pip install "skypilot[kubernetes,aws,gcp]"
+  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+  uv pip install --prerelease allow azure-cli
+  uv pip install "skypilot[all]"
+
+
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
+
+.. note::
+
+  After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
+  See :ref:`upgrade-skypilot` for more details.
+
+
+Connect to a remote API server (optional)
+--------------------------------------------------
+
+If your team has set up a remote :ref:`SkyPilot API server <sky-api-server>`, connect to it by running:
+
+.. code-block:: shell
+
+  sky api login
+
+This is an optional step---by default, SkyPilot automatically starts and uses a local API server.  See more details in :ref:`sky-api-server-connect`.
+
+
 
 .. _verify-cloud-access:
 
@@ -523,8 +554,8 @@ increases before proceeding.
 
 .. _docker-image:
 
-Quick alternative: Trying in Docker
-------------------------------------------------------
+Using SkyPilot in Docker
+-------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.
