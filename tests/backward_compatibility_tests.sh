@@ -92,6 +92,12 @@ activate_env() {
   # Show which sky is being used.
   which sky
 
+  # Change to the environment directory
+  cd "$absolute_dir" || {
+    echo "Failed to change directory to $absolute_dir"
+    exit 1
+  }
+
   # API operations: Restart the API if restart_api_server is 1
   if [ "$restart_api_server" -eq 1 ]; then
     sky api stop || true  # Stop, ignoring errors if it's not running
@@ -130,14 +136,12 @@ if ! gcloud --version; then
 fi
 
 activate_env "base" 0
-cd $ABSOLUTE_BASE_VERSION_DIR
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate_env
 
 activate_env "current" 0
-cd $ABSOLUTE_CURRENT_VERSION_DIR
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
