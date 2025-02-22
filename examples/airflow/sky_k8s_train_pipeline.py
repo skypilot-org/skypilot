@@ -3,8 +3,8 @@ import uuid
 
 from airflow import DAG
 from airflow.decorators import task
-from airflow.utils.dates import days_ago
 from airflow.models import Variable
+from airflow.utils.dates import days_ago
 import yaml
 
 default_args = {
