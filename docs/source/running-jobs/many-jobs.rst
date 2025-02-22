@@ -282,7 +282,6 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
                 sky.jobs.launch(
                   task,
                   name=f'train-job{job_idx}',
-                  detach_run=True,
                   retry_until_up=True,
                 )
               )

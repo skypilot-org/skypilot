@@ -162,12 +162,12 @@ See :ref:`job-queue` to get started.
             train = sky.Task(run='python train.py').set_resources(
                 sky.Resources(accelerators='L4:1'))
             train = sky.Task.from_yaml('train.yaml')  # Or load from a YAML.
-            sky.exec(train, cluster_name='my-cluster', detach_run=True)
+            sky.exec(train, cluster_name='my-cluster')
 
             # Queue a job requesting 0.5 GPU.
             eval = sky.Task(run='python eval.py').set_resources(
                 sky.Resources(accelerators='L4:0.5'))
-            sky.exec(eval, cluster_name='my-cluster', detach_run=True)
+            sky.exec(eval, cluster_name='my-cluster')
 
 
 .. _concept-managed-jobs:
