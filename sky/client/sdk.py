@@ -889,7 +889,7 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: List[str],
+def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> server_common.RequestId:
     """Gets the job queue of a cluster.
