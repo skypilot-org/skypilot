@@ -362,6 +362,7 @@ class RayCodeGen:
             inspect.getsource(log_lib._ProcessingArgs),  # pylint: disable=protected-access
             inspect.getsource(log_lib._handle_io_stream),  # pylint: disable=protected-access
             inspect.getsource(log_lib.process_subprocess_stream),
+            inspect.getsource(log_lib.ProcFuture),
             inspect.getsource(log_lib.run_with_log),
             inspect.getsource(log_lib.make_task_bash_script),
             inspect.getsource(log_lib.add_ray_env_vars),
@@ -3813,7 +3814,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                   job_id: Optional[int],
                   managed_job_id: Optional[int] = None,
                   follow: bool = True,
-                  tail: int = 0) -> int:
+                  tail: int = 0,
+                  async_call: bool = False) -> Union[int, log_lib.ProcFuture]:
         """Tail the logs of a job.
 
         Args:
@@ -3838,7 +3840,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             signal.signal(signal.SIGINT, backend_utils.interrupt_handler)
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
         try:
-            returncode = self.run_on_head(
+            ret = self.run_on_head(
                 handle,
                 code,
                 stream_logs=True,
@@ -3846,7 +3848,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 # Allocate a pseudo-terminal to disable output buffering.
                 # Otherwise, there may be 5 minutes delay in logging.
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
+                async_call=async_call,
             )
+            if async_call:
+                return ret
+            if not isinstance(ret, int):
+                raise TypeError(
+                    f'Expected int returncode returned when async_call=False, '
+                    f'got {type(ret)}')
+            return int(ret)
         except SystemExit as e:
             returncode = e.code
         return returncode
@@ -4494,8 +4504,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         separate_stderr: bool = False,
         process_stream: bool = True,
         source_bashrc: bool = False,
+        async_call: bool = False,
         **kwargs,
-    ) -> Union[int, Tuple[int, str, str]]:
+    ) -> Union[int, Tuple[int, str, str], log_lib.ProcFuture]:
         """Runs 'cmd' on the cluster's head node.
 
         It will try to fetch the head node IP if it is not cached.
@@ -4549,6 +4560,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             require_outputs=require_outputs,
             separate_stderr=separate_stderr,
             source_bashrc=source_bashrc,
+            async_call=async_call,
             **kwargs,
         )
 

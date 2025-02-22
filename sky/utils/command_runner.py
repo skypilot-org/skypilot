@@ -345,6 +345,7 @@ class CommandRunner:
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            async_call: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Runs the command on the cluster.
 
@@ -587,7 +588,8 @@ class SSHCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
-            **kwargs) -> Union[int, Tuple[int, str, str]]:
+            async_call: bool = False,
+            **kwargs) -> Union[int, Tuple[int, str, str], log_lib.ProcFuture]:
         """Uses 'ssh' to run 'cmd' on a node with ip.
 
         Args:
@@ -656,6 +658,7 @@ class SSHCommandRunner(CommandRunner):
                                     process_stream=process_stream,
                                     shell=True,
                                     executable=executable,
+                                    async_call=async_call,
                                     **kwargs)
 
     @timeline.event
@@ -782,6 +785,7 @@ class KubernetesCommandRunner(CommandRunner):
             connect_timeout: Optional[int] = None,
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
+            async_call: bool = False,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
         """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
 

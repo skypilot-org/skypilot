@@ -784,7 +784,7 @@ def cancel(
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0) -> log_lib.ProcFuture:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tails the logs of a job.
 
@@ -809,7 +809,8 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    return backend.tail_logs(handle, job_id, follow=follow, tail=tail,
+                             async_call=True)
 
 
 @usage_lib.entrypoint
