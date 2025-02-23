@@ -3,6 +3,25 @@
 Getting Started on Kubernetes
 =============================
 
+Quick Start
+-----------
+Have a kubeconfig? Get started with SkyPilot in 3 commands:
+
+.. code-block:: bash
+
+   # Install dependencies
+   $ brew install kubectl socat netcat  
+   # Linux: sudo apt-get install kubectl socat netcat
+
+   # With a valid kubeconfig at ~/.kube/config, run:
+   $ sky check  
+   # Shows "Kubernetes: enabled"
+
+   # Launch your SkyPilot cluster
+   $ sky launch --cpus 2+ -- echo hi
+
+For detailed instructions, prerequisites, and advanced features, read on.
+
 Prerequisites
 -------------
 
