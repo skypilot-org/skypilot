@@ -3,8 +3,8 @@
 Getting Started on Kubernetes
 =============================
 
-Quick Start
------------
+Quickstart
+----------
 Have a kubeconfig? Get started with SkyPilot in 3 commands:
 
 .. code-block:: bash
