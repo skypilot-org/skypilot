@@ -40,7 +40,7 @@ ABSOLUTE_BASE_VERSION_DIR=$ABSOLUTE_PARENT_DIR/$(basename "$BASE_VERSION_DIR")
 rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
-start_from=${2:-7}
+start_from=${2:-0}
 base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$(whoami)"
