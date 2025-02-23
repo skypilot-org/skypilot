@@ -3,9 +3,8 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
 from sky import clouds
+from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
@@ -15,8 +14,12 @@ from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
+    import requests
+
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 _CLOUD_VSPHERE = 'vsphere'
 _CREDENTIAL_FILES = [
