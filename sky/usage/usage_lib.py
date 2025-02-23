@@ -10,8 +10,6 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import click
-
 import sky
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -485,6 +483,20 @@ def send_heartbeat(interval_seconds: int = 600):
     _send_to_loki(MessageType.HEARTBEAT)
 
 
+def maybe_show_privacy_policy():
+    """Show the privacy policy if it is not already shown."""
+    # Show the policy message only when the entrypoint is used.
+    # An indicator for PRIVACY_POLICY has already been shown.
+    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
+    if not env_options.Options.DISABLE_LOGGING.get():
+        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
+        try:
+            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
+                logger.info(constants.USAGE_POLICY_MESSAGE)
+        except FileExistsError:
+            pass
+
+
 @contextlib.contextmanager
 def entrypoint_context(name: str, fallback: bool = False):
     """Context manager for entrypoint.
@@ -496,17 +508,6 @@ def entrypoint_context(name: str, fallback: bool = False):
     additional entrypoint_context with fallback=True can be used to wrap
     the global entrypoint to catch any exceptions that are not caught.
     """
-    # Show the policy message only when the entrypoint is used.
-    # An indicator for PRIVACY_POLICY has already been shown.
-    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
-    if not env_options.Options.DISABLE_LOGGING.get():
-        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
-        try:
-            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
-                click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
-        except FileExistsError:
-            pass
-
     is_entry = messages.usage.entrypoint is None
     if is_entry and not fallback:
         for message in messages.values():
