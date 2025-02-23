@@ -247,7 +247,7 @@ class Backoff:
 
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
-_using_remote_api_server: bool = False
+_using_remote_api_server: Optional[bool] = None
 
 
 def set_client_status(client_entrypoint: Optional[str],
@@ -291,7 +291,13 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
 
 def get_using_remote_api_server() -> bool:
     """Returns whether the API server is remote."""
-    return _using_remote_api_server
+    if _using_remote_api_server is not None:
+        return _using_remote_api_server
+    # This gets the right status for the local client.
+    # TODO(zhwu): This is to prevent circular import. We should refactor this.
+    # pylint: disable=import-outside-toplevel
+    from sky.server import common as server_common
+    return not server_common.is_api_server_local()
 
 
 def get_pretty_entrypoint_cmd() -> str:
