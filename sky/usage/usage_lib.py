@@ -215,9 +215,11 @@ class UsageMessageToReport(MessageToReport):
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
         if self.ray_yamls is None:
             self.ray_yamls = []
-        self.ray_yamls.extend(
-            prepare_json_from_yaml_config(yaml_config_or_path))
-        self.num_tried_regions = len(self.ray_yamls)
+        if self.num_tried_regions is None:
+            self.num_tried_regions = 0
+        # Only keep the latest ray yaml to reduce the size of the message.
+        self.ray_yamls = prepare_json_from_yaml_config(yaml_config_or_path)
+        self.num_tried_regions += 1
 
     def update_cluster_name(self, cluster_name: Union[List[str], str]):
         if isinstance(cluster_name, str):
