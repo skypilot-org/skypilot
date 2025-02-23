@@ -378,6 +378,7 @@ def _send_to_loki(message_type: MessageType):
     if message_type == MessageType.USAGE:
         prom_labels['new_cluster'] = (message.original_cluster_status != 'UP'
                                       and message.final_cluster_status == 'UP')
+        message.update_using_remote_api_server()
 
     headers = {'Content-type': 'application/json'}
     payload = {
