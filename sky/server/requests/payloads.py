@@ -37,7 +37,7 @@ def request_body_env_vars() -> dict:
     env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
                                                  getpass.getuser())
     env_vars[
-        usage_constants.USAGE_RUN_ID_ENV_VAR] = common_utils.get_usage_run_id()
+        usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)

@@ -256,6 +256,7 @@ def _request_execution_wrapper(request_id: str,
         try:
             with override_request_env_and_config(request_body):
                 return_value = func(**request_body.to_kwargs())
+                f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             _restore_output(original_stdout, original_stderr)

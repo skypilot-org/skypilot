@@ -409,12 +409,16 @@ def reload_for_new_request(client_entrypoint: Optional[str],
         client_command=client_command,
         using_remote_api_server=using_remote_api_server,
     )
+
+    # Clear cache should be called before reload_logger and usage reset,
+    # otherwise, the latest env var will not be used.
+    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
+        func.cache_clear()
+
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
 
-    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
-        func.cache_clear()
 
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment
