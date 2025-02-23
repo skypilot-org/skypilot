@@ -35,11 +35,12 @@ set -evx
 # Store the initial directory
 ABSOLUTE_CURRENT_VERSION_DIR=$(pwd)
 BASE_VERSION_DIR="../sky-base"
-ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && pwd || pwd)/$(basename "$BASE_VERSION_DIR")
+ABSOLUTE_PARENT_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && pwd || pwd)
+ABSOLUTE_BASE_VERSION_DIR=$ABSOLUTE_PARENT_DIR/$(basename "$BASE_VERSION_DIR")
 rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
-start_from=${2:-0}
+start_from=${2:-7}
 base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$(whoami)"
@@ -55,17 +56,14 @@ activate_env() {
   local env_name="$1"
   local restart_api_server="${2:-1}"
   local env_dir
-  local absolute_dir
 
   # Determine environment directory and absolute path based on env_name
   case "$env_name" in
     base)
       env_dir="sky-back-compat-base"
-      absolute_dir="$ABSOLUTE_BASE_VERSION_DIR"
       ;;
     current)
       env_dir="sky-back-compat-current"
-      absolute_dir="$ABSOLUTE_CURRENT_VERSION_DIR"
       ;;
     *)
       echo "Invalid environment name: '$env_name'. Must be 'base' or 'current'."
@@ -92,9 +90,9 @@ activate_env() {
   # Show which sky is being used.
   which sky
 
-  # Change to the environment directory
-  cd "$absolute_dir" || {
-    echo "Failed to change directory to $absolute_dir"
+  # Change to the parent directory to avoid importing the current version of skypilot
+  cd "$ABSOLUTE_PARENT_DIR" || {
+    echo "Failed to change directory to $ABSOLUTE_PARENT_DIR"
     exit 1
   }
 
@@ -136,12 +134,14 @@ if ! gcloud --version; then
 fi
 
 activate_env "base" 0
+cd "$ABSOLUTE_BASE_VERSION_DIR"
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
 deactivate_env
 
 activate_env "current" 0
+cd "$ABSOLUTE_CURRENT_VERSION_DIR"
 $UV pip uninstall skypilot
 $UV pip install --prerelease=allow azure-cli
 $UV pip install -e ".[all]"
@@ -154,6 +154,8 @@ cleanup_resources() {
   sky serve down ${CLUSTER_NAME}-* -y || true
   sky api stop
   deactivate_env
+  # Reset to the initial directory
+  cd "$ABSOLUTE_CURRENT_VERSION_DIR"
 }
 
 # Set trap to call cleanup on script exit
