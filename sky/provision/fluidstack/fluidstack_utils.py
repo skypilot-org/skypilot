@@ -3,12 +3,17 @@
 import json
 import os
 import time
+import typing
 from typing import Any, Dict, List
 import uuid
 
-import requests
-
+from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 
 def get_key_suffix():

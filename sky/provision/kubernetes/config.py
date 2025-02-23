@@ -3,15 +3,20 @@ import copy
 import logging
 import math
 import os
+import typing
 from typing import Any, Dict, Optional, Union
 
-import yaml
-
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
+
+if typing.TYPE_CHECKING:
+    import yaml
+else:
+    yaml = adaptors_common.LazyImport('yaml')
 
 logger = logging.getLogger(__name__)
 

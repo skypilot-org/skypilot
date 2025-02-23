@@ -11,20 +11,27 @@ import shlex
 import signal
 import sqlite3
 import time
+import typing
 from typing import Any, Dict, List, Optional, Sequence
 
 import colorama
-import filelock
-import psutil
 
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+
+if typing.TYPE_CHECKING:
+    import filelock
+    import psutil
+else:
+    filelock = adaptors_common.LazyImport('filelock')
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 

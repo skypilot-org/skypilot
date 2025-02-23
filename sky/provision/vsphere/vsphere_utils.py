@@ -3,12 +3,12 @@
 import http.cookies as http_cookies
 import os
 import ssl
+import typing
 from typing import Any, Dict, List, Optional
-
-import yaml
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
 from sky.clouds.service_catalog import vsphere_catalog
 from sky.clouds.service_catalog.common import get_catalog_path
@@ -32,6 +32,11 @@ from sky.provision.vsphere.common.vim_utils import create_spec_with_script
 from sky.provision.vsphere.common.vim_utils import poweron_vm
 from sky.provision.vsphere.common.vim_utils import wait_for_tasks
 from sky.provision.vsphere.common.vim_utils import wait_internal_ip_ready
+
+if typing.TYPE_CHECKING:
+    import yaml
+else:
+    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 
