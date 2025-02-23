@@ -41,6 +41,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.usage import usage_lib
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -1076,6 +1077,10 @@ if __name__ == '__main__':
     parser.add_argument('--port', default=46580, type=int)
     parser.add_argument('--deploy', action='store_true')
     cmd_args = parser.parse_args()
+    # Show the privacy policy if it is not already shown. We place it here so
+    # that it is shown only when the API server is started.
+    usage_lib.maybe_show_privacy_policy()
+
     num_workers = None
     if cmd_args.deploy:
         num_workers = os.cpu_count()
