@@ -1,10 +1,17 @@
 """Vapi Connect
 """
 
-import requests
+import typing
+
 from urllib3.exceptions import InsecureRequestWarning
 
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import vsphere as vsphere_adaptor
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 
 def get_jsonrpc_endpoint_url(host):
