@@ -86,12 +86,10 @@ def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
-    from cryptography.hazmat.backends import (
-        default_backend)  # pylint: disable=import-outside-toplevel
-    from cryptography.hazmat.primitives import (
-        serialization)  # pylint: disable=import-outside-toplevel
-    from cryptography.hazmat.primitives.asymmetric import (
-        rsa)  # pylint: disable=import-outside-toplevel
+    # pylint: disable=import-outside-toplevel
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
 
     key = rsa.generate_private_key(backend=default_backend(),
                                    public_exponent=65537,
