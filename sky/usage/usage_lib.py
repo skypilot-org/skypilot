@@ -15,7 +15,9 @@ import click
 import sky
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
+from sky.server import common as server_common
 from sky.usage import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
@@ -167,6 +169,11 @@ class UsageMessageToReport(MessageToReport):
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
+        # Whether API server is deployed remotely. It is only set on the client
+        # side, and the dashboard should consider a user to be using a remote
+        # API server if using_remote_api_server is True.
+        self.using_remote_api_server: Optional[bool] = None
+
     def update_entrypoint(self, msg: str):
         if self.client_entrypoint is None:
             self.client_entrypoint = common_utils.get_current_client_entrypoint(
@@ -266,6 +273,17 @@ class UsageMessageToReport(MessageToReport):
     def update_final_cluster_status(
             self, status: Optional['status_lib.ClusterStatus']):
         self.final_cluster_status = status.value if status is not None else None
+
+    def update_using_remote_api_server(self):
+        """Set to True if it is on client and the API server is remote.
+
+        We keep the using_remote_api_server to be None if it is on server
+        side, because the server side does not have the information to make the
+        determination.
+        """
+        if not annotations.is_on_api_server:
+            self.using_remote_api_server = (
+                not server_common.is_api_server_local())
 
     def set_new_cluster(self):
         self.is_new_cluster = True
