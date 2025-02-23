@@ -307,6 +307,9 @@ class JobsController:
                         'The user job failed. Please check the logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
+                    assert (handle is None or isinstance(
+                        handle,
+                        cloud_vm_ray_backend.CloudVmRayResourceHandle)), handle
                     self._download_log_and_stream(task_id, handle)
                     managed_job_status = (
                         managed_job_state.ManagedJobStatus.FAILED)
@@ -347,6 +350,9 @@ class JobsController:
                                 '(the cluster will not be restarted).')
             # When the handle is None, the cluster should be cleaned up already.
             if handle is not None:
+                assert isinstance(
+                    handle,
+                    cloud_vm_ray_backend.CloudVmRayResourceHandle), handle
                 resources = handle.launched_resources
                 assert resources is not None, handle
                 if resources.need_cleanup_after_preemption_or_failure():
