@@ -400,12 +400,14 @@ def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
 
 
 def reload_for_new_request(client_entrypoint: Optional[str],
-                           client_command: Optional[str]):
+                           client_command: Optional[str],
+                           using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
     # Reset the client entrypoint and command for the usage message.
-    common_utils.set_client_entrypoint_and_command(
+    common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
         client_command=client_command,
+        using_remote_api_server=using_remote_api_server,
     )
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.

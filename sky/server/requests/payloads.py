@@ -70,6 +70,7 @@ class RequestBody(pydantic.BaseModel):
     env_vars: Dict[str, str] = {}
     entrypoint: str = ''
     entrypoint_command: str = ''
+    using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
 
     def __init__(self, **data):
@@ -80,6 +81,8 @@ class RequestBody(pydantic.BaseModel):
         data['entrypoint'] = data.get('entrypoint', usage_lib_entrypoint)
         data['entrypoint_command'] = data.get(
             'entrypoint_command', common_utils.get_pretty_entrypoint_cmd())
+        data['using_remote_api_server'] = data.get(
+            'using_remote_api_server', not common.is_api_server_local())
         data['override_skypilot_config'] = data.get(
             'override_skypilot_config',
             get_override_skypilot_config_from_client())
@@ -95,6 +98,7 @@ class RequestBody(pydantic.BaseModel):
         kwargs.pop('env_vars')
         kwargs.pop('entrypoint')
         kwargs.pop('entrypoint_command')
+        kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
         return kwargs
 

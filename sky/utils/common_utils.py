@@ -247,18 +247,23 @@ class Backoff:
 
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
+_using_remote_api_server: bool = False
 
 
-def set_client_entrypoint_and_command(client_entrypoint: Optional[str],
-                                      client_command: Optional[str]):
+def set_client_status(client_entrypoint: Optional[str],
+                      client_command: Optional[str],
+                      using_remote_api_server: bool):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
     client entrypoint and command from the client.
     """
-    global _current_command, _current_client_entrypoint
+    global _current_command
+    global _current_client_entrypoint
+    global _using_remote_api_server
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
+    _using_remote_api_server = using_remote_api_server
 
 
 def get_current_command() -> str:

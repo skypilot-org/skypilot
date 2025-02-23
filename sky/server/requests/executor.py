@@ -178,7 +178,8 @@ def override_request_env_and_config(
     os.environ['CLICOLOR_FORCE'] = '1'
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command)
+        client_command=request_body.entrypoint_command,
+        using_remote_api_server=request_body.using_remote_api_server)
     try:
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config):
