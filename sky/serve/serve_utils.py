@@ -17,13 +17,11 @@ from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
 import uuid
 
 import colorama
-import filelock
-import psutil
-import requests
 
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
@@ -37,12 +35,40 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
+    import filelock
+    import psutil
+    import requests
 
     from sky.serve import replica_managers
+else:
+    fastapi = adaptors_common.LazyImport('fastapi')
+    filelock = adaptors_common.LazyImport('filelock')
+    psutil = adaptors_common.LazyImport('psutil')
+    requests = adaptors_common.LazyImport('requests')
 
-_SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
-                         constants.CONTROLLER_MEMORY_USAGE_GB)
+
+def _get_system_memory_gb():
+    """Get system memory in GB."""
+    return psutil.virtual_memory().total // (1024**3)
+
+
+def _get_num_service_threshold():
+    """Get number of services threshold based on available memory."""
+    return _get_system_memory_gb() // constants.CONTROLLER_MEMORY_USAGE_GB
+
+
+# Only calculate these when actually needed
+_num_service_threshold = None
+
+
+def get_num_service_threshold():
+    """Get number of services threshold, calculating it only when needed."""
+    global _num_service_threshold
+    if _num_service_threshold is None:
+        _num_service_threshold = _get_num_service_threshold()
+    return _num_service_threshold
+
+
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 # NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
@@ -607,7 +633,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
-        elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
+        elif len(serve_state.get_services()) >= get_num_service_threshold():
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '

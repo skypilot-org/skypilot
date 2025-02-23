@@ -8,7 +8,6 @@ import typing
 from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
-import requests
 
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -21,8 +20,10 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import pandas as pd
+    import requests
 else:
     pd = adaptors_common.LazyImport('pandas')
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 

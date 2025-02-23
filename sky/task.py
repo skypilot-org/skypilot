@@ -9,12 +9,12 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
-import yaml
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -26,7 +26,11 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import yaml
+
     from sky import resources as resources_lib
+else:
+    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 

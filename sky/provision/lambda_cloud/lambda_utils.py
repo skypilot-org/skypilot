@@ -3,17 +3,70 @@
 import json
 import os
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-
+from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
 INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
+
+# Move request functionality into a separate module-level object
+_request_handler = None
+
+
+def _get_request_handler():
+    """Lazy initialize the request handler."""
+    global _request_handler
+    if _request_handler is None:
+        _request_handler = _RequestHandler()
+    return _request_handler
+
+
+class _RequestHandler:
+    """Handles all HTTP requests to avoid early imports."""
+
+    def __init__(self):
+        self._session = None
+
+    @property
+    def session(self):
+        """Lazy initialize the session."""
+        if self._session is None:
+            self._session = requests.Session()
+        return self._session
+
+    def try_request_with_backoff(self,
+                                 method: str,
+                                 url: str,
+                                 headers: Dict[str, str],
+                                 data: Optional[str] = None):
+        """Make HTTP request with exponential backoff."""
+        backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
+                                       max_backoff_factor=MAX_BACKOFF_FACTOR)
+        for i in range(MAX_ATTEMPTS):
+            if method == 'get':
+                response = self.session.get(url, headers=headers)
+            elif method == 'post':
+                response = self.session.post(url, headers=headers, data=data)
+            else:
+                raise ValueError(f'Unsupported requests method: {method}')
+            # If rate limited, wait and try again
+            if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
+                time.sleep(backoff.current_backoff())
+                continue
+            if response.status_code == 200:
+                return response
+            raise_lambda_error(response)
 
 
 class LambdaCloudError(Exception):
@@ -76,7 +129,7 @@ class Metadata:
             json.dump(metadata, f)
 
 
-def raise_lambda_error(response: requests.Response) -> None:
+def raise_lambda_error(response: 'requests.Response') -> None:
     """Raise LambdaCloudError if appropriate."""
     status_code = response.status_code
     if status_code == 200:
@@ -94,28 +147,6 @@ def raise_lambda_error(response: requests.Response) -> None:
             f'code: {status_code}; reason: {response.reason}; '
             f'content: {response.text}') from e
     raise LambdaCloudError(f'{code}: {message}')
-
-
-def _try_request_with_backoff(method: str,
-                              url: str,
-                              headers: Dict[str, str],
-                              data: Optional[str] = None):
-    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
-                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
-    for i in range(MAX_ATTEMPTS):
-        if method == 'get':
-            response = requests.get(url, headers=headers)
-        elif method == 'post':
-            response = requests.post(url, headers=headers, data=data)
-        else:
-            raise ValueError(f'Unsupported requests method: {method}')
-        # If rate limited, wait and try again
-        if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
-            time.sleep(backoff.current_backoff())
-            continue
-        if response.status_code == 200:
-            return response
-        raise_lambda_error(response)
 
 
 class LambdaCloudClient:
@@ -168,37 +199,35 @@ class LambdaCloudClient:
             'quantity': quantity,
             'name': name,
         })
-        response = _try_request_with_backoff(
+        response = _get_request_handler().try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/launch',
-            data=data,
             headers=self.headers,
+            data=data,
         )
         return response.json().get('data', []).get('instance_ids', [])
 
     def remove_instances(self, instance_ids: List[str]) -> Dict[str, Any]:
         """Terminate instances."""
         data = json.dumps({'instance_ids': instance_ids})
-        response = _try_request_with_backoff(
+        response = _get_request_handler().try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/terminate',
-            data=data,
             headers=self.headers,
+            data=data,
         )
         return response.json().get('data', []).get('terminated_instances', [])
 
     def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
-        response = _try_request_with_backoff('get',
-                                             f'{API_ENDPOINT}/instances',
-                                             headers=self.headers)
+        response = _get_request_handler().try_request_with_backoff(
+            'get', f'{API_ENDPOINT}/instances', headers=self.headers)
         return response.json().get('data', [])
 
     def list_ssh_keys(self) -> List[Dict[str, str]]:
         """List ssh keys."""
-        response = _try_request_with_backoff('get',
-                                             f'{API_ENDPOINT}/ssh-keys',
-                                             headers=self.headers)
+        response = _get_request_handler().try_request_with_backoff(
+            'get', f'{API_ENDPOINT}/ssh-keys', headers=self.headers)
         return response.json().get('data', [])
 
     def get_unique_ssh_key_name(self, prefix: str,
@@ -234,14 +263,11 @@ class LambdaCloudClient:
     def register_ssh_key(self, name: str, pub_key: str) -> None:
         """Register ssh key with Lambda."""
         data = json.dumps({'name': name, 'public_key': pub_key})
-        _try_request_with_backoff('post',
-                                  f'{API_ENDPOINT}/ssh-keys',
-                                  data=data,
-                                  headers=self.headers)
+        _get_request_handler().try_request_with_backoff(
+            'post', f'{API_ENDPOINT}/ssh-keys', headers=self.headers, data=data)
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = _try_request_with_backoff('get',
-                                             f'{API_ENDPOINT}/instance-types',
-                                             headers=self.headers)
+        response = _get_request_handler().try_request_with_backoff(
+            'get', f'{API_ENDPOINT}/instance-types', headers=self.headers)
         return response.json().get('data', [])

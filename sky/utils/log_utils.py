@@ -2,19 +2,26 @@
 import enum
 import time
 import types
+import typing
 from typing import Callable, Iterator, List, Optional, TextIO, Type
 
 import colorama
-# slow due to https://github.com/python-pendulum/pendulum/issues/808
-# FIXME(aylei): bump pendulum if it get fixed
-import pendulum
-import prettytable
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
+
+if typing.TYPE_CHECKING:
+    # slow due to https://github.com/python-pendulum/pendulum/issues/808
+    # FIXME(aylei): bump pendulum if it get fixed
+    import pendulum
+    import prettytable
+else:
+    pendulum = adaptors_common.LazyImport('pendulum')
+    prettytable = adaptors_common.LazyImport('prettytable')
 
 
 class LineProcessor(object):

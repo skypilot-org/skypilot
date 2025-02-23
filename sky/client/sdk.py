@@ -21,15 +21,13 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
-import filelock
-import psutil
-import requests
 
 from sky import admin_policy
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -50,14 +48,22 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import io
 
+    import filelock
+    import psutil
+    import requests
+
     import sky
+else:
+    filelock = adaptors_common.LazyImport('filelock')
+    psutil = adaptors_common.LazyImport('psutil')
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 
 def stream_response(request_id: Optional[str],
-                    response: requests.Response,
+                    response: 'requests.Response',
                     output_stream: Optional['io.TextIOBase'] = None) -> Any:
     """Streams the response to the console.
 

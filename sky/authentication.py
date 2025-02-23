@@ -25,19 +25,16 @@ import re
 import socket
 import subprocess
 import sys
+import typing
 from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives import serialization
-from cryptography.hazmat.primitives.asymmetric import rsa
-import filelock
-import yaml
 
 from sky import clouds
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import kubernetes
@@ -66,6 +63,21 @@ MAX_TRIALS = 64
 # because ssh key pair need to persist across API server restarts, while
 # the former dir is empheral.
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
+
+if typing.TYPE_CHECKING:
+    from cryptography.hazmat.backends import default_backend
+    from cryptography.hazmat.primitives import serialization
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    import filelock
+    import yaml
+else:
+    # Lazy load cryptography modules
+    default_backend = adaptors_common.LazyImport('cryptography.hazmat.backends')
+    serialization = adaptors_common.LazyImport('cryptography.hazmat.primitives')
+    rsa = adaptors_common.LazyImport(
+        'cryptography.hazmat.primitives.asymmetric')
+    filelock = adaptors_common.LazyImport('filelock')
+    yaml = adaptors_common.LazyImport('yaml')
 
 
 def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
