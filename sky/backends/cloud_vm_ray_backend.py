@@ -17,11 +17,12 @@ import textwrap
 import threading
 import time
 import typing
-from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
-                    Union)
+from typing import (Any, Callable, Dict, Iterable, List, Literal, Optional, Set,
+                    Tuple, Union)
 
 import colorama
 import filelock
+import rich.status as rich_status
 
 import sky
 from sky import backends
@@ -1436,17 +1437,18 @@ class RetryingVmProvisioner(object):
                 zone_str = ','.join(z.name for z in zones)
                 zone_str = f' ({zone_str})'
             try:
-                config_dict = backend_utils.write_cluster_config(
-                    to_provision,
-                    num_nodes,
-                    _get_cluster_config_template(to_provision.cloud),
-                    cluster_name,
-                    self._local_wheel_path,
-                    self._wheel_hash,
-                    region=region,
-                    zones=zones,
-                    dryrun=dryrun,
-                    keep_launch_fields_in_existing_config=cluster_exists)
+                config_dict: Dict[
+                    str, Any] = backend_utils.write_cluster_config(
+                        to_provision,
+                        num_nodes,
+                        _get_cluster_config_template(to_provision.cloud),
+                        cluster_name,
+                        self._local_wheel_path,
+                        self._wheel_hash,
+                        region=region,
+                        zones=zones,
+                        dryrun=dryrun,
+                        keep_launch_fields_in_existing_config=cluster_exists)
             except exceptions.ResourcesUnavailableError as e:
                 # Failed due to catalog issue, e.g. image not found, or
                 # GPUs are requested in a Kubernetes cluster but the cluster
@@ -3848,7 +3850,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 ssh_mode=command_runner.SshMode.INTERACTIVE,
             )
         except SystemExit as e:
-            returncode = e.code
+            returncode = int(
+                e.code) if e.code is not None else 1  # Default to 1 if None
         return returncode
 
     def tail_managed_job_logs(self,
@@ -4475,6 +4478,66 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                      f'{returncode}: {stdout+stderr}\n'
                      f'Command: {code}')
         return False
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = None,
+        log_path: str = '/dev/null',
+        stream_logs: bool = False,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
+        require_outputs: Literal[False] = False,
+        separate_stderr: bool = False,
+        process_stream: bool = True,
+        source_bashrc: bool = False,
+        **kwargs,
+    ) -> int:
+        ...
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = None,
+        log_path: str = '/dev/null',
+        stream_logs: bool = False,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
+        require_outputs: Literal[True],
+        separate_stderr: bool = False,
+        process_stream: bool = True,
+        source_bashrc: bool = False,
+        **kwargs,
+    ) -> Tuple[int, str, str]:
+        ...
+
+    @typing.overload
+    def run_on_head(
+        self,
+        handle: CloudVmRayResourceHandle,
+        cmd: str,
+        *,
+        port_forward: Optional[List[int]] = None,
+        log_path: str = '/dev/null',
+        stream_logs: bool = False,
+        ssh_mode: command_runner.SshMode = command_runner.SshMode.
+        NON_INTERACTIVE,
+        under_remote_workdir: bool = False,
+        require_outputs: bool = False,
+        separate_stderr: bool = False,
+        process_stream: bool = True,
+        source_bashrc: bool = False,
+        **kwargs,
+    ) -> Union[int, Tuple[int, str, str]]:
+        ...
 
     # TODO(zhwu): Refactor this to a CommandRunner class, so different backends
     # can support its own command runner.

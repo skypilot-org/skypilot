@@ -365,6 +365,10 @@ def get_job_timestamp(backend: 'backends.CloudVmRayBackend', cluster_name: str,
     code = job_lib.JobLibCodeGen.get_job_submitted_or_ended_timestamp_payload(
         job_id=None, get_ended_time=get_end_time)
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        raise exceptions.ClusterNotUpError(f'Cluster {cluster_name!r} does not '
+                                           'exist.')
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     returncode, stdout, stderr = backend.run_on_head(handle,
                                                      code,
                                                      stream_logs=False,
@@ -396,6 +400,10 @@ def try_to_get_job_end_time(backend: 'backends.CloudVmRayBackend',
             return time.time()
         else:
             raise
+    except exceptions.ClusterNotUpError as e:
+        logger.info(f'Cluster {cluster_name!r} is not up. Assuming the job '
+                    'was preempted.')
+        return time.time()
 
 
 def event_callback_func(job_id: int, task_id: int, task: 'sky.Task'):
