@@ -65,17 +65,9 @@ MAX_TRIALS = 64
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
 
 if typing.TYPE_CHECKING:
-    from cryptography.hazmat.backends import default_backend
-    from cryptography.hazmat.primitives import serialization
-    from cryptography.hazmat.primitives.asymmetric import rsa
     import filelock
     import yaml
 else:
-    # Lazy load cryptography modules
-    default_backend = adaptors_common.LazyImport('cryptography.hazmat.backends')
-    serialization = adaptors_common.LazyImport('cryptography.hazmat.primitives')
-    rsa = adaptors_common.LazyImport(
-        'cryptography.hazmat.primitives.asymmetric')
     filelock = adaptors_common.LazyImport('filelock')
     yaml = adaptors_common.LazyImport('yaml')
 
@@ -94,6 +86,13 @@ def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
+    from cryptography.hazmat.backends import (
+        default_backend)  # pylint: disable=import-outside-toplevel
+    from cryptography.hazmat.primitives import (
+        serialization)  # pylint: disable=import-outside-toplevel
+    from cryptography.hazmat.primitives.asymmetric import (
+        rsa)  # pylint: disable=import-outside-toplevel
+
     key = rsa.generate_private_key(backend=default_backend(),
                                    public_exponent=65537,
                                    key_size=2048)
