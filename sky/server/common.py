@@ -419,7 +419,6 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
 
-
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment
     # variables are set, such as SKYPILOT_DEBUG.
