@@ -289,6 +289,11 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     return server_entrypoint
 
 
+def get_using_remote_api_server() -> bool:
+    """Returns whether the API server is remote."""
+    return _using_remote_api_server
+
+
 def get_pretty_entrypoint_cmd() -> str:
     """Returns the prettified entry point of this process (sys.argv).
 

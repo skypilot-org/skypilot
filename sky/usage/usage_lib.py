@@ -165,10 +165,9 @@ class UsageMessageToReport(MessageToReport):
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
-        # Whether API server is deployed remotely. It is only set on the client
-        # side, and the dashboard should consider a user to be using a remote
-        # API server if using_remote_api_server is True.
-        self.using_remote_api_server: bool = False
+        # Whether API server is deployed remotely.
+        self.using_remote_api_server: bool = (
+            common_utils.get_using_remote_api_server())
 
     def update_entrypoint(self, msg: str):
         if self.client_entrypoint is None:
@@ -269,16 +268,6 @@ class UsageMessageToReport(MessageToReport):
     def update_final_cluster_status(
             self, status: Optional['status_lib.ClusterStatus']):
         self.final_cluster_status = status.value if status is not None else None
-
-    def update_using_remote_api_server(self,
-                                       using_remote_api_server: bool) -> None:
-        """Set to True if it is on client and the API server is remote.
-
-        We keep the using_remote_api_server to be None if it is on server
-        side, because the server side does not have the information to make the
-        determination.
-        """
-        self.using_remote_api_server = using_remote_api_server
 
     def set_new_cluster(self):
         self.is_new_cluster = True
