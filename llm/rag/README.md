@@ -29,20 +29,20 @@ HF_TOKEN=hf_xxxxx
 or set as environment variable `HF_TOKEN`.
 
 ## Step 1: Compute Embeddings from Legal Documents
-Convert legal documents into vector representations using DeepSeek R1. These embeddings enable semantic search across the document collection.
+Convert legal documents into vector representations using `Alibaba-NLP/gte-Qwen2-7B-instruct`. These embeddings enable semantic search across the document collection.
 
 Launch the embedding computation:
 ```bash
 python3 batch_compute_embeddings.py
 ```
 
-This processes documents from the Pile of Law dataset and computes embeddings in batches:
+This automatically launches 10 SkyPilot managed jobs on L4 GPUs to processe documents from the Pile of Law dataset and computes embeddings in batches:
 ```
 Processing documents: 100%|██████████| 1000/1000 [00:45<00:00, 22.05it/s]
 Saving embeddings to: embeddings_0_1000.parquet
 ...
 ```
-
+The generated embeddings will be saved to a cloud bucket in parquet format.
 ## Step 2: Build RAG with Vector Database
 After computing embeddings, construct a ChromaDB vector database for efficient similarity search:
 
@@ -66,7 +66,7 @@ sky launch -c rag_serve serve_rag.yaml
 
 Or use Sky Serve for managed deployment:
 ```bash
-sky serve up serve_rag.yaml -n legal-rag
+sky serve up -n legal-rag serve_rag.yaml 
 ```
 
 To query the system, get the endpoint:
