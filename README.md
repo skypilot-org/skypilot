@@ -21,9 +21,9 @@
   <a href="https://github.com/skypilot-org/skypilot/releases">
     <img alt="Downloads" src="https://img.shields.io/pypi/dm/skypilot">
   </a>
-  <br>
-  <a href="https://buildkite.com/skypilot-1/smoke-tests">
-    <img alt="Smoke Tests" src="https://badge.buildkite.com/1a20bd4a902acd70cd8c5ed4446634b151a62b9c06609744bb.svg?theme=github&branch=master">
+
+  <a href="https://buildkite.com/skypilot-1/full-smoke-tests-run">
+    <img alt="Smoke Tests" src="https://badge.buildkite.com/d3aa9d2370e4a9ac4fb5e210381f955082a63a9a46673b197a.svg?theme=github&branch=master">
   </a>
 
 </p>

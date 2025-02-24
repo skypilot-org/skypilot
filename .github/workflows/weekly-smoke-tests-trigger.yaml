@@ -3,12 +3,7 @@ name: Smoke Tests Trigger (Scheduled and PR)
 on:
   schedule:
     - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
-  workflow_dispatch:
-    inputs:
-      clouds:
-        description: 'Comma-separated clouds to test (aws,azure,gcp,kubernetes)'
-        required: true
-        default: 'aws,azure,gcp,kubernetes'
+  workflow_dispatch: {}  # Explicit empty configuration
   # uncomment this for PR triggers testing
   # pull_request:
   #   types: [opened, synchronize, reopened]
@@ -16,25 +11,19 @@ on:
 jobs:
   smoke-tests:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        cloud: [aws, azure, gcp, kubernetes]
     steps:
-      - name: Trigger Smoke Tests (${{ matrix.cloud }})
+      - name: Trigger Smoke Tests
         env:
           BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
-          BUILDKITE_API_URL: "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds"
+          BUILDKITE_API_URL: "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/full-smoke-tests-run/builds"
         run: |
           response=$(curl -w "%{http_code}" -H "Authorization: Bearer $BUILDKITE_TOKEN" \
             -X POST "$BUILDKITE_API_URL" \
             -d '{
               "commit": "HEAD",
               "branch": "master",
-              "message": "Weekly Smoke Tests on (${{ matrix.cloud }})",
-              "ignore_pipeline_branch_filters": true,
-              "env": {
-                "ARGS": "--${{ matrix.cloud }}"
-              }
+              "message": "Weekly Smoke Tests",
+              "ignore_pipeline_branch_filters": true
             }')
 
           http_code=$(echo "$response" | tail -n 1)
