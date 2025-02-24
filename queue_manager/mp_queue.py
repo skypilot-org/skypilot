@@ -1,8 +1,13 @@
 """Manager manages shared queues for multiprocessing."""
+import logging
 from multiprocessing import managers
 import queue
-from typing import List
+import time
+from typing import List, Optional
 
+# The default port used by SkyPilot API server's request queue.
+# We avoid 50010, as it might be taken by HDFS.
+DEFAULT_QUEUE_MANAGER_PORT = 50011
 
 # Have to create custom manager to handle different processes connecting to the
 # same manager and getting the same queues.
@@ -10,7 +15,8 @@ class QueueManager(managers.BaseManager):
     pass
 
 
-def start(queue_names: List[str], port: int) -> None:
+def start_queue_manager(queue_names: List[str],
+                        port: int = DEFAULT_QUEUE_MANAGER_PORT) -> None:
     # Defining a local function instead of a lambda function
     # (e.g. lambda: q) because the lambda function captures q by
     # reference, so by the time lambda is called, the loop has already
@@ -38,8 +44,30 @@ def start(queue_names: List[str], port: int) -> None:
     server.serve_forever()
 
 
-def get_queue(queue_name: str, port: int) -> queue.Queue:
+def get_queue(queue_name: str,
+              port: int = DEFAULT_QUEUE_MANAGER_PORT) -> queue.Queue:
     QueueManager.register(queue_name)
     manager = QueueManager(address=('localhost', port), authkey=b'skypilot')
     manager.connect()
     return getattr(manager, queue_name)()
+
+def wait_for_queues_to_be_ready(queue_names: List[str],
+                                port: int = DEFAULT_QUEUE_MANAGER_PORT,
+                                logger: Optional[logging.Logger] = None) -> None:
+    """Wait for the queues to be ready after queue manager is just started."""
+    initial_time = time.time()
+    max_wait_time = 5
+    while queue_names:
+        try:
+            get_queue(queue_names[0], port)
+            queue_names.pop(0)
+            break
+        except ConnectionRefusedError as e:  # pylint: disable=broad-except
+            if logger is not None:
+                logger.info(f'Waiting for request queue, named {queue_names[0]!r}, '
+                            f'to be ready...')
+            time.sleep(0.2)
+            if time.time() - initial_time > max_wait_time:
+                raise RuntimeError(
+                    f'Request queue, named {queue_names[0]!r}, '
+                    f'is not ready after {max_wait_time} seconds.') from e

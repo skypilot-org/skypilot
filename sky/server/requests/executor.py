@@ -34,6 +34,7 @@ from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
 import setproctitle
 
+from queue_manager import mp_queue
 from sky import global_user_state
 from sky import models
 from sky import sky_logging
@@ -42,7 +43,6 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests as api_requests
-from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
@@ -422,10 +422,15 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
                 f'SkyPilot API server fails to start as port {port!r} is '
                 'already in use by another process.')
         queue_server = multiprocessing.Process(
-            target=mp_queue.start_queue_manager, args=(queue_names, port))
+            target=mp_queue.start_queue_manager,
+            args=(queue_names, port),
+            daemon=True,
+            name='SkyPilot:QueueManager')
         queue_server.start()
 
-        mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
+        mp_queue.wait_for_queues_to_be_ready(queue_names,
+                                             port=port,
+                                             logger=logger)
 
     logger.info('Request queues created')
 
