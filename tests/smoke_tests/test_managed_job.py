@@ -44,6 +44,7 @@ from sky.utils import controller_utils
 # when the controller being on Azure, which takes a long time for launching
 # step.
 @pytest.mark.managed_jobs
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.resource_heavy
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
@@ -95,6 +96,7 @@ def test_managed_jobs_basic(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # The pipeline.yaml uses other clouds
+@pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
 def test_job_pipeline(generic_cloud: str):
     """Test a job pipeline."""
@@ -138,6 +140,7 @@ def test_job_pipeline(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not support spot instances
+@pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_failed_setup(generic_cloud: str):
     """Test managed job with failed setup."""
@@ -167,6 +170,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_vast  # Test fails to stay within a single cloud
+@pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
     """Test managed job with failed setup for a pipeline."""
@@ -404,6 +408,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
 @pytest.mark.no_do  # DO does not have spot instances
 @pytest.mark.no_vast  # Uses other clouds
+@pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
 def test_managed_jobs_recovery_default_resources(generic_cloud: str):
     """Test managed job recovery for default resources."""
@@ -698,6 +703,7 @@ def test_managed_jobs_cancellation_gcp():
 
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.managed_jobs
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_retry_logs(generic_cloud: str):
     """Test managed job retry logs are properly displayed when a task fails."""
     timeout = 7 * 60  # 7 mins
@@ -705,29 +711,36 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
+    yaml_config = common_utils.read_yaml_all(yaml_path)
+    for task_config in yaml_config:
+        task_config['resources'] = task_config.get('resources', {})
+        task_config['resources']['cloud'] = generic_cloud
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
-        test = smoke_tests_utils.Test(
-            'managed_jobs_retry_logs',
-            [
-                # TODO(zhwu): we should make the override for generic_cloud work
-                # with multiple stages in pipeline.
-                f'sky jobs launch -n {name} {yaml_path} -y -d',
-                # TODO(zhwu): Check why the logs does not return immediately
-                # after job status FAILED.
-                f'sky jobs logs -n {name} | tee {log_file.name} ',
-                # First attempt
-                f'cat {log_file.name} | grep "Job started. Streaming logs..."',
-                f'cat {log_file.name} | grep "Job 1 failed"',
-                # Second attempt
-                f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
-                f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
-                # Task 2 is not reached
-                f'! cat {log_file.name} | grep "Job 2"',
-            ],
-            f'sky jobs cancel -y -n {name}',
-            timeout=timeout)
-        smoke_tests_utils.run_one_test(test)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
+        common_utils.dump_yaml(yaml_file.name, yaml_config)
+        yaml_path = yaml_file.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
+            test = smoke_tests_utils.Test(
+                'managed_jobs_retry_logs',
+                [
+                    # TODO(zhwu): we should make the override for generic_cloud
+                    # work with multiple stages in pipeline.
+                    f'sky jobs launch -n {name} {yaml_path} -y -d',
+                    # TODO(zhwu): Check why the logs does not return immediately
+                    # after job status FAILED.
+                    f'sky jobs logs -n {name} | tee {log_file.name} ',
+                    # First attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..."',
+                    f'cat {log_file.name} | grep "Job 1 failed"',
+                    # Second attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
+                    f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
+                    # Task 2 is not reached
+                    f'! cat {log_file.name} | grep "Job 2"',
+                ],
+                f'sky jobs cancel -y -n {name}',
+                timeout=timeout)
+            smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing storage for managed job ----------
@@ -738,6 +751,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # Uses other clouds
+@pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
 @pytest.mark.resource_heavy
 def test_managed_jobs_storage(generic_cloud: str):
@@ -856,7 +870,9 @@ def test_managed_jobs_storage(generic_cloud: str):
                 *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
                 smoke_tests_utils.launch_cluster_for_cloud_cmd(
                     generic_cloud, name),
-                f'sky jobs launch -n {name}{use_spot} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
+                # Override CPU/memory requirements to relax resource constraints
+                # and reduce the chance of out-of-stock
+                f'sky jobs launch -n {name}{use_spot} --cpus 2+ --memory 4+ --cloud {generic_cloud}{region_flag} {file_path} -y -d',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -990,6 +1006,7 @@ def test_managed_jobs_tpu():
 # ---------- Testing env for managed jobs ----------
 @pytest.mark.no_vast  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 @pytest.mark.resource_heavy
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
@@ -1021,6 +1038,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
 
 @pytest.mark.no_vast  # The test uses other clouds
 @pytest.mark.managed_jobs
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_logs_sync_down(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

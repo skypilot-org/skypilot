@@ -18,6 +18,7 @@ import uuid
 
 import jinja2
 import jsonschema
+import psutil
 import yaml
 
 from sky import exceptions
@@ -246,18 +247,23 @@ class Backoff:
 
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
+_using_remote_api_server: Optional[bool] = None
 
 
-def set_client_entrypoint_and_command(client_entrypoint: Optional[str],
-                                      client_command: Optional[str]):
+def set_client_status(client_entrypoint: Optional[str],
+                      client_command: Optional[str],
+                      using_remote_api_server: bool):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
     client entrypoint and command from the client.
     """
-    global _current_command, _current_client_entrypoint
+    global _current_command
+    global _current_client_entrypoint
+    global _using_remote_api_server
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
+    _using_remote_api_server = using_remote_api_server
 
 
 def get_current_command() -> str:
@@ -281,6 +287,17 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     if _current_client_entrypoint is not None:
         return _current_client_entrypoint
     return server_entrypoint
+
+
+def get_using_remote_api_server() -> bool:
+    """Returns whether the API server is remote."""
+    if _using_remote_api_server is not None:
+        return _using_remote_api_server
+    # This gets the right status for the local client.
+    # TODO(zhwu): This is to prevent circular import. We should refactor this.
+    # pylint: disable=import-outside-toplevel
+    from sky.server import common as server_common
+    return not server_common.is_api_server_local()
 
 
 def get_pretty_entrypoint_cmd() -> str:
@@ -755,3 +772,40 @@ def is_port_available(port: int, reuse_addr: bool = True) -> bool:
             return True
         except OSError:
             return False
+
+
+# TODO(aylei): should be aware of cgroups
+def get_cpu_count() -> int:
+    """Get the number of CPUs.
+
+    If the API server is deployed as a pod in k8s cluster, we assume the
+    number of CPUs is provided by the downward API.
+    """
+    cpu_count = os.getenv('SKYPILOT_POD_CPU_CORE_LIMIT')
+    if cpu_count is not None:
+        try:
+            return int(float(cpu_count))
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the number of CPUs from {cpu_count}'
+                ) from e
+    return psutil.cpu_count()
+
+
+# TODO(aylei): should be aware of cgroups
+def get_mem_size_gb() -> float:
+    """Get the memory size in GB.
+
+    If the API server is deployed as a pod in k8s cluster, we assume the
+    memory size is provided by the downward API.
+    """
+    mem_size = os.getenv('SKYPILOT_POD_MEMORY_GB_LIMIT')
+    if mem_size is not None:
+        try:
+            return float(mem_size)
+        except ValueError as e:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'Failed to parse the memory size from {mem_size}') from e
+    return psutil.virtual_memory().total / (1024**3)

@@ -169,7 +169,7 @@ spec:
       {{- if .Values.kubernetesCredentials.useKubeconfig }}
       - name: kube-config
         secret:
-          secretName: kube-credentials
+          secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
       {{- end }}
       {{- if .Values.apiService.config }}
       - name: skypilot-config

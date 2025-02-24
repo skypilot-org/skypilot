@@ -15,7 +15,6 @@ import uuid
 
 import colorama
 import filelock
-import psutil
 import pydantic
 import requests
 
@@ -146,13 +145,14 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
+def start_api_server_in_background(deploy: bool = False,
+                                   host: str = '127.0.0.1'):
     if not is_api_server_local():
         raise RuntimeError(
             f'Cannot start API server: {get_server_url()} is not a local URL')
 
     # Check available memory before starting the server.
-    avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
+    avail_mem_size_gb: float = common_utils.get_mem_size_gb()
     if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
         logger.warning(
             f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only has '
@@ -163,16 +163,14 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    # The command to run uvicorn. Adjust the app:app to your application's
-    # location.
     api_server_cmd = API_SERVER_CMD
     if deploy:
         api_server_cmd += ' --deploy'
     if host is not None:
         api_server_cmd += f' --host {host}'
-    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1'
+    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1 < /dev/null'
 
-    # Start the uvicorn process in the background and don't wait for it.
+    # Start the API server process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
     # that SIGINT on the CLI will not also kill the API server.
     subprocess.Popen(cmd, shell=True, start_new_session=True)
@@ -232,7 +230,7 @@ def _start_api_server(deploy: bool = False, host: str = '127.0.0.1'):
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        start_uvicorn_in_background(deploy=deploy, host=host)
+        start_api_server_in_background(deploy=deploy, host=host)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
@@ -402,19 +400,24 @@ def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
 
 
 def reload_for_new_request(client_entrypoint: Optional[str],
-                           client_command: Optional[str]):
+                           client_command: Optional[str],
+                           using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
     # Reset the client entrypoint and command for the usage message.
-    common_utils.set_client_entrypoint_and_command(
+    common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
         client_command=client_command,
+        using_remote_api_server=using_remote_api_server,
     )
+
+    # Clear cache should be called before reload_logger and usage reset,
+    # otherwise, the latest env var will not be used.
+    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
+        func.cache_clear()
+
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-
-    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
-        func.cache_clear()
 
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment

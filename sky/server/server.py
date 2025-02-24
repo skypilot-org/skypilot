@@ -41,6 +41,7 @@ from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
+from sky.usage import usage_lib
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -57,7 +58,9 @@ P = ParamSpec('P')
 
 def _add_timestamp_prefix_for_server_logs() -> None:
     server_logger = sky_logging.init_logger('sky.server')
-    # Disable propagation to avoid the root logger of SkyPilot being affected.
+    # Clear existing handlers first to prevent duplicates
+    server_logger.handlers.clear()
+    # Disable propagation to avoid the root logger of SkyPilot being affected
     server_logger.propagate = False
     # Add date prefix to the log message printed by loggers under
     # server.
@@ -460,6 +463,7 @@ async def launch(launch_body: payloads.LaunchBody,
                  request: fastapi.Request) -> None:
     """Launches a cluster or task."""
     request_id = request.state.request_id
+    logger.info(f'Launching request: {request_id}')
     executor.schedule_request(
         request_id,
         request_name='launch',
@@ -627,6 +631,9 @@ async def logs(
         request_name='logs',
         request_body=cluster_job_body,
         func=core.tail_logs,
+        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
+        # should be responsive. However, it can be long running if the user's
+        # job keeps running, and we should avoid it taking the SHORT worker.
         schedule_type=requests_lib.ScheduleType.SHORT,
         request_cluster_name=cluster_job_body.cluster_name,
     )
@@ -794,10 +801,9 @@ async def api_get(request_id: str) -> requests_lib.RequestPayload:
                                             detail=dataclasses.asdict(
                                                 request_task.encode()))
             return request_task.encode()
-        # Sleep 0 to yield, so other coroutines can run. This busy waiting
-        # loop is performance critical for short-running requests, so we do
-        # not want to yield too long.
-        await asyncio.sleep(0)
+        # yield control to allow other coroutines to run, sleep shortly
+        # to avoid storming the DB and CPU in the meantime
+        await asyncio.sleep(0.1)
 
 
 @app.get('/api/stream')
@@ -1071,6 +1077,10 @@ if __name__ == '__main__':
     parser.add_argument('--port', default=46580, type=int)
     parser.add_argument('--deploy', action='store_true')
     cmd_args = parser.parse_args()
+    # Show the privacy policy if it is not already shown. We place it here so
+    # that it is shown only when the API server is started.
+    usage_lib.maybe_show_privacy_policy()
+
     num_workers = None
     if cmd_args.deploy:
         num_workers = os.cpu_count()

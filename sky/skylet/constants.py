@@ -143,7 +143,8 @@ DISABLE_GPU_ECC_COMMAND = (
 # AWS's Deep Learning AMI's default conda environment.
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
-    '{ curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    '{ '
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
@@ -152,18 +153,10 @@ CONDA_INSTALLATION_COMMANDS = (
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
-    'conda activate base; }; }; '
+    'conda activate base; }; '
+    '}; '
     'grep "# >>> conda initialize >>>" ~/.bashrc || '
     '{ conda init && source ~/.bashrc; };'
-    # If Python version is larger then equal to 3.12, create a new conda env
-    # with Python 3.10.
-    # We don't use a separate conda env for SkyPilot dependencies because it is
-    # costly to create a new conda env, and venv should be a lightweight and
-    # faster alternative when the python version satisfies the requirement.
-    '[[ $(python3 --version | cut -d " " -f 2 | cut -d "." -f 2) -ge 12 ]] && '
-    'echo "Creating conda env with Python 3.10" && '
-    f'conda create -y -n {SKY_REMOTE_PYTHON_ENV_NAME} python=3.10 && '
-    f'conda activate {SKY_REMOTE_PYTHON_ENV_NAME};'
     # Install uv for venv management and pip installation.
     f'{SKY_UV_INSTALL_CMD};'
     # Create a separate conda environment for SkyPilot dependencies.
@@ -173,7 +166,14 @@ CONDA_INSTALLATION_COMMANDS = (
     # Reference: https://github.com/skypilot-org/skypilot/issues/4097
     # --seed will include pip and setuptools, which are present in venvs created
     # with python -m venv.
-    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV};'
+    # --python 3.10 will ensure the specific python version is downloaded
+    # and installed in the venv. SkyPilot requires Python<3.12, and 3.10 is
+    # preferred. We have to always pass in `--python` to avoid the issue when a
+    # user has `.python_version` file in their home directory, which will cause
+    # uv to use the python version specified in the `.python_version` file.
+    # TODO(zhwu): consider adding --python-preference only-managed to avoid
+    # using the system python, if a user report such issue.
+    f'{SKY_UV_CMD} venv --seed {SKY_REMOTE_PYTHON_ENV} --python 3.10;'
     f'echo "$(echo {SKY_REMOTE_PYTHON_ENV})/bin/python" > {SKY_PYTHON_PATH_FILE};'
 )
 
@@ -281,12 +281,9 @@ FILE_MOUNTS_REMOTE_TMP_DIR = '/tmp/sky-{}-filemounts-files'
 # linking. E.g., in our API server deployment on k8s, ~/.sky/ is mounted from a
 # persistent volume, so any contents in ~/.sky/ cannot be hard linked elsewhere.
 FILE_MOUNTS_LOCAL_TMP_BASE_PATH = '~/.sky/tmp/'
-
-# Used when an managed jobs are created and
-# files are synced up to the cloud.
-FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
-FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
-FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
+# Base path for two-hop file mounts translation. See
+# controller_utils.translate_local_file_mounts_to_two_hop().
+FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH = '~/.sky/tmp/controller'
 
 # Used when an managed jobs are created and
 # files are synced up to the cloud.
