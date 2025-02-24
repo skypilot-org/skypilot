@@ -117,8 +117,7 @@ DEFAULT_RETRY_INTERVAL_SECONDS = 1
 
 def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     retry_interval=DEFAULT_RETRY_INTERVAL_SECONDS,
-                    resource_type: Optional[str] = None,
-                    context_param: str = 'context'):
+                    resource_type: Optional[str] = None):
     """Decorator to retry Kubernetes API calls on transient failures.
 
     Args:
@@ -126,8 +125,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
         retry_interval: Initial seconds to wait between retries
         resource_type: Type of resource being accessed (e.g. 'node', 'pod').
             Used to provide more specific error messages.
-        context_param: Name of the parameter that contains the Kubernetes
-            context. Empty means no context parameter. Defaults to 'context'.
+
+    Raises:
+        KubeAPIUnreachableError: If the API server of the given context is
+            unreachable.
     """
 
     def decorator(func):
@@ -138,10 +139,8 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             backoff = common_utils.Backoff(initial_backoff=retry_interval,
                                            max_backoff_factor=3)
 
-            # try to capture the kubernetes context from parameters
-            if context_param:
-                context = kwargs.get(context_param)
-                assert context is not None, f'{context_param} is required'
+            assert 'context' in kwargs, 'context is required'
+            context = kwargs.get('context')
 
             for attempt in range(max_retries):
                 try:
@@ -180,7 +179,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                 error_msg = (f'Kubernetes configuration error{resource_msg}: '
                              f'{str(last_exception)}')
 
-            raise exceptions.ResourcesUnavailableError(
+            raise exceptions.KubeAPIUnreachableError(
                 f'{error_msg}'
                 f' Please check if the cluster is healthy and retry.'
                 f'{debug_cmd}') from last_exception
@@ -585,7 +584,7 @@ def detect_accelerator_resource(
 
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
-def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
+def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
@@ -599,8 +598,9 @@ def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
 
 
 @_retry_on_error(resource_type='pod')
-def get_all_pods_in_kubernetes_cluster(
-        context: Optional[str] = None) -> List[Any]:
+def get_all_pods_in_kubernetes_cluster(*,
+                                       context: Optional[str] = None
+                                      ) -> List[Any]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
