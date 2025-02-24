@@ -12,7 +12,7 @@ import argparse
 import os
 
 import sky
-
+from dotenv import load_dotenv
 
 def calculate_job_range(start_idx: int, end_idx: int, job_rank: int,
                         total_jobs: int) -> tuple[int, int]:
@@ -68,11 +68,8 @@ def main():
     if not hf_token:
         env_path = os.path.expanduser(args.env_path)
         if os.path.exists(env_path):
-            with open(env_path) as f:
-                for line in f:
-                    if line.startswith('HF_TOKEN='):
-                        hf_token = line.strip().split('=')[1]
-                        break
+            load_dotenv(env_path)
+            hf_token = os.getenv('HF_TOKEN')
 
     if not hf_token:
         raise ValueError("HF_TOKEN not found in ~/.env or environment variable")

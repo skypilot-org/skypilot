@@ -3,9 +3,7 @@ name: serve-legal-rag
 workdir: .
 
 resources:
-  accelerators: 
-    L4: 4
-    L40S: 4
+  accelerators: {L4:4, L40S:4}
   memory: 32+
   ports: 
     - 8000 

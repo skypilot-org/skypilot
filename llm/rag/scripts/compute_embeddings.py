@@ -1,5 +1,5 @@
 """
-Script to compute embeddings for Pile of Law dataset using DeepSeek R1 through vLLM.
+Script to compute embeddings for Pile of Law dataset using `Alibaba-NLP/gte-Qwen2-7B-instruct` through vLLM.
 """
 
 import argparse
