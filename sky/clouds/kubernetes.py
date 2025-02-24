@@ -1,6 +1,8 @@
 """Kubernetes."""
 import os
 import re
+import shutil
+import sys
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -33,6 +35,26 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # same cluster (even if they might be running in different namespaces).
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
+
+_REQUIRED_BINARIES = ['netcat', 'socat']
+
+
+def _check_k8s_dependencies() -> Tuple[bool, Optional[str]]:
+    missing = []
+
+    for binary in _REQUIRED_BINARIES:
+        if shutil.which(binary) is None:
+            missing.append(binary)
+
+    if missing:
+        missing_str = ', '.join(missing)
+        reason = (f'The following dependencies are missing: {missing_str}.\n'
+                  '    Please install them before proceeding. For example:\n'
+                  f'    • macOS:   brew install {missing_str}\n'
+                  f'    • Ubuntu:  sudo apt-get install {missing_str}\n'
+                  '    • Other:   <use your OS package manager>')
+        return False, reason
+    return True, None
 
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
@@ -592,6 +614,9 @@ class Kubernetes(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        ok, reason = _check_k8s_dependencies()
+        if not ok:
+            return (False, reason)
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
