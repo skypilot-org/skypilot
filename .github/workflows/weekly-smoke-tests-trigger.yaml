@@ -3,10 +3,10 @@ name: Smoke Tests Trigger
 on:
   schedule:
     - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
-  workflow_dispatch:
+  workflow_dispatch: {}
   # uncomment this for PR triggers testing
-  pull_request:
-    types: [opened, synchronize, reopened]
+  # pull_request:
+  #   types: [opened, synchronize, reopened]
 
 jobs:
   smoke-tests:
