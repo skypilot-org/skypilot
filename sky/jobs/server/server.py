@@ -21,11 +21,6 @@ logger = sky_logging.init_logger(__name__)
 router = fastapi.APIRouter()
 
 
-def _get_controller_name(request_body: payloads.RequestBody) -> str:
-    user_hash = request_body.user_hash
-    return common.get_controller_name(common.ControllerType.JOBS, user_hash)
-
-
 @router.post('/launch')
 async def launch(request: fastapi.Request,
                  jobs_launch_body: payloads.JobsLaunchBody) -> None:
@@ -35,7 +30,7 @@ async def launch(request: fastapi.Request,
         request_body=jobs_launch_body,
         func=core.launch,
         schedule_type=api_requests.ScheduleType.LONG,
-        request_cluster_name=_get_controller_name(jobs_launch_body),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
 
@@ -49,7 +44,7 @@ async def queue(request: fastapi.Request,
         func=core.queue,
         schedule_type=(api_requests.ScheduleType.LONG if jobs_queue_body.refresh
                        else api_requests.ScheduleType.SHORT),
-        request_cluster_name=_get_controller_name(jobs_queue_body),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
 
@@ -62,7 +57,7 @@ async def cancel(request: fastapi.Request,
         request_body=jobs_cancel_body,
         func=core.cancel,
         schedule_type=api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(jobs_cancel_body),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
 
@@ -78,7 +73,7 @@ async def logs(
         func=core.tail_logs,
         schedule_type=api_requests.ScheduleType.SHORT
         if jobs_logs_body.refresh else api_requests.ScheduleType.LONG,
-        request_cluster_name=_get_controller_name(jobs_logs_body),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
     request_task = api_requests.get_request(request.state.request_id)
 
@@ -107,17 +102,21 @@ async def download_logs(
         func=core.download_logs,
         schedule_type=api_requests.ScheduleType.LONG
         if jobs_download_logs_body.refresh else api_requests.ScheduleType.SHORT,
-        request_cluster_name=_get_controller_name(jobs_download_logs_body),
+        request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
 
 
 @router.get('/dashboard')
 async def dashboard(request: fastapi.Request,
                     user_hash: str) -> fastapi.Response:
+    # Note: before #4717, each user had their own controller, and thus their own
+    # dashboard. Now, all users share the same controller, so this isn't really
+    # necessary. TODO(cooperc): clean up.
     # Find the port for the dashboard of the user
     os.environ[constants.USER_ID_ENV_VAR] = user_hash
     server_common.reload_for_new_request(client_entrypoint=None,
-                                         client_command=None)
+                                         client_command=None,
+                                         using_remote_api_server=False)
     logger.info(f'Starting dashboard for user hash: {user_hash}')
 
     with dashboard_utils.get_dashboard_lock_for_user(user_hash):

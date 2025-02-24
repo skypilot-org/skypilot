@@ -91,10 +91,6 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        # Default cluster name is the current user's controller cluster unless
-        # caller initiate with a different controller name.
-        # TODO(zhwu): by having the controller name loaded in common, it
-        # will not respect the latest updated user hash.
         cluster_name=common.JOB_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
@@ -164,13 +160,18 @@ class Controllers(enum.Enum):
         if name is None:
             return None
         controller = None
+        # The controller name is always the same. However, on the client-side,
+        # we may not know the exact name, because we are missing the server-side
+        # common.SERVER_ID. So, we will assume anything that matches the prefix
+        # is a controller.
         if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
             controller = cls.SKY_SERVE_CONTROLLER
         elif name.startswith(common.JOB_CONTROLLER_PREFIX):
             controller = cls.JOBS_CONTROLLER
         if controller is not None and name != controller.value.cluster_name:
-            # Input name is not the current user's controller name,
-            # so need to set the controller's cluster name to the input name.
+            # The client-side cluster_name is not accurate. Assume that `name`
+            # is the actual cluster name, so need to set the controller's
+            # cluster name to the input name.
             controller.value.cluster_name = name
         return controller
 
@@ -661,6 +662,66 @@ def replace_skypilot_config_path_in_file_mounts(
                      f'with the real path in file mounts: {file_mounts}')
 
 
+def _generate_run_uuid() -> str:
+    """Generates a unique run id for the job."""
+    return common_utils.base36_encode(uuid.uuid4().hex)[:8]
+
+
+def translate_local_file_mounts_to_two_hop(
+        task: 'task_lib.Task') -> Dict[str, str]:
+    """Translates local->VM mounts into two-hop file mounts.
+
+    This strategy will upload the local files to the controller first, using a
+    normal rsync as part of sky.launch() for the controller. Then, when the
+    controller launches the task, it will also use local file_mounts from the
+    destination path of the first hop.
+
+    Local machine/API server        Controller              Job cluster
+    ------------------------  -----------------------  --------------------
+    |      local path  ----|--|-> controller path --|--|-> job dst path   |
+    ------------------------  -----------------------  --------------------
+
+    Returns:
+        A dict mapping from controller file mount path to local file mount path
+          for the first hop. The task is updated in-place to do the second hop.
+    """
+    first_hop_file_mounts = {}
+    second_hop_file_mounts = {}
+
+    run_id = _generate_run_uuid()
+    base_tmp_dir = os.path.join(constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH,
+                                run_id)
+
+    # Use a simple counter to create unique paths within the base_tmp_dir for
+    # each mount.
+    file_mount_id = 0
+
+    file_mounts_to_translate = task.file_mounts or {}
+    if task.workdir is not None:
+        file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
+        task.workdir = None
+
+    for job_cluster_path, local_path in file_mounts_to_translate.items():
+        if data_utils.is_cloud_store_url(
+                local_path) or data_utils.is_cloud_store_url(job_cluster_path):
+            raise exceptions.NotSupportedError(
+                'Cloud-based file_mounts are specified, but no cloud storage '
+                'is available. Please specify local file_mounts only.')
+
+        controller_path = os.path.join(base_tmp_dir, f'{file_mount_id}')
+        file_mount_id += 1
+        first_hop_file_mounts[controller_path] = local_path
+        second_hop_file_mounts[job_cluster_path] = controller_path
+
+    # Use set_file_mounts to override existing file mounts, if they exist.
+    task.set_file_mounts(second_hop_file_mounts)
+
+    # Return the first hop info so that it can be added to the jobs-controller
+    # YAML.
+    return first_hop_file_mounts
+
+
+# (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                                                   task_type: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
@@ -694,7 +755,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # We should not use common_utils.get_usage_run_id() here, because when
     # Python API is used, the run id will be the same across multiple
     # jobs.launch/serve.up calls after the sky is imported.
-    run_id = common_utils.base36_encode(uuid.uuid4().hex)[:8]
+    run_id = _generate_run_uuid()
     user_hash = common_utils.get_user_hash()
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
@@ -853,7 +914,11 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # Step 4: Upload storage from sources
         # Upload the local source to a bucket. The task will not be executed
         # locally, so we need to upload the files/folders to the bucket manually
-        # here before sending the task to the remote jobs controller.
+        # here before sending the task to the remote jobs controller.  This will
+        # also upload any storage mounts that are not translated.  After
+        # sync_storage_mounts, we will also have file_mounts in the task, but
+        # these aren't used since the storage_mounts for the same paths take
+        # precedence.
         if task.storage_mounts:
             # There may be existing (non-translated) storage mounts, so log this
             # whenever task.storage_mounts is non-empty.

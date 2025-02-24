@@ -329,16 +329,19 @@ def test_invalid_instance_type(enable_all_clouds):
 
 def test_infer_cloud_from_instance_type(enable_all_clouds):
     # AWS instances
-    _test_resources(cloud=sky.AWS(),
-                    instance_type='m5.12xlarge',
-                    expected_cloud=sky.AWS())
+    _test_resources(instance_type='m5.12xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='m5.12xlarge')
     _test_resources(instance_type='p3.8xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='p3.8xlarge')
     _test_resources(instance_type='g4dn.2xlarge', expected_cloud=sky.AWS())
+    _test_resources_launch(instance_type='g4dn.2xlarge')
     # GCP instances
     _test_resources(instance_type='n1-standard-96', expected_cloud=sky.GCP())
+    _test_resources_launch(instance_type='n1-standard-96')
     #Azure instances
     _test_resources(instance_type='Standard_NC12s_v3',
                     expected_cloud=sky.Azure())
+    _test_resources_launch(instance_type='Standard_NC12s_v3')
 
 
 def test_invalid_cpus(enable_all_clouds):
@@ -725,3 +728,16 @@ def test_optimize_disk_tier(enable_all_clouds):
     ultra_tier_candidates = _get_all_candidate_cloud(ultra_tier_resources)
     assert ultra_tier_candidates == set(
         map(registry.CLOUD_REGISTRY.get, ['aws', 'gcp'])), ultra_tier_candidates
+
+
+def test_resource_hints_for_invalid_resources(capfd, enable_all_clouds):
+    """Tests that helpful hints are shown when no matching resources are found."""
+    # Test when there are no fuzzy candidates
+    with pytest.raises(exceptions.ResourcesUnavailableError):
+        _test_resources_launch(cloud=sky.AWS(), cpus=111, memory=999)
+    stdout, _ = capfd.readouterr()
+    assert 'Try specifying a different CPU count' in stdout
+    assert 'add "+" to the end of the CPU count' in stdout
+    assert 'Try specifying a different memory size' in stdout
+    assert 'add "+" to the end of the memory size' in stdout
+    assert 'Did you mean:' not in stdout  # No fuzzy candidates

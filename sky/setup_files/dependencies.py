@@ -5,6 +5,7 @@ This file is imported by setup.py, so:
   correct.
 - It should not import any dependencies, as they may not be installed yet.
 """
+import sys
 from typing import Dict, List
 
 install_requires = [
@@ -146,6 +147,13 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'nebius': ['nebius>=0.2.0',]
 }
 
-extras_require['all'] = sum(extras_require.values(), [])
+# Nebius needs python3.10. If python 3.9 [all] will not install nebius
+if sys.version_info < (3, 10):
+    filtered_keys = [k for k in extras_require if k != 'nebius']
+    extras_require['all'] = sum(
+        [v for k, v in extras_require.items() if k != 'nebius'], [])
+else:
+    extras_require['all'] = sum(extras_require.values(), [])

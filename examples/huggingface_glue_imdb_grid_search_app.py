@@ -12,9 +12,7 @@ with sky.Dag() as dag:
         pip3 install -r requirements.txt
         python3 -c 'import datasets; datasets.load_dataset("imdb")'"""
     sky.Task(setup=common_setup).set_resources(resources_to_launch)
-# `detach_run` will only detach the `run` command. The provision and `setup` are
-# still blocking.
-sky.launch(dag, cluster_name='hgs', detach_run=True)
+sky.stream_and_get(sky.launch(dag, cluster_name='hgs'))
 
 for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
     # To be filled in: {lr}.
@@ -42,4 +40,4 @@ for lr in [1e-5, 2e-5, 3e-5, 4e-5]:
 
     # Set 'stream_logs=False' to not mix all tasks' outputs together.
     # Each task's output is redirected to run-{lr}.log and can be tail-ed.
-    sky.exec(task, cluster_name='hgs', stream_logs=False, detach_run=True)
+    sky.exec(task, cluster_name='hgs', stream_logs=False)

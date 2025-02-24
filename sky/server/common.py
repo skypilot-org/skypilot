@@ -3,11 +3,11 @@
 import dataclasses
 import enum
 import functools
-import importlib
 import json
 import os
 import pathlib
 import subprocess
+import sys
 import time
 import typing
 from typing import Any, Dict, Optional
@@ -15,7 +15,6 @@ import uuid
 
 import colorama
 import filelock
-import psutil
 import pydantic
 import requests
 
@@ -27,14 +26,12 @@ from sky.server import constants as server_constants
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import dag as dag_lib
-    from sky.server.requests import payloads
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
@@ -42,7 +39,7 @@ AVAILABLE_LOCAL_API_SERVER_URLS = [
     f'http://{host}:46580' for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
 ]
 
-API_SERVER_CMD = 'python -m sky.server.server'
+API_SERVER_CMD = '-m sky.server.server'
 # The client dir on the API server for storing user-specific data, such as file
 # mounts, logs, etc. This dir is empheral and will be cleaned up when the API
 # server is restarted.
@@ -148,13 +145,14 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
+def start_api_server_in_background(deploy: bool = False,
+                                   host: str = '127.0.0.1'):
     if not is_api_server_local():
         raise RuntimeError(
             f'Cannot start API server: {get_server_url()} is not a local URL')
 
     # Check available memory before starting the server.
-    avail_mem_size_gb: float = psutil.virtual_memory().available / (1024**3)
+    avail_mem_size_gb: float = common_utils.get_mem_size_gb()
     if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
         logger.warning(
             f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only has '
@@ -165,16 +163,14 @@ def start_uvicorn_in_background(deploy: bool = False, host: str = '127.0.0.1'):
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
 
-    # The command to run uvicorn. Adjust the app:app to your application's
-    # location.
     api_server_cmd = API_SERVER_CMD
     if deploy:
         api_server_cmd += ' --deploy'
     if host is not None:
         api_server_cmd += f' --host {host}'
-    cmd = f'{api_server_cmd} > {log_path} 2>&1'
+    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1 < /dev/null'
 
-    # Start the uvicorn process in the background and don't wait for it.
+    # Start the API server process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
     # that SIGINT on the CLI will not also kill the API server.
     subprocess.Popen(cmd, shell=True, start_new_session=True)
@@ -234,7 +230,7 @@ def _start_api_server(deploy: bool = False, host: str = '127.0.0.1'):
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        start_uvicorn_in_background(deploy=deploy, host=host)
+        start_api_server_in_background(deploy=deploy, host=host)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
@@ -404,36 +400,24 @@ def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
 
 
 def reload_for_new_request(client_entrypoint: Optional[str],
-                           client_command: Optional[str]):
+                           client_command: Optional[str],
+                           using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
-    # When a user request is sent to api server, it changes the user hash in the
-    # env vars, but since controller_utils is imported before the env vars are
-    # set, it doesn't get updated. So we need to reload it here.
-    # pylint: disable=import-outside-toplevel
-    from sky.utils import controller_utils
-    common.SKY_SERVE_CONTROLLER_NAME = common.get_controller_name(
-        common.ControllerType.SERVE)
-    common.JOB_CONTROLLER_NAME = common.get_controller_name(
-        common.ControllerType.JOBS)
-    # TODO(zhwu): We should avoid reloading the controller_utils module.
-    # Instead, we should reload required cache or global variables.
-    # TODO(zhwu): Reloading the controller_utils module may cause the global
-    # variables in other modules referring the `controller_utils.Controllers`
-    # dangling, as they will be pointing to the old object. We should not use
-    # it in global variables.
-    importlib.reload(controller_utils)
-
     # Reset the client entrypoint and command for the usage message.
-    common_utils.set_client_entrypoint_and_command(
+    common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
         client_command=client_command,
+        using_remote_api_server=using_remote_api_server,
     )
+
+    # Clear cache should be called before reload_logger and usage reset,
+    # otherwise, the latest env var will not be used.
+    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
+        func.cache_clear()
+
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-
-    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
-        func.cache_clear()
 
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment

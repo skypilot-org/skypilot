@@ -1,7 +1,6 @@
 envs:
   MODEL_NAME: deepseek-ai/DeepSeek-R1-Distill-Llama-8B
   MAX_MODEL_LEN: 4096
-  HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 resources:
   accelerators: {L4:1, A10G:1, A10:1, A100:1, A100-80GB:1}
@@ -13,7 +12,6 @@ setup: |
   uv pip install transformers==4.48.1
   uv pip install vllm==0.6.6.post1
 
-  python -c "import huggingface_hub; huggingface_hub.login('${HF_TOKEN}')"
 
 run: |
   echo 'Starting vllm openai api server...'
