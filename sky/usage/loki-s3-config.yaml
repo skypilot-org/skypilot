@@ -26,8 +26,8 @@ schema_config:
 
 ingester:
   chunk_idle_period: 3m
-  chunk_block_size: 262144
   chunk_retain_period: 1m
+  chunk_block_size: 1048576  # 1 MB
   wal:
     enabled: true
     dir: /loki/wal

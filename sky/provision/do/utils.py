@@ -6,7 +6,6 @@ https://github.com/digitalocean/pydo/blob/main/examples/poc_droplets_volumes_ssh
 
 import copy
 import os
-import typing
 from typing import Any, Dict, List, Optional
 import urllib
 import uuid
@@ -17,10 +16,6 @@ from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.do import constants
 from sky.utils import common_utils
-
-if typing.TYPE_CHECKING:
-    from sky import resources
-    from sky import status_lib
 
 logger = sky_logging.init_logger(__name__)
 

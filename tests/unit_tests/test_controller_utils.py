@@ -36,13 +36,11 @@ from sky.utils import controller_utils
             'disk_size': 200
         }),
     ])
-def test_get_controller_resources(
-    controller_type: str,
-    custom_controller_resources_config: Dict[str, Any],
-    expected: Dict[str, Any],
-    enable_all_clouds,
-    monkeypatch,
-):
+def test_get_controller_resources(controller_type: str,
+                                  custom_controller_resources_config: Dict[str,
+                                                                           Any],
+                                  expected: Dict[str, Any], monkeypatch,
+                                  enable_all_clouds):
 
     def get_custom_controller_resources(keys, default):
         if keys == (controller_type, 'controller', 'resources'):
@@ -60,7 +58,7 @@ def test_get_controller_resources(
             task_resources=[]))[0]
     controller_resources_config = controller_resources.to_yaml_config()
     for k, v in expected.items():
-        assert controller_resources_config[k] == v, (
+        assert controller_resources_config.get(k) == v, (
             controller_type, custom_controller_resources_config, expected,
             controller_resources_config, k, v)
 
@@ -88,10 +86,8 @@ def _check_controller_resources(
     ('serve', serve_constants.CONTROLLER_RESOURCES),
 ])
 def test_get_controller_resources_with_task_resources(
-    controller_type: str,
-    default_controller_resources: Dict[str, Any],
-    enable_all_clouds,
-):
+        controller_type: str, default_controller_resources: Dict[str, Any],
+        enable_all_clouds):
 
     # 1. All resources has cloud specified. All of them
     # could host controllers. Return a set, each item has

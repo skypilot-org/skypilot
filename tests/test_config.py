@@ -1,15 +1,19 @@
+"""Test skypilot_config"""
 import copy
-import importlib
+import os
 import pathlib
 import textwrap
+from unittest import mock
 
 import pytest
 
 import sky
 from sky import skypilot_config
 import sky.exceptions
+from sky.server.requests import payloads
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import kubernetes_enums
 
 DISK_ENCRYPTED = True
@@ -23,9 +27,9 @@ PROVISION_TIMEOUT = 600
 
 
 def _reload_config() -> None:
-    skypilot_config._dict = skypilot_config.Config()
+    skypilot_config._dict = config_utils.Config()
     skypilot_config._loaded_config_path = None
-    skypilot_config._try_load_config()
+    skypilot_config._reload_config()
 
 
 def _check_empty_config() -> None:
@@ -125,7 +129,7 @@ def _create_invalid_config_yaml_file(task_file_path: pathlib.Path) -> None:
 
 def test_nested_config(monkeypatch) -> None:
     """Test that the nested config works."""
-    config = skypilot_config.Config()
+    config = config_utils.Config()
     config.set_nested(('aws', 'ssh_proxy_command'), 'value')
     assert config == {'aws': {'ssh_proxy_command': 'value'}}
 
@@ -142,7 +146,7 @@ def test_nested_config(monkeypatch) -> None:
 def test_no_config(monkeypatch) -> None:
     """Test that the config is not loaded if the config file does not exist."""
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', '/tmp/does_not_exist')
-    _reload_config()
+    skypilot_config._reload_config()
     _check_empty_config()
 
 
@@ -151,7 +155,7 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
         f.write('')
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'empty.yaml')
-    _reload_config()
+    skypilot_config._reload_config()
     _check_empty_config()
 
 
@@ -174,7 +178,7 @@ def test_valid_null_proxy_config(monkeypatch, tmp_path) -> None:
                     disk_size: 256
         """)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
-    _reload_config()
+    skypilot_config._reload_config()
     proxy_config = skypilot_config.get_nested(
         ('aws', 'ssh_proxy_command', 'eu-west-1'), 'default')
     assert proxy_config is None, proxy_config
@@ -192,7 +196,7 @@ def test_invalid_field_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
-        _reload_config()
+        skypilot_config._reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -212,7 +216,7 @@ def test_invalid_indent_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
-        _reload_config()
+        skypilot_config._reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -229,7 +233,7 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
                         tmp_path / 'invalid.yaml')
     with pytest.raises(ValueError) as e:
-        _reload_config()
+        skypilot_config._reload_config()
     assert 'Invalid config YAML' in e.value.args[0]
 
 
@@ -244,7 +248,7 @@ def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
                 - projects/my-project/reservations/my-reservation2
         """))
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', tmp_path / 'valid.yaml')
-    _reload_config()
+    skypilot_config._reload_config()
 
 
 def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
@@ -254,7 +258,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     config_path = tmp_path / 'config.yaml'
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
-    _reload_config()
+    skypilot_config._reload_config()
     # Check that the config is loaded with the expected values
     assert skypilot_config.loaded()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
@@ -280,7 +284,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     new_config_path = tmp_path / 'new_config.yaml'
     common_utils.dump_yaml(new_config_path, new_config2)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', new_config_path)
-    _reload_config()
+    skypilot_config._reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
     assert skypilot_config.get_nested(
@@ -295,7 +299,7 @@ def test_config_get_set_nested(monkeypatch, tmp_path) -> None:
     new_config_path = tmp_path / 'new_config3.yaml'
     common_utils.dump_yaml(new_config_path, new_config3)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', new_config_path)
-    _reload_config()
+    skypilot_config._reload_config()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None) is None
     assert skypilot_config.get_nested(
@@ -315,7 +319,7 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH',
                         tmp_path / 'does_not_exist')
-    _reload_config()
+    skypilot_config._reload_config()
     assert skypilot_config.loaded()
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == VPC_NAME
     assert skypilot_config.get_nested(('aws', 'use_internal_ips'), None)
@@ -331,7 +335,7 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
 
-    _reload_config()
+    skypilot_config._reload_config()
     task_path = tmp_path / 'task.yaml'
     _create_task_yaml_file(task_path)
     task = sky.Task.from_yaml(task_path)
@@ -340,7 +344,8 @@ def test_k8s_config_with_override(monkeypatch, tmp_path,
     # Get cluster YAML
     cluster_name = 'test-kubernetes-config-with-override'
     task.set_resources_override({'cloud': sky.Kubernetes()})
-    sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    sky.stream_and_get(request_id)
     cluster_yaml = pathlib.Path(
         f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
             tmp_path / (cluster_name + '.yml'))
@@ -375,7 +380,8 @@ def test_k8s_config_with_invalid_config(monkeypatch, tmp_path,
     task.set_resources_override({'cloud': sky.Kubernetes()})
     exception_occurred = False
     try:
-        sky.launch(task, cluster_name=cluster_name, dryrun=True)
+        request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
+        sky.stream_and_get(request_id)
     except sky.exceptions.ResourcesUnavailableError:
         exception_occurred = True
     assert exception_occurred
@@ -387,7 +393,7 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
 
-    _reload_config()
+    skypilot_config._reload_config()
     task_path = tmp_path / 'task.yaml'
     _create_task_yaml_file(task_path)
     task = sky.Task.from_yaml(task_path)
@@ -395,7 +401,8 @@ def test_gcp_config_with_override(monkeypatch, tmp_path,
     # Test GCP overrides
     cluster_name = 'test-gcp-config-with-override'
     task.set_resources_override({'cloud': sky.GCP(), 'accelerators': 'L4'})
-    sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    request_id = sky.launch(task, cluster_name=cluster_name, dryrun=True)
+    sky.stream_and_get(request_id)
     cluster_yaml = pathlib.Path(
         f'~/.sky/generated/{cluster_name}.yml.tmp').expanduser().rename(
             tmp_path / (cluster_name + '.yml'))
@@ -422,7 +429,7 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
     _create_config_file(config_path)
     monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
 
-    _reload_config()
+    skypilot_config._reload_config()
 
     task_config_yaml = textwrap.dedent(f"""\
         experimental:
@@ -440,3 +447,146 @@ def test_config_with_invalid_override(monkeypatch, tmp_path,
         task_path = tmp_path / 'task.yaml'
         task_path.write_text(task_config_yaml)
         sky.Task.from_yaml(task_path)
+
+
+@mock.patch('sky.skypilot_config.to_dict',
+            return_value=config_utils.Config({
+                'api_server': 'http://example.com',
+                'aws': {
+                    'vpc_name': 'test-vpc',
+                    'security_group': 'test-sg'
+                },
+                'gcp': {
+                    'project_id': 'test-project'
+                }
+            }))
+@mock.patch('sky.skylet.constants.SKIPPED_CLIENT_OVERRIDE_KEYS',
+            [('aws', 'security_group')])
+@mock.patch('sky.skypilot_config.loaded_config_path',
+            return_value='/path/to/config.yaml')
+def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
+    with mock.patch('sky.server.requests.payloads.logger') as mock_logger:
+        # Call the function
+        result = payloads.get_override_skypilot_config_from_client()
+
+        # Verify api_server was removed
+        assert 'api_server' not in result
+
+        # Verify disallowed key was removed
+        assert 'security_group' not in result['aws']
+
+        # Verify allowed keys remain
+        assert result['aws']['vpc_name'] == 'test-vpc'
+        assert result['gcp']['project_id'] == 'test-project'
+
+        # Verify warning was logged for removed disallowed key
+        mock_logger.debug.assert_called_once_with(
+            'The following keys ({"aws.security_group": "test-sg"}) are specified in the client '
+            'SkyPilot config at \'/path/to/config.yaml\'. This will be '
+            'ignored. If you want to specify it, please modify it on server '
+            'side or contact your administrator.')
+
+
+def test_override_skypilot_config(monkeypatch, tmp_path):
+    """Test that override_skypilot_config properly restores config and cleans up."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    # Create original config file
+    config_path = tmp_path / 'config.yaml'
+    _create_config_file(config_path)
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+    skypilot_config._reload_config()
+
+    # Store original values
+    original_vpc = skypilot_config.get_nested(('aws', 'vpc_name'), None)
+    original_proxy = skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                                None)
+
+    # Create override config
+    override_configs = {
+        'aws': {
+            'vpc_name': 'override-vpc',
+            'ssh_proxy_command': 'override-command'
+        }
+    }
+
+    # Use the context manager
+    with skypilot_config.override_skypilot_config(override_configs):
+        # Check values are overridden
+        assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                          None) == 'override-vpc'
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == 'override-command'
+
+        # Get the temp file path
+        temp_config_path = os.environ.get(
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+        assert temp_config_path is not None
+        assert os.path.exists(temp_config_path)
+
+    # Check values are restored
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == original_vpc
+    assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                      None) == original_proxy
+
+    # Check temp file is cleaned up
+    assert not os.path.exists(temp_config_path)
+    env_config_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+    assert env_config_path == str(config_path), (
+        f'{env_config_path} is not cleaned up')
+
+    # Test with None override_configs
+    with skypilot_config.override_skypilot_config(None):
+        assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                          None) == original_vpc
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == original_proxy
+
+
+def test_override_skypilot_config_without_original_config(
+        monkeypatch, tmp_path):
+    """Test that override_skypilot_config works with empty original config."""
+    os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    # Create original config file
+    config_path = tmp_path / 'non_existent.yaml'
+    monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+    skypilot_config._reload_config()
+    assert not skypilot_config._dict
+    assert skypilot_config._loaded_config_path is None
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
+
+    # Test empty override_configs
+    with skypilot_config.override_skypilot_config(None):
+        assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
+        assert skypilot_config.get_nested(
+            ('aws', 'ssh_proxy_command'), None) is None
+
+        assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
+
+    # Test with override_configs
+    # Create override config
+    override_configs = {
+        'aws': {
+            'vpc_name': 'override-vpc',
+            'ssh_proxy_command': 'override-command'
+        }
+    }
+
+    with skypilot_config.override_skypilot_config(override_configs):
+        assert skypilot_config.get_nested(('aws', 'vpc_name'),
+                                          None) == 'override-vpc'
+        assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
+                                          None) == 'override-command'
+
+        # Get the temp file path
+        temp_config_path = os.environ.get(
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
+        assert temp_config_path is not None
+        assert os.path.exists(temp_config_path)
+
+    # Check values are restored
+    assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
+    assert skypilot_config.get_nested(
+        ('aws', 'ssh_proxy_command'), None) is None
+    assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
+    assert skypilot_config._loaded_config_path is None
+    assert not skypilot_config._dict

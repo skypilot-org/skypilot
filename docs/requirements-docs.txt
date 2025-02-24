@@ -6,6 +6,7 @@ sphinx-design==0.5.0
 pydata-sphinx-theme==0.14.4
 Pygments==2.16.1
 myst-parser==2.0.0
+sphinx-autobuild==2021.3.14
 
 sphinx-autodoc-typehints==1.25.2
 sphinx-book-theme==1.1.0
