@@ -233,7 +233,7 @@ async def get_search_page():
     return """
     <html>
         <head>
-            <title>SkyPilot Legal RAG System</title>
+            <title>SkyPilot Legal RAG</title>
             <style>
                 * { box-sizing: border-box; margin: 0; padding: 0; }
                 body { 
@@ -382,7 +382,7 @@ async def get_search_page():
         <body>
             <div class="container">
                 <div class="search-container">
-                    <h1>SkyPilot Legal RAG System</h1>
+                    <h1>SkyPilot Legal RAG</h1>
                     <div class="search-box">
                         <input type="text" id="searchInput" placeholder="Ask a question about legal documents..."
                             onkeypress="if(event.key === 'Enter') search()">
@@ -390,7 +390,7 @@ async def get_search_page():
                     </div>
                     <!-- <p class="disclaimer">This website is just a demonstration that SkyPilot can streamline the RAG generation with cheaper and faster processing. This does not and would not give any legal advice.</p> -->
                 </div>
-                <div id="loading">Processing your question...</div>
+                <div id="loading">Processing your question... May take a minute or two.</div>
                 <div id="results" class="results-container"></div>
             </div>
             
