@@ -2,7 +2,6 @@
 import os
 import re
 import shutil
-import sys
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
