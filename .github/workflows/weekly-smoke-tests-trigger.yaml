@@ -3,6 +3,12 @@ name: Smoke Tests Trigger (Scheduled and PR)
 on:
   schedule:
     - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
+  workflow_dispatch:
+    inputs:
+      clouds:
+        description: 'Comma-separated clouds to test (aws,azure,gcp,kubernetes)'
+        required: true
+        default: 'aws,azure,gcp,kubernetes'
   # uncomment this for PR triggers testing
   # pull_request:
   #   types: [opened, synchronize, reopened]
