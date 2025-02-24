@@ -1,4 +1,4 @@
-name: Smoke Tests Trigger (Scheduled and PR)
+name: Smoke Tests Trigger
 
 on:
   schedule:
