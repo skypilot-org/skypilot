@@ -51,11 +51,12 @@ def get_project_by_region(region: str) -> str:
 
     #  Check is there project if in config
     preferable_project_id = nebius.get_project_id()
-    if preferable_project_id:
+    if preferable_project_id is not None:
         if preferable_project_id[8:11] == region_ids[region]:
             return preferable_project_id
-        else:
-            logger.warning(f'Can\'t use NEBIUS_PROJECT_ID for "{region}".')
+        logger.warning(
+            f'Can\'t use customized NEBIUS_PROJECT_ID ({preferable_project_id})'
+            f' for region {region}. Please check if the project ID is correct.')
     for project in projects.items:
         if project.metadata.id[8:11] == region_ids[region]:
             return project.metadata.id
