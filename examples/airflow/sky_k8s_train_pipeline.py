@@ -118,6 +118,10 @@ def _run_sky_task(yaml_path: str, envs_override: dict, kwargs: dict):
     # Stream the logs for airflow logging
     sky.tail_logs(cluster_name=cluster_name, job_id=job_id, follow=True)
 
+    # Terminate the cluster after the task is done
+    down_id = sky.down(cluster_name)
+    sky.stream_and_get(down_id)
+
 
 @task
 def generate_bucket_uuid(**context):
