@@ -43,6 +43,7 @@ extensions = [
     'myst_parser',
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
+    'extension.linting',
 ]
 
 intersphinx_mapping = {
