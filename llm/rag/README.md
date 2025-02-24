@@ -13,7 +13,7 @@ In particular:
 * **Context-Awareness**: By retrieving relevant documents before generating answers, the system provides responses that consider specific legal contexts.
 * **Traceability**: All generated answers can be traced back to source documents, crucial for legal applications.
 
-SkyPilot streamlines the deployment of RAG systems in the cloud by managing infrastructure and enabling efficient, cost-effective compute resource usage. We use [Alibaba-NLP/gte-Qwen2-7B-instruct] for generating document embeddings and distilled Deepseek R1 ([deepseek-ai/DeepSeek-R1-Distill-Llama-8B]) for generating final anwsers. 
+SkyPilot streamlines the deployment of RAG systems in the cloud by managing infrastructure and enabling efficient, cost-effective compute resource usage. We use [Alibaba-NLP/gte-Qwen2-7B-instruct](https://huggingface.co/Alibaba-NLP/gte-Qwen2-7B-instruct) for generating document embeddings and distilled Deepseek R1 ([deepseek-ai/DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B)) for generating final anwsers. 
 
 In this example, we use legal documents by [pile of law](https://huggingface.co/datasets/pile-of-law/pile-of-law) as example data to demonstrate RAG capabilities. The system processes a collection of legal texts, including case law, statutes, and legal discussions, to enable semantic search and intelligent question answering. This approach can help legal professionals quickly find relevant precedents, analyze complex legal scenarios, and extract insights from large document collections. 
 
