@@ -309,8 +309,8 @@ def check_cluster_name_not_controller(
         msg = controller.value.check_cluster_name_hint
         if operation_str is not None:
             msg += f' {operation_str} is not allowed.'
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NotSupportedError(msg)
+        # with ux_utils.print_exception_no_traceback():
+        #     raise exceptions.NotSupportedError(msg)
 
 
 # Internal only:

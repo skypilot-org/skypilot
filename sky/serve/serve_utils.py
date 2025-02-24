@@ -887,6 +887,9 @@ def format_service_table(service_records: List[Dict[str, Any]],
     replica_infos: List[Dict[str, Any]] = []
     external_lb_infos: List[Dict[str, Any]] = []
     for record in service_records:
+        if record['name'].endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            continue
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
             replica_infos.append(replica)

@@ -94,11 +94,12 @@ def launch_cluster(replica_id: int,
             task.set_resources(type(resources)(overrided_resources))
         # Sort resources by string representation and select one based on
         # replica_id. TODO(tian): Hack. Fix it.
-        sorted_resources = sorted(str(r) for r in task.resources)
+        sorted_resources = sorted(
+            str(r.to_yaml_config()) for r in task.resources)
         selected_idx = replica_id % len(sorted_resources)
         task.set_resources([
             r for r in task.resources
-            if str(r) == sorted_resources[selected_idx]
+            if str(r.to_yaml_config()) == sorted_resources[selected_idx]
         ])
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
@@ -519,7 +520,8 @@ class ReplicaInfo:
         Returns:
             Tuple of (self, is_ready, probe_time).
         """
-        replica_identity = f'replica {self.replica_id} with url {self.url}'
+        replica_identity = (f'replica {self.replica_id} with url {self.url} '
+                            f'in path {readiness_path}')
         # TODO(tian): This requiring the clock on each replica to be aligned,
         # which may not be true when the GCP VMs have run for a long time. We
         # should have a better way to do this. See #2539 for more information.

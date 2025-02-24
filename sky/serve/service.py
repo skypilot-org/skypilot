@@ -134,8 +134,8 @@ def _cleanup(service_name: str,
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
-    external_lbs = serve_state.get_external_load_balancers(service_name)
-    lbid2proc: Dict[int, multiprocessing.Process] = dict()
+    external_lbs = serve_state.get_replica_infos(f'{service_name}-lb')
+    logger.info(f'Terminating external load balancers: {external_lbs}')
     for info in replica_infos:
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
@@ -150,13 +150,15 @@ def _cleanup(service_name: str,
         logger.info(f'Terminating replica {info.replica_id} ...')
     change_batch = []
     for external_lb_record in external_lbs:
-        lb_cluster_name = external_lb_record['cluster_name']
-        lb_id = external_lb_record['lb_id']
-        lb_region = external_lb_record['region']
+        lb_cluster_name = external_lb_record.cluster_name
+        cluster_record = global_user_state.get_cluster_from_name(
+            lb_cluster_name)
+        assert cluster_record is not None
+        lb_region = cluster_record['handle'].launched_resources.region
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(lb_cluster_name,))
         p.start()
-        lbid2proc[lb_id] = p
+        info2proc[external_lb_record] = p
         lb_ip = _get_cluster_ip(lb_cluster_name)
         assert lb_ip is not None
         # Hosted zone must be set for external LBs.
@@ -170,35 +172,37 @@ def _cleanup(service_name: str,
         # TODO(tian): Fix this import hack.
         import boto3  # pylint: disable=import-outside-toplevel
         client = boto3.client('route53')
+        logger.info(f'Deleting Route53 records for {service_name}. '
+                    f'Change batch: {change_batch}')
         client.change_resource_record_sets(
             HostedZoneId=service_spec.target_hosted_zone_id,
             ChangeBatch={'Changes': change_batch})
 
     for info, p in info2proc.items():
         p.join()
+        # TODO(tian): Hack. Fix this.
+        sn = (f'{service_name}-lb'
+              if info.cluster_name.startswith(f'{service_name}-lb') else
+              service_name)
         if p.exitcode == 0:
-            serve_state.remove_replica(service_name, info.replica_id)
-            logger.info(f'Replica {info.replica_id} terminated successfully.')
+            serve_state.remove_replica(sn, info.replica_id)
+            logger.info(f'Replica {info.replica_id} for service {sn} '
+                        f'terminated successfully.')
         else:
             # Set replica status to `FAILED_CLEANUP`
             info.status_property.sky_down_status = (
                 replica_managers.ProcessStatus.FAILED)
-            serve_state.add_or_update_replica(service_name, info.replica_id,
-                                              info)
+            serve_state.add_or_update_replica(sn, info.replica_id, info)
             failed = True
-            logger.error(f'Replica {info.replica_id} failed to terminate.')
-    for lb_id, p in lbid2proc.items():
-        p.join()
-        if p.exitcode == 0:
-            serve_state.remove_external_load_balancer(service_name, lb_id)
-            logger.info(
-                f'External load balancer {lb_id} terminated successfully.')
-        else:
-            failed = True
-            logger.error(f'External load balancer {lb_id} failed to terminate.')
-    versions = serve_state.get_service_versions(service_name)
-    serve_state.remove_service_versions(service_name)
+            logger.error(f'Replica {info.replica_id} for service {sn}'
+                         f' failed to terminate.')
 
+    for sn in [f'{service_name}-lb', service_name]:
+        versions = serve_state.get_service_versions(sn)
+        serve_state.remove_service_versions(sn)
+
+    # NOTE(tian): We dont need to cleanup the storage for external LB.
+    # Add when we need storage in external LB.
     def cleanup_version_storage(version: int) -> bool:
         task_yaml: str = serve_utils.generate_task_yaml_file_name(
             service_name, version)
@@ -490,13 +494,15 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             process.join()
         failed = _cleanup(service_name, service_spec)
         if failed:
-            serve_state.set_service_status_and_active_versions(
-                service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+            for sn in [f'{service_name}-lb', service_name]:
+                serve_state.set_service_status_and_active_versions(
+                    sn, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:
             shutil.rmtree(service_dir)
-            serve_state.remove_service(service_name)
-            serve_state.delete_all_versions(service_name)
+            for sn in [f'{service_name}-lb', service_name]:
+                serve_state.remove_service(sn)
+                serve_state.delete_all_versions(sn)
             logger.info(f'Service {service_name} terminated successfully.')
 
 

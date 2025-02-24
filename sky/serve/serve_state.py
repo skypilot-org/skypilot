@@ -10,11 +10,9 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import colorama
 
-from sky import global_user_state
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.utils import db_utils
-from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     from sky.serve import replica_managers
@@ -578,63 +576,3 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
-
-
-# === External Load Balancer functions ===
-# TODO(tian): Add a status column.
-def add_external_load_balancer(service_name: str, lb_id: int, cluster_name: str,
-                               region: str, port: int) -> None:
-    """Adds an external load balancer to the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            INSERT INTO external_load_balancers
-            (service_name, lb_id, cluster_name, region, port)
-            VALUES (?, ?, ?, ?, ?)""",
-            (service_name, lb_id, cluster_name, region, port))
-
-
-def _get_external_load_balancer_from_row(row) -> Dict[str, Any]:
-    lb_id, cluster_name, region, port = row[:4]
-    lb_cluster_record = global_user_state.get_cluster_from_name(cluster_name)
-    if (lb_cluster_record is None or
-            lb_cluster_record['status'] != status_lib.ClusterStatus.UP):
-        # TODO(tian): We should implement a status for external lbs as well
-        # and returns a '-' when it is still provisioning.
-        lb_ip = '-'
-    else:
-        lb_ip = lb_cluster_record['handle'].head_ip
-        if lb_ip is None:
-            lb_ip = '-'
-    return {
-        'lb_id': lb_id,
-        'cluster_name': cluster_name,
-        'region': region,
-        'ip': lb_ip,
-        'port': port,
-    }
-
-
-def get_external_load_balancers(service_name: str) -> List[Dict[str, Any]]:
-    """Gets all external load balancers of a service."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        rows = cursor.execute(
-            """\
-            SELECT lb_id, cluster_name, region, port
-            FROM external_load_balancers
-            WHERE service_name=(?)""", (service_name,)).fetchall()
-    external_load_balancers = []
-    for row in rows:
-        external_load_balancers.append(
-            _get_external_load_balancer_from_row(row))
-    return external_load_balancers
-
-
-def remove_external_load_balancer(service_name: str, lb_id: int) -> None:
-    """Removes an external load balancer from the database."""
-    with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM external_load_balancers
-            WHERE service_name=(?)
-            AND lb_id=(?)""", (service_name, lb_id))

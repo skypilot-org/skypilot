@@ -82,9 +82,6 @@ class SkyServeController:
             serve_state.add_service(lb_svc_name, 0, '', '', '',
                                     serve_state.ServiceStatus.CONTROLLER_INIT,
                                     True)
-            serve_state.add_or_update_version(lb_svc_name,
-                                              constants.INITIAL_VERSION,
-                                              service_spec)
             service_dir = os.path.expanduser(
                 serve_utils.generate_remote_service_dir_name(lb_svc_name))
             os.makedirs(service_dir, exist_ok=True)
@@ -97,8 +94,12 @@ class SkyServeController:
             # TODO(tian): Make it configurable.
             lb_service_spec._readiness_headers = None
             lb_service_spec._readiness_path = '/sky-lb-health'
-            lb_service_spec._readiness_timeout_seconds = 120
+            lb_service_spec._readiness_timeout_seconds = 20
+            lb_service_spec._initial_delay_seconds = 120
             lb_service_spec._post_data = None
+            serve_state.add_or_update_version(lb_svc_name,
+                                              constants.INITIAL_VERSION,
+                                              lb_service_spec)
             self._lb_replica_manager = replica_managers.SkyPilotReplicaManager(
                 service_name=lb_svc_name,
                 spec=lb_service_spec,
@@ -139,6 +140,10 @@ class SkyServeController:
                                             f'{self._service_name}')
                 active_versions = record['active_versions']
                 logger.info(f'All replica info: {replica_infos}')
+                external_lb_infos = serve_state.get_replica_infos(
+                    f'{self._service_name}-lb')
+                logger.info('All external load balancer infos: '
+                            f'{external_lb_infos}')
                 scaling_options = self._autoscaler.generate_scaling_decisions(
                     replica_infos, active_versions)
                 for scaling_option in scaling_options:
