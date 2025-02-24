@@ -14,11 +14,14 @@ from sky.utils import env_options
 from sky.utils import rich_utils
 
 # UX: Should we show logging prefixes and some extra information in optimizer?
-_show_logging_prefix = (env_options.Options.SHOW_DEBUG_INFO.get() or
-                        not env_options.Options.MINIMIZE_LOGGING.get())
 _FORMAT = '%(levelname).1s %(asctime)s %(filename)s:%(lineno)d] %(message)s'
 _DATE_FORMAT = '%m-%d %H:%M:%S'
 _SENSITIVE_LOGGER = ['sky.provisioner', 'sky.optimizer']
+
+
+def _show_logging_prefix():
+    return env_options.Options.SHOW_DEBUG_INFO.get(
+    ) or not env_options.Options.MINIMIZE_LOGGING.get()
 
 
 class NewLineFormatter(logging.Formatter):
@@ -36,13 +39,6 @@ class NewLineFormatter(logging.Formatter):
             if self.dim:
                 msg = colorama.Style.DIM + msg + colorama.Style.RESET_ALL
         return msg
-
-
-class RichSafeStreamHandler(logging.StreamHandler):
-
-    def emit(self, record: logging.LogRecord) -> None:
-        with rich_utils.safe_logger():
-            return super().emit(record)
 
 
 _root_logger = logging.getLogger('sky')
@@ -65,14 +61,14 @@ def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
     if _default_handler is None:
-        _default_handler = RichSafeStreamHandler(sys.stdout)
+        _default_handler = rich_utils.RichSafeStreamHandler(sys.stdout)
         _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)
         else:
             _default_handler.setLevel(logging.INFO)
         _root_logger.addHandler(_default_handler)
-    if _show_logging_prefix:
+    if _show_logging_prefix():
         _default_handler.setFormatter(FORMATTER)
     else:
         _default_handler.setFormatter(NO_PREFIX_FORMATTER)
@@ -85,11 +81,11 @@ def _setup_logger():
         # for certain loggers.
         for logger_name in _SENSITIVE_LOGGER:
             logger = logging.getLogger(logger_name)
-            handler_to_logger = RichSafeStreamHandler(sys.stdout)
+            handler_to_logger = rich_utils.RichSafeStreamHandler(sys.stdout)
             handler_to_logger.flush = sys.stdout.flush  # type: ignore
             logger.addHandler(handler_to_logger)
             logger.setLevel(logging.INFO)
-            if _show_logging_prefix:
+            if _show_logging_prefix():
                 handler_to_logger.setFormatter(FORMATTER)
             else:
                 handler_to_logger.setFormatter(NO_PREFIX_FORMATTER)

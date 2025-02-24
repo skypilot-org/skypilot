@@ -13,7 +13,7 @@ import prepare_github_markdown
 # -- Project information
 
 project = 'SkyPilot'
-copyright = '2024, SkyPilot Team'
+copyright = '2025, SkyPilot Team'
 author = 'the SkyPilot authors'
 
 # The version info for the project you're documenting, acts as replacement for
@@ -42,6 +42,7 @@ extensions = [
     'sphinx_design',
     'myst_parser',
     'notfound.extension',
+    'sphinx.ext.autosectionlabel',
 ]
 
 intersphinx_mapping = {
@@ -56,7 +57,13 @@ templates_path = ['_templates']
 main_doc = 'index'
 
 autosummary_generate = True
-napolean_use_rtype = False
+# Disable automatic type hints to let Napoleon handle them
+napoleon_use_rtype = False
+# Napoleon settings
+napoleon_custom_sections = [
+    ('Request Returns', 'params_style'),
+    ('Request Raises', 'params_style'),
+]
 
 # -- Options for autodoc
 
@@ -165,6 +172,12 @@ exclude_patterns = ['_gallery_original']
 myst_heading_anchors = 3
 
 googleanalytics_id = 'G-92WF3MDCJV'
+
+autosectionlabel_prefix_document = True
+
+suppress_warnings = [
+    'autosectionlabel.*',
+]
 
 
 def setup(app):

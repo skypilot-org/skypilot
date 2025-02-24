@@ -1,7 +1,7 @@
 .. _auto-failover:
 
-Auto-provisioning GPUs
-==========================
+Provisioning Compute
+====================
 
 SkyPilot comes with an auto-failover provisioner, which
 **automatically retries provisioning** a cluster in different regions (or
@@ -62,7 +62,7 @@ provisioner handles such a request:
   $ sky launch -c gpu --gpus A100
 
   ...
-  Launching a new cluster 'gpu'. Proceed? [Y/n]: 
+  Launching a new cluster 'gpu'. Proceed? [Y/n]:
   ⚙️ Launching on GCP us-central1 (us-central1-a).
   W 10-11 18:25:57 instance_utils.py:112] Got return codes 'VM_MIN_COUNT_NOT_REACHED', 'ZONE_RESOURCE_POOL_EXHAUSTED_WITH_DETAILS' in us-central1-a: 'Requested minimum count of 1 VMs could not be created'; "The zone 'projects/xxxxxx/zones/us-central1-a' does not have enough resources available to fulfill the request.  '(resource type:compute)'"
   ...
@@ -91,13 +91,13 @@ GCP, where it succeeded after one region:
 
   Considered resources (1 node):
   ----------------------------------------------------------------------------------------------------
-   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN   
+   CLOUD   INSTANCE              vCPUs   Mem(GB)   ACCELERATORS   REGION/ZONE     COST ($)   CHOSEN
   ----------------------------------------------------------------------------------------------------
-   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔     
-   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39               
-   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77               
+   Azure   Standard_ND96asr_v4   96      900       A100:8         eastus          27.20         ✔
+   GCP     a2-highgpu-8g         96      680       A100:8         us-central1-a   29.39
+   AWS     p4d.24xlarge          96      1152      A100:8         us-east-1       32.77
   ----------------------------------------------------------------------------------------------------
-  Launching a new cluster 'a100-8'. Proceed? [Y/n]: 
+  Launching a new cluster 'a100-8'. Proceed? [Y/n]:
 
   ...
   ⚙️ Launching on Azure eastus.
@@ -114,7 +114,7 @@ GCP, where it succeeded after one region:
   ✓ Cluster launched: a100-8.  View logs at: ~/sky_logs/sky-2024-10-11-18-24-14-357884/provision.log
 
 
-Multiple Candidate GPUs
+Multiple candidate GPUs
 -------------------------
 
 If a task can be run on different GPUs, the user can specify multiple candidate GPUs,
@@ -155,7 +155,7 @@ In the above example, SkyPilot will first try to provision an A10 GPU, then an A
 
 .. _multiple-resources:
 
-Multiple Candidate Resources
+Multiple candidate resources
 --------------------------------------------
 
 If a task would like to specify multiple candidate resources (not only GPUs), the user can specify a list of candidate resources with a preference annotation:

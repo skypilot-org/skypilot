@@ -114,7 +114,7 @@ To use this mode:
     and the endpoint may not be accessible from outside the cluster.
 
 
-3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
+3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config.yaml` to use the ingress mode.
 
 .. code-block:: yaml
 

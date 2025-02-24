@@ -11,6 +11,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import exceptions
 from sky import sky_logging
 from sky.utils import common_utils
 from sky.utils import db_utils
@@ -32,7 +33,7 @@ logger = sky_logging.init_logger(__name__)
 # the same content as the `task_name` column.
 # The `job_id` is now not really a job id, but a only a unique
 # identifier/primary key for all the tasks. We will use `spot_job_id`
-# to identify the spot job.
+# to identify the job.
 # TODO(zhwu): schema migration may be needed.
 def create_table(cursor, conn):
     # Enable WAL mode to avoid locking issues.
@@ -420,9 +421,16 @@ def set_submitted(job_id: int, task_id: int, run_timestamp: str,
             run_timestamp=(?),
             specs=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""",
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""",
             (resources_str, submit_time, ManagedJobStatus.SUBMITTED.value,
-             run_timestamp, json.dumps(specs), job_id, task_id))
+             run_timestamp, json.dumps(specs), job_id, task_id,
+             ManagedJobStatus.PENDING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to submitted. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('SUBMITTED')
 
 
@@ -434,7 +442,14 @@ def set_starting(job_id: int, task_id: int, callback_func: CallbackType):
             """\
             UPDATE spot SET status=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""", (ManagedJobStatus.STARTING.value, job_id, task_id))
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""", (ManagedJobStatus.STARTING.value, job_id,
+                                task_id, ManagedJobStatus.SUBMITTED.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to starting. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('STARTING')
 
 
@@ -447,15 +462,25 @@ def set_started(job_id: int, task_id: int, start_time: float,
             """\
             UPDATE spot SET status=(?), start_at=(?), last_recovered_at=(?)
             WHERE spot_job_id=(?) AND
-            task_id=(?)""",
+            task_id=(?) AND
+            status IN (?, ?) AND
+            end_at IS null""",
             (
                 ManagedJobStatus.RUNNING.value,
                 start_time,
                 start_time,
                 job_id,
                 task_id,
+                ManagedJobStatus.STARTING.value,
+                # If the task is empty, we will jump straight from PENDING to
+                # RUNNING
+                ManagedJobStatus.PENDING.value,
             ),
         )
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to started. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('STARTED')
 
 
@@ -468,8 +493,15 @@ def set_recovering(job_id: int, task_id: int, callback_func: CallbackType):
                 UPDATE spot SET
                 status=(?), job_duration=job_duration+(?)-last_recovered_at
                 WHERE spot_job_id=(?) AND
-                task_id=(?)""",
-            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id))
+                task_id=(?) AND
+                status=(?) AND
+                end_at IS null""",
+            (ManagedJobStatus.RECOVERING.value, time.time(), job_id, task_id,
+             ManagedJobStatus.RUNNING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to recovering. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('RECOVERING')
 
 
@@ -482,8 +514,15 @@ def set_recovered(job_id: int, task_id: int, recovered_time: float,
             UPDATE spot SET
             status=(?), last_recovered_at=(?), recovery_count=recovery_count+1
             WHERE spot_job_id=(?) AND
-            task_id=(?)""",
-            (ManagedJobStatus.RUNNING.value, recovered_time, job_id, task_id))
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""",
+            (ManagedJobStatus.RUNNING.value, recovered_time, job_id, task_id,
+             ManagedJobStatus.RECOVERING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to recovered. '
+                f'({cursor.rowcount} rows updated)')
     logger.info('==== Recovered. ====')
     callback_func('RECOVERED')
 
@@ -496,10 +535,16 @@ def set_succeeded(job_id: int, task_id: int, end_time: float,
             """\
             UPDATE spot SET
             status=(?), end_at=(?)
-            WHERE spot_job_id=(?) AND task_id=(?)
-            AND end_at IS null""",
-            (ManagedJobStatus.SUCCEEDED.value, end_time, job_id, task_id))
-
+            WHERE spot_job_id=(?) AND
+            task_id=(?) AND
+            status=(?) AND
+            end_at IS null""",
+            (ManagedJobStatus.SUCCEEDED.value, end_time, job_id, task_id,
+             ManagedJobStatus.RUNNING.value))
+        if cursor.rowcount != 1:
+            raise exceptions.ManagedJobStatusError(
+                f'Failed to set the task to succeeded. '
+                f'({cursor.rowcount} rows updated)')
     callback_func('SUCCEEDED')
     logger.info('Job succeeded.')
 
@@ -571,7 +616,9 @@ def set_failed(
                 {set_str}
                 WHERE spot_job_id=(?) {task_query_str} AND end_at IS null""",
                 (end_time, *list(fields_to_set.values()), job_id, *task_value))
-    if callback_func:
+
+        updated = cursor.rowcount > 0
+    if callback_func and updated:
         callback_func('FAILED')
     logger.info(failure_reason)
 
@@ -586,12 +633,15 @@ def set_cancelling(job_id: int, callback_func: CallbackType):
         rows = cursor.execute(
             """\
             UPDATE spot SET
-            status=(?), end_at=(?)
+            status=(?)
             WHERE spot_job_id=(?) AND end_at IS null""",
-            (ManagedJobStatus.CANCELLING.value, time.time(), job_id))
-        if rows.rowcount > 0:
-            logger.info('Cancelling the job...')
-            callback_func('CANCELLING')
+            (ManagedJobStatus.CANCELLING.value, job_id))
+        updated = rows.rowcount > 0
+    if updated:
+        logger.info('Cancelling the job...')
+        callback_func('CANCELLING')
+    else:
+        logger.info('Cancellation skipped, job is already terminal')
 
 
 def set_cancelled(job_id: int, callback_func: CallbackType):
@@ -607,9 +657,12 @@ def set_cancelled(job_id: int, callback_func: CallbackType):
             WHERE spot_job_id=(?) AND status=(?)""",
             (ManagedJobStatus.CANCELLED.value, time.time(), job_id,
              ManagedJobStatus.CANCELLING.value))
-        if rows.rowcount > 0:
-            logger.info('Job cancelled.')
-            callback_func('CANCELLED')
+        updated = rows.rowcount > 0
+    if updated:
+        logger.info('Job cancelled.')
+        callback_func('CANCELLED')
+    else:
+        logger.info('Cancellation skipped, job is not CANCELLING')
 
 
 def set_local_log_file(job_id: int, task_id: Optional[int],
@@ -705,8 +758,9 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
         job_id: Optional job ID to check. If None, checks all jobs.
 
     Returns a list of job_ids, including the following:
-    - For jobs with schedule state: jobs that have schedule state not DONE
-    - For legacy jobs (no schedule state): jobs that are in non-terminal status
+    - Jobs that have a schedule_state that is not DONE
+    - Jobs have schedule_state DONE but are in a non-terminal status
+    - Legacy jobs (that is, no schedule state) that are in non-terminal status
     """
     job_filter = '' if job_id is None else 'AND spot.spot_job_id=(?)'
     job_value = () if job_id is None else (job_id,)
@@ -719,7 +773,9 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
 
     # Get jobs that are either:
     # 1. Have schedule state that is not DONE, or
-    # 2. Have no schedule state (legacy) AND are in non-terminal status
+    # 2. Have schedule state DONE AND are in non-terminal status (unexpected
+    #    inconsistent state), or
+    # 3. Have no schedule state (legacy) AND are in non-terminal status
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(
             f"""\
@@ -728,14 +784,23 @@ def get_jobs_to_check_status(job_id: Optional[int] = None) -> List[int]:
             LEFT OUTER JOIN job_info
             ON spot.spot_job_id=job_info.spot_job_id
             WHERE (
+                -- non-legacy jobs that are not DONE
                 (job_info.schedule_state IS NOT NULL AND
                  job_info.schedule_state IS NOT ?)
                 OR
-                (job_info.schedule_state IS NULL AND
+                -- legacy or that are in non-terminal status or
+                -- DONE jobs that are in non-terminal status
+                ((-- legacy jobs
+                  job_info.schedule_state IS NULL OR
+                  -- non-legacy DONE jobs
+                  job_info.schedule_state IS ?
+                 ) AND
+                 -- non-terminal
                  status NOT IN ({status_filter_str}))
             )
             {job_filter}
             ORDER BY spot.spot_job_id DESC""", [
+                ManagedJobScheduleState.DONE.value,
                 ManagedJobScheduleState.DONE.value, *terminal_status_values,
                 *job_value
             ]).fetchall()

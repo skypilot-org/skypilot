@@ -63,7 +63,7 @@ SkyPilot also support opening ports through the CLI:
 
     $ sky launch -c jupyter --ports 8888 jupyter_lab.yaml
 
-Security and Lifecycle Considerations
+Security and lifecycle considerations
 -------------------------------------
 
 Before you start opening ports, there are a few things you need to bear in mind:

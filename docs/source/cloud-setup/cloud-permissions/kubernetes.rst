@@ -53,7 +53,7 @@ Below are the permissions required by SkyPilot and an example service account YA
 
 .. _k8s-permissions:
 
-Minimum Permissions Required for SkyPilot
+Minimum permissions required for SkyPilot
 -----------------------------------------
 
 SkyPilot requires permissions equivalent to the following roles to be able to manage the resources in the Kubernetes cluster:
@@ -120,7 +120,7 @@ Permissions for ``sky show-gpus``
     If this role is not granted to the service account, ``sky show-gpus`` will still work but it will only show the total GPUs on the nodes, not the number of free GPUs.
 
 
-Permissions for Object Store Mounting
+Permissions for object store mounting
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 If your tasks use object store mounting (e.g., S3, GCS, etc.), SkyPilot will need to run a DaemonSet to expose the FUSE device as a Kubernetes resource to SkyPilot pods.
@@ -177,7 +177,7 @@ If your tasks use :ref:`Ingress <kubernetes-ingress>` for exposing ports, you wi
 
 .. _k8s-sa-example:
 
-Example using Custom Service Account
+Example using custom service account
 ------------------------------------
 
 To create a service account that has all necessary permissions for SkyPilot (including for accessing object stores), you can use the following YAML.

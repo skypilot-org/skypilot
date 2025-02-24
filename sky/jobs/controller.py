@@ -6,6 +6,7 @@ import argparse
 import multiprocessing
 import os
 import pathlib
+import shutil
 import time
 import traceback
 import typing
@@ -15,9 +16,9 @@ import filelock
 
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.backends import cloud_vm_ray_backend
+from sky.data import data_utils
 from sky.jobs import recovery_strategy
 from sky.jobs import scheduler
 from sky.jobs import state as managed_job_state
@@ -25,9 +26,11 @@ from sky.jobs import utils as managed_job_utils
 from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -68,7 +71,7 @@ class JobsController:
             else:
                 assert task.name is not None, task
                 task_name = task.name
-                # This is guaranteed by the spot_launch API, where we fill in
+                # This is guaranteed by the jobs.launch API, where we fill in
                 # the task.name with
                 # dag_utils.maybe_infer_and_fill_dag_and_task_names.
                 assert task_name is not None, self._dag
@@ -137,8 +140,8 @@ class JobsController:
                 1. The optimizer cannot find a feasible solution.
                 2. Precheck errors: invalid cluster name, failure in getting
                 cloud user identity, or unsupported feature.
-            exceptions.SpotJobReachedMaxRetryError: This will be raised when
-                all prechecks passed but the maximum number of retries is
+            exceptions.ManagedJobReachedMaxRetriesError: This will be raised
+                when all prechecks passed but the maximum number of retries is
                 reached for `sky.launch`. The failure of `sky.launch` can be
                 due to:
                 1. Any of the underlying failover exceptions is due to resources
@@ -238,8 +241,8 @@ class JobsController:
                 try:
                     clusters = backend_utils.get_clusters(
                         cluster_names=[cluster_name],
-                        refresh=False,
-                        include_controller=False)
+                        refresh=common.StatusRefreshMode.NONE,
+                        all_users=True)
                     if clusters:
                         assert len(clusters) == 1, (clusters, cluster_name)
                         handle = clusters[0].get('handle')
@@ -251,7 +254,6 @@ class JobsController:
                         f'Failed to download and stream logs: '
                         f'{common_utils.format_exception(e)}',
                         exc_info=True)
-
                 # Only clean up the cluster, not the storages, because tasks may
                 # share storages.
                 managed_job_utils.terminate_cluster(cluster_name=cluster_name)
@@ -482,18 +484,37 @@ def _cleanup(job_id: int, dag_yaml: str):
         when reaching here, as we currently only support chain DAGs, and only
         task is executed at a time.
     """
-    # NOTE: The code to get cluster name is same as what we did in the spot
-    # controller, we should keep it in sync with JobsController.__init__()
     dag, _ = _get_dag_and_name(dag_yaml)
     for task in dag.tasks:
         assert task.name is not None, task
         cluster_name = managed_job_utils.generate_managed_job_cluster_name(
             task.name, job_id)
         managed_job_utils.terminate_cluster(cluster_name)
+
         # Clean up Storages with persistent=False.
         # TODO(zhwu): this assumes the specific backend.
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        # Need to re-construct storage object in the controller process
+        # because when SkyPilot API server machine sends the yaml config to the
+        # controller machine, only storage metadata is sent, not the storage
+        # object itself.
+        for storage in task.storage_mounts.values():
+            storage.construct()
         backend.teardown_ephemeral_storage(task)
+
+        # Clean up any files mounted from the local disk, such as two-hop file
+        # mounts.
+        for file_mount in (task.file_mounts or {}).values():
+            try:
+                if not data_utils.is_cloud_store_url(file_mount):
+                    path = os.path.expanduser(file_mount)
+                    if os.path.isdir(path):
+                        shutil.rmtree(path)
+                    else:
+                        os.remove(path)
+            except Exception as e:  # pylint: disable=broad-except
+                logger.warning(
+                    f'Failed to clean up file mount {file_mount}: {e}')
 
 
 def start(job_id, dag_yaml):
@@ -533,8 +554,8 @@ def start(job_id, dag_yaml):
             # Kill the controller process first; if its child process is
             # killed first, then the controller process will raise errors.
             # Kill any possible remaining children processes recursively.
-            subprocess_utils.kill_children_processes(controller_process.pid,
-                                                     force=True)
+            subprocess_utils.kill_children_processes(
+                parent_pids=[controller_process.pid], force=True)
             controller_process.join()
             logger.info(f'Controller process {controller_process.pid} killed.')
 
