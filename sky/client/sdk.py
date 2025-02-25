@@ -321,8 +321,7 @@ def launch(
           many minute of idleness, i.e., no running or pending jobs in the
           cluster's job queue. Idleness gets reset whenever setting-up/
           running/pending jobs are found in the job queue. Setting this
-          flag is equivalent to running
-          ``sky.launch(..., detach_run=True, ...)`` and then
+          flag is equivalent to running ``sky.launch()`` and then
           ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
           will not be autostopped.
         dryrun: if True, do not actually launch the cluster.
@@ -677,8 +676,7 @@ def start(
             many minute of idleness, i.e., no running or pending jobs in the
             cluster's job queue. Idleness gets reset whenever setting-up/
             running/pending jobs are found in the job queue. Setting this
-            flag is equivalent to running
-            ``sky.launch(..., detach_run=True, ...)`` and then
+            flag is equivalent to running ``sky.launch()`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
             cluster will not be autostopped.
         retry_until_up: whether to retry launching the cluster until it is
@@ -889,7 +887,7 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: List[str],
+def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> server_common.RequestId:
     """Gets the job queue of a cluster.

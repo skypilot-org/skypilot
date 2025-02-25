@@ -108,7 +108,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str,
     accelerator = accelerator.get(generic_cloud, 'T4')
     name = smoke_tests_utils.get_cluster_name() + image_id[len('docker:'):][:4]
     total_timeout_minutes = 40 if generic_cloud == 'azure' else 15
-    time_to_sleep = 300 if generic_cloud == 'azure' else 180
+    time_to_sleep = 300 if generic_cloud == 'azure' else 200
     test = smoke_tests_utils.Test(
         'job_queue_with_docker',
         [

@@ -124,7 +124,8 @@ async def dashboard(request: fastapi.Request,
     # Find the port for the dashboard of the user
     os.environ[constants.USER_ID_ENV_VAR] = user_hash
     server_common.reload_for_new_request(client_entrypoint=None,
-                                         client_command=None)
+                                         client_command=None,
+                                         using_remote_api_server=False)
     logger.info(f'Starting dashboard for user hash: {user_hash}')
 
     with dashboard_utils.get_dashboard_lock_for_user(user_hash):

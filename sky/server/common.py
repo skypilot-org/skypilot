@@ -168,7 +168,7 @@ def start_api_server_in_background(deploy: bool = False,
         api_server_cmd += ' --deploy'
     if host is not None:
         api_server_cmd += f' --host {host}'
-    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1'
+    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1 < /dev/null'
 
     # Start the API server process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
@@ -400,19 +400,24 @@ def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
 
 
 def reload_for_new_request(client_entrypoint: Optional[str],
-                           client_command: Optional[str]):
+                           client_command: Optional[str],
+                           using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
     # Reset the client entrypoint and command for the usage message.
-    common_utils.set_client_entrypoint_and_command(
+    common_utils.set_client_status(
         client_entrypoint=client_entrypoint,
         client_command=client_command,
+        using_remote_api_server=using_remote_api_server,
     )
+
+    # Clear cache should be called before reload_logger and usage reset,
+    # otherwise, the latest env var will not be used.
+    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
+        func.cache_clear()
+
     # We need to reset usage message, so that the message is up-to-date with the
     # latest information in the context, e.g. client entrypoint and run id.
     usage_lib.messages.reset(usage_lib.MessageType.USAGE)
-
-    for func in annotations.FUNCTIONS_NEED_RELOAD_CACHE:
-        func.cache_clear()
 
     # Make sure the logger takes the new environment variables. This is
     # necessary because the logger is initialized before the environment

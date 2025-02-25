@@ -221,6 +221,7 @@ class ManagedJobStatus(enum.Enum):
     is dedicated to a managed job, i.e. there should always be enough resource
     to run the job and the job will be immediately transitioned to RUNNING.
 
+    You can see a state diagram for ManagedJobStatus in sky/jobs/README.md.
     """
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
@@ -340,6 +341,8 @@ class ManagedJobScheduleState(enum.Enum):
       and the job is in some terminal status. In the future it may be possible
       to transition directly from WAITING or even INACTIVE to DONE if the job is
       cancelled.
+
+    You can see a state diagram in sky/jobs/README.md.
 
     There is no well-defined mapping from the managed job status to schedule
     state or vice versa. (In fact, schedule state is defined on the job and
