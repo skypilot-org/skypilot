@@ -7,7 +7,9 @@ resources:
   memory: 32+
   ports: 
     - 8000 
-  use_spot: false
+  any_of:
+    - use_spot: true
+    - use_spot: false
 
 envs:
   EMBEDDING_MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
