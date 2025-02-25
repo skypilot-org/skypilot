@@ -32,6 +32,7 @@ resources:
   ports: 8080
   cpus: 2+
 
-workdir: examples/serve/http_server
+setup: |
+  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
 
 run: python3 server.py

@@ -414,12 +414,11 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
     if with_external_lb_info:
-        # record['external_lb_info'] = serve_state.get_external_load_balancers(
-        #     service_name)
-        record['external_lb_info'] = _get_service_status(
-            f'{service_name}-lb',
-            with_replica_info=True,
-            with_external_lb_info=False)
+        lb_service_record = _get_service_status(f'{service_name}-lb',
+                                                with_replica_info=True,
+                                                with_external_lb_info=False)
+        assert lb_service_record is not None
+        record['external_lb_info'] = lb_service_record['replica_info']
     return record
 
 
