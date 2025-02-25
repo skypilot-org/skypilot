@@ -134,7 +134,7 @@ with DAG(dag_id='sky_k8s_train_pipeline',
          schedule_interval=None,
          catchup=False) as dag:
     # Path to SkyPilot YAMLs. Can be a git repo or local directory.
-    base_path = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+    base_path = 'https://github.com/skypilot-org/mock-train-workflow.git'
 
     # Generate bucket UUID as first task
     # See https://stackoverflow.com/questions/55748050/generating-uuid-and-use-it-across-airflow-dag

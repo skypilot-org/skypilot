@@ -62,7 +62,7 @@ We will define the following tasks to mock a training workflow:
 2. `train.yaml`: Trains a model on the data in the bucket.
 3. `eval.yaml`: Evaluates the model and writes evaluation results to the bucket.
 
-We have defined these tasks in this directory and uploaded them to a [Git repository](https://github.com/romilbhardwaj/mock_train_workflow/tree/clientserver_example).
+We have defined these tasks in this directory and uploaded them to a [Git repository](https://github.com/skypilot-org/mock-train-workflow/).
 
 When developing the workflow, you can run the tasks independently using `sky launch`:
 
@@ -90,14 +90,14 @@ Once we have developed the tasks, we can seamlessly run them in Airflow.
 2. **Airflow native logging** - SkyPilot logs are written to container stdout, which is captured as task logs in Airflow and displayed in the UI.
 3. **Easy debugging** - If a task fails, you can independently run the task using `sky launch` to debug the issue. SkyPilot will recreate the environment in which the task failed. 
 
-Here's a snippet of the DAG declaration in `sky_k8s_train_pipeline.py`:
+Here's a snippet of the DAG declaration in [sky_k8s_train_pipeline.py](sky_k8s_train_pipeline.py):
 ```python
 with DAG(dag_id='sky_k8s_train_pipeline',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
     # Path to SkyPilot YAMLs. Can be a git repo or local directory.
-    base_path = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+    base_path = 'https://github.com/skypilot-org/mock-train-workflow.git'
 
     # Generate bucket UUID as first task
     bucket_uuid = generate_bucket_uuid()
@@ -125,7 +125,7 @@ The task YAML files can be sourced in two ways:
 
 1. **From a Git repository** (as shown above):
    ```python
-   repo_url = 'https://github.com/romilbhardwaj/mock_train_workflow.git'
+   repo_url = 'https://github.com/skypilot-org/mock-train-workflow.git'
    run_sky_task(...)(repo_url, 'path/to/yaml', git_branch='optional_branch')
    ```
    The task will automatically clone the repository and checkout the specified branch before execution.
