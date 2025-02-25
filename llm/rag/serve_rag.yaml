@@ -9,15 +9,17 @@ resources:
     - 8000 
   use_spot: false
 
-file_mounts:
-  /vectordb:
-    name: sky-rag-vectordb
-    # this needs to be the same as in build_vectordb.yaml
-    mode: MOUNT
-
 envs:
   EMBEDDING_MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
   GENERATION_MODEL_NAME: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+  VECTORDB_BUCKET_NAME: sky-rag-vectordb
+  VECTORDB_BUCKET_ROOT: /vectordb
+
+file_mounts:
+  ${VECTORDB_BUCKET_ROOT}:
+    name: ${VECTORDB_BUCKET_NAME}
+    # this needs to be the same as in build_vectordb.yaml
+    mode: MOUNT
 
 setup: |
   # Install dependencies for RAG service

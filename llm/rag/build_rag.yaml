@@ -6,14 +6,20 @@ resources:
   memory: 32+  # Need more memory for merging embeddings
   cloud: aws
 
+envs:
+  EMBEDDINGS_BUCKET_NAME: sky-rag-embeddings
+  EMBEDDINGS_BUCKET_ROOT: /embeddings
+  VECTORDB_BUCKET_NAME: sky-rag-vectordb
+  VECTORDB_BUCKET_ROOT: /vectordb
+
 file_mounts:
-  /embeddings:
-    name: sky-rag-embeddings
+  ${EMBEDDINGS_BUCKET_ROOT}:
+    name: ${EMBEDDINGS_BUCKET_NAME}
     # this needs to be the same as the output in compute_embeddings.yaml
     mode: MOUNT
   
-  /vectordb:
-    name: sky-rag-vectordb
+  ${VECTORDB_BUCKET_ROOT}:
+    name: ${VECTORDB_BUCKET_NAME}
     mode: MOUNT
 
 setup: |
