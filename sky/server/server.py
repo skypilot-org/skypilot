@@ -21,6 +21,7 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 import sky
+from sky import admin_policy
 from sky import check as sky_check
 from sky import clouds
 from sky import core
@@ -46,6 +47,7 @@ from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
+from sky.utils import admin_policy_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -261,6 +263,21 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     logger.debug(f'Validating tasks: {validate_body.dag}')
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        
+        # Apply admin policies
+        request_options = admin_policy.RequestOptions(
+            cluster_name=validate_body.cluster_name,
+            idle_minutes_to_autostop=validate_body.idle_minutes_to_autostop,
+            down=validate_body.down,
+            dryrun=validate_body.dryrun
+        )
+        
+        dag, _ = admin_policy_utils.apply(
+            dag,
+            use_mutated_config_in_current_request=True,
+            request_options=request_options
+        )
+        
         for task in dag.tasks:
             # Will validate workdir and file_mounts in the backend, as those
             # need to be validated after the files are uploaded to the SkyPilot

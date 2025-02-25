@@ -116,6 +116,10 @@ class CheckBody(RequestBody):
 class ValidateBody(RequestBody):
     """The request body for the validate endpoint."""
     dag: str
+    cluster_name: Optional[str] = None
+    idle_minutes_to_autostop: Optional[int] = None
+    down: bool = False
+    dryrun: bool = False
 
 
 class OptimizeBody(RequestBody):
