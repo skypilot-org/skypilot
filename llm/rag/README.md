@@ -17,7 +17,7 @@ SkyPilot streamlines the deployment of RAG systems in the cloud by managing infr
 
 In this example, we use legal documents by [pile of law](https://huggingface.co/datasets/pile-of-law/pile-of-law) as example data to demonstrate RAG capabilities. The system processes a collection of legal texts, including case law, statutes, and legal discussions, to enable semantic search and intelligent question answering. This approach can help legal professionals quickly find relevant precedents, analyze complex legal scenarios, and extract insights from large document collections. 
 
-SkyPilot streamlines the process of running such large-scale jobs in the cloud. It abstracts away much of the complexity of managing infrastructure and helps you run compute-intensive tasks efficiently and cost-effectively through managed jobs. 
+**Why SkyPilot**: SkyPilot streamlines the process of running such large-scale jobs in the cloud. It abstracts away much of the complexity of managing infrastructure and helps you run compute-intensive tasks efficiently and cost-effectively through managed jobs. 
 
 ## Step 0: Set Up The Environment
 Install the following Prerequisites:  
