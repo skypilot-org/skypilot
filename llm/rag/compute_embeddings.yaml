@@ -31,7 +31,7 @@ setup: |
   pip install nltk hf_transfer
 
 run: |
-  # Initialize and check bucket
+  # Initialize and download the model
   HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/model $MODEL_NAME
   
   # Start vLLM service in background

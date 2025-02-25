@@ -17,6 +17,8 @@ SkyPilot streamlines the deployment of RAG systems in the cloud by managing infr
 
 In this example, we use legal documents by [pile of law](https://huggingface.co/datasets/pile-of-law/pile-of-law) as example data to demonstrate RAG capabilities. The system processes a collection of legal texts, including case law, statutes, and legal discussions, to enable semantic search and intelligent question answering. This approach can help legal professionals quickly find relevant precedents, analyze complex legal scenarios, and extract insights from large document collections. 
 
+SkyPilot streamlines the process of running such large-scale jobs in the cloud. It abstracts away much of the complexity of managing infrastructure and helps you run compute-intensive tasks efficiently and cost-effectively through managed jobs. 
+
 ## Step 0: Set Up The Environment
 Install the following Prerequisites:  
 * SkyPilot: Ensure SkyPilot is installed and `sky check` succeeds. See [installation instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
@@ -36,13 +38,61 @@ Launch the embedding computation:
 python3 batch_compute_embeddings.py
 ```
 
+Here is how the python script launches vLLM with `Alibaba-NLP/gte-Qwen2-7B-instruct` for embedding generation, where we set each worker to work from `START_IDX` to `END_IDX`. 
+
+<details>
+<summary>SkyPilot YAML for embedding generation</summary>
+
+```yaml
+name: compute-legal-embeddings
+
+resources:
+  accelerators: {L4:1, A100:1} 
+
+envs:
+  START_IDX: ${START_IDX}
+  END_IDX: ${END_IDX}
+
+file_mounts:
+  /output:
+    name: my-bucket-for-embedding-output
+    mode: MOUNT
+
+setup: |
+  pip install torch==2.5.1 vllm==0.6.6.post
+  ...
+
+envs: 
+  MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
+
+run: |
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --model $MODEL_NAME \
+    --max-model-len 3072 \
+    --task embed &
+
+  python scripts/compute_embeddings.py \
+    --start-idx $START_IDX \
+    --end-idx $END_IDX \
+    --chunk-size 2048 \
+    --chunk-overlap 512 \
+    --vllm-endpoint http://localhost:8000 
+```
+
+</details>
+
 This automatically launches 10 SkyPilot managed jobs on L4 GPUs to processe documents from the Pile of Law dataset and computes embeddings in batches:
 ```
 Processing documents: 100%|██████████| 1000/1000 [00:45<00:00, 22.05it/s]
 Saving embeddings to: embeddings_0_1000.parquet
 ...
 ```
-The generated embeddings will be saved to a cloud bucket in parquet format.
+We leverage SkyPilot's managed jobs feature to enable parallel processing across multiple regions and cloud providers. 
+SkyPilot handles job state management and automatic recovery from failures when using spot instances. 
+Managed jobs are cost-efficient and streamline the processing of the partitioned dataset. 
+All generated embeddings are stored efficiently in parquet format within a cloud storage bucket.
+
 ## Step 2: Build RAG with Vector Database
 After computing embeddings, construct a ChromaDB vector database for efficient similarity search:
 
@@ -61,7 +111,7 @@ Adding vectors to ChromaDB: 100%|██████████| 1000/1000 [00:1
 Deploy the RAG service to handle queries and generate answers:
 
 ```bash
-sky launch -c rag_serve serve_rag.yaml
+sky launch -c legal-rag serve_rag.yaml
 ```
 
 Or use Sky Serve for managed deployment:
