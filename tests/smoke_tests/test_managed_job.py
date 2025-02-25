@@ -711,29 +711,36 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
         timeout *= 2
     name = smoke_tests_utils.get_cluster_name()
     yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
+    yaml_config = common_utils.read_yaml_all(yaml_path)
+    for task_config in yaml_config:
+        task_config['resources'] = task_config.get('resources', {})
+        task_config['resources']['cloud'] = generic_cloud
 
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
-        test = smoke_tests_utils.Test(
-            'managed_jobs_retry_logs',
-            [
-                # TODO(zhwu): we should make the override for generic_cloud work
-                # with multiple stages in pipeline.
-                f'sky jobs launch -n {name} {yaml_path} -y -d',
-                # TODO(zhwu): Check why the logs does not return immediately
-                # after job status FAILED.
-                f'sky jobs logs -n {name} | tee {log_file.name} ',
-                # First attempt
-                f'cat {log_file.name} | grep "Job started. Streaming logs..."',
-                f'cat {log_file.name} | grep "Job 1 failed"',
-                # Second attempt
-                f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
-                f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
-                # Task 2 is not reached
-                f'! cat {log_file.name} | grep "Job 2"',
-            ],
-            f'sky jobs cancel -y -n {name}',
-            timeout=timeout)
-        smoke_tests_utils.run_one_test(test)
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
+        common_utils.dump_yaml(yaml_file.name, yaml_config)
+        yaml_path = yaml_file.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
+            test = smoke_tests_utils.Test(
+                'managed_jobs_retry_logs',
+                [
+                    # TODO(zhwu): we should make the override for generic_cloud
+                    # work with multiple stages in pipeline.
+                    f'sky jobs launch -n {name} {yaml_path} -y -d',
+                    # TODO(zhwu): Check why the logs does not return immediately
+                    # after job status FAILED.
+                    f'sky jobs logs -n {name} | tee {log_file.name} ',
+                    # First attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..."',
+                    f'cat {log_file.name} | grep "Job 1 failed"',
+                    # Second attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
+                    f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
+                    # Task 2 is not reached
+                    f'! cat {log_file.name} | grep "Job 2"',
+                ],
+                f'sky jobs cancel -y -n {name}',
+                timeout=timeout)
+            smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing storage for managed job ----------
