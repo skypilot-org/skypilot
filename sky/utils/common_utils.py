@@ -787,12 +787,7 @@ def get_cpu_count() -> int:
                 raise ValueError(
                     f'Failed to parse the number of CPUs from {cpu_count}'
                 ) from e
-    # host cpu cores
-    cpu = psutil.cpu_count()
-    cgroup_cpu = _get_cgroup_cpu_limit()
-    if cgroup_cpu is not None:
-        cpu = min(cpu, int(cgroup_cpu))
-    return cpu
+    return _cpu_count()
 
 
 def get_mem_size_gb() -> float:
@@ -805,6 +800,23 @@ def get_mem_size_gb() -> float:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Failed to parse the memory size from {mem_size}') from e
+    return _mem_size_gb()
+
+
+def _cpu_count() -> int:
+    # host cpu cores (logical)
+    cpu = psutil.cpu_count()
+    # cpu affinity on Linux
+    if hasattr(os, 'sched_getaffinity'):
+        # just for safe, length of CPU set should always <= logical cpu cores
+        cpu = min(cpu, len(os.sched_getaffinity(0)))
+    cgroup_cpu = _get_cgroup_cpu_limit()
+    if cgroup_cpu is not None:
+        cpu = min(cpu, int(cgroup_cpu))
+    return cpu
+
+
+def _mem_size_gb() -> float:
     # host memory limit
     mem = psutil.virtual_memory().total
     cgroup_mem = _get_cgroup_memory_limit()
@@ -823,8 +835,8 @@ def _get_cgroup_cpu_limit() -> Optional[float]:
     """Return cpu limit from cgroups in cores.
 
     Returns:
-        The cpu limit in cores as a float (can be fractional), or None if not
-        found, unspecified, or invalid.
+        The cpu limit in cores as a float (can be fractional), or None if there
+        is no limit in cgroups.
     """
     try:
         if _is_cgroup_v2():
@@ -837,15 +849,21 @@ def _get_cgroup_cpu_limit() -> Optional[float]:
                 return quota / period if quota > 0 else None
         else:
             # cgroup v1
-            quota_path = '/sys/fs/cgroup/cpu/cpu.cfs_quota_us'
-            period_path = '/sys/fs/cgroup/cpu/cpu.cfs_period_us'
-
-            with open(quota_path, 'r', encoding='utf-8') as f:
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us',
+                      'r',
+                      encoding='utf-8') as f:
                 quota = float(f.read().strip())
-            with open(period_path, 'r', encoding='utf-8') as f:
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us',
+                      'r',
+                      encoding='utf-8') as f:
                 period = float(f.read().strip())
-            return quota / period if quota > 0 else None
-    except (IOError, ValueError):
+            # Return unlimited if cpu quota is not set.
+            # Note that we do not use cpu.shares since it is a relative weight
+            # instead of a hard limit. It is okay to get CPU throttling under
+            # high contention. And unlimited enables the server to use as much
+            # CPU as available if there is no contention.
+            return quota / period if (quota > 0 and period > 0) else None
+    except (OSError, ValueError):
         return None
 
 
@@ -853,7 +871,7 @@ def _get_cgroup_memory_limit() -> Optional[int]:
     """Return memory limit from cgroups in bytes.
 
     Returns:
-        The memory limit in bytes, or None if not found or unspecified.
+        The memory limit in bytes, or None if there is no limit in cgroups.
     """
     try:
         path = ('/sys/fs/cgroup/memory.max' if _is_cgroup_v2() else
@@ -864,10 +882,10 @@ def _get_cgroup_memory_limit() -> Optional[int]:
                 return None
             limit = int(value)
             return limit if limit > 0 else None
-    except (IOError, ValueError):
+    except (OSError, ValueError):
         return None
 
 
 def _is_cgroup_v2() -> bool:
     """Return True if the environment is running cgroup v2."""
-    return os.path.exists('/sys/fs/cgroup/cgroup.controllers')
+    return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')

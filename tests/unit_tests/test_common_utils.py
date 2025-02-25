@@ -1,3 +1,4 @@
+import os
 from unittest import mock
 
 import pytest
@@ -156,7 +157,7 @@ class TestCgroupFunctions:
         mock_open.side_effect = IOError
         assert common_utils._get_cgroup_memory_limit() is None
 
-    @mock.patch('os.path.exists')
+    @mock.patch('os.path.isfile')
     def test_is_cgroup_v2(self, mock_exists):
         # Test cgroup v2 detection
         mock_exists.return_value = True
@@ -167,19 +168,28 @@ class TestCgroupFunctions:
 
     @mock.patch('psutil.cpu_count')
     @mock.patch('sky.utils.common_utils._get_cgroup_cpu_limit')
-    def test_get_cpu_count(self, mock_cgroup_cpu, mock_cpu_count):
+    @mock.patch('os.sched_getaffinity', create=True)
+    def test_get_cpu_count(self, mock_affinity, mock_cgroup_cpu,
+                           mock_cpu_count):
         # Test when no cgroup limit
         mock_cpu_count.return_value = 8
         mock_cgroup_cpu.return_value = None
+        # Non-Linux platforms
+        delattr(os, 'sched_getaffinity')
         assert common_utils.get_cpu_count() == 8
 
-        # Test when cgroup limit is lower
-        mock_cgroup_cpu.return_value = 4.0
+        # Test with CPU affinity
+        setattr(os, 'sched_getaffinity', mock_affinity)
+        mock_affinity.return_value = {0, 1, 2, 3}
         assert common_utils.get_cpu_count() == 4
 
         # Test when cgroup limit is higher
         mock_cgroup_cpu.return_value = 16.0
-        assert common_utils.get_cpu_count() == 8
+        assert common_utils.get_cpu_count() == 4
+
+        # Test when cgroup limit is lower
+        mock_cgroup_cpu.return_value = 2.0
+        assert common_utils.get_cpu_count() == 2
 
         # Test with env var
         with mock.patch.dict('os.environ',
