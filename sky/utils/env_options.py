@@ -13,6 +13,7 @@ class Options(enum.Enum):
     DISABLE_LOGGING = ('SKYPILOT_DISABLE_USAGE_COLLECTION', False)
     MINIMIZE_LOGGING = ('SKYPILOT_MINIMIZE_LOGGING', True)
     SUPPRESS_SENSITIVE_LOG = ('SKYPILOT_SUPPRESS_SENSITIVE_LOG', False)
+    LOWEST_RESOURCE_MODE = ('SKYPILOT_LOWEST_RESOURCE_MODE', False)
     # Internal: this is used to skip the cloud user identity check, which is
     # used to protect cluster operations in a multi-identity scenario.
     # Currently, this is only used in the job and serve controller, as there

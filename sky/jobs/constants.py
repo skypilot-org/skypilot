@@ -2,6 +2,7 @@
 from typing import Dict, Union
 
 from sky.skylet import constants as skylet_constants
+from sky.utils import env_options
 
 JOBS_CONTROLLER_TEMPLATE = 'jobs-controller.yaml.j2'
 JOBS_CONTROLLER_YAML_PREFIX = '~/.sky/jobs_controller'
@@ -17,11 +18,13 @@ JOBS_TASK_YAML_PREFIX = '~/.sky/managed_jobs'
 # parallelism limit, and memory / 350MB is the limit to concurrently running
 # jobs. See _get_launch_parallelism and _get_job_parallelism in scheduler.py.
 # We use 50 GB disk size to reduce the cost.
-CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
-    'cpus': '4+',
-    'memory': '8x',
-    'disk_size': 50
-}
+if env_options.Options.LOWEST_RESOURCE_MODE.get():
+    CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
+        'cpus': '2+',
+        'memory': '2x',
+    }
+else:
+    CONTROLLER_RESOURCES = {'cpus': '4+', 'memory': '8x', 'disk_size': 50}
 
 # TODO(zhwu): This is no longer accurate, after #4592, which increases the
 # length of user hash appended to the cluster name from 4 to 8 chars. This makes
