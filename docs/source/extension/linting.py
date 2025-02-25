@@ -11,27 +11,31 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
 
     # Markdown ATX headings pattern explanation:
     # ^            - Start of line
-    # #+           - 1+ '#' characters (heading level)
+    # #{2,}        - 2+ '#' characters (heading level, excluding top level)
     # \s+          - 1+ whitespace after #
     # (.+?)        - Non-greedy capture of heading text (group 1)
     # \s*          - Optional whitespace after heading text
     # #*           - Optional closing #s (some markdown flavors allow this)
     # $            - End of line
-    md_pattern = re.compile(r'^#+\s+(.+?)\s*#*$', re.MULTILINE)
+    md_pattern = re.compile(r'^#{2,}\s+(.+?)\s*#*$', re.MULTILINE)
     headings += md_pattern.findall(content)
 
     # reST underlined headings pattern explanation:
+    # We need to identify the document structure to exclude top-level headings
+    # This simplified approach looks for specific underline characters
+    # typically used for section levels below the top level
+    #
     # ^            - Start of line
     # ([^\n]+)     - Capture heading text (group 1) - any chars except newline
     # \n           - Newline after heading text
-    # ([...])       - Capture underline character (group 2) from valid set
+    # ([=\-`:"'~+^_#*]) - Capture underline character (group 2) from valid set
     # \2+          - 1+ repeats of same underline character
     # \s*$         - Optional trailing whitespace
     #
-    # Valid underline chars: all ASCII punctuation except ~ (reserved for overlining)
+    # Note: Typically = and - are used for top-level headings, so we exclude them
     rst_pattern = re.compile(
         r'^([^\n]+)\n'  # Heading text
-        r'([!"#$%&\'()*+,\-./:;<=>?@[\\\]^_`{|}~])'  # First underline char
+        r'([`:"\'~+^_#*])'  # First underline char (excluding = and - for top level)
         r'\2+\s*$',  # Repeat same char + whitespace
         re.MULTILINE)
     headings += [m[0] for m in rst_pattern.findall(content)]
