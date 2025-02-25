@@ -230,12 +230,15 @@ async def health_check():
 @app.get('/', response_class=HTMLResponse)
 async def get_search_page():
     """Serve a simple search interface."""
-    template_path = os.path.join(os.path.dirname(__file__), 'templates', 'index.html')
+    template_path = os.path.join(os.path.dirname(__file__), 'templates',
+                                 'index.html')
     try:
         with open(template_path, 'r') as f:
             return f.read()
     except FileNotFoundError:
-        raise HTTPException(status_code=500, detail=f"Template file not found at {template_path}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Template file not found at {template_path}")
 
 
 def main():

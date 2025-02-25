@@ -11,8 +11,10 @@ to define the managed job info.
 import argparse
 import os
 
-import sky
 from dotenv import load_dotenv
+
+import sky
+
 
 def calculate_job_range(start_idx: int, end_idx: int, job_rank: int,
                         total_jobs: int) -> tuple[int, int]:
