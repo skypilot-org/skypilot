@@ -661,7 +661,8 @@ class Kubernetes(clouds.Cloud):
                 check_result = kubernetes_utils.check_credentials(context)
                 if check_result[0]:
                     success = True
-                    hints.append(f'Context {context}: {check_result[1]}')
+                    if check_result[1] is not None:
+                        hints.append(f'Context {context}: {check_result[1]}')
                 else:
                     reasons.append(f'Context {context}: {check_result[1]}')
             except Exception as e:  # pylint: disable=broad-except
