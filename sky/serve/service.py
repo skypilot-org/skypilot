@@ -216,55 +216,6 @@ def _cleanup(service_name: str,
     return failed
 
 
-# def _get_external_lb_cluster_name(service_name: str, lb_id: int) -> str:
-#     return f'sky-{service_name}-lb-{lb_id}'
-
-# def _start_external_load_balancer(service_name: str, lb_id: int,
-#                                   lb_cluster_name: str, controller_addr: str,
-#                                   lb_port: int, lb_policy: str,
-#                                   lb_resources: Dict[str, Any]) -> None:
-#     # TODO(tian): Hack. We should figure out the optimal resoruces.
-#     if 'cpus' not in lb_resources:
-#         lb_resources['cpus'] = '2+'
-#     # Already checked in service spec validation.
-#     assert 'ports' not in lb_resources
-#     lb_resources['ports'] = [lb_port]
-#     lbr = resources_lib.Resources.from_yaml_config(lb_resources)
-#     # TODO(tian): Set delete=False to debug. Remove this on production.
-#     with tempfile.NamedTemporaryFile(prefix=lb_cluster_name,
-#                                      mode='w',
-#                                      delete=False) as f:
-#         # TODO(tian): Hack. Support multiple resources.
-#         assert len(lbr) == 1, lbr
-#         lb_region = lbr[0].region
-#         vars_to_fill = {
-#             'load_balancer_port': lb_port,
-#             'controller_addr': controller_addr,
-#             'load_balancing_policy': lb_policy,
-#             'sky_activate_python_env':
-#                 skylet_constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV,
-#             'lb_envs': controller_utils.sky_managed_cluster_envs(),
-#             'region': lb_region,
-#         }
-#         common_utils.fill_template(constants.EXTERNAL_LB_TEMPLATE,
-#                                    vars_to_fill,
-#                                    output_path=f.name)
-#         lb_task = task_lib.Task.from_yaml(f.name)
-#         lb_task.set_resources(lbr)
-#         serve_state.add_external_load_balancer(service_name, lb_id,
-#                                                lb_cluster_name,
-#                                                lb_resources['region'], lb_port
-# )
-#         # TODO(tian): Temporary solution for circular import. We should move
-#         # the import to the top of the file.
-#         import sky  # pylint: disable=import-outside-toplevel
-#         sky.launch(
-#             task=lb_task,
-#             cluster_name=lb_cluster_name,
-#             retry_until_up=True,
-#         )
-
-
 def _wait_external_load_balancers(
         service_name: str, hosted_zone: str,
         service_spec: 'service_spec.SkyServiceSpec') -> None:
@@ -399,9 +350,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                                                     controller_port)
 
             controller_addr = f'http://{controller_host}:{controller_port}'
-            # # TODO(tian): Combine the following two.
-            # lbid2cluster = {}
-            # lbid2region = {}
 
             load_balancer_process = None
             if service_spec.external_load_balancers is None:
@@ -445,34 +393,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                     service_name, constants.EXTERNAL_LB_PORT)
             if load_balancer_process is not None:
                 load_balancer_processes.append(load_balancer_process)
-            #     for lb_id, lb_config in enumerate(
-            #             service_spec.external_load_balancers):
-            #         # Generate load balancer log file name.
-            #         load_balancer_log_file = os.path.expanduser(
-            #             serve_utils.
-            #             generate_remote_external_load_balancer_log_file_name(
-            #                 service_name, lb_id))
-            #         lb_cluster_name = _get_external_lb_cluster_name(
-            #             service_name, lb_id)
-            #         lbid2cluster[lb_id] = lb_cluster_name
-            #         lb_policy = lb_config['load_balancing_policy']
-            #         lb_resources = lb_config['resources']
-            #         lbid2region[lb_id] = lb_resources['region']
-            #         controller_external_addr = (
-            #             f'http://{_get_external_host()}:{controller_port}')
-            #         lb_process = multiprocessing.Process(
-            #             target=ux_utils.RedirectOutputForProcess(
-            #                 _start_external_load_balancer,
-            #                 load_balancer_log_file).run,
-            #             # TODO(tian): Support HTTPS on external load balancer.
-            #             # TODO(tian): Let the user to customize the port.
-            #             # TODO(tian): Or, default to port 80 (need root).
-            #             args=(service_name, lb_id, lb_cluster_name,
-            #                   controller_external_addr,
-            #                   constants.EXTERNAL_LB_PORT, lb_policy,
-            #                   lb_resources))
-            #         lb_process.start()
-            #         load_balancer_processes.append(lb_process)
 
         while True:
             _handle_signal(service_name)
