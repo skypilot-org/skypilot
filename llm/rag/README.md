@@ -30,12 +30,20 @@ HF_TOKEN=hf_xxxxx
 ```
 or set as environment variable `HF_TOKEN`.
 
+Set up bucket names for storing embeddings and vector database:
+```bash
+export EMBEDDINGS_BUCKET_NAME=sky-rag-embeddings
+export VECTORDB_BUCKET_NAME=sky-rag-vectordb
+```
+Note that these bucket names need to be unique to the entire SkyPilot community. 
+
+
 ## Step 1: Compute Embeddings from Legal Documents
 Convert legal documents into vector representations using `Alibaba-NLP/gte-Qwen2-7B-instruct`. These embeddings enable semantic search across the document collection.
 
 Launch the embedding computation:
 ```bash
-python3 batch_compute_embeddings.py
+python3 batch_compute_embeddings.py --embedding_bucket_name $EMBEDDINGS_BUCKET_NAME
 ```
 
 Here is how the python script launches vLLM with `Alibaba-NLP/gte-Qwen2-7B-instruct` for embedding generation, where we set each worker to work from `START_IDX` to `END_IDX`. 
@@ -97,12 +105,11 @@ All generated embeddings are stored efficiently in parquet format within a cloud
 After computing embeddings, construct a ChromaDB vector database for efficient similarity search:
 
 ```bash
-sky jobs launch build_rag.yaml
+sky launch build_rag.yaml --env EMBEDDINGS_BUCKET_NAME=$EMBEDDINGS_BUCKET_NAME --env VECTORDB_BUCKET_NAME=$VECTORDB_BUCKET_NAME
 ```
 
 The process builds the database in batches:
-```
-Loading embeddings from: embeddings_0_1000.parquet
+```Loading embeddings from: embeddings_0_1000.parquet
 Adding vectors to ChromaDB: 100%|██████████| 1000/1000 [00:12<00:00, 81.97it/s]
 ...
 ```
@@ -111,12 +118,12 @@ Adding vectors to ChromaDB: 100%|██████████| 1000/1000 [00:1
 Deploy the RAG service to handle queries and generate answers:
 
 ```bash
-sky launch -c legal-rag serve_rag.yaml
+sky launch -c legal-rag serve_rag.yaml --env VECTORDB_BUCKET_NAME=$VECTORDB_BUCKET_NAME
 ```
 
 Or use Sky Serve for managed deployment:
 ```bash
-sky serve up -n legal-rag serve_rag.yaml 
+sky serve up -n legal-rag serve_rag.yaml --env VECTORDB_BUCKET_NAME=$VECTORDB_BUCKET_NAME
 ```
 
 To query the system, get the endpoint:

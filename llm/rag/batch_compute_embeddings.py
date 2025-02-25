@@ -57,14 +57,18 @@ def main():
         help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,
-                        default=10,
+                        default=1,
                         help='Number of jobs to partition the work across')
     parser.add_argument('--env-path',
                         type=str,
                         default='~/.env',
                         help='Path to the environment file')
-    args = parser.parse_args()
+    parser.add_argument("--embedding_bucket_name",
+                        type=str,
+                        default="sky-rag-embeddings",
+                        help="Name of the bucket to store embeddings")
 
+    args = parser.parse_args()
     # Try to get HF_TOKEN from environment first, then ~/.env file
     hf_token = os.environ.get('HF_TOKEN')
     if not hf_token:
@@ -90,6 +94,7 @@ def main():
             'START_IDX': job_start,
             'END_IDX': job_end,
             'HF_TOKEN': hf_token,
+            'EMBEDDINGS_BUCKET_NAME': args.embedding_bucket_name,
         })
 
         sky.jobs.launch(task_copy, name=f'rag-compute-{job_start}-{job_end}')
