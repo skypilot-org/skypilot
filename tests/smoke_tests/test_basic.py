@@ -600,8 +600,11 @@ def unreachable_context():
         '--token="aQo=" && '
         'kubectl config set-context ' + unreachable_name + ' '
         '--cluster=unreachable-cluster --user=unreachable-user && '
-        # Stop the API server (if any) to pick up kubeconfig change
-        'sky api stop',
+        # Restart the API server to pick up kubeconfig change
+        # TODO(aylei): There is a implicit API server restart before starting
+        # smoke tests in CI pipeline. We should move that to fixture to make
+        # the test coherent.
+        'sky api stop || true && sky api start',
         shell=True,
         check=True)
 
