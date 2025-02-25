@@ -37,6 +37,12 @@ spec:
         {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
+        # Start API server directly to:
+        # 1. Bypass the healthz check of `sky api start`, probe will do the job better
+        # 2. Ensure all logs are properly captured in container stdout/stderr
+        # See: https://github.com/skypilot-org/skypilot/issues/4471
+        #      https://github.com/skypilot-org/skypilot/issues/4772
+        # PS: this comment is moved here to avoid appearing in the final start script.
         args:
         - /bin/sh
         - -c
@@ -52,19 +58,20 @@ spec:
           # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
           cp /tmp/config.yaml /root/.sky/config.yaml
           {{- end }}
-          sky api start --deploy && tail -f /root/.sky/api_server/server.log
+          exec python -m sky.server.server --deploy --host 0.0.0.0 --port 46580
         ports:
         - containerPort: 46580
         livenessProbe:
           httpGet:
             path: /api/health
             port: 46580
-          periodSeconds: 30
+          periodSeconds: 10
         readinessProbe:
           httpGet:
             path: /api/health
             port: 46580
-          periodSeconds: 30
+          # Accelerate startup and failover
+          periodSeconds: 10
         volumeMounts:
         {{- if .Values.storage.enabled }}
         - name: state-volume
