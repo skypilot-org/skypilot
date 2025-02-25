@@ -3004,7 +3004,7 @@ def _down_or_stop_clusters(
                     # with the termination.
                     hint_or_raise(controller_name, purge)
                 except (exceptions.ClusterOwnerIdentityMismatchError,
-                        RuntimeError) as e:
+                        exceptions.NotSupportedError, RuntimeError) as e:
                     if purge:
                         click.echo(common_utils.format_exception(e))
                     else:
