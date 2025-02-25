@@ -157,7 +157,11 @@ def _cleanup_ports_for_loadbalancer(
 ) -> None:
     service_name = _LOADBALANCER_SERVICE_NAME.format(
         cluster_name_on_cloud=cluster_name_on_cloud)
+    # TODO(aylei): test coverage
+    context = provider_config.get(
+        'context', kubernetes_utils.get_current_kube_config_context_name())
     network_utils.delete_namespaced_service(
+        context=context,
         namespace=provider_config.get('namespace', 'default'),
         service_name=service_name,
     )
@@ -169,9 +173,12 @@ def _cleanup_ports_for_ingress(
     provider_config: Dict[str, Any],
 ) -> None:
     # Delete services for each port
+    context = provider_config.get(
+        'context', kubernetes_utils.get_current_kube_config_context_name())
     for port in ports:
         service_name = f'{cluster_name_on_cloud}--skypilot-svc--{port}'
         network_utils.delete_namespaced_service(
+            context=context,
             namespace=provider_config.get('namespace',
                                           kubernetes_utils.DEFAULT_NAMESPACE),
             service_name=service_name,
