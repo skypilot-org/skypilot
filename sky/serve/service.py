@@ -147,7 +147,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # Already checked before submit to controller.
     assert task.service is not None, task
     service_spec = task.service
-    if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
+    if len(serve_state.get_services()) >= serve_utils.get_num_service_threshold(
+    ):
         cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Max number of services reached.')
