@@ -267,6 +267,9 @@ available_node_types:
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
+            {% if high_availability %}
+            app: {{cluster_name_on_cloud}}
+            {% endif %}
         {% if k8s_fuse_device_required %}
         annotations:
             # Required for FUSE mounting to access /dev/fuse
@@ -276,7 +279,7 @@ available_node_types:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
-        restartPolicy: Never
+        restartPolicy: {{ "Always" if high_availability else "Never" }}
 
         # Add node selector if GPU/TPUs are requested:
         {% if (k8s_acc_label_key is not none and k8s_acc_label_value is not none) or (k8s_spot_label_key is not none) %}
@@ -313,6 +316,11 @@ available_node_types:
         - name: dev-fuse    # Required for fuse mounting
           hostPath:
             path: /dev/fuse
+        {% if high_availability %}
+        - name: sky-data
+          persistentVolumeClaim:
+            claimName: {{cluster_name_on_cloud}}-sky-data
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -559,6 +567,15 @@ available_node_types:
           # /tmp which cause slowdowns if is not a shared memory volume.
           - mountPath: /dev/shm
             name: dshm
+          {% if high_availability %}
+          # Please be careful when changing this.
+          # When mounting, Kubernetes changes the ownership of the parent directory
+          # to root:root.
+          # pylint: disable=line-too-long
+          # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
+          - name: sky-data
+            mountPath: /mnt/home
+          {% endif %}
           {% if k8s_fuse_device_required %}
           securityContext:
             capabilities:
@@ -592,7 +609,47 @@ available_node_types:
               smarter-devices/fuse: "1"
               {% endif %}
             {% endif %}
-            
+      
+      {%if high_availability %}
+      pvc_spec:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: {{cluster_name_on_cloud}}-sky-data
+          namespace: {{k8s_namespace}}
+        spec:
+          accessModes:
+            - ReadWriteOnce # Our controller pod is singleton
+          resources:
+            requests:
+              storage: {{disk_size}}
+
+      deployment_spec:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: {{cluster_name_on_cloud}}-deployment
+          namespace: {{k8s_namespace}}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: {{cluster_name_on_cloud}}
+          template:
+            # The only difference between the pod spec and this section is the initContainers
+            metadata:
+              # should be replaced by pod metadata
+            spec:
+              initContainers:
+                - name: init-copy-home
+                  image: {{image_id}}
+                  command: ["/bin/sh", "-c"]
+                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a /home/sky/ /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
+                  volumeMounts:
+                    - name: sky-data
+                      mountPath: /mnt/home
+              # should be replaced by pod spec
+      {% endif %}
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Create ~/.ssh/config file in case the file does not exist in the image.

@@ -35,11 +35,7 @@ TAG_POD_INITIALIZED = 'skypilot-initialized'
 def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
     return {TAG_RAY_CLUSTER_NAME: cluster_name}
 
-# Please be careful when changing this.
-# When mounting, Kubernetes changes the ownership of the parent directory
-# to root:root.
-# pylint: disable=line-too-long
-# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
+
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS = {
     # volume name -> mount path
     'sky-data': '/home/sky',
@@ -481,121 +477,18 @@ def _create_namespaced_pod_with_retries(namespace: str, pod_spec: dict,
 
 
 def _create_persistent_volume_claim(namespace: str, context: Optional[str],
-                                    pvc_name: str) -> None:
+                                    pvc_spec: Dict[str, Any]) -> None:
     """Creates a persistent volume claim for SkyServe controller."""
     try:
         kubernetes.core_api(context).read_namespaced_persistent_volume_claim(
-            name=pvc_name, namespace=namespace)
+            name=pvc_spec['metadata']['name'], namespace=namespace)
         return
     except kubernetes.api_exception() as e:
         if e.status != 404:  # Not found
             raise
 
-    pvc_spec = {
-        'apiVersion': 'v1',
-        'kind': 'PersistentVolumeClaim',
-        'metadata': {
-            'name': pvc_name,
-        },
-        'spec': {
-            'accessModes': ['ReadWriteOnce'],
-            'resources': {
-                'requests': {
-                    'storage': '10Gi'  # TODO(andyl): use a constant here
-                }
-            }
-        }
-    }
-
     kubernetes.core_api(context).create_namespaced_persistent_volume_claim(
         namespace=namespace, body=pvc_spec)
-
-
-def _create_serve_controller_deployment(
-        pod_spec: Dict[str, Any], cluster_name_on_cloud: str, namespace: str,
-        context: Optional[str]) -> Dict[str, Any]:
-    """Creates a deployment for SkyServe controller with persistence."""
-    assert len(
-        pod_spec['spec']['containers']) == 1, 'Only one container is supported'
-
-    # The pod template part of pod_spec is used in the deployment
-    # spec.template.spec
-    spec = pod_spec.pop('spec')
-    container = spec['containers'][0]
-
-    if HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS:
-        # TODO(andyl): use defaultdict
-        if spec.get('volumes') is None:
-            spec['volumes'] = []
-        if container.get('volumeMounts') is None:
-            container['volumeMounts'] = []
-
-    for volume_name, mount_path in (
-            HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS.items()):
-        pvc_name = _get_pvc_name(cluster_name_on_cloud, volume_name)
-        _create_persistent_volume_claim(namespace, context, pvc_name)
-        spec['volumes'].append({
-            'name': volume_name,
-            'persistentVolumeClaim': {
-                'claimName': pvc_name
-            }
-        })
-        container['volumeMounts'].append({
-            'mountPath': mount_path,
-            'name': volume_name
-        })
-
-    template_metadata = pod_spec.pop('metadata')
-    assert pod_spec.keys() == {'apiVersion', 'kind'
-                              }, (f'pod_spec has fields {pod_spec.keys()}')
-
-    deployment_labels = {
-        'app': cluster_name_on_cloud,
-    }
-    template_metadata['labels'].update(deployment_labels)
-
-    image_id = container['image']
-    assert image_id is not None, 'Image ID is None'
-    init_containers = spec.get('initContainers', [])
-    init_containers.append({
-        'name': 'init-copy-home',
-        'image': image_id,
-        'command': ['/bin/sh', '-c'],
-        'args': [
-            'echo "Copying home directory to /mnt/home"; '
-            'rsync -a /home/sky/ /mnt/home; '
-            'echo "Copy completed.";'
-            'ls -la /mnt/home'
-        ],
-        'volumeMounts': [{
-            'name': 'sky-data',
-            'mountPath': '/mnt/home'
-        }]
-    })
-
-    deployment_spec = {
-        'apiVersion': 'apps/v1',
-        'kind': 'Deployment',
-        'metadata': {
-            'name': _get_deployment_name(cluster_name_on_cloud),
-            'namespace': namespace,
-        },
-        'spec': {
-            'replicas': 1,
-            'selector': {
-                'matchLabels': deployment_labels
-            },
-            'template': {
-                'metadata': template_metadata,
-                'spec': {
-                    'initContainers': init_containers,
-                    **spec, 'restartPolicy': 'Always'
-                }
-            }
-        }
-    }
-
-    return deployment_spec
 
 
 @timeline.event
@@ -627,6 +520,14 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     namespace = kubernetes_utils.get_namespace_from_config(provider_config)
     context = kubernetes_utils.get_context_from_config(provider_config)
     pod_spec = copy.deepcopy(config.node_config)
+
+    to_create_deployment = 'deployment_spec' in pod_spec
+    if to_create_deployment:
+        deployment_spec = pod_spec.pop('deployment_spec')
+        pvc_spec = pod_spec.pop('pvc_spec')
+        assert len(pod_spec['spec']['containers']) == 1, (
+            'Only one container is supported for deployment')
+
     tags = ray_tag_filter(cluster_name_on_cloud)
 
     pod_spec['metadata']['namespace'] = namespace
@@ -709,11 +610,6 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'run_instances: calling create_namespaced_pod '
                  f'(count={to_start_count}).')
 
-    # TODO(andyl): We should not check user config here. Somehow breaks the abstraction.
-    # Instead, we should move this flag to provision config.
-    to_create_deployment = common_utils.high_availability_specified(
-        cluster_name_on_cloud)
-
     def _create_pod_thread(i: int):
         pod_spec_copy = copy.deepcopy(pod_spec)
         if head_pod_name is None and i == 0:
@@ -773,8 +669,13 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
             pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
 
         if to_create_deployment:
-            deployment_spec = _create_serve_controller_deployment(
-                pod_spec_copy, cluster_name_on_cloud, namespace, context)
+            _create_persistent_volume_claim(namespace, context, pvc_spec)
+
+            # It's safe to directly modify the template spec in the deployment spec
+            # because controller pod is singleton, i.e. i in [0].
+            template_pod_spec = deployment_spec['spec']['template']
+            template_pod_spec['metadata'] = pod_spec_copy['metadata']
+            template_pod_spec['spec'].update(pod_spec_copy['spec'])
             try:
                 return kubernetes.apps_api(
                     context).create_namespaced_deployment(
@@ -914,7 +815,8 @@ def _delete_services(name_prefix: str, namespace: str,
     for service_suffix in ['', '-ssh']:
         service_name = f'{name_prefix}{service_suffix}'
         # Since we are not saving this lambda, it's a false positive.
-        # TODO(andyl): Wait for https://github.com/pylint-dev/pylint/issues/5263.
+        # TODO(andyl): Wait for
+        # https://github.com/pylint-dev/pylint/issues/5263.
         # pylint: disable=cell-var-from-loop
         _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
             context).delete_namespaced_service(name=service_name,
@@ -999,10 +901,11 @@ def terminate_instances(
 
     if cluster_name_on_cloud.startswith('sky-serve-controller'):
         # We chooese to only check cluster name, because users may launch a
-        # high availability controller, and then remove `controller.high_availability`
-        # from the config, which creates a resource leak.
-        # TODO(andyl): Could be resolved by storing the high availability property
-        # in the cluster config.
+        # high availability controller, and then remove
+        # `controller.high_availability` from the config, which creates a
+        # resource leak.
+        # TODO(andyl): Could be resolved by storing the high availability
+        # property in the provider config.
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 

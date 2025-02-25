@@ -863,6 +863,9 @@ def write_cluster_config(
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
 
+    high_availability_specified = common_utils.high_availability_specified(
+        cluster_name_on_cloud)
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -946,6 +949,9 @@ def write_cluster_config(
                 'sky_wheel_hash': wheel_hash,
                 # Authentication (optional).
                 **auth_config,
+
+                # High availability
+                'high_availability': high_availability_specified,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
