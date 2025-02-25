@@ -4663,11 +4663,10 @@ def serve_logs(
         sky serve logs [SERVICE_NAME] 1
     """
     have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
-    if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
+    if controller and (load_balancer or have_replica_id):
+        raise click.UsageError('--controller cannot be specified with '
+                               '--load-balancer or [REPLICA_ID].')
+    if not (controller or load_balancer or have_replica_id):
         raise click.UsageError('One of --controller, --load-balancer, '
                                '[REPLICA_ID] must be specified.')
     if controller:
@@ -4675,7 +4674,7 @@ def serve_logs(
     elif load_balancer:
         target_component = serve_lib.ServiceComponent.LOAD_BALANCER
     else:
-        # Already checked that num_flags == 1.
+        # Already checked that num_flags >= 1.
         assert replica_id is not None
         target_component = serve_lib.ServiceComponent.REPLICA
     try:

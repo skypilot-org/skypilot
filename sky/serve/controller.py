@@ -55,7 +55,7 @@ def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
 
 def _get_external_host():
     # TODO(tian): Use a more robust way to get the host.
-    return subprocess.check_output('curl ifconfig.me',
+    return subprocess.check_output('curl -s https://checkip.amazonaws.com',
                                    shell=True).decode('utf-8').strip()
 
 

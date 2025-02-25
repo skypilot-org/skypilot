@@ -131,49 +131,39 @@ def _cleanup(service_name: str,
     failed = False
     hosted_zone = service_spec.route53_hosted_zone
 
+    lb_svc_name = serve_utils.format_lb_service_name(service_name)
     replica_infos = serve_state.get_replica_infos(service_name)
+    external_lbs = serve_state.get_replica_infos(lb_svc_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
-    external_lbs = serve_state.get_replica_infos(
-        serve_utils.format_lb_service_name(service_name))
-    logger.info(f'Terminating external load balancers: {external_lbs}')
-    # TODO(tian): Merge the following two loops.
-    for info in replica_infos:
-        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
-                                    args=(info.cluster_name,))
-        p.start()
-        info2proc[info] = p
-        # Set replica status to `SHUTTING_DOWN`
-        info.status_property.sky_launch_status = (
-            replica_managers.ProcessStatus.SUCCEEDED)
-        info.status_property.sky_down_status = (
-            replica_managers.ProcessStatus.RUNNING)
-        serve_state.add_or_update_replica(service_name, info.replica_id, info)
-        logger.info(f'Terminating replica {info.replica_id} ...')
     change_batch = []
-    for external_lb_info in external_lbs:
-        lb_cluster_name = external_lb_info.cluster_name
-        cluster_record = global_user_state.get_cluster_from_name(
-            lb_cluster_name)
-        assert cluster_record is not None
-        lb_region = cluster_record['handle'].launched_resources.region
-        p = multiprocessing.Process(target=replica_managers.terminate_cluster,
-                                    args=(lb_cluster_name,))
-        p.start()
-        info2proc[external_lb_info] = p
-        # Set replica status to `SHUTTING_DOWN`
-        external_lb_info.status_property.sky_launch_status = (
-            replica_managers.ProcessStatus.SUCCEEDED)
-        external_lb_info.status_property.sky_down_status = (
-            replica_managers.ProcessStatus.RUNNING)
-        lb_ip = _get_cluster_ip(lb_cluster_name)
-        assert lb_ip is not None
-        # Hosted zone must be set for external LBs.
-        assert hosted_zone is not None
-        change_batch.append(
-            _get_route53_change('DELETE', service_name, hosted_zone, 'A',
-                                lb_region, lb_ip))
-        logger.info(f'Terminating external load balancer {lb_cluster_name} ...')
+    for is_external_lb, infos in [(False, replica_infos), (True, external_lbs)]:
+        for info in infos:
+            cn = info.cluster_name
+            if is_external_lb:
+                lb_record = global_user_state.get_cluster_from_name(cn)
+                assert lb_record is not None
+                lb_region = lb_record['handle'].launched_resources.region
+                lb_ip = _get_cluster_ip(cn)
+                assert lb_ip is not None
+                # Hosted zone must be set for external LBs.
+                assert hosted_zone is not None
+                change_batch.append(
+                    _get_route53_change('DELETE', service_name, hosted_zone,
+                                        'A', lb_region, lb_ip))
+            p = multiprocessing.Process(
+                target=replica_managers.terminate_cluster, args=(cn,))
+            p.start()
+            info2proc[info] = p
+            # Set replica status to `SHUTTING_DOWN`
+            info.status_property.sky_launch_status = (
+                replica_managers.ProcessStatus.SUCCEEDED)
+            info.status_property.sky_down_status = (
+                replica_managers.ProcessStatus.RUNNING)
+            sn = (lb_svc_name if is_external_lb else service_name)
+            serve_state.add_or_update_replica(sn, info.replica_id, info)
+            identity = 'external load balancer' if is_external_lb else 'replica'
+            logger.info(f'Terminating {identity} {info.replica_id} ...')
 
     if change_batch:
         # TODO(tian): Fix this import hack.
@@ -191,7 +181,6 @@ def _cleanup(service_name: str,
             with ux_utils.enable_traceback():
                 logger.error(f'  Traceback: {traceback.format_exc()}')
 
-    lb_svc_name = serve_utils.format_lb_service_name(service_name)
     for info, p in info2proc.items():
         p.join()
         # TODO(tian): Hack. Fix this.

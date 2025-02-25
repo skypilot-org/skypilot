@@ -834,10 +834,11 @@ def tail_logs(
                 raise ValueError(
                     '`replica_id` must be specified when using target=REPLICA.')
     else:
-        if replica_id is not None:
+        if (replica_id is not None and
+                target == serve_utils.ServiceComponent.CONTROLLER):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
-                                 'target=CONTROLLER/LOAD_BALANCER.')
+                                 'target=CONTROLLER.')
     handle = backend_utils.is_controller_accessible(
         controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
         stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
@@ -846,16 +847,19 @@ def tail_logs(
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    if target != serve_utils.ServiceComponent.REPLICA:
+    if replica_id is None:
         code = serve_utils.ServeCodeGen.stream_serve_process_logs(
             service_name,
             stream_controller=(
                 target == serve_utils.ServiceComponent.CONTROLLER),
             follow=follow)
     else:
-        assert replica_id is not None, service_name
         code = serve_utils.ServeCodeGen.stream_replica_logs(
-            service_name, replica_id, follow)
+            service_name,
+            replica_id,
+            is_external_lb=(
+                target == serve_utils.ServiceComponent.LOAD_BALANCER),
+            follow=follow)
 
     # With the stdin=subprocess.DEVNULL, the ctrl-c will not directly
     # kill the process, so we need to handle it manually here.

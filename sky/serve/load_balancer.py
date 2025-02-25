@@ -110,8 +110,10 @@ class SkyServeLoadBalancer:
                     logger.info(f'Available Replica URLs: {ready_replica_urls}')
                     with self._client_pool_lock:
                         # TODO(tian): Check if there is any replica that is not
-                        #assigned a LB.
+                        # assigned a LB.
                         ready_urls = ready_replica_urls.get(self._region, [])
+                        logger.info('Ready URLs in local region '
+                                    f'{self._region}: {ready_urls}')
                         self._load_balancing_policy.set_ready_replicas(
                             ready_urls)
                         for replica_url in ready_urls:

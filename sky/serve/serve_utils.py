@@ -772,30 +772,31 @@ def _follow_logs_with_provision_expanding(
 
 
 def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+                        is_external_lb: bool, follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
 
-    log_file_name = generate_replica_log_file_name(service_name, replica_id)
+    sn = (format_lb_service_name(service_name)
+          if is_external_lb else service_name)
+
+    log_file_name = generate_replica_log_file_name(sn, replica_id)
     if os.path.exists(log_file_name):
         with open(log_file_name, 'r', encoding='utf-8') as f:
             print(f.read(), flush=True)
         return ''
 
-    launch_log_file_name = generate_replica_launch_log_file_name(
-        service_name, replica_id)
+    launch_log_file_name = generate_replica_launch_log_file_name(sn, replica_id)
     if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
-    replica_cluster_name = generate_replica_cluster_name(
-        service_name, replica_id)
+    replica_cluster_name = generate_replica_cluster_name(sn, replica_id)
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
-        replica_info = serve_state.get_replica_infos(service_name)
+        replica_info = serve_state.get_replica_infos(sn)
         for info in replica_info:
             if info.replica_id == replica_id:
                 return info.status
@@ -1081,10 +1082,11 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            is_external_lb: bool, follow: bool) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, '
+            f'is_external_lb={is_external_lb}, follow={follow})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)
