@@ -77,7 +77,7 @@ class SkyServeController:
         self._lb_replica_manager: Optional[
             replica_managers.ReplicaManager] = None
         if service_spec.external_load_balancers is not None:
-            lb_svc_name = f'{service_name}-lb'
+            lb_svc_name = serve_utils.format_lb_service_name(service_name)
             # TODO(tian): Fix it by not introducing new service.
             serve_state.add_service(lb_svc_name, 0, '', '', '',
                                     serve_state.ServiceStatus.CONTROLLER_INIT,
@@ -141,7 +141,7 @@ class SkyServeController:
                 active_versions = record['active_versions']
                 logger.info(f'All replica info: {replica_infos}')
                 external_lb_infos = serve_state.get_replica_infos(
-                    f'{self._service_name}-lb')
+                    serve_utils.format_lb_service_name(self._service_name))
                 logger.info('All external load balancer infos: '
                             f'{external_lb_infos}')
                 scaling_options = self._autoscaler.generate_scaling_decisions(

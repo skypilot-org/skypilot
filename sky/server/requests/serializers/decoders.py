@@ -116,10 +116,12 @@ def decode_serve_status(return_value: List[dict]) -> List[Dict[str, Any]]:
     for service_status in service_statuses:
         service_status['status'] = serve_state.ServiceStatus(
             service_status['status'])
-        for replica_info in service_status.get('replica_info', []):
-            replica_info['status'] = serve_state.ReplicaStatus(
-                replica_info['status'])
-            replica_info['handle'] = decode_and_unpickle(replica_info['handle'])
+        for replica_key in ['replica_info', 'external_lb_info']:
+            for replica_info in service_status.get(replica_key, []):
+                replica_info['status'] = serve_state.ReplicaStatus(
+                    replica_info['status'])
+                replica_info['handle'] = decode_and_unpickle(
+                    replica_info['handle'])
     return service_statuses
 
 

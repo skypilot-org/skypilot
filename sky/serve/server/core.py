@@ -341,8 +341,7 @@ def up(
                             if task.service.tls_credential is None else 'https')
                 endpoint = f'{protocol}://{socket_endpoint}'
             else:
-                assert isinstance(service_init_result, str)
-                endpoint = service_init_result
+                endpoint = 'Please wait for external load balancer to be ready.'
 
         logger.info(
             f'{fore.CYAN}Service name: '
@@ -682,7 +681,7 @@ def status(
             'tls_encrypted': (bool) whether the service is TLS encrypted,
             'dns_endpoint': (Optional[str]) DNS endpoint,
             'replica_info': (List[Dict[str, Any]]) replica information,
-            'external_lb_info': (Dict[str, Any]) external load balancer
+            'external_lb_info': (List[Dict[str, Any]]) external load balancer
               information,
         }
 
@@ -701,17 +700,7 @@ def status(
             'endpoint': (str) endpoint of the replica,
         }
 
-    Each entry in external_lb_info has the following fields:
-
-    .. code-block:: python
-
-        {
-            'lb_id': (int) index of the external load balancer,
-            'cluster_name': (str) cluster name of the external load balancer,
-            'region': (str) region of the external load balancer,
-            'ip': (str) ip of the external load balancer,
-            'port': (int) port of the external load balancer,
-        }
+    Each entry in external_lb_info has the same fields as replica_info.
 
     For possible service statuses and replica statuses, please refer to
     sky.cli.serve_status.

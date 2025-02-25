@@ -391,6 +391,10 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def format_lb_service_name(service_name: str) -> str:
+    return f'{service_name}-lb'
+
+
 def _get_service_status(
         service_name: str,
         with_replica_info: bool = True,
@@ -400,6 +404,8 @@ def _get_service_status(
     Args:
         service_name: The name of the service.
         with_replica_info: Whether to include the information of all replicas.
+        with_external_lb_info: Whether to include the information of external
+            load balancers.
 
     Returns:
         A dictionary describing the status of the service if the service exists.
@@ -414,11 +420,11 @@ def _get_service_status(
             for info in serve_state.get_replica_infos(service_name)
         ]
     if with_external_lb_info:
-        lb_service_record = _get_service_status(f'{service_name}-lb',
-                                                with_replica_info=True,
-                                                with_external_lb_info=False)
-        assert lb_service_record is not None
-        record['external_lb_info'] = lb_service_record['replica_info']
+        record['external_lb_info'] = [
+            info.to_info_dict(with_handle=True)
+            for info in serve_state.get_replica_infos(
+                format_lb_service_name(service_name))
+        ]
     return record
 
 
@@ -517,6 +523,10 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     terminated_service_names: List[str] = []
     messages: List[str] = []
     for service_name in service_names:
+        if service_name.endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
         service_status = _get_service_status(service_name,
                                              with_replica_info=False,
                                              with_external_lb_info=False)
@@ -888,6 +898,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
     for record in service_records:
         if record['name'].endswith('-lb'):
             # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
             continue
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
@@ -1000,43 +1011,6 @@ def _format_replica_table(replica_records: List[Dict[str, Any]],
         replica_table.add_row(replica_values)
 
     return f'{replica_table}{truncate_hint}'
-
-
-def _format_external_lb_table(external_lb_records: List[Dict[str, Any]],
-                              show_all: bool) -> str:
-    if not external_lb_records:
-        return 'No existing external load balancers.'
-
-    external_lb_columns = ['SERVICE_NAME', 'ID', 'ENDPOINT']
-    if show_all:
-        external_lb_columns.extend(['IP', 'PORT', 'CLUSTER_NAME'])
-    external_lb_table = log_utils.create_table(external_lb_columns)
-
-    truncate_hint = ''
-    if not show_all:
-        if len(external_lb_records) > _EXTERNAL_LB_TRUNC_NUM:
-            truncate_hint = (
-                '\n... (use --all to show all external load balancers)')
-        external_lb_records = external_lb_records[:_EXTERNAL_LB_TRUNC_NUM]
-
-    for record in external_lb_records:
-        service_name = record['service_name']
-        external_lb_id = record['lb_id']
-        lb_ip = record['ip']
-        port = record['port']
-        endpoint = f'{lb_ip}:{port}'
-        cluster_name = record['cluster_name']
-
-        external_lb_values = [
-            service_name,
-            external_lb_id,
-            endpoint,
-        ]
-        if show_all:
-            external_lb_values.extend([lb_ip, port, cluster_name])
-        external_lb_table.add_row(external_lb_values)
-
-    return f'{external_lb_table}{truncate_hint}'
 
 
 # =========================== CodeGen for Sky Serve ===========================

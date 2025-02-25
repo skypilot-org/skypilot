@@ -455,8 +455,8 @@ class ReplicaInfo:
             return None
         replica_port_int = int(self.replica_port)
         try:
-            endpoint_dict = core.endpoints(handle.cluster_name,
-                                           replica_port_int)
+            endpoint_dict = backend_utils.get_endpoints(handle.cluster_name,
+                                                        replica_port_int)
         except exceptions.ClusterNotUpError:
             return None
         endpoint = endpoint_dict.get(replica_port_int, None)

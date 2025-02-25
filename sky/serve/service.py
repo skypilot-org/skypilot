@@ -134,8 +134,10 @@ def _cleanup(service_name: str,
     replica_infos = serve_state.get_replica_infos(service_name)
     info2proc: Dict[replica_managers.ReplicaInfo,
                     multiprocessing.Process] = dict()
-    external_lbs = serve_state.get_replica_infos(f'{service_name}-lb')
+    external_lbs = serve_state.get_replica_infos(
+        serve_utils.format_lb_service_name(service_name))
     logger.info(f'Terminating external load balancers: {external_lbs}')
+    # TODO(tian): Merge the following two loops.
     for info in replica_infos:
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(info.cluster_name,))
@@ -149,8 +151,8 @@ def _cleanup(service_name: str,
         serve_state.add_or_update_replica(service_name, info.replica_id, info)
         logger.info(f'Terminating replica {info.replica_id} ...')
     change_batch = []
-    for external_lb_record in external_lbs:
-        lb_cluster_name = external_lb_record.cluster_name
+    for external_lb_info in external_lbs:
+        lb_cluster_name = external_lb_info.cluster_name
         cluster_record = global_user_state.get_cluster_from_name(
             lb_cluster_name)
         assert cluster_record is not None
@@ -158,7 +160,12 @@ def _cleanup(service_name: str,
         p = multiprocessing.Process(target=replica_managers.terminate_cluster,
                                     args=(lb_cluster_name,))
         p.start()
-        info2proc[external_lb_record] = p
+        info2proc[external_lb_info] = p
+        # Set replica status to `SHUTTING_DOWN`
+        external_lb_info.status_property.sky_launch_status = (
+            replica_managers.ProcessStatus.SUCCEEDED)
+        external_lb_info.status_property.sky_down_status = (
+            replica_managers.ProcessStatus.RUNNING)
         lb_ip = _get_cluster_ip(lb_cluster_name)
         assert lb_ip is not None
         # Hosted zone must be set for external LBs.
@@ -174,16 +181,22 @@ def _cleanup(service_name: str,
         client = boto3.client('route53')
         logger.info(f'Deleting Route53 records for {service_name}. '
                     f'Change batch: {change_batch}')
-        client.change_resource_record_sets(
-            HostedZoneId=service_spec.target_hosted_zone_id,
-            ChangeBatch={'Changes': change_batch})
+        try:
+            client.change_resource_record_sets(
+                HostedZoneId=service_spec.target_hosted_zone_id,
+                ChangeBatch={'Changes': change_batch})
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Failed to delete Route53 records for {service_name}:'
+                         f' {common_utils.format_exception(e)}')
+            with ux_utils.enable_traceback():
+                logger.error(f'  Traceback: {traceback.format_exc()}')
 
+    lb_svc_name = serve_utils.format_lb_service_name(service_name)
     for info, p in info2proc.items():
         p.join()
         # TODO(tian): Hack. Fix this.
-        sn = (f'{service_name}-lb'
-              if info.cluster_name.startswith(f'{service_name}-lb') else
-              service_name)
+        sn = (lb_svc_name
+              if info.cluster_name.startswith(lb_svc_name) else service_name)
         if p.exitcode == 0:
             serve_state.remove_replica(sn, info.replica_id)
             logger.info(f'Replica {info.replica_id} for service {sn} '
@@ -197,7 +210,7 @@ def _cleanup(service_name: str,
             logger.error(f'Replica {info.replica_id} for service {sn}'
                          f' failed to terminate.')
 
-    for sn in [f'{service_name}-lb', service_name]:
+    for sn in [lb_svc_name, service_name]:
         versions = serve_state.get_service_versions(sn)
         serve_state.remove_service_versions(sn)
 
@@ -223,10 +236,11 @@ def _wait_external_load_balancers(
     external_lbs = service_spec.external_load_balancers
     assert external_lbs is not None
     lb_replicas = []
+    lb_svc_name = serve_utils.format_lb_service_name(service_name)
     while True:
         # TODO(tian): Hack. Keep it align with
         # sky/serve/controller.py::SkyServeController::__init__.
-        lb_replicas = serve_state.get_replica_infos(f'{service_name}-lb')
+        lb_replicas = serve_state.get_replica_infos(lb_svc_name)
         if len(lb_replicas) == len(external_lbs):
             if all(
                     _get_cluster_ip(lb_info.cluster_name) is not None
@@ -413,14 +427,15 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         for process in process_to_kill:
             process.join()
         failed = _cleanup(service_name, service_spec)
+        lb_svc_name = serve_utils.format_lb_service_name(service_name)
         if failed:
-            for sn in [f'{service_name}-lb', service_name]:
+            for sn in [lb_svc_name, service_name]:
                 serve_state.set_service_status_and_active_versions(
                     sn, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:
             shutil.rmtree(service_dir)
-            for sn in [f'{service_name}-lb', service_name]:
+            for sn in [lb_svc_name, service_name]:
                 serve_state.remove_service(sn)
                 serve_state.delete_all_versions(sn)
             logger.info(f'Service {service_name} terminated successfully.')
