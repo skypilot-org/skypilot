@@ -16,6 +16,7 @@ import flask
 import yaml
 
 from sky import jobs as managed_jobs
+from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -134,7 +135,8 @@ def _extract_launch_history(log_content: str) -> str:
 def home():
     if not _is_running_on_jobs_controller():
         # Experimental: run on laptop (refresh is very slow).
-        all_managed_jobs = managed_jobs.queue(refresh=True, skip_finished=False)
+        request_id = managed_jobs.queue(refresh=True, skip_finished=False)
+        all_managed_jobs = sdk.get(request_id)
     else:
         job_table = managed_jobs.dump_managed_job_queue()
         all_managed_jobs = managed_jobs.load_managed_job_queue(job_table)
@@ -142,6 +144,7 @@ def home():
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     rows = managed_jobs.format_job_table(all_managed_jobs,
                                          show_all=True,
+                                         show_user=False,
                                          return_rows=True)
 
     status_counts = collections.defaultdict(int)
