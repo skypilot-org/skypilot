@@ -2027,7 +2027,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
         clusters = [cluster['name'] for cluster in cluster_records]
 
     unsupported_clusters = []
-    logger.info(f'Fetching job queue for {clusters}')
+    logger.info(f'Fetching job queue for: {", ".join(clusters)}')
     job_tables = {}
 
     def _get_job_queue(cluster):
@@ -4585,6 +4585,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
               type=int,
               help='Tear down a given replica')
 @_add_click_options(_COMMON_OPTIONS)
+@usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def serve_down(
     service_names: List[str],

@@ -125,6 +125,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_nebius
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -361,6 +362,7 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
+@pytest.mark.no_nebius  # Nebius Autodown and Autostop not supported.
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
@@ -463,6 +465,7 @@ class TestYamlSpecs:
 @pytest.mark.no_vast  # Vast has low availability for K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
+@pytest.mark.no_nebius  # Nebius does not support K80s
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -480,6 +483,7 @@ def test_multiple_accelerators_ordered():
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -497,6 +501,7 @@ def test_multiple_accelerators_ordered_with_default():
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -513,6 +518,7 @@ def test_multiple_accelerators_unordered():
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(

@@ -247,18 +247,23 @@ class Backoff:
 
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
+_using_remote_api_server: Optional[bool] = None
 
 
-def set_client_entrypoint_and_command(client_entrypoint: Optional[str],
-                                      client_command: Optional[str]):
+def set_client_status(client_entrypoint: Optional[str],
+                      client_command: Optional[str],
+                      using_remote_api_server: bool):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
     client entrypoint and command from the client.
     """
-    global _current_command, _current_client_entrypoint
+    global _current_command
+    global _current_client_entrypoint
+    global _using_remote_api_server
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
+    _using_remote_api_server = using_remote_api_server
 
 
 def get_current_command() -> str:
@@ -282,6 +287,17 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     if _current_client_entrypoint is not None:
         return _current_client_entrypoint
     return server_entrypoint
+
+
+def get_using_remote_api_server() -> bool:
+    """Returns whether the API server is remote."""
+    if _using_remote_api_server is not None:
+        return _using_remote_api_server
+    # This gets the right status for the local client.
+    # TODO(zhwu): This is to prevent circular import. We should refactor this.
+    # pylint: disable=import-outside-toplevel
+    from sky.server import common as server_common
+    return not server_common.is_api_server_local()
 
 
 def get_pretty_entrypoint_cmd() -> str:
