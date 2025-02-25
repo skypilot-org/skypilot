@@ -112,7 +112,8 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
                 f'sky jobs launch -n {name}-1 --cloud {generic_cloud} --cpus 2+ tests/test_yamls/minimal.yaml -y',
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
-            ]), *set_user(user_2, user_2_name, [
+            ]),
+            *set_user(user_2, user_2_name, [
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
                 f'sky jobs launch -n {name}-2 --cloud {generic_cloud} --cpus 2+ tests/test_yamls/minimal.yaml -y',
@@ -138,7 +139,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
             *set_user(user_2, user_2_name, [
                 f'controller=$(sky status -u | grep sky-jobs-controller- | awk \'{{print $1}}\') && echo "$controller" && echo delete | sky down "$controller" && exit 1 || true',
                 f'sky jobs cancel -y -n {name}-3',
-            ])
+            ]),
         ],
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2; sky jobs cancel -y -n {name}-3',
     )
