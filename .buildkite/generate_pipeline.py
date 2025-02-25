@@ -317,7 +317,7 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str]):
             },
             #TODO(zpoint): remove this after issue #4753 fixed
             'env': {
-                'SKYPILOT_LOWEST_RESOURCE_MODE': '1'
+                'SKYPILOT_LOWEST_RESOURCE_MODE': '0'
             }
         })
         output_file_pipelines.append(pipeline)
