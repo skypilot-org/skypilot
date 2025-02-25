@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -569,8 +570,49 @@ def test_sky_bench(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.fixture(scope='session')
+def unreachable_context():
+    """Setup the kubernetes context for the test.
+
+    This fixture will copy the kubeconfig file and inject an unreachable context
+    to it. So this must be session scoped that the kubeconfig is modified before
+    the local API server starts.
+    """
+    # Get kubeconfig path from environment variable or use default
+    kubeconfig_path = os.environ.get('KUBECONFIG',
+                                     os.path.expanduser('~/.kube/config'))
+    if not os.path.exists(kubeconfig_path):
+        return
+    import shutil
+
+    # Create a temp kubeconfig
+    temp_kubeconfig = tempfile.NamedTemporaryFile(delete=False, suffix='.yaml')
+    shutil.copy(kubeconfig_path, temp_kubeconfig.name)
+    original_kubeconfig = os.environ.get('KUBECONFIG')
+    os.environ['KUBECONFIG'] = temp_kubeconfig.name
+
+    unreachable_name = '_unreachable_context_'
+    subprocess.run('kubectl config set-cluster unreachable-cluster '
+                   '--server=https://192.0.2.1:6443 && '
+                   'kubectl config set-credentials unreachable-user '
+                   '--client-certificate=invalid --client-key=invalid && '
+                   'kubectl config set-context ' + unreachable_name + ' '
+                   '--cluster=unreachable-cluster --user=unreachable-user',
+                   shell=True,
+                   check=True)
+
+    yield unreachable_name
+
+    # Clean up
+    if original_kubeconfig:
+        os.environ['KUBECONFIG'] = original_kubeconfig
+    else:
+        os.environ.pop('KUBECONFIG', None)
+    os.unlink(temp_kubeconfig.name)
+
+
 @pytest.mark.kubernetes
-def test_kubernetes_context_failover():
+def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
     This test requires two kubernetes clusters:
@@ -594,12 +636,19 @@ def test_kubernetes_context_failover():
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
-    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    assert unreachable_context in contexts, (
+        'unreachable_context should be initialized in the fixture')
+    context = [
+        context for context in contexts
+        if (context != 'kind-skypilot' and context != unreachable_context)
+    ][0]
     config = textwrap.dedent(f"""\
     kubernetes:
       allowed_contexts:
         - kind-skypilot
         - {context}
+        - {unreachable_context}
+        - _nonexist_
     """)
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(config.encode('utf-8'))

@@ -207,7 +207,7 @@ class Kubernetes(clouds.Cloud):
         if existing_contexts and all(ctx in cls.logged_unreachable_contexts
                                      for ctx in existing_contexts):
             logger.warning(
-                'All Kubernetes contexts have reported as unreachable. '
+                'All Kubernetes contexts are unreachable. '
                 'Retry if it is a transient error, or run sky check to '
                 'refresh Kubernetes availability if permanent.')
 
