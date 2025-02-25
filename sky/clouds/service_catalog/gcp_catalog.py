@@ -11,6 +11,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import GCP
 from sky.clouds.service_catalog import common
+from sky.utils import env_options
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -58,8 +59,13 @@ _DEFAULT_HOST_VM_FAMILY = (
     'n1-highmem',
     'n1-highcpu',
 )
-_DEFAULT_NUM_VCPUS = 8
-_DEFAULT_MEMORY_CPU_RATIO = 4
+
+if env_options.Options.LOWEST_RESOURCE_MODE.get():
+    _DEFAULT_NUM_VCPUS = 2
+    _DEFAULT_MEMORY_CPU_RATIO = 2
+else:
+    _DEFAULT_NUM_VCPUS = 8
+    _DEFAULT_MEMORY_CPU_RATIO = 4
 
 _DEFAULT_GPU_MEMORY_CPU_RATIO = 4
 

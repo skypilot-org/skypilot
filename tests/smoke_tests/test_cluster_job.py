@@ -273,6 +273,7 @@ def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # Vast doesn't guarantee exactly 8 CPUs, only at least.
 @pytest.mark.resource_heavy
+@pytest.mark.no_lowest_resource_mode  # Do not run this test in lowest resource mode
 def test_large_job_queue(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -320,6 +321,7 @@ def test_large_job_queue(generic_cloud: str):
 @pytest.mark.no_lambda_cloud  # No Lambda Cloud VM has 8 CPUs
 @pytest.mark.no_vast  # No Vast Cloud VM has 8 CPUs
 @pytest.mark.resource_heavy
+@pytest.mark.no_lowest_resource_mode  # Do not run this test in lowest resource mode
 def test_fast_large_job_queue(generic_cloud: str):
     # This is to test the jobs can be scheduled quickly when there are many jobs in the queue.
     name = smoke_tests_utils.get_cluster_name()

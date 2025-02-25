@@ -121,8 +121,9 @@ def _parse_args(args: Optional[str] = None):
 
 
 def _extract_marked_tests(
-        file_path: str, args: str
-) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]]]]:
+    file_path: str, args: str
+) -> Dict[str, Tuple[List[str], List[str], List[Optional[str]],
+                     List[Optional[Dict[str, str]]]]]:
     """Extract test functions and filter clouds using pytest.mark
     from a Python test file.
 
@@ -188,6 +189,11 @@ def _extract_marked_tests(
                 continue
             clouds_to_include.append(PYTEST_TO_CLOUD_KEYWORD[mark])
 
+        # extract env for each steps
+        env: Optional[Dict[str, str]] = None
+        if 'no_lowest_resource_mode' in marks:
+            env = {'SKYPILOT_LOWEST_RESOURCE_MODE': '0'}
+
         clouds_to_include = (clouds_to_include
                              if clouds_to_include else default_clouds_to_run)
         cloud_queue_map = SERVE_CLOUD_QUEUE_MAP if is_serve_test else CLOUD_QUEUE_MAP
@@ -209,7 +215,6 @@ def _extract_marked_tests(
 
         # pytest will only run the first cloud if there are multiple clouds
         # make it consistent with pytest behavior
-        # print(f"final_clouds_to_include: {final_clouds_to_include}")
         final_clouds_to_include = [final_clouds_to_include[0]]
         param_list = function_name_param_map.get(function_name, [None])
         if len(param_list) < len(final_clouds_to_include):
@@ -220,7 +225,7 @@ def _extract_marked_tests(
             QUEUE_KUBE_BACKEND
             if run_on_cloud_kube_backend else cloud_queue_map[cloud]
             for cloud in final_clouds_to_include
-        ], param_list)
+        ], param_list, [env for _ in final_clouds_to_include])
 
     return function_cloud_map
 
@@ -233,7 +238,7 @@ def _generate_pipeline(test_file: str,
     generated_function_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param in zip(*clouds_queues_param):
+        for cloud, queue, param, env in zip(*clouds_queues_param):
             if test_function in generated_function_set:
                 # Skip duplicate nested function tests under the same class
                 continue
@@ -257,6 +262,8 @@ def _generate_pipeline(test_file: str,
                     # Automatically retry 2 times on any failure by default.
                     'automatic': True
                 }
+            if env:
+                step['env'] = env
             generated_function_set.add(test_function)
             steps.append(step)
     return {'steps': steps}
@@ -267,7 +274,8 @@ def _dump_pipeline_to_file(yaml_file_path: str,
                            extra_env: Optional[Dict[str, str]] = None):
     default_env = {
         'LOG_TO_STDOUT': '1',
-        'SKYPILOT_DISABLE_USAGE_COLLECTION': '1'
+        'SKYPILOT_DISABLE_USAGE_COLLECTION': '1',
+        'SKYPILOT_LOWEST_RESOURCE_MODE': '1'
     }
     if extra_env:
         default_env.update(extra_env)
@@ -306,6 +314,10 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str]):
             'command': 'bash tests/backward_compatibility_tests.sh',
             'agents': {
                 'queue': 'back_compat'
+            },
+            #TODO(zpoint): remove this after issue #4753 fixed
+            'env': {
+                'SKYPILOT_LOWEST_RESOURCE_MODE': '0'
             }
         })
         output_file_pipelines.append(pipeline)
