@@ -13,7 +13,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -61,6 +61,8 @@ _FAILED_TO_FIND_REPLICA_MSG = (
 # Max number of replicas to show in `sky serve status` by default.
 # If user wants to see all replicas, use `sky serve status --all`.
 _REPLICA_TRUNC_NUM = 10
+# Similar to _REPLICA_TRUNC_NUM, but for external load balancers.
+_EXTERNAL_LB_TRUNC_NUM = 10
 
 
 class ServiceComponent(enum.Enum):
@@ -242,6 +244,13 @@ def generate_remote_load_balancer_log_file_name(service_name: str) -> str:
     return os.path.join(dir_name, 'load_balancer.log')
 
 
+def generate_remote_external_load_balancer_log_file_name(
+        service_name: str, lb_id: int) -> str:
+    dir_name = generate_remote_service_dir_name(service_name)
+    # Don't expand here since it is used for remote machine.
+    return os.path.join(dir_name, f'external_load_balancer_{lb_id}.log')
+
+
 def generate_replica_launch_log_file_name(service_name: str,
                                           replica_id: int) -> str:
     dir_name = generate_remote_service_dir_name(service_name)
@@ -278,9 +287,9 @@ def set_service_status_and_active_versions_from_replica(
     if record is None:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(
-                'The service is up-ed in an old version and does not '
-                'support update. Please `sky serve down` '
-                'it first and relaunch the service.')
+                'The service is up-ed in an old version and does not support '
+                'update. Please `sky serve down` it first and relaunch '
+                f'the service. Got service name: {service_name!r}')
     if record['status'] == serve_state.ServiceStatus.SHUTTING_DOWN:
         # When the service is shutting down, there is a period of time which the
         # controller still responds to the request, and the replica is not
@@ -382,14 +391,21 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
     return message
 
 
+def format_lb_service_name(service_name: str) -> str:
+    return f'{service_name}-lb'
+
+
 def _get_service_status(
         service_name: str,
-        with_replica_info: bool = True) -> Optional[Dict[str, Any]]:
+        with_replica_info: bool = True,
+        with_external_lb_info: bool = True) -> Optional[Dict[str, Any]]:
     """Get the status dict of the service.
 
     Args:
         service_name: The name of the service.
         with_replica_info: Whether to include the information of all replicas.
+        with_external_lb_info: Whether to include the information of external
+            load balancers.
 
     Returns:
         A dictionary describing the status of the service if the service exists.
@@ -402,6 +418,12 @@ def _get_service_status(
         record['replica_info'] = [
             info.to_info_dict(with_handle=True)
             for info in serve_state.get_replica_infos(service_name)
+        ]
+    if with_external_lb_info:
+        record['external_lb_info'] = [
+            info.to_info_dict(with_handle=True)
+            for info in serve_state.get_replica_infos(
+                format_lb_service_name(service_name))
         ]
     return record
 
@@ -501,8 +523,13 @@ def terminate_services(service_names: Optional[List[str]], purge: bool) -> str:
     terminated_service_names: List[str] = []
     messages: List[str] = []
     for service_name in service_names:
+        if service_name.endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
         service_status = _get_service_status(service_name,
-                                             with_replica_info=False)
+                                             with_replica_info=False,
+                                             with_external_lb_info=False)
         if (service_status is not None and service_status['status']
                 == serve_state.ServiceStatus.SHUTTING_DOWN):
             # Already scheduled to be terminated.
@@ -570,6 +597,12 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         Encoded load balancer port assigned to the service.
     """
     start_time = time.time()
+    # TODO(tian): Add a field in service record to indicate whether it has
+    # external load balancer or not. And change this timeout accordingly.
+    # TODO(tian): Or, immediately return and let the user to pull the latest
+    # external LB status.
+    # timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS
+    timeout = constants.SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB
     setup_completed = False
     while True:
         job_status = job_lib.get_status(job_id)
@@ -606,6 +639,9 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                         f'{service_name} <new-service-yaml>')
             lb_port = record['load_balancer_port']
             if lb_port is not None:
+                if record.get('dns_endpoint', None) is not None:
+                    endpoint = f'{record["dns_endpoint"]}:{lb_port}'
+                    return message_utils.encode_payload(endpoint)
                 return message_utils.encode_payload(lb_port)
         elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
             with ux_utils.print_exception_no_traceback():
@@ -613,7 +649,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
                                    'To spin up more services, please '
                                    'tear down some existing services.')
         elapsed = time.time() - start_time
-        if elapsed > constants.SERVICE_REGISTER_TIMEOUT_SECONDS:
+        if elapsed > timeout:
             # Print the controller log to help user debug.
             controller_log_path = (
                 generate_remote_controller_log_file_name(service_name))
@@ -628,7 +664,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
         time.sleep(1)
 
 
-def load_service_initialization_result(payload: str) -> int:
+def load_service_initialization_result(payload: str) -> Union[int, str]:
     return message_utils.decode_payload(payload)
 
 
@@ -736,30 +772,31 @@ def _follow_logs_with_provision_expanding(
 
 
 def stream_replica_logs(service_name: str, replica_id: int,
-                        follow: bool) -> str:
+                        is_external_lb: bool, follow: bool) -> str:
     msg = check_service_status_healthy(service_name)
     if msg is not None:
         return msg
     print(f'{colorama.Fore.YELLOW}Start streaming logs for launching process '
           f'of replica {replica_id}.{colorama.Style.RESET_ALL}')
 
-    log_file_name = generate_replica_log_file_name(service_name, replica_id)
+    sn = (format_lb_service_name(service_name)
+          if is_external_lb else service_name)
+
+    log_file_name = generate_replica_log_file_name(sn, replica_id)
     if os.path.exists(log_file_name):
         with open(log_file_name, 'r', encoding='utf-8') as f:
             print(f.read(), flush=True)
         return ''
 
-    launch_log_file_name = generate_replica_launch_log_file_name(
-        service_name, replica_id)
+    launch_log_file_name = generate_replica_launch_log_file_name(sn, replica_id)
     if not os.path.exists(launch_log_file_name):
         return (f'{colorama.Fore.RED}Replica {replica_id} doesn\'t exist.'
                 f'{colorama.Style.RESET_ALL}')
 
-    replica_cluster_name = generate_replica_cluster_name(
-        service_name, replica_id)
+    replica_cluster_name = generate_replica_cluster_name(sn, replica_id)
 
     def _get_replica_status() -> serve_state.ReplicaStatus:
-        replica_info = serve_state.get_replica_infos(service_name)
+        replica_info = serve_state.get_replica_infos(sn)
         for info in replica_info:
             if info.replica_id == replica_id:
                 return info.status
@@ -858,10 +895,18 @@ def format_service_table(service_records: List[Dict[str, Any]],
     service_table = log_utils.create_table(service_columns)
 
     replica_infos: List[Dict[str, Any]] = []
+    external_lb_infos: List[Dict[str, Any]] = []
     for record in service_records:
+        if record['name'].endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
         for replica in record['replica_info']:
             replica['service_name'] = record['name']
             replica_infos.append(replica)
+        for external_lb in record['external_lb_info']:
+            external_lb['service_name'] = record['name']
+            external_lb_infos.append(external_lb)
 
         service_name = record['name']
         version = ','.join(
@@ -893,10 +938,21 @@ def format_service_table(service_records: List[Dict[str, Any]],
         service_table.add_row(service_values)
 
     replica_table = _format_replica_table(replica_infos, show_all)
-    return (f'{service_table}\n'
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
-            f'{replica_table}')
+
+    final_table = (f'{service_table}\n'
+                   f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                   f'Service Replicas{colorama.Style.RESET_ALL}\n'
+                   f'{replica_table}')
+
+    if external_lb_infos:
+        # external_lb_table = _format_external_lb_table(external_lb_infos,
+        #                                               show_all)
+        external_lb_table = _format_replica_table(external_lb_infos, show_all)
+        final_table += (f'\n\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
+                        f'External Load Balancers{colorama.Style.RESET_ALL}\n'
+                        f'{external_lb_table}')
+
+    return final_table
 
 
 def _format_replica_table(replica_records: List[Dict[str, Any]],
@@ -1026,10 +1082,11 @@ class ServeCodeGen:
 
     @classmethod
     def stream_replica_logs(cls, service_name: str, replica_id: int,
-                            follow: bool) -> str:
+                            is_external_lb: bool, follow: bool) -> str:
         code = [
             'msg = serve_utils.stream_replica_logs('
-            f'{service_name!r}, {replica_id!r}, follow={follow})',
+            f'{service_name!r}, {replica_id!r}, '
+            f'is_external_lb={is_external_lb}, follow={follow})',
             'print(msg, flush=True)'
         ]
         return cls._build(code)

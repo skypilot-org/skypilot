@@ -1,6 +1,7 @@
 """Constants used for SkyServe."""
 
 CONTROLLER_TEMPLATE = 'sky-serve-controller.yaml.j2'
+EXTERNAL_LB_TEMPLATE = 'sky-serve-external-load-balancer.yaml.j2'
 
 SKYSERVE_METADATA_DIR = '~/.sky/serve'
 
@@ -17,6 +18,11 @@ SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 CONTROLLER_SETUP_TIMEOUT_SECONDS = 300
 # Time to wait in seconds for service to register on the controller.
 SERVICE_REGISTER_TIMEOUT_SECONDS = 60
+
+# Time to wait in seconds for service to register on the controller with
+# external load balancer. We need to wait longer for external load balancer to
+# be ready for the ip address of the service.
+SERVICE_REGISTER_TIMEOUT_SECONDS_WITH_EXTERNAL_LB = 300
 
 # The time interval in seconds for load balancer to sync with controller. Every
 # time the load balancer syncs with controller, it will update all available
@@ -82,8 +88,12 @@ DEFAULT_MIN_REPLICAS = 1
 # Default port range start for controller and load balancer. Ports will be
 # automatically generated from this start port.
 CONTROLLER_PORT_START = 20001
+CONTROLLER_PORT_RANGE = '20001-20020'
 LOAD_BALANCER_PORT_START = 30001
 LOAD_BALANCER_PORT_RANGE = '30001-30020'
+
+# Port for external load balancer.
+EXTERNAL_LB_PORT = 8000
 
 # Initial version of service.
 INITIAL_VERSION = 1
