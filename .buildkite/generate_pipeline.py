@@ -267,7 +267,8 @@ def _dump_pipeline_to_file(yaml_file_path: str,
                            extra_env: Optional[Dict[str, str]] = None):
     default_env = {
         'LOG_TO_STDOUT': '1',
-        'SKYPILOT_DISABLE_USAGE_COLLECTION': '1'
+        'SKYPILOT_DISABLE_USAGE_COLLECTION': '1',
+        'LOWEST_RESOURCE_MODE': '1'
     }
     if extra_env:
         default_env.update(extra_env)
