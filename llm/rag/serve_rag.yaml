@@ -1,0 +1,82 @@
+name: serve-legal-rag
+
+workdir: .
+
+resources:
+  accelerators: {L4:4, L40S:4}
+  memory: 32+
+  ports: 
+    - 8000 
+  any_of:
+    - use_spot: true
+    - use_spot: false
+
+envs:
+  EMBEDDING_MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
+  GENERATION_MODEL_NAME: "deepseek-ai/DeepSeek-R1-Distill-Llama-8B"
+  VECTORDB_BUCKET_NAME: sky-rag-vectordb
+  VECTORDB_BUCKET_ROOT: /vectordb
+
+file_mounts:
+  ${VECTORDB_BUCKET_ROOT}:
+    name: ${VECTORDB_BUCKET_NAME}
+    # this needs to be the same as in build_vectordb.yaml
+    mode: MOUNT
+
+setup: |
+  # Install dependencies for RAG service
+  pip install numpy pandas sentence-transformers requests tqdm
+  pip install fastapi uvicorn pydantic chromadb
+  
+  # Install dependencies for vLLM
+  pip install transformers==4.48.1 vllm==0.6.6.post1 hf_transfer
+
+run: |
+  HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/generation_model $GENERATION_MODEL_NAME
+  HF_HUB_ENABLE_HF_TRANSFER=1 huggingface-cli download --local-dir /tmp/embedding_model $EMBEDDING_MODEL_NAME
+  
+  # Start vLLM generationservice in background
+  CUDA_VISIBLE_DEVICES=0,1,2 python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --port 8002 \
+    --model /tmp/generation_model \
+    --max-model-len 28816 \
+    --tensor-parallel-size 2 \
+    --task generate &
+  
+  # Wait for vLLM to start
+  echo "Waiting for vLLM service to be ready..."
+  while ! curl -s http://localhost:8002/health > /dev/null; do
+    sleep 5
+    echo "Still waiting for vLLM service..."
+  done
+  echo "vLLM service is ready!"
+  
+  # Start vLLM embeddings service in background
+  CUDA_VISIBLE_DEVICES=3 python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --port 8003 \
+    --model /tmp/embedding_model \
+    --max-model-len 4096 \
+    --task embed &
+
+  # Wait for vLLM embeddings service to start
+  echo "Waiting for vLLM embeddings service to be ready..."
+  while ! curl -s http://localhost:8003/health > /dev/null; do
+    sleep 5
+    echo "Still waiting for vLLM embeddings service..."
+  done
+  echo "vLLM embeddings service is ready!"
+  
+  # Start RAG service
+  python scripts/serve_rag.py \
+    --collection-name legal_docs \
+    --persist-dir /vectordb/chroma \
+    --generator-endpoint http://localhost:8002 \
+    --embed-endpoint http://localhost:8003 
+  
+service:
+  replicas: 1
+  readiness_probe:
+    path: /health
+
