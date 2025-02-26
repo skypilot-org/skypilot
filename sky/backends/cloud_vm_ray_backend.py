@@ -3304,16 +3304,21 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  up=True,
                                  stream_logs=False)
 
+            # Always dump the full setup script to the persistent path first
+            # In high availability mode, we need to dump the full setup script
+            # to a persistent path BEFORE any other operations. This ensures
+            # that if the pod restarts, it can find and execute the complete
+            # setup script, rather than a reference to a temporary file that
+            # would no longer exist after restart.
+            if self._dump_final_script:
+                _dump_final_script(setup_script, constants.PERSISTENT_SETUP_SCRIPT_PATH)
+
             if detach_setup or _is_command_length_over_limit(encoded_script):
                 _dump_final_script(setup_script)
                 create_script_code = 'true'
             else:
                 create_script_code = (f'{{ echo {encoded_script} > '
                                       f'{remote_setup_file_name}; }}')
-
-            if self._dump_final_script:
-                _dump_final_script(setup_script,
-                                   constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
             if detach_setup:
                 return
@@ -3468,10 +3473,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   up=True,
                                   stream_logs=False)
 
-        if _is_command_length_over_limit(job_submit_cmd):
-            _dump_code_to_file(codegen)
-            job_submit_cmd = f'{mkdir_code} && {code}'
-
         if managed_job_dag is not None:
             # Add the managed job to job queue database.
             managed_job_codegen = managed_jobs.ManagedJobCodeGen()
@@ -3483,11 +3484,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot set the managed job to PENDING state in the job template
             # (jobs-controller.yaml.j2), as it may need to wait for the run
             # commands to be scheduled on the job controller in high-load cases.
-            job_submit_cmd = job_submit_cmd + ' && ' + managed_job_code
+            code += ' && ' + managed_job_code
 
         if self._dump_final_script:
             _dump_code_to_file(job_submit_cmd,
                                constants.PERSISTENT_RUN_SCRIPT_DIR)
+
+        if _is_command_length_over_limit(job_submit_cmd):
+            _dump_code_to_file(codegen)
+            job_submit_cmd = f'{mkdir_code} && {code}'
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
