@@ -60,6 +60,7 @@ def optimize(dag: 'dag.Dag',
         minimize: whether to minimize cost or time.
         blocked_resources: a list of resources that should not be used.
         quiet: whether to suppress logging.
+        request_options: Request options used in enforcing admin policies.
 
     Returns:
         The optimized DAG.
