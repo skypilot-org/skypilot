@@ -1,0 +1,26 @@
+{{- if and .Values.ingress.nodePortEnabled (index .Values "ingress-nginx" "enabled") }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Release.Name }}-ingress-controller-np
+  namespace: {{ .Release.Namespace }}
+spec:
+  type: NodePort
+  ports:
+    - port: 80
+      targetPort: 80
+      {{- if .Values.ingress.httpNodePort }}
+      nodePort: {{ .Values.ingress.httpNodePort }}
+      {{- end }}
+      name: http
+    - port: 443
+      targetPort: 443
+      {{- if .Values.ingress.httpsNodePort }}
+      nodePort: {{ .Values.ingress.httpsNodePort }}
+      {{- end }}
+      name: https
+  selector:
+    app.kubernetes.io/component: controller
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: ingress-nginx
+{{- end}}

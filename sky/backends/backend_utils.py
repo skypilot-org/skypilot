@@ -197,6 +197,9 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
     return str(output_path)
 
 
+# Add retry for the file mounts optimization, as the underlying cp command may
+# experience transient errors, #4758.
+@common_utils.retry
 def _optimize_file_mounts(yaml_path: str) -> None:
     """Optimize file mounts in the given ray yaml file.
 
@@ -206,6 +209,10 @@ def _optimize_file_mounts(yaml_path: str) -> None:
       - wheel
       - credentials
     Format is {dst: src}.
+
+    Raises:
+        subprocess.CalledProcessError: If the file mounts are failed to be
+            copied.
     """
     yaml_config = common_utils.read_yaml(yaml_path)
 
@@ -863,6 +870,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.Paperspace,
             clouds.Azure,
             clouds.DO,
+            clouds.Nebius,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):

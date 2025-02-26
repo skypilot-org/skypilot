@@ -138,11 +138,11 @@ Read the research:
    :maxdepth: 1
    :caption: Infra Choices
 
-   ../compute/gpus
-   Using Cloud VMs <../compute/cloud-vm>
    ../reference/kubernetes/index
    Using Existing Machines <../reservations/existing-machines>
    ../reservations/reservations
+   Using Cloud VMs <../compute/cloud-vm>
+   ../compute/gpus
 
 
 
@@ -159,7 +159,7 @@ Read the research:
    :maxdepth: 1
    :caption: User Guides
 
-   ../reference/api-server/api-server
+   ../reference/async
    Secrets and Environment Variables <../running-jobs/environment-variables>
    Docker Containers <../examples/docker-containers>
    ../examples/ports
@@ -171,6 +171,7 @@ Read the research:
    :maxdepth: 1
    :caption: Administrator Guides
 
+   ../reference/api-server/api-server
    ../cloud-setup/cloud-permissions/index
    ../cloud-setup/cloud-auth
    ../cloud-setup/quota
@@ -183,7 +184,7 @@ Read the research:
 
    Task YAML <../reference/yaml-spec>
    CLI <../reference/cli>
-   Python API <../reference/api>
+   ../reference/api
    ../reference/config
    ../developers/index
 

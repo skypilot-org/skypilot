@@ -36,6 +36,7 @@ Install SkyPilot using pip:
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
           pip install "skypilot[kubernetes]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[all]"
 
 
@@ -65,6 +66,7 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
           pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
 
@@ -96,6 +98,7 @@ Install SkyPilot using pip:
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
           pip install -e ".[kubernetes]"
+          pip install -e ".[nebius]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -123,7 +126,38 @@ To use more than one cloud, combine the pip extras:
 
           pip install -e ".[kubernetes,aws,gcp]"
 
+
+Installing via ``uv`` is also supported:
+
+.. code-block:: shell
+
+  uv venv --seed --python 3.10
+  uv pip install "skypilot[kubernetes,aws,gcp]"
+  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+  uv pip install --prerelease allow azure-cli
+  uv pip install "skypilot[all]"
+
+
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
+
+.. note::
+
+  After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
+  See :ref:`upgrade-skypilot` for more details.
+
+
+Connect to a remote API server (optional)
+--------------------------------------------------
+
+If your team has set up a remote :ref:`SkyPilot API server <sky-api-server>`, connect to it by running:
+
+.. code-block:: shell
+
+  sky api login
+
+This is an optional step---by default, SkyPilot automatically starts and uses a local API server.  See more details in :ref:`sky-api-server-connect`.
+
+
 
 .. _verify-cloud-access:
 
@@ -146,6 +180,7 @@ This will produce a summary like:
     Azure: enabled
     OCI: enabled
     Lambda: enabled
+    Nebius: enabled
     RunPod: enabled
     Paperspace: enabled
     Fluidstack: enabled
@@ -495,6 +530,27 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+Nebius
+~~~~~~
+
+`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
+
+.. code-block:: shell
+
+  mkdir -p ~/.nebius
+  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
+
+If you have one tenant you can run:
+
+.. code-block:: shell
+
+  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
+
+You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
+
+.. code-block:: shell
+
+  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
 
 
 Request quotas for first time users
@@ -509,8 +565,8 @@ increases before proceeding.
 
 .. _docker-image:
 
-Quick alternative: Trying in Docker
-------------------------------------------------------
+Using SkyPilot in Docker
+-------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.

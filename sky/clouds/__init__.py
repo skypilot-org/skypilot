@@ -20,6 +20,7 @@ from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
+from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
@@ -49,6 +50,7 @@ __all__ = [
     'ProvisionerVersion',
     'StatusVersion',
     'Fluidstack',
+    'Nebius',
     # Utility functions
     'cloud_in_iterable',
 ]
