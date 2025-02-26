@@ -1225,17 +1225,19 @@ def launch(
         # provided)
         if not detach_run and job_id is not None:
             sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
-            
-            # Check job status and exit with non-zero code if job failed
-            job_statuses = sdk.stream_and_get(
-                sdk.job_status(handle.get_cluster_name(), [job_id]))
-            job_status = job_statuses.get(job_id)
-            if job_status is not None and job_status != job_lib.JobStatus.SUCCEEDED:
-                sys.exit(1)
                 
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
+
+        if not detach_run and job_id is not None:
+            # Check job status and exit with non-zero code if job failed
+            job_statuses = sdk.stream_and_get(
+                sdk.job_status(handle.get_cluster_name(), [job_id]))
+            # TODO: Fix str type mismatch here (#4817)
+            job_status = job_statuses.get(str(job_id))
+            if job_status is not None and job_status != job_lib.JobStatus.SUCCEEDED:
+                sys.exit(1)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1382,6 +1384,11 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
         sdk.tail_logs(cluster, job_id, follow=True)
+        job_statuses = sdk.stream_and_get(
+            sdk.job_status(cluster, [job_id]))
+        job_status = job_statuses.get(job_id)
+        if job_status is not None and job_status != job_lib.JobStatus.SUCCEEDED:
+            sys.exit(1)
 
 
 def _handle_jobs_queue_request(
@@ -3892,6 +3899,21 @@ def jobs_launch(
                                controller=False)
                                
         # Check job status and exit with non-zero code if job failed
+        # TODO: This queue gets longer over time, making each call slower. We
+        # should have tail_logs somehow return the job status too.
+        job_queue = sdk.get(managed_jobs.queue(refresh=False))
+        logger.info(job_queue)
+        found = False
+        for job in job_queue:
+            # TODO: Fix str type mismatch here (#4817)
+            if str(job['job_id']) == str(job_id):
+                found = True
+                job_status = job['status']
+                if job_status is not None and job_status != job_lib.JobStatus.SUCCEEDED:
+                    sys.exit(1)
+        if not found:
+            click.secho(f'Job {job_id} not found in the queue. Did the job launch successfully?', fg='red')
+            sys.exit(1)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
