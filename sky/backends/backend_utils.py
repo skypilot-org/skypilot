@@ -18,8 +18,6 @@ import uuid
 
 import colorama
 from packaging import version
-from requests import adapters
-from requests.packages.urllib3.util import retry as retry_lib
 from typing_extensions import Literal
 
 import sky
@@ -55,6 +53,8 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import filelock
     import requests
+    from requests import adapters
+    from requests.packages.urllib3.util import retry as retry_lib
     import rich.progress as rich_progress
     import yaml
 
@@ -67,6 +67,9 @@ else:
     filelock = adaptors_common.LazyImport('filelock')
     requests = adaptors_common.LazyImport('requests')
     rich_progress = adaptors_common.LazyImport('rich.progress')
+    adapters = adaptors_common.LazyImport('requests.adapters')
+    retry_lib = adaptors_common.LazyImport(
+        'requests.packages.urllib3.util.retry')
 
 logger = sky_logging.init_logger(__name__)
 
