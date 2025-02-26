@@ -259,6 +259,11 @@ async def validate(request: fastapi.Request,
 
     # We make the validation a separate request as it may require expensive
     # network calls if an admin policy is applied.
+    # TODO: Our current launch process is broken down into three calls: 
+    # validate, optimize, and launch. This requires us to apply the admin policy
+    # in each step, which may be an expensive operation. We should consolidate
+    # these into a single call or have a TTL cache for (task, admin_policy) 
+    # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
     executor.schedule_request(request_id=request.state.request_id,
                               request_name='validate',

@@ -72,6 +72,10 @@ def optimize(
             for a task.
         exceptions.NoCloudAccessError: if no public clouds are enabled.
     """
+    # TODO: We apply the admin policy only on the first DAG optimization which 
+    # is shown on `sky launch`. The optimizer is also invoked during failover, 
+    # but we do not apply the admin policy there. We should apply the admin 
+    # policy in the optimizer, but that will require some refactoring.
     dag, _ = admin_policy_utils.apply(
         dag,
         use_mutated_config_in_current_request=True,
