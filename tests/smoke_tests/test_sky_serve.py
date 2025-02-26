@@ -151,6 +151,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
             'curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=timeout_minutes * 60,
     )
     return test
@@ -271,6 +272,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=40 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -298,6 +300,7 @@ def test_skyserve_spot_recovery():
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
         f'{_TEARDOWN_SERVICE.format(name=name)}',
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -320,6 +323,7 @@ def test_skyserve_base_ondemand_fallback(generic_cloud: str):
                                             (1, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -369,6 +373,7 @@ def test_skyserve_dynamic_ondemand_fallback():
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
         f'{_TEARDOWN_SERVICE.format(name=name)}',
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -408,6 +413,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
                                               (1, False, 'FAILED')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -434,6 +440,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -481,6 +488,7 @@ def test_skyserve_auto_restart():
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
         f'{_TEARDOWN_SERVICE.format(name=name)}',
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -509,6 +517,7 @@ def test_skyserve_cancel(generic_cloud: str):
             'echo "$s"; echo "$s" | grep "Client disconnected, stopping computation"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -531,6 +540,7 @@ def test_skyserve_streaming(generic_cloud: str):
             '--endpoint $endpoint | grep "Streaming test passed"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -557,6 +567,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -577,6 +588,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -612,6 +624,7 @@ def test_skyserve_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -654,6 +667,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -699,6 +713,7 @@ def test_skyserve_fast_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -738,6 +753,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -805,6 +821,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -858,6 +875,7 @@ def test_skyserve_failures(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -897,6 +915,7 @@ def test_skyserve_https(generic_cloud: str):
             ],
             _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
+            env=smoke_tests_utils.LOW_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -921,6 +940,7 @@ def test_skyserve_multi_ports(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -950,5 +970,6 @@ def test_user_dependencies(generic_cloud: str):
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)

@@ -1,8 +1,10 @@
 jobs:
   controller:
-    cpus: 2+
-    memory: 4+
+    resources:
+      cpus: 2+
+      memory: 4+
 serve:
   controller:
-    cpus: 2+
-    memory: 4+
+    resources:
+      cpus: 2+
+      memory: 4+
