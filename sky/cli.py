@@ -1225,6 +1225,14 @@ def launch(
         # provided)
         if not detach_run and job_id is not None:
             sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
+            
+            # Check job status and exit with non-zero code if job failed
+            job_statuses = sdk.stream_and_get(
+                sdk.job_status(handle.get_cluster_name(), [job_id]))
+            job_status = job_statuses.get(job_id)
+            if job_status is not None and job_status != job_lib.JobStatus.SUCCEEDED:
+                sys.exit(1)
+                
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
@@ -3882,6 +3890,8 @@ def jobs_launch(
                                job_id=job_id,
                                follow=True,
                                controller=False)
+                               
+        # Check job status and exit with non-zero code if job failed
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
