@@ -45,7 +45,6 @@ from sky.utils import controller_utils
 # step.
 @pytest.mark.managed_jobs
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
-@pytest.mark.resource_heavy
 def test_managed_jobs_basic(generic_cloud: str):
     """Test the managed jobs yaml."""
     name = smoke_tests_utils.get_cluster_name()
@@ -767,7 +766,6 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
-@pytest.mark.resource_heavy
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
     name = smoke_tests_utils.get_cluster_name()
@@ -1023,7 +1021,6 @@ def test_managed_jobs_tpu():
 @pytest.mark.no_vast  # Uses unsatisfiable machines
 @pytest.mark.managed_jobs
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
-@pytest.mark.resource_heavy
 def test_managed_jobs_inline_env(generic_cloud: str):
     """Test managed jobs env"""
     name = smoke_tests_utils.get_cluster_name()
