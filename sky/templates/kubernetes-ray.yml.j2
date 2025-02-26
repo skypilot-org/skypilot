@@ -576,7 +576,7 @@ available_node_types:
           # pylint: disable=line-too-long
           # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
           - name: sky-data
-            mountPath: /mnt/home
+            mountPath: /home/sky
           {% endif %}
           {% if k8s_fuse_device_required %}
           securityContext:
