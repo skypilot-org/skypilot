@@ -6,7 +6,6 @@ from typing import Any, Callable, Optional, Set
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
 from sky.utils import annotations
-from sky.utils import env_options
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
@@ -69,9 +68,7 @@ def _load_config(context: Optional[str] = None):
         try:
             kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
-            suffix = ''
-            if env_options.Options.SHOW_DEBUG_INFO.get():
-                suffix += f' Error: {str(e)}'
+            suffix = f' Error: {str(e)}'
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
                 err_str = (
