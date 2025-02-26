@@ -112,7 +112,8 @@ sky launch build_rag.yaml --env EMBEDDINGS_BUCKET_NAME=$EMBEDDINGS_BUCKET_NAME -
 ```
 
 The process builds the database in batches:
-```Loading embeddings from: embeddings_0_1000.parquet
+```
+Loading embeddings from: embeddings_0_1000.parquet
 Adding vectors to ChromaDB: 100%|██████████| 1000/1000 [00:12<00:00, 81.97it/s]
 ...
 ```
