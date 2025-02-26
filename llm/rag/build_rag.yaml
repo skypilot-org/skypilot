@@ -8,17 +8,15 @@ resources:
 
 envs:
   EMBEDDINGS_BUCKET_NAME: sky-rag-embeddings
-  EMBEDDINGS_BUCKET_ROOT: /embeddings
   VECTORDB_BUCKET_NAME: sky-rag-vectordb
-  VECTORDB_BUCKET_ROOT: /vectordb
 
 file_mounts:
-  ${EMBEDDINGS_BUCKET_ROOT}:
+  /embeddings:
     name: ${EMBEDDINGS_BUCKET_NAME}
     # this needs to be the same as the output in compute_embeddings.yaml
     mode: MOUNT
   
-  ${VECTORDB_BUCKET_ROOT}:
+  /vectordb:
     name: ${VECTORDB_BUCKET_NAME}
     mode: MOUNT
 

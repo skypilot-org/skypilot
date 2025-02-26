@@ -9,10 +9,6 @@ to define the managed job info.
 #!/usr/bin/env python3
 
 import argparse
-import os
-
-from dotenv import load_dotenv
-
 import sky
 
 
@@ -59,26 +55,12 @@ def main():
                         type=int,
                         default=1,
                         help='Number of jobs to partition the work across')
-    parser.add_argument('--env-path',
-                        type=str,
-                        default='~/.env',
-                        help='Path to the environment file')
     parser.add_argument("--embedding_bucket_name",
                         type=str,
                         default="sky-rag-embeddings",
                         help="Name of the bucket to store embeddings")
 
     args = parser.parse_args()
-    # Try to get HF_TOKEN from environment first, then ~/.env file
-    hf_token = os.environ.get('HF_TOKEN')
-    if not hf_token:
-        env_path = os.path.expanduser(args.env_path)
-        if os.path.exists(env_path):
-            load_dotenv(env_path)
-            hf_token = os.getenv('HF_TOKEN')
-
-    if not hf_token:
-        raise ValueError("HF_TOKEN not found in ~/.env or environment variable")
 
     # Load the task template
     task = sky.Task.from_yaml('compute_embeddings.yaml')
@@ -93,7 +75,6 @@ def main():
         task_copy = task.update_envs({
             'START_IDX': job_start,
             'END_IDX': job_end,
-            'HF_TOKEN': hf_token,
             'EMBEDDINGS_BUCKET_NAME': args.embedding_bucket_name,
         })
 

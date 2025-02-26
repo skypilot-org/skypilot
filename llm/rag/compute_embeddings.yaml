@@ -13,13 +13,11 @@ resources:
 envs:
   START_IDX: 0  # Will be overridden by batch_compute_vectors.py
   END_IDX: 10000  # Will be overridden by batch_compute_vectors.py
-  HF_TOKEN: ""  # Will be overridden by batch_compute_vectors.py
   MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
   EMBEDDINGS_BUCKET_NAME: sky-rag-embeddings  # Bucket name for storing embeddings
-  EMBEDDINGS_BUCKET_ROOT: /output
 
 file_mounts:
-  ${EMBEDDINGS_BUCKET_ROOT}:
+  /output:
     name: ${EMBEDDINGS_BUCKET_NAME}
     mode: MOUNT
 

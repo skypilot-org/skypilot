@@ -1,7 +1,7 @@
 # Retrieval Augmented Generation with DeepSeek R1
 
 <p align="center">
-<img src="https://i.imgur.com/fI6Mzpi.png" alt="RAG with DeepSeek R1" style="width: 70%;">
+<img src="https://i.imgur.com/yysdtA4.png" alt="RAG with DeepSeek R1" style="width: 70%;">
 </p>
 
 ## Large-Scale Legal Document Search and Analysis
@@ -13,22 +13,18 @@ In particular:
 * **Context-Awareness**: By retrieving relevant documents before generating answers, the system provides responses that consider specific legal contexts.
 * **Traceability**: All generated answers can be traced back to source documents, crucial for legal applications.
 
-SkyPilot streamlines the deployment of RAG systems in the cloud by managing infrastructure and enabling efficient, cost-effective compute resource usage. We use [Alibaba-NLP/gte-Qwen2-7B-instruct](https://huggingface.co/Alibaba-NLP/gte-Qwen2-7B-instruct) for generating document embeddings and distilled Deepseek R1 ([deepseek-ai/DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B)) for generating final anwsers. 
+
+SkyPilot streamlines the development and deployment of RAG systems in any cloud or kubernetes by managing infrastructure and enabling efficient, cost-effective compute resource usage.
 
 In this example, we use legal documents by [pile of law](https://huggingface.co/datasets/pile-of-law/pile-of-law) as example data to demonstrate RAG capabilities. The system processes a collection of legal texts, including case law, statutes, and legal discussions, to enable semantic search and intelligent question answering. This approach can help legal professionals quickly find relevant precedents, analyze complex legal scenarios, and extract insights from large document collections. 
+
+We use [Alibaba-NLP/gte-Qwen2-7B-instruct](https://huggingface.co/Alibaba-NLP/gte-Qwen2-7B-instruct) for generating document embeddings and distilled Deepseek R1 ([deepseek-ai/DeepSeek-R1-Distill-Llama-8B](https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Llama-8B)) for generating final anwsers. 
 
 **Why SkyPilot**: SkyPilot streamlines the process of running such large-scale jobs in the cloud. It abstracts away much of the complexity of managing infrastructure and helps you run compute-intensive tasks efficiently and cost-effectively through managed jobs. 
 
 ## Step 0: Set Up The Environment
 Install the following Prerequisites:  
 * SkyPilot: Ensure SkyPilot is installed and `sky check` succeeds. See [installation instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
-* Hugging Face Token: Required to access the DeepSeek R1 model. Configure your token:
-
-Setup Huggingface token in `~/.env`
-```
-HF_TOKEN=hf_xxxxx
-```
-or set as environment variable `HF_TOKEN`.
 
 Set up bucket names for storing embeddings and vector database:
 ```bash
@@ -58,16 +54,19 @@ resources:
   accelerators: {L4:1, A100:1} 
 
 envs:
-  START_IDX: ${START_IDX}
-  END_IDX: ${END_IDX}
+  START_IDX: 0  # Will be overridden by batch_compute_vectors.py
+  END_IDX: 10000  # Will be overridden by batch_compute_vectors.py
+  MODEL_NAME: "Alibaba-NLP/gte-Qwen2-7B-instruct"
+  EMBEDDINGS_BUCKET_NAME: sky-rag-embeddings  # Bucket name for storing embeddings
+
 
 file_mounts:
   /output:
-    name: my-bucket-for-embedding-output
+    name: ${EMBEDDINGS_BUCKET_NAME}
     mode: MOUNT
 
 setup: |
-  pip install torch==2.5.1 vllm==0.6.6.post
+  pip install torch==2.5.1 vllm==0.6.6.post1
   ...
 
 envs: 
@@ -99,6 +98,10 @@ Saving embeddings to: embeddings_0_1000.parquet
 We leverage SkyPilot's managed jobs feature to enable parallel processing across multiple regions and cloud providers. 
 SkyPilot handles job state management and automatic recovery from failures when using spot instances. 
 Managed jobs are cost-efficient and streamline the processing of the partitioned dataset. 
+You can check all the jobs by running `sky jobs dashboard`.
+<p align="center">
+<img src="https://i.imgur.com/EviKuQx.png" alt="job dashboard" style="width: 70%;">
+</p>
 All generated embeddings are stored efficiently in parquet format within a cloud storage bucket.
 
 ## Step 2: Build RAG with Vector Database
