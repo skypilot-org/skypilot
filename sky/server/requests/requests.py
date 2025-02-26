@@ -89,6 +89,8 @@ class ScheduleType(enum.Enum):
     LONG = 'long'
     # Queue for requests that should be executed quickly for a quick response.
     SHORT = 'short'
+    # Skip any queue and execute the request immediately.
+    IMMEDIATE = 'immediate'
 
 
 @dataclasses.dataclass

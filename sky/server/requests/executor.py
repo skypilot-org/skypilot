@@ -27,6 +27,7 @@ import os
 import queue as queue_lib
 import signal
 import sys
+import threading
 import time
 import traceback
 import typing
@@ -231,11 +232,12 @@ def _request_execution_wrapper(request_id: str,
     4. Handle the SIGTERM signal to abort the request gracefully.
     """
 
-    def sigterm_handler(signum: int,
-                        frame: Optional['types.FrameType']) -> None:
-        raise KeyboardInterrupt
+    if threading.current_thread() is threading.main_thread():
+        def sigterm_handler(signum: int,
+                            frame: Optional['types.FrameType']) -> None:
+            raise KeyboardInterrupt
 
-    signal.signal(signal.SIGTERM, sigterm_handler)
+        signal.signal(signal.SIGTERM, sigterm_handler)
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
@@ -316,8 +318,13 @@ def schedule_request(request_id: str,
     request.log_path.touch()
     input_tuple = (request_id, ignore_return_value)
 
-    logger.info(f'Queuing request: {request_id}')
-    _get_queue(schedule_type).put(input_tuple)
+    if schedule_type == api_requests.ScheduleType.IMMEDIATE:
+        thread = threading.Thread(target=_request_execution_wrapper, args=(request_id, ignore_return_value))
+        thread.start()
+        thread.join()
+    else:
+        logger.info(f'Queuing request: {request_id}')
+        _get_queue(schedule_type).put(input_tuple)
 
 
 def executor_initializer(proc_group: str):
