@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Optional, Union
+from typing import Dict, List, Optional, Union
 
 import aiohttp
 import fastapi
@@ -17,6 +17,65 @@ from sky.serve import serve_utils
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
+
+
+class ClientPool:
+    """ClientPool: A pool of httpx.AsyncClient for the load balancer.
+
+    This class is used to manage the client pool for the load balancer.
+    It also incorporates the load balancing policy to select the replica.
+    """
+
+    def __init__(self, load_balancing_policy_name: Optional[str]) -> None:
+        logger.info('Starting load balancer with policy '
+                    f'{load_balancing_policy_name}.')
+        # Use the registry to create the load balancing policy
+        self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
+            load_balancing_policy_name)
+        # TODO(tian): httpx.Client has a resource limit of 100 max connections
+        # for each client. We should wait for feedback on the best max
+        # connections.
+        # Reference: https://www.python-httpx.org/advanced/resource-limits/
+        #
+        # If more than 100 requests are sent to the same replica, the
+        # httpx.Client will queue the requests and send them when a
+        # connection is available.
+        # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # pylint: disable=line-too-long
+        self._pool: Dict[str, httpx.AsyncClient] = dict()
+        # We need this lock to avoid getting from the client pool while
+        # updating it from _sync_with_controller.
+        self._lock: threading.Lock = threading.Lock()
+
+    def refresh_with_new_urls(self,
+                              ready_urls: List[str]) -> List[asyncio.Task]:
+        close_client_tasks = []
+        with self._lock:
+            self._load_balancing_policy.set_ready_replicas(ready_urls)
+            for replica_url in ready_urls:
+                if replica_url not in self._pool:
+                    self._pool[replica_url] = httpx.AsyncClient(
+                        base_url=replica_url)
+            urls_to_close = set(self._pool.keys()) - set(ready_urls)
+            for replica_url in urls_to_close:
+                client = self._pool.pop(replica_url)
+                close_client_tasks.append(client.aclose())
+        return close_client_tasks
+
+    def select_replica(self, request: fastapi.Request) -> Optional[str]:
+        with self._lock:
+            return self._load_balancing_policy.select_replica(request)
+
+    def get_client(self, url: str) -> Optional[httpx.AsyncClient]:
+        with self._lock:
+            return self._pool.get(url, None)
+
+    def pre_execute_hook(self, url: str, request: fastapi.Request) -> None:
+        with self._lock:
+            self._load_balancing_policy.pre_execute_hook(url, request)
+
+    def post_execute_hook(self, url: str, request: fastapi.Request) -> None:
+        with self._lock:
+            self._load_balancing_policy.post_execute_hook(url, request)
 
 
 class SkyServeLoadBalancer:
@@ -47,29 +106,12 @@ class SkyServeLoadBalancer:
         self._app = fastapi.FastAPI()
         self._controller_url: str = controller_url
         self._load_balancer_port: int = load_balancer_port
-        # Use the registry to create the load balancing policy
-        self._load_balancing_policy = lb_policies.LoadBalancingPolicy.make(
-            load_balancing_policy_name)
-        logger.info('Starting load balancer with policy '
-                    f'{load_balancing_policy_name}.')
         self._request_aggregator: serve_utils.RequestsAggregator = (
             serve_utils.RequestTimestamp())
         self._region: Optional[str] = region
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
-        # TODO(tian): httpx.Client has a resource limit of 100 max connections
-        # for each client. We should wait for feedback on the best max
-        # connections.
-        # Reference: https://www.python-httpx.org/advanced/resource-limits/
-        #
-        # If more than 100 requests are sent to the same replica, the
-        # httpx.Client will queue the requests and send them when a
-        # connection is available.
-        # Reference: https://github.com/encode/httpcore/blob/a8f80980daaca98d556baea1783c5568775daadc/httpcore/_async/connection_pool.py#L69-L71 # pylint: disable=line-too-long
-        self._client_pool: Dict[str, httpx.AsyncClient] = dict()
-        # We need this lock to avoid getting from the client pool while
-        # updating it from _sync_with_controller.
-        self._client_pool_lock: threading.Lock = threading.Lock()
+        self._client_pool: ClientPool = ClientPool(load_balancing_policy_name)
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -107,27 +149,14 @@ class SkyServeLoadBalancer:
                     logger.error('An error occurred when syncing with '
                                  f'the controller: {e}')
                 else:
-                    logger.info(f'Available Replica URLs: {ready_replica_urls}')
-                    with self._client_pool_lock:
-                        # TODO(tian): Check if there is any replica that is not
-                        # assigned a LB.
-                        ready_urls = ready_replica_urls.get(self._region, [])
-                        logger.info('Ready URLs in local region '
-                                    f'{self._region}: {ready_urls}')
-                        self._load_balancing_policy.set_ready_replicas(
-                            ready_urls)
-                        for replica_url in ready_urls:
-                            if replica_url not in self._client_pool:
-                                self._client_pool[replica_url] = (
-                                    httpx.AsyncClient(base_url=replica_url))
-                        urls_to_close = set(
-                            self._client_pool.keys()) - set(ready_urls)
-                        client_to_close = []
-                        for replica_url in urls_to_close:
-                            client_to_close.append(
-                                self._client_pool.pop(replica_url))
-                    for client in client_to_close:
-                        close_client_tasks.append(client.aclose())
+                    # TODO(tian): Check if there is any replica that is not
+                    # assigned a LB.
+                    ready_urls = ready_replica_urls.get(self._region, [])
+                    logger.info(f'Available Replica URLs: {ready_replica_urls},'
+                                f' Ready URLs in local region {self._region}: '
+                                f'{ready_urls}')
+                    close_client_tasks.extend(
+                        self._client_pool.refresh_with_new_urls(ready_urls))
 
             await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
             # Await those tasks after the interval to avoid blocking.
@@ -143,15 +172,14 @@ class SkyServeLoadBalancer:
             encountered if anything goes wrong.
         """
         logger.info(f'Proxy request to {url}')
-        self._load_balancing_policy.pre_execute_hook(url, request)
+        self._client_pool.pre_execute_hook(url, request)
         try:
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
             # entering this function. In that case we will return an error here
             # and retry to find next ready replica. We also need to wait for the
             # update of the client pool to finish before getting the client.
-            with self._client_pool_lock:
-                client = self._client_pool.get(url, None)
+            client = self._client_pool.get_client(url)
             if client is None:
                 return RuntimeError(f'Client for {url} not found.')
             worker_url = httpx.URL(path=request.url.path,
@@ -166,7 +194,7 @@ class SkyServeLoadBalancer:
 
             async def background_func():
                 await proxy_response.aclose()
-                self._load_balancing_policy.post_execute_hook(url, request)
+                self._client_pool.post_execute_hook(url, request)
 
             return fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
@@ -189,9 +217,7 @@ class SkyServeLoadBalancer:
         retry_cnt = 0
         while True:
             retry_cnt += 1
-            with self._client_pool_lock:
-                ready_replica_url = self._load_balancing_policy.select_replica(
-                    request)
+            ready_replica_url = self._client_pool.select_replica(request)
             if ready_replica_url is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently

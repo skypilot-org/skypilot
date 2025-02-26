@@ -36,4 +36,4 @@ setup: |
   wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/serve-multi-region-lb/examples/serve/external-lb/server.py
   pip install fastapi uvicorn
 
-run: python3 server.py
+run: python3 server.py --port 8080 --length 10

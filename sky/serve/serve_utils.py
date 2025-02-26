@@ -886,7 +886,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'EXTERNAL_LBS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'EXTERNAL_LBS',
+        'ENDPOINT'
     ]
     if show_all:
         service_columns.extend([
