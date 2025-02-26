@@ -237,10 +237,9 @@ def optimize(
     """
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-    body = payloads.OptimizeBody(
-        dag=dag_str,
-        minimize=minimize,
-        request_options=admin_policy_request_options)
+    body = payloads.OptimizeBody(dag=dag_str,
+                                 minimize=minimize,
+                                 request_options=admin_policy_request_options)
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -250,9 +249,10 @@ def optimize(
 @server_common.check_server_healthy_or_start
 @annotations.client_api
 def validate(
-        dag: 'sky.Dag',
-        workdir_only: bool = False,
-        admin_policy_request_options: Optional[admin_policy.RequestOptions] = None) -> None:
+    dag: 'sky.Dag',
+    workdir_only: bool = False,
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+) -> None:
     """Validates the tasks.
 
     The file paths (workdir and file_mounts) are validated on the client side
@@ -272,9 +272,8 @@ def validate(
         if not workdir_only:
             task.expand_and_validate_file_mounts()
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-    body = payloads.ValidateBody(
-        dag=dag_str,
-        request_options=admin_policy_request_options)
+    body = payloads.ValidateBody(dag=dag_str,
+                                 request_options=admin_policy_request_options)
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
@@ -404,8 +403,7 @@ def launch(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
-        dryrun=dryrun
-    )
+        dryrun=dryrun)
     validate(dag, admin_policy_request_options=request_options)
 
     confirm_shown = False
@@ -556,12 +554,13 @@ def exec(  # pylint: disable=redefined-builtin
           controller that does not support this operation.
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    request_options = admin_policy.RequestOptions(
-        cluster_name=cluster_name,
-        down=down,
-        dryrun=dryrun
-    )
-    validate(dag, workdir_only=True, admin_policy_request_options=request_options)
+    request_options = admin_policy.RequestOptions(cluster_name=cluster_name,
+                                                  idle_minutes_to_autostop=None,
+                                                  down=down,
+                                                  dryrun=dryrun)
+    validate(dag,
+             workdir_only=True,
+             admin_policy_request_options=request_options)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ExecBody(

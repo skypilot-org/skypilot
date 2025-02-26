@@ -113,6 +113,7 @@ class CheckBody(RequestBody):
     clouds: Optional[Tuple[str, ...]]
     verbose: bool
 
+
 class DagRequestBody(RequestBody):
     """Request body base class for endpoints with a dag."""
     dag: str

@@ -42,11 +42,11 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
-from sky.utils import admin_policy_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -271,7 +271,8 @@ async def validate(request: fastapi.Request,
     logger.debug(f'Validating tasks: {validate_body.dag}')
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        dag, _ = admin_policy_utils.apply(dag, request_options=validate_body.request_options)
+        dag, _ = admin_policy_utils.apply(
+            dag, request_options=validate_body.request_options)
         for task in dag.tasks:
             # Will validate workdir and file_mounts in the backend, as those
             # need to be validated after the files are uploaded to the SkyPilot
