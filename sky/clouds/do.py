@@ -8,6 +8,7 @@ from sky import clouds
 from sky.adaptors import do
 from sky.clouds import service_catalog
 from sky.provision.do import utils as do_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -16,7 +17,7 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILE = 'config.yaml'
 
 
-@clouds.CLOUD_REGISTRY.register(aliases=['digitalocean'])
+@registry.CLOUD_REGISTRY.register(aliases=['digitalocean'])
 class DO(clouds.Cloud):
     """Digital Ocean Cloud"""
 
@@ -232,8 +233,11 @@ class DO(clouds.Cloud):
                 cpus=resources.cpus,
                 memory=resources.memory,
                 disk_tier=resources.disk_tier)
-            return resources_utils.FeasibleResources(
-                _make([default_instance_type]), [], None)
+            if default_instance_type is None:
+                return resources_utils.FeasibleResources([], [], None)
+            else:
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
 
         assert len(accelerators) == 1, resources
         acc, acc_count = list(accelerators.items())[0]

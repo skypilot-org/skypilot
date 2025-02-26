@@ -1,5 +1,4 @@
 """Azure."""
-import functools
 import os
 import re
 import subprocess
@@ -17,7 +16,9 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -60,7 +61,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Azure(clouds.Cloud):
     """Azure."""
 
@@ -574,7 +575,8 @@ class Azure(clouds.Cloud):
                                                     clouds='azure')
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='global',
+                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].

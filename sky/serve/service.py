@@ -25,7 +25,7 @@ from sky.serve import load_balancer
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.skylet import constants as skylet_constants
+from sky.skylet import constants as skylet_constants, job_lib
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
@@ -77,6 +77,12 @@ def cleanup_storage(task_yaml: str) -> bool:
     try:
         task = task_lib.Task.from_yaml(task_yaml)
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        # Need to re-construct storage object in the controller process
+        # because when SkyPilot API server machine sends the yaml config to the
+        # controller machine, only storage metadata is sent, not the storage
+        # object itself.
+        for storage in task.storage_mounts.values():
+            storage.construct()
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to clean up storage: '

@@ -1,5 +1,4 @@
 """Kubernetes."""
-import functools
 import os
 import re
 import typing
@@ -14,7 +13,9 @@ from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 
@@ -34,7 +35,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
-@clouds.CLOUD_REGISTRY.register(aliases=['k8s'])
+@registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
@@ -82,7 +83,7 @@ class Kubernetes(clouds.Cloud):
         # Use a fresh user hash to avoid conflicts in the secret object naming.
         # This can happen when the controller is reusing the same user hash
         # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.get_user_hash(force_fresh_hash=True)
+        fresh_user_hash = common_utils.generate_user_hash()
         return f'ssh-publickey-{fresh_user_hash}'
 
     @classmethod
@@ -116,7 +117,7 @@ class Kubernetes(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str,
                                                                 ...]) -> None:
         """Log skipped contexts for only once.
@@ -240,7 +241,7 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
+            disk_tier: Optional['resources_utils.DiskTier'] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
@@ -330,7 +331,7 @@ class Kubernetes(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
+            cluster_name: 'resources_utils.ClusterName',
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
@@ -468,7 +469,9 @@ class Kubernetes(clouds.Cloud):
         # CPU resources on the node instead within the pod.
         custom_ray_options = {
             'object-store-memory': 500000000,
-            'num-cpus': str(int(cpus)),
+            # 'num-cpus' must be an integer, but we should not set it to 0 if
+            # cpus is <1.
+            'num-cpus': str(max(int(cpus), 1)),
         }
         deploy_vars = {
             'instance_type': resources.instance_type,

@@ -37,8 +37,11 @@ Cluster CLI
    :nested: full
 
 
+Jobs CLI
+--------
+
 Cluster Jobs CLI
-----------------
+~~~~~~~~~~~~~~~~
 
 .. _sky-exec:
 .. click:: sky.cli:exec
@@ -61,7 +64,7 @@ Cluster Jobs CLI
    :nested: full
 
 Managed Jobs CLI
----------------------------
+~~~~~~~~~~~~~~~~~
 
 .. _sky-job-launch:
 .. click:: sky.cli:jobs_launch
@@ -119,6 +122,49 @@ Storage CLI
 .. click:: sky.cli:storage_delete
    :prog: sky storage delete
    :nested: full
+
+
+.. _sky-api-cli:
+
+API Request CLI
+---------------
+
+.. _sky-api-login:
+.. click:: sky.cli:api_login
+   :prog: sky api login
+   :nested: full
+
+.. _sky-api-info:
+.. click:: sky.cli:api_info
+   :prog: sky api info
+   :nested: full
+
+.. _sky-api-logs:
+.. click:: sky.cli:api_logs
+   :prog: sky api logs
+   :nested: full
+
+.. _sky-api-status:
+.. click:: sky.cli:api_status
+   :prog: sky api status
+   :nested: full
+
+.. _sky-api-cancel:
+.. click:: sky.cli:api_cancel
+   :prog: sky api cancel
+   :nested: full
+
+Admin CLI
+~~~~~~~~~
+
+.. click:: sky.cli:api_stop
+   :prog: sky api stop
+   :nested: full
+
+.. click:: sky.cli:api_start
+   :prog: sky api start
+   :nested: full
+
 
 Utils: ``show-gpus``/``check``/``cost-report``
 -------------------------------------------------

@@ -9,11 +9,11 @@ History:
 import copy
 from datetime import datetime
 import time
+import typing
 from typing import Any, Dict, List, Optional
 
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds.utils import oci_utils
 from sky.provision import common
@@ -22,6 +22,9 @@ from sky.provision.oci import query_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -32,7 +35,7 @@ def query_instances(
     cluster_name_on_cloud: str,
     provider_config: Optional[Dict[str, Any]] = None,
     non_terminated_only: bool = True,
-) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+) -> Dict[str, Optional['status_lib.ClusterStatus']]:
     """Query instances.
 
     Returns a dictionary of instance IDs and status.
@@ -44,7 +47,7 @@ def query_instances(
     region = provider_config['region']
 
     status_map = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY
-    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    statuses: Dict[str, Optional['status_lib.ClusterStatus']] = {}
     filters = {constants.TAG_RAY_CLUSTER_NAME: cluster_name_on_cloud}
 
     instances = _get_filtered_nodes(region, filters)
@@ -319,7 +322,7 @@ def cleanup_ports(
 
 @query_utils.debug_enabled(logger)
 def wait_instances(region: str, cluster_name_on_cloud: str,
-                   state: Optional[status_lib.ClusterStatus]) -> None:
+                   state: Optional['status_lib.ClusterStatus']) -> None:
     del region, cluster_name_on_cloud, state
     # We already wait for the instances to be running in run_instances.
     # We can not implement the wait logic here because the provisioning

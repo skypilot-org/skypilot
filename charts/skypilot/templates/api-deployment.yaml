@@ -1,0 +1,182 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ .Release.Name }}-api-server
+  namespace: {{ .Release.Namespace }}
+spec:
+  # Note: replicas > 1 is not well tested, and requires a PVC that supports ReadWriteMany.
+  replicas: {{ .Values.apiService.replicas }}
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: {{ .Release.Name }}-api
+  template:
+    metadata:
+      labels:
+        app: {{ .Release.Name }}-api
+    spec:
+      automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
+      serviceAccountName: {{ .Release.Name }}-api-sa
+      containers:
+      - name: skypilot-api
+        image: {{ .Values.apiService.image }}
+        imagePullPolicy: Always
+        resources:
+          {{- toYaml .Values.apiService.resources | nindent 10 }}
+        env:
+        - name: SKYPILOT_DEV
+          value: {{ .Values.apiService.skypilotDev | quote }}
+        {{- if .Values.gcpCredentials.enabled }}
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /root/gcp-cred.json
+        {{- end }}
+        {{- if .Values.kubernetesCredentials.inclusterNamespace }}
+        - name: SKYPILOT_IN_CLUSTER_NAMESPACE
+          value: {{ .Values.kubernetesCredentials.inclusterNamespace }}
+        {{- end }}
+        # Use tini as the init process
+        command: ["tini", "--"]
+        args:
+        - /bin/sh
+        - -c
+        - |
+          set -e
+          {{- if .Values.apiService.preDeployHook }}
+          {{ .Values.apiService.preDeployHook | nindent 10 }}
+          {{- end }}
+          {{- if .Values.apiService.config }}
+          mkdir -p /root/.sky
+          echo "Copying config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
+          # The configmap serves as the ground truth for the config.yaml file.
+          # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
+          cp /tmp/config.yaml /root/.sky/config.yaml
+          {{- end }}
+          if sky api start --deploy; then
+            tail -n+0 -f /root/.sky/api_server/server.log
+          else
+            cat /root/.sky/api_server/server.log
+          fi
+        ports:
+        - containerPort: 46580
+        livenessProbe:
+          httpGet:
+            path: /api/health
+            port: 46580
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /api/health
+            port: 46580
+          periodSeconds: 30
+        volumeMounts:
+        {{- if .Values.storage.enabled }}
+        - name: state-volume
+          mountPath: /root/.sky
+          subPath: .sky
+        - name: state-volume
+          mountPath: /root/.ssh # To preserve the SSH keys for the user when using the API server
+          subPath: .ssh
+        {{- end }}
+        {{- if .Values.apiService.config }}
+        - name: skypilot-config
+          mountPath: /tmp/config.yaml
+          subPath: config.yaml
+        {{- end }}
+        {{- if .Values.awsCredentials.enabled }}
+        - name: aws-config
+          mountPath: /root/.aws
+          readOnly: true
+        {{- end }}
+        {{- if .Values.gcpCredentials.enabled }}
+        - name: gcp-config
+          mountPath: /root/.config/gcloud
+        - name: gcp-credentials
+          mountPath: /root/gcp-cred.json
+          subPath: gcp-cred.json
+        {{- end }}
+        {{- if .Values.kubernetesCredentials.useKubeconfig }}
+        - name: kube-config
+          mountPath: /root/.kube
+        {{- end }}
+      initContainers:
+      {{- if .Values.awsCredentials.enabled }}
+      - name: create-aws-credentials
+        image: {{ .Values.apiService.image }}
+        command: ["/bin/sh", "-c"]
+        args:
+        - |
+          echo "Setting up AWS credentials..."
+          if [ -n "$AWS_ACCESS_KEY_ID" ] && [ -n "$AWS_SECRET_ACCESS_KEY" ]; then
+            echo "AWS credentials found in environment variables."
+            aws configure set aws_access_key_id "$AWS_ACCESS_KEY_ID"
+            aws configure set aws_secret_access_key "$AWS_SECRET_ACCESS_KEY"
+            echo "Credentials file created successfully."
+          else
+            echo "AWS credentials not found in environment variables. Skipping credentials setup."
+            sleep 600
+          fi
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws_access_key_id
+        - name: AWS_SECRET_ACCESS_KEY
+          valueFrom:
+            secretKeyRef:
+              name: aws-credentials
+              key: aws_secret_access_key
+        volumeMounts:
+        - name: aws-config
+          mountPath: /root/.aws
+      {{- end }}
+      {{- if .Values.gcpCredentials.enabled }}
+      - name: setup-gcp-credentials
+        image: google/cloud-sdk:latest
+        command: ["/bin/sh", "-c"]
+        env:
+        - name: GOOGLE_APPLICATION_CREDENTIALS
+          value: /root/gcp-cred.json
+        args:
+        - |
+          gcloud auth activate-service-account --key-file=/root/gcp-cred.json
+          gcloud config set project {{ .Values.gcpCredentials.projectId }}
+        volumeMounts:
+        - name: gcp-credentials
+          mountPath: /root/gcp-cred.json
+          subPath: gcp-cred.json
+        - name: gcp-config
+          mountPath: /root/.config/gcloud
+      {{- end }}
+      volumes:
+      {{- if .Values.storage.enabled }}
+      - name: state-volume
+        persistentVolumeClaim:
+          claimName: {{ .Release.Name }}-state
+      {{- else }}
+      - name: state-volume
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.awsCredentials.enabled }}
+      - name: aws-config
+        emptyDir: {}
+      {{- end }}
+
+      {{- if .Values.gcpCredentials.enabled }}
+      - name: gcp-credentials
+        secret:
+          secretName: gcp-credentials
+      - name: gcp-config
+        emptyDir: {}
+      {{- end }}
+      {{- if .Values.kubernetesCredentials.useKubeconfig }}
+      - name: kube-config
+        secret:
+          secretName: {{ .Values.kubernetesCredentials.kubeconfigSecretName }}
+      {{- end }}
+      {{- if .Values.apiService.config }}
+      - name: skypilot-config
+        configMap:
+          name: {{ .Release.Name }}-config
+      {{- end }}

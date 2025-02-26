@@ -178,11 +178,16 @@ def run_with_log(
     if process_stream:
         stdout_arg = subprocess.PIPE
         stderr_arg = subprocess.PIPE if not with_ray else subprocess.STDOUT
+    # Use stdin=subprocess.DEVNULL by default, as allowing inputs will mess up
+    # the terminal output when typing in the terminal that starts the API
+    # server.
+    stdin = kwargs.pop('stdin', subprocess.DEVNULL)
     with subprocess.Popen(cmd,
                           stdout=stdout_arg,
                           stderr=stderr_arg,
                           start_new_session=True,
                           shell=shell,
+                          stdin=stdin,
                           **kwargs) as proc:
         try:
             subprocess_utils.kill_process_daemon(proc.pid)
@@ -289,14 +294,11 @@ def run_bash_command_with_log(bash_command: str,
         # Need this `-i` option to make sure `source ~/.bashrc` work.
         inner_command = f'/bin/bash -i {script_path}'
 
-        return run_with_log(
-            inner_command,
-            log_path,
-            stream_logs=stream_logs,
-            with_ray=with_ray,
-            # Disable input to avoid blocking.
-            stdin=subprocess.DEVNULL,
-            shell=True)
+        return run_with_log(inner_command,
+                            log_path,
+                            stream_logs=stream_logs,
+                            with_ray=with_ray,
+                            shell=True)
 
 
 def _follow_job_logs(file,
@@ -340,9 +342,9 @@ def _follow_job_logs(file,
                     wait_last_logs = False
                     continue
                 status_str = status.value if status is not None else 'None'
-                print(
-                    ux_utils.finishing_message(
-                        f'Job finished (status: {status_str}).'))
+                print(ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).'),
+                      flush=True)
                 return
 
             time.sleep(SKY_LOG_TAILING_GAP_SECONDS)
@@ -488,6 +490,10 @@ def tail_logs(job_id: Optional[int],
                         start_streaming = True
                     if start_streaming:
                         print(line, end='', flush=True)
+                status_str = status.value if status is not None else 'None'
+                print(ux_utils.finishing_message(
+                    f'Job finished (status: {status_str}).'),
+                      flush=True)
         except FileNotFoundError:
             print(f'{colorama.Fore.RED}ERROR: Logs for job {job_id} (status:'
                   f' {status.value}) does not exist.{colorama.Style.RESET_ALL}')

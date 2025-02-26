@@ -8,7 +8,6 @@ import uuid
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky import status_lib
 from sky.adaptors import kubernetes
 from sky.provision import common
 from sky.provision import constants
@@ -18,6 +17,7 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import kubernetes_enums
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
@@ -666,7 +666,11 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'value': 'present',
                 'effect': 'NoSchedule'
             }
-            pod_spec_copy['spec']['tolerations'] = [tpu_toleration]
+            # Preserve existing tolerations if any
+            existing_tolerations = pod_spec_copy['spec'].get('tolerations', [])
+            pod_spec_copy['spec']['tolerations'] = existing_tolerations + [
+                tpu_toleration
+            ]
 
         if to_create_deployment:
             _create_persistent_volume_claim(namespace, context, pvc_spec)
