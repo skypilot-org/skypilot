@@ -50,7 +50,7 @@ def test_multi_tenant(generic_cloud: str):
         [
             'echo "==== Test multi-tenant job on single cluster ===="',
             *set_user(user_1, user_1_name, [
-                f'sky launch -y -c {name}-1 --cloud {generic_cloud} --cpus 2+ -n job-1 tests/test_yamls/minimal.yaml',
+                f'sky launch -y -c {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-1 tests/test_yamls/minimal.yaml',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 1',
                 f's=$(sky queue -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
@@ -66,7 +66,7 @@ def test_multi_tenant(generic_cloud: str):
                 user_2,
                 user_2_name,
                 [
-                    f'sky launch -y -c {name}-2 --cloud {generic_cloud} --cpus 2+ -n job-3 tests/test_yamls/minimal.yaml',
+                    f'sky launch -y -c {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-3 tests/test_yamls/minimal.yaml',
                     f's=$(sky status {name}-2) && echo "$s" && echo "$s" | grep UP',
                     # sky status should not show other clusters from other users.
                     f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
