@@ -17,7 +17,7 @@ from sky import global_user_state
 from sky import models
 from sky import optimizer
 from sky import sky_logging
-from sky import task
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
@@ -81,6 +81,34 @@ def optimize(dag: 'dag_lib.Dag',
         blocked_resources=blocked_resources,
         quiet=quiet
     )
+
+
+@usage_lib.entrypoint
+def validate_dag(dag: 'dag_lib.Dag',
+                request_options: admin_policy.RequestOptions = None) -> None:
+    """Validates the specified DAG.
+
+    Args:
+        dag: The DAG to validate.
+        request_options: Request options used in enforcing admin policies.
+
+    Raises:
+        ValueError: if the DAG is invalid.
+    """
+    dag, _ = admin_policy_utils.apply(
+        dag,
+        use_mutated_config_in_current_request=True,
+        request_options=request_options
+    )
+    
+    for task in dag.tasks:
+        # Will validate workdir and file_mounts in the backend, as those
+        # need to be validated after the files are uploaded to the SkyPilot
+        # API server with `upload_mounts_to_api_server`.
+        task.validate_name()
+        task.validate_run()
+        for r in task.resources:
+            r.validate()
 
 
 @usage_lib.entrypoint
@@ -365,7 +393,7 @@ def _start(
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
     with dag_lib.Dag():
-        dummy_task = task.Task().set_resources(handle.launched_resources)
+        dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
     handle = backend.provision(dummy_task,
                                to_provision=handle.launched_resources,

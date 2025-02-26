@@ -256,35 +256,23 @@ async def list_accelerator_counts(
 
 
 @app.post('/validate')
-async def validate(validate_body: payloads.ValidateBody) -> None:
+async def validate(request: fastapi.Request,
+                validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
-    logger.debug(f'Validating tasks: {validate_body.dag}')
-    try:
-        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
 
-        # Apply admin policy since it may affect DAG validation.
-        # TODO: The admin policy may be a potentially expensive operation with
-        # network calls. Maybe this should be moved into a request run with the
-        # executor.
-        dag, _ = admin_policy_utils.apply(
-            dag,
-            use_mutated_config_in_current_request=True,
-            request_options=validate_body.request_options
+    # We make the validation a separate request as it may require expensive
+    # network calls if an admin policy is applied.
+    logger.debug(f'Validating tasks: {validate_body.dag}')
+    executor.schedule_request(
+            request_id=request.state.request_id,
+            request_name='validate',
+            request_body=validate_body,
+            ignore_return_value=True,
+            func=core.validate_dag,
+            schedule_type=requests_lib.ScheduleType.SHORT
         )
-        
-        for task in dag.tasks:
-            # Will validate workdir and file_mounts in the backend, as those
-            # need to be validated after the files are uploaded to the SkyPilot
-            # API server with `upload_mounts_to_api_server`.
-            task.validate_name()
-            task.validate_run()
-            for r in task.resources:
-                r.validate()
-    except Exception as e:  # pylint: disable=broad-except
-        raise fastapi.HTTPException(
-            status_code=400, detail=exceptions.serialize_exception(e)) from e
 
 
 @app.post('/optimize')
