@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -569,8 +570,56 @@ def test_sky_bench(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.fixture(scope='session')
+def unreachable_context():
+    """Setup the kubernetes context for the test.
+
+    This fixture will copy the kubeconfig file and inject an unreachable context
+    to it. So this must be session scoped that the kubeconfig is modified before
+    the local API server starts.
+    """
+    # Get kubeconfig path from environment variable or use default
+    kubeconfig_path = os.environ.get('KUBECONFIG',
+                                     os.path.expanduser('~/.kube/config'))
+    if not os.path.exists(kubeconfig_path):
+        return
+    import shutil
+
+    # Create a temp kubeconfig
+    temp_kubeconfig = tempfile.NamedTemporaryFile(delete=False, suffix='.yaml')
+    shutil.copy(kubeconfig_path, temp_kubeconfig.name)
+    original_kubeconfig = os.environ.get('KUBECONFIG')
+    os.environ['KUBECONFIG'] = temp_kubeconfig.name
+
+    free_port = common_utils.find_free_port(30000)
+    unreachable_name = '_unreachable_context_'
+    subprocess.run(
+        'kubectl config set-cluster unreachable-cluster '
+        f'--server=https://127.0.0.1:{free_port} && '
+        'kubectl config set-credentials unreachable-user '
+        '--token="aQo=" && '
+        'kubectl config set-context ' + unreachable_name + ' '
+        '--cluster=unreachable-cluster --user=unreachable-user && '
+        # Restart the API server to pick up kubeconfig change
+        # TODO(aylei): There is a implicit API server restart before starting
+        # smoke tests in CI pipeline. We should move that to fixture to make
+        # the test coherent.
+        'sky api stop || true && sky api start',
+        shell=True,
+        check=True)
+
+    yield unreachable_name
+
+    # Clean up
+    if original_kubeconfig:
+        os.environ['KUBECONFIG'] = original_kubeconfig
+    else:
+        os.environ.pop('KUBECONFIG', None)
+    os.unlink(temp_kubeconfig.name)
+
+
 @pytest.mark.kubernetes
-def test_kubernetes_context_failover():
+def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
     This test requires two kubernetes clusters:
@@ -580,12 +629,8 @@ def test_kubernetes_context_failover():
       sky local up
       # Add mock label for accelerator
       kubectl label node --overwrite skypilot-control-plane skypilot.co/accelerator=h100 --context kind-skypilot
-      # Get the token for the cluster in context kind-skypilot
-      TOKEN=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.users[0].user.token}\')
-      # Get the API URL for the cluster in context kind-skypilot
-      API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
-      # Add mock capacity for GPU
-      curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+      # Patch accelerator capacity
+      kubectl patch node skypilot-control-plane --subresource=status -p '{"status": {"capacity": {"nvidia.com/gpu": "8"}}}' --context kind-skypilot
       # Add a new namespace to test the handling of namespaces
       kubectl create namespace test-namespace --context kind-skypilot
       # Set the namespace to test-namespace
@@ -594,12 +639,20 @@ def test_kubernetes_context_failover():
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
-    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    assert unreachable_context in contexts, (
+        'unreachable_context should be initialized in the fixture')
+    context = [
+        context for context in contexts
+        if (context != 'kind-skypilot' and context != unreachable_context)
+    ][0]
+    # Test unreachable context and non-existing context do not break failover
     config = textwrap.dedent(f"""\
     kubernetes:
       allowed_contexts:
-        - kind-skypilot
         - {context}
+        - {unreachable_context}
+        - _nonexist_
+        - kind-skypilot
     """)
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(config.encode('utf-8'))
@@ -648,8 +701,13 @@ def test_kubernetes_context_failover():
                 f'sky launch -c {name}-3 --gpus h100 echo hi',
                 f'sky logs {name}-3 --status',
                 f'sky status -r {name}-3 | grep UP',
+                # Test failure for launching on unreachable context
+                f'kubectl config use-context {unreachable_context}',
+                f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --cloud kubernetes --region {unreachable_context} echo hi && exit 1 || true',
+                # Test failover from unreachable context
+                f'sky launch -y -c {name}-5 --cpus 1 echo hi',
             ],
-            f'sky down -y {name}-1 {name}-3',
+            f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
                 'SKYPILOT_CONFIG': f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
