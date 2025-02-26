@@ -113,18 +113,9 @@ class CheckBody(RequestBody):
     clouds: Optional[Tuple[str, ...]]
     verbose: bool
 
-
-class ValidateBody(RequestBody):
-    """The request body for the validate endpoint."""
+class DagRequestBody(RequestBody):
+    """Request body base class for endpoints with a dag."""
     dag: str
-    request_options: admin_policy.RequestOptions
-
-
-class OptimizeBody(RequestBody):
-    """The request body for the optimize endpoint."""
-    dag: str
-    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
-    request_options: admin_policy.RequestOptions
 
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
@@ -140,6 +131,19 @@ class OptimizeBody(RequestBody):
         # optimization to make sure the resources are available.
         kwargs['dag'] = dag
         return kwargs
+
+
+class ValidateBody(DagRequestBody):
+    """The request body for the validate endpoint."""
+    dag: str
+    request_options: Optional[admin_policy.RequestOptions]
+
+
+class OptimizeBody(DagRequestBody):
+    """The request body for the optimize endpoint."""
+    dag: str
+    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
+    request_options: Optional[admin_policy.RequestOptions]
 
 
 class LaunchBody(RequestBody):
