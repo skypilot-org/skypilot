@@ -34,5 +34,5 @@ If you have any questions, please feel free to ask in the `SkyPilot Slack <https
    Quickstart: PyTorch <../getting-started/tutorial>
    Training <../gallery/tutorials/index>
    Serving <../gallery/llms/index>
-   Frameworks <frameworks/index>
+   Other Frameworks <frameworks/index>
    AI Applications <../gallery/applications/index>

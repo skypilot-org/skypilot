@@ -43,7 +43,24 @@ extensions = [
     'myst_parser',
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
+    ##### vllm #####
+    "sphinx.ext.napoleon",
+    # "sphinx.ext.linkcode",
+    "sphinx.ext.intersphinx",
+    "sphinx_copybutton",
+    "sphinx.ext.autodoc",
+    "sphinx.ext.autosummary",
+    "myst_parser",
+    "sphinxarg.ext",  # pip install sphinx-argparse
+    "sphinx_design",
+    "sphinx_togglebutton",
 ]
+# Needed for admonitions in markdown:
+# https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
+myst_enable_extensions = [
+    "colon_fence",
+]
+
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
@@ -132,7 +149,7 @@ html_context = {
 }
 
 html_sidebars = {
-    'index': [],
+    # 'index': [],
     '**': ['main-sidebar'],
 }
 
@@ -165,11 +182,51 @@ html_js_files = ['custom.js']
 html_css_files = ['custom.css']
 
 # Allowing cross references in markdown files to be parsed
-myst_heading_anchors = 7
+# myst_heading_anchors = 7
 show_sphinx = False
 
 exclude_patterns = ['_gallery_original']
-myst_heading_anchors = 3
+# myst_heading_anchors = 3
+myst_url_schemes = {
+    'http': {
+        'classes': ['external-link'],  # Add a CSS class for styling
+        # 'title': 'External link'     # Optional tooltip text
+    },
+    'https': {
+        'classes': ['external-link'],
+    },
+    'mailto': {
+        'classes': ['email-link'],
+    },
+    'ftp': {
+        'classes': ['file-link'],
+    },
+    'gh-issue': {
+        'url':
+        'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',
+        'title': 'Issue #{{path}}',
+        'classes': ['github'],
+    },
+    'gh-pr': {
+        'url':
+        'https://github.com/skypilot-org/skypilot/pull/{{path}}#{{fragment}}',
+        'title': 'Pull Request #{{path}}',
+        'classes': ['github'],
+    },
+    'gh-dir': {
+        'url': 'https://github.com/skypilot-org/skypilot/tree/master/{{path}}',
+        'title': '{{path}}',
+        'classes': ['github'],
+    },
+    'gh-file': {
+        'url': 'https://github.com/skypilot-org/skypilot/blob/master/{{path}}',
+        'title': '{{path}}',
+        'classes': ['github'],
+    },
+}
+
+
+
 
 googleanalytics_id = 'G-92WF3MDCJV'
 
@@ -181,5 +238,7 @@ suppress_warnings = [
 
 
 def setup(app):
+    from docs.source.generate_examples import generate_examples
     app.connect('builder-inited',
                 prepare_github_markdown.handle_markdown_in_gallery)
+    generate_examples()
