@@ -33,6 +33,6 @@ resources:
   cpus: 2+
 
 setup: |
-  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
+  wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/serve-multi-region-lb/examples/serve/external-lb/server.py
 
 run: python3 server.py
