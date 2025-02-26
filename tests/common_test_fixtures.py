@@ -268,6 +268,7 @@ def mock_services_one_service(monkeypatch):
             'policy': None,
             'requested_resources_str': '',
             'replica_info': [],
+            'external_lb_info': [],
             'tls_encrypted': False,
         }
         return 0, message_utils.encode_payload(
