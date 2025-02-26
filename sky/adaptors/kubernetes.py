@@ -69,9 +69,7 @@ def _load_config(context: Optional[str] = None):
         try:
             kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
-            suffix = ''
-            if env_options.Options.SHOW_DEBUG_INFO.get():
-                suffix += f' Error: {str(e)}'
+            suffix = f' Error: {str(e)}'
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
                 err_str = (
