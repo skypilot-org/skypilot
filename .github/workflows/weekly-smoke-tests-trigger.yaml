@@ -2,11 +2,11 @@ name: Smoke Tests Trigger
 
 on:
   schedule:
-    - cron: '0 0 * * 0'  # Runs at 00:00 on Sunday (UTC)
+    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
   workflow_dispatch: {}
   # uncomment this for PR triggers testing
-  # pull_request:
-  #   types: [opened, synchronize, reopened]
+  pull_request:
+    types: [opened, synchronize, reopened]
 
 jobs:
   smoke-tests:
@@ -22,7 +22,7 @@ jobs:
             -d '{
               "commit": "HEAD",
               "branch": "master",
-              "message": "Weekly Smoke Tests",
+              "message": "Biweekly Smoke Tests",
               "ignore_pipeline_branch_filters": true
             }')
 
