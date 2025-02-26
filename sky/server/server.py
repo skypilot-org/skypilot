@@ -28,7 +28,6 @@ from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
-from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
@@ -255,14 +254,11 @@ async def list_accelerator_counts(
 
 
 @app.post('/validate')
-async def validate(request: fastapi.Request,
-                   validate_body: payloads.ValidateBody) -> None:
+async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
-    # We make the validation a separate request as it may require expensive
-    # network calls if an admin policy is applied.
     # TODO: Our current launch process is broken down into three calls:
     # validate, optimize, and launch. This requires us to apply the admin policy
     # in each step, which may be an expensive operation. We should consolidate
@@ -271,6 +267,11 @@ async def validate(request: fastapi.Request,
     logger.debug(f'Validating tasks: {validate_body.dag}')
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        # TODO: Admin policy may contain arbitrary code, which may be expensive
+        # to run and may block the server thread. However, moving it into the
+        # executor adds a ~150ms penalty on the local API server because of
+        # added RTTs. For now, we stick to doing the validation inline in the
+        # server thread.
         dag, _ = admin_policy_utils.apply(
             dag, request_options=validate_body.request_options)
         for task in dag.tasks:
