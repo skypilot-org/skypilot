@@ -635,6 +635,45 @@ class SkyPilotReplicaManager(ReplicaManager):
         threading.Thread(target=self._job_status_fetcher).start()
         threading.Thread(target=self._replica_prober).start()
 
+        self._recover_replica_operations()
+
+    def _recover_replica_operations(self):
+        """Let's see are there something to do for ReplicaManager in a
+        recovery run"""
+        assert (not self._launch_process_pool and not self._down_process_pool
+               ), 'We should not have any running processes in a recovery run'
+
+        # sky.launch should be robust enough to handle the case where the
+        # provisioning is partially done.
+        to_up_replicas = serve_state.get_replicas_at_statuses(
+            self._service_name, [
+                serve_state.ReplicaStatus.PENDING,
+                serve_state.ReplicaStatus.PROVISIONING
+            ])
+        for replica_info in to_up_replicas:
+            replica_id = replica_info.replica_id
+            try:
+                self._launch_replica(replica_id, resources_override=None)
+            # pylint: disable=broad-except
+            except Exception as e:
+                logger.error(
+                    f'Failed to launch replica {replica_id} in recovery'
+                    f'run: {e}')
+        to_down_replicas = serve_state.get_replicas_at_statuses(
+            self._service_name, [serve_state.ReplicaStatus.SHUTTING_DOWN])
+        for replica_info in to_down_replicas:
+            replica_id = replica_info.replica_id
+            try:
+                self._terminate_replica(replica_id,
+                                        sync_down_logs=False,
+                                        purge=True,
+                                        replica_drain_delay_seconds=0)
+            # pylint: disable=broad-except
+            except Exception as e:
+                logger.error(
+                    f'Failed to terminate replica {replica_id} in recovery'
+                    f'run: {e}')
+
     ################################
     # Replica management functions #
     ################################
@@ -834,7 +873,9 @@ class SkyPilotReplicaManager(ReplicaManager):
         the fly. If any of them finished, it will update the status of the
         corresponding replica.
         """
-        for replica_id, p in list(self._launch_process_pool.items()):
+        # To avoid `dictionary changed size during iteration` error.
+        launch_process_pool_snapshot = list(self._launch_process_pool.items())
+        for replica_id, p in launch_process_pool_snapshot:
             if not p.is_alive():
                 info = serve_state.get_replica_info_from_id(
                     self._service_name, replica_id)
@@ -876,7 +917,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._terminate_replica(replica_id,
                                             sync_down_logs=True,
                                             replica_drain_delay_seconds=0)
-        for replica_id, p in list(self._down_process_pool.items()):
+        down_process_pool_snapshot = list(self._down_process_pool.items())
+        for replica_id, p in down_process_pool_snapshot:
             if not p.is_alive():
                 logger.info(
                     f'Terminate process for replica {replica_id} finished.')
