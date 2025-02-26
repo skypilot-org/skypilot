@@ -263,19 +263,15 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     logger.debug(f'Validating tasks: {validate_body.dag}')
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
-        
-        # Apply admin policies
-        request_options = admin_policy.RequestOptions(
-            cluster_name=validate_body.cluster_name,
-            idle_minutes_to_autostop=validate_body.idle_minutes_to_autostop,
-            down=validate_body.down,
-            dryrun=validate_body.dryrun
-        )
-        
+
+        # Apply admin policy since it may affect DAG validation.
+        # TODO: The admin policy may be a potentially expensive operation with
+        # network calls. Maybe this should be moved into a request run with the
+        # executor.
         dag, _ = admin_policy_utils.apply(
             dag,
             use_mutated_config_in_current_request=True,
-            request_options=request_options
+            request_options=validate_body.request_options
         )
         
         for task in dag.tasks:

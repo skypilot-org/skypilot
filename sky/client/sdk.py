@@ -25,7 +25,7 @@ import filelock
 import psutil
 import requests
 
-from sky import backends
+from sky import backends, admin_policy
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -37,6 +37,7 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
+from sky.utils import admin_policy_utils
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
@@ -212,13 +213,21 @@ def list_accelerator_counts(
 @annotations.client_api
 def optimize(
     dag: 'sky.Dag',
-    minimize: common.OptimizeTarget = common.OptimizeTarget.COST
+    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+    cluster_name: Optional[str] = None,
+    idle_minutes_to_autostop: Optional[int] = None,
+    down: bool = False,
+    dryrun: bool = False
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
 
     Args:
         dag: the DAG to optimize.
         minimize: whether to minimize cost or time.
+        cluster_name: name of the cluster to create/reuse. Used for admin policy validation.
+        idle_minutes_to_autostop: autostop setting. Used for admin policy validation.
+        down: whether to tear down the cluster. Used for admin policy validation.
+        dryrun: whether this is a dryrun. Used for admin policy validation.
 
     Returns:
         The request ID of the optimize request.
@@ -233,7 +242,16 @@ def optimize(
     """
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-    body = payloads.OptimizeBody(dag=dag_str, minimize=minimize)
+    body = payloads.OptimizeBody(
+        dag=dag_str, 
+        minimize=minimize,
+        request_options=admin_policy.RequestOptions(
+            cluster_name=cluster_name,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            dryrun=dryrun
+        )
+    )
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -271,10 +289,11 @@ def validate(dag: 'sky.Dag',
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(
         dag=dag_str,
+        request_options=admin_policy.RequestOptions(
         cluster_name=cluster_name,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         down=down,
-        dryrun=dryrun
+        dryrun=dryrun)
     )
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()))
