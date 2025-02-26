@@ -7,7 +7,7 @@
 
 <p align="center">
   <a href="https://docs.skypilot.co/">
-    <img alt="Documentation" src="https://img.shields.io/badge/docs-passing-default">
+    <img alt="Documentation" src="https://img.shields.io/badge/docs-gray?logo=readthedocs&logoColor=f5f5f5">
   </a>
 
   <a href="https://github.com/skypilot-org/skypilot/releases">
