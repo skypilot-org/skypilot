@@ -296,7 +296,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_name='optimize',
         request_body=optimize_body,
         ignore_return_value=True,
-        func=optimizer.Optimizer.optimize,
+        func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
