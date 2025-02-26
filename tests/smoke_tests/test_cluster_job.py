@@ -1276,7 +1276,7 @@ def test_autodown(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'autodown',
         [
-            f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} --num-nodes 2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --down -i 1',
             check_autostop_set,
             # Ensure the cluster is not terminated early.
@@ -1285,14 +1285,14 @@ def test_autodown(generic_cloud: str):
             # Ensure the cluster is terminated.
             f'sleep {autodown_timeout}',
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             f'sky status | grep {name} | grep UP',  # Ensure the cluster is UP.
             f'sky exec {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml',
             check_autostop_set,
             f'sleep {autodown_timeout}',
             # Ensure the cluster is terminated.
             f's=$(SKYPILOT_DEBUG=0 sky status {name} --refresh) && echo "$s" && {{ echo "$s" | grep {name} | grep "Autodowned cluster\|Cluster \'{name}\' not found"; }} || {{ echo "$s" | grep {name} && exit 1 || exit 0; }}',
-            f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down tests/test_yamls/minimal.yaml',
+            f'sky launch -y -d -c {name} --cloud {generic_cloud} --num-nodes 2 --down {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             f'sky autostop -y {name} --cancel',
             f'sleep {autodown_timeout}',
             # Ensure the cluster is still UP.
