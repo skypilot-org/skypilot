@@ -309,7 +309,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
         'managed_jobs_pipeline_recovery_aws',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/pipeline_aws.yaml -y -d',
+            f'sky jobs launch -n {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud aws tests/test_yamls/pipeline_aws.yaml -y -d',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=name,
