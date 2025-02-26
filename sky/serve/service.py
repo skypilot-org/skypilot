@@ -25,7 +25,7 @@ from sky.serve import load_balancer
 from sky.serve import replica_managers
 from sky.serve import serve_state
 from sky.serve import serve_utils
-from sky.skylet import constants as skylet_constants, job_lib
+from sky.skylet import constants as skylet_constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils

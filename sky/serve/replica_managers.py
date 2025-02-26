@@ -653,8 +653,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         for replica_info in to_up_replicas:
             replica_id = replica_info.replica_id
             try:
-                self._launch_replica(replica_id,
-                                     resources_override=None)
+                self._launch_replica(replica_id, resources_override=None)
             # pylint: disable=broad-except
             except Exception as e:
                 logger.error(
