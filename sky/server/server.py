@@ -24,9 +24,11 @@ import sky
 from sky import check as sky_check
 from sky import clouds
 from sky import core
+from sky import exceptions
 from sky import execution
 from sky import global_user_state
 from sky import sky_logging
+from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.data import storage_utils
 from sky.jobs.server import server as jobs_rest
@@ -42,7 +44,9 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common as common_lib
 from sky.utils import common_utils
+from sky.utils import dag_utils
 from sky.utils import status_lib
+from sky.utils import admin_policy_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -265,12 +269,20 @@ async def validate(request: fastapi.Request,
     # these into a single call or have a TTL cache for (task, admin_policy)
     # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
-    executor.schedule_request(request_id=request.state.request_id,
-                              request_name='validate',
-                              request_body=validate_body,
-                              ignore_return_value=True,
-                              func=core.validate_dag,
-                              schedule_type=requests_lib.ScheduleType.SHORT)
+    try:
+        dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        dag, _ = admin_policy_utils.apply(dag, request_options=validate_body.request_options)
+        for task in dag.tasks:
+            # Will validate workdir and file_mounts in the backend, as those
+            # need to be validated after the files are uploaded to the SkyPilot
+            # API server with `upload_mounts_to_api_server`.
+            task.validate_name()
+            task.validate_run()
+            for r in task.resources:
+                r.validate()
+    except Exception as e:  # pylint: disable=broad-except
+        raise fastapi.HTTPException(
+            status_code=400, detail=exceptions.serialize_exception(e)) from e
 
 
 @app.post('/optimize')

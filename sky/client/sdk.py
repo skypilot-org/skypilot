@@ -281,8 +281,6 @@ def validate(
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
                 response.json().get('detail'))
-    request_id = server_common.get_request_id(response)
-    get(request_id) # Make sure the request completed with no exceptions
 
 
 @usage_lib.entrypoint
