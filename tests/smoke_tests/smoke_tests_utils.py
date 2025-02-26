@@ -40,6 +40,15 @@ STORAGE_SETUP_COMMANDS = [
     'touch ~/.ssh/id_rsa.pub'
 ]
 
+LOW_RESOURCE_ARG = '--cpus 2+ --memory 4+'
+LOW_RESOURCE_PARAM = {
+    'cpus': '2+',
+    'memory': '4+',
+}
+LOW_RESOURCE_ENV = {
+    'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
+}
+
 # Get the job queue, and print it once on its own, then print it again to
 # use with grep by the caller.
 GET_JOB_QUEUE = 's=$(sky jobs queue); echo "$s"; echo "$s"'
@@ -467,7 +476,9 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
     if sky.server.common.is_api_server_local():
         return 'true'
     else:
-        return (f'sky launch -y -c {cluster_name} --cloud {cloud} --async')
+        return (
+            f'sky launch -y -c {cluster_name} --cloud {cloud} {LOW_RESOURCE_ARG} --async'
+        )
 
 
 def run_cloud_cmd_on_cluster(test_cluster_name: str,

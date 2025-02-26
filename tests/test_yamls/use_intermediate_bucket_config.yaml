@@ -1,2 +1,6 @@
 jobs:
   bucket: "s3://bucket-jobs-s3"
+
+controller:
+  cpus: 2+
+  memory: 4+
