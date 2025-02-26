@@ -21,14 +21,11 @@ from fastapi.middleware import cors
 import starlette.middleware.base
 
 import sky
-from sky import admin_policy
 from sky import check as sky_check
 from sky import clouds
 from sky import core
-from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import optimizer
 from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.data import storage_utils
@@ -45,9 +42,7 @@ from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import common as common_lib
 from sky.utils import common_utils
-from sky.utils import dag_utils
 from sky.utils import status_lib
-from sky.utils import admin_policy_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):

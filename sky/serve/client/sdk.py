@@ -51,8 +51,8 @@ def up(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag, workdir_only=False, cluster_name=service_name)
-    request_id = sdk.optimize(dag, cluster_name=service_name)
+    sdk.validate(dag)
+    request_id = sdk.optimize(dag)
     sdk.stream_and_get(request_id)
     if _need_confirmation:
         prompt = f'Launching a new service {service_name!r}. Proceed?'
@@ -107,8 +107,8 @@ def update(
     from sky.client import sdk  # pylint: disable=import-outside-toplevel
 
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    sdk.validate(dag, workdir_only=False, cluster_name=service_name)
-    request_id = sdk.optimize(dag, cluster_name=service_name)
+    sdk.validate(dag)
+    request_id = sdk.optimize(dag)
     sdk.stream_and_get(request_id)
     if _need_confirmation:
         click.confirm(f'Updating service {service_name!r}. Proceed?',

@@ -25,7 +25,8 @@ import filelock
 import psutil
 import requests
 
-from sky import backends, admin_policy
+from sky import admin_policy
+from sky import backends
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -37,7 +38,6 @@ from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
 from sky.utils import annotations
-from sky.utils import admin_policy_utils
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
@@ -224,7 +224,7 @@ def optimize(
     Args:
         dag: the DAG to optimize.
         minimize: whether to minimize cost or time.
-        cluster_name: name of the cluster to create/reuse. Used for admin policy validation.
+        cluster_name: name of the cluster. Used for admin policy validation.
         idle_minutes_to_autostop: autostop setting. Used for admin policy validation.
         down: whether to tear down the cluster. Used for admin policy validation.
         dryrun: whether this is a dryrun. Used for admin policy validation.
@@ -277,7 +277,7 @@ def validate(dag: 'sky.Dag',
         dag: the DAG to validate.
         workdir_only: whether to only validate the workdir. This is used for
             `exec` as it does not need other files/folders in file_mounts.
-        cluster_name: name of the cluster to create/reuse. Used for admin policy validation.
+        cluster_name: name of the cluster. Used for admin policy validation.
         idle_minutes_to_autostop: autostop setting. Used for admin policy validation.
         down: whether to tear down the cluster. Used for admin policy validation.
         dryrun: whether this is a dryrun. Used for admin policy validation.
