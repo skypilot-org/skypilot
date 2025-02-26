@@ -10,7 +10,7 @@ from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import dag
+from sky import dag as dag_lib
 from sky import data
 from sky import exceptions
 from sky import global_user_state
@@ -48,11 +48,11 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def optimize(dag: 'dag.Dag',
+def optimize(dag: 'dag_lib.Dag',
              minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
              blocked_resources: Optional[List['resources_lib.Resources']] = None,
              quiet: bool = False,
-             request_options: admin_policy.RequestOptions = None) -> 'dag.Dag':
+             request_options: admin_policy.RequestOptions = None) -> 'dag_lib.Dag':
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -364,7 +364,7 @@ def _start(
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
-    with dag.Dag():
+    with dag_lib.Dag():
         dummy_task = task.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
     handle = backend.provision(dummy_task,
