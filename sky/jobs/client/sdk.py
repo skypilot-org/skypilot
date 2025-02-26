@@ -7,7 +7,6 @@ import webbrowser
 import click
 import requests
 
-from examples.airflow.workflow_clientserver.pythonapi_test import cluster_name
 from sky import sky_logging
 from sky.client import common as client_common
 from sky.client import sdk

@@ -216,7 +216,7 @@ def optimize(
     minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
     cluster_name: Optional[str] = None,
     idle_minutes_to_autostop: Optional[int] = None,
-    down: bool = False,
+    down: bool = False,  # pylint: disable=redefined-outer-name
     dryrun: bool = False
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
@@ -225,8 +225,10 @@ def optimize(
         dag: the DAG to optimize.
         minimize: whether to minimize cost or time.
         cluster_name: name of the cluster. Used for admin policy validation.
-        idle_minutes_to_autostop: autostop setting. Used for admin policy validation.
-        down: whether to tear down the cluster. Used for admin policy validation.
+        idle_minutes_to_autostop: autostop setting. Used for admin policy
+            validation.
+        down: whether to tear down the cluster. Used for admin policy
+            validation.
         dryrun: whether this is a dryrun. Used for admin policy validation.
 
     Returns:
@@ -243,15 +245,13 @@ def optimize(
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
     body = payloads.OptimizeBody(
-        dag=dag_str, 
+        dag=dag_str,
         minimize=minimize,
         request_options=admin_policy.RequestOptions(
             cluster_name=cluster_name,
             idle_minutes_to_autostop=idle_minutes_to_autostop,
             down=down,
-            dryrun=dryrun
-        )
-    )
+            dryrun=dryrun))
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -260,12 +260,13 @@ def optimize(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def validate(dag: 'sky.Dag', 
-             workdir_only: bool = False,
-             cluster_name: Optional[str] = None,
-             idle_minutes_to_autostop: Optional[int] = None,
-             down: bool = False,
-             dryrun: bool = False) -> None:
+def validate(
+        dag: 'sky.Dag',
+        workdir_only: bool = False,
+        cluster_name: Optional[str] = None,
+        idle_minutes_to_autostop: Optional[int] = None,
+        down: bool = False,  # pylint: disable=redefined-outer-name
+        dryrun: bool = False) -> None:
     """Validates the tasks.
 
     The file paths (workdir and file_mounts) are validated on the client side
@@ -278,8 +279,10 @@ def validate(dag: 'sky.Dag',
         workdir_only: whether to only validate the workdir. This is used for
             `exec` as it does not need other files/folders in file_mounts.
         cluster_name: name of the cluster. Used for admin policy validation.
-        idle_minutes_to_autostop: autostop setting. Used for admin policy validation.
-        down: whether to tear down the cluster. Used for admin policy validation.
+        idle_minutes_to_autostop: autostop setting. Used for admin policy
+            validation.
+        down: whether to tear down the cluster. Used for admin policy
+            validation.
         dryrun: whether this is a dryrun. Used for admin policy validation.
     """
     for task in dag.tasks:
@@ -290,11 +293,10 @@ def validate(dag: 'sky.Dag',
     body = payloads.ValidateBody(
         dag=dag_str,
         request_options=admin_policy.RequestOptions(
-        cluster_name=cluster_name,
-        idle_minutes_to_autostop=idle_minutes_to_autostop,
-        down=down,
-        dryrun=dryrun)
-    )
+            cluster_name=cluster_name,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            dryrun=dryrun))
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
@@ -420,10 +422,10 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    validate(dag, 
-             cluster_name=cluster_name, 
-             idle_minutes_to_autostop=idle_minutes_to_autostop, 
-             down=down, 
+    validate(dag,
+             cluster_name=cluster_name,
+             idle_minutes_to_autostop=idle_minutes_to_autostop,
+             down=down,
              dryrun=dryrun)
 
     confirm_shown = False
@@ -574,10 +576,10 @@ def exec(  # pylint: disable=redefined-builtin
           controller that does not support this operation.
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    validate(dag, 
-             workdir_only=True, 
-             cluster_name=cluster_name, 
-             dryrun=dryrun, 
+    validate(dag,
+             workdir_only=True,
+             cluster_name=cluster_name,
+             dryrun=dryrun,
              down=down)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)

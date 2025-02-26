@@ -48,11 +48,13 @@ logger = sky_logging.init_logger(__name__)
 
 
 @usage_lib.entrypoint
-def optimize(dag: 'dag_lib.Dag',
-             minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
-             blocked_resources: Optional[List['resources_lib.Resources']] = None,
-             quiet: bool = False,
-             request_options: admin_policy.RequestOptions = None) -> 'dag_lib.Dag':
+def optimize(
+    dag: 'dag_lib.Dag',
+    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+    blocked_resources: Optional[List['resources_lib.Resources']] = None,
+    quiet: bool = False,
+    request_options: Optional[admin_policy.RequestOptions] = None
+) -> 'dag_lib.Dag':
     """Finds the best execution plan for the given DAG.
 
     Args:
@@ -73,19 +75,17 @@ def optimize(dag: 'dag_lib.Dag',
     dag, _ = admin_policy_utils.apply(
         dag,
         use_mutated_config_in_current_request=True,
-        request_options=request_options
-    )
-    return optimizer.Optimizer.optimize(
-        dag=dag,
-        minimize=minimize,
-        blocked_resources=blocked_resources,
-        quiet=quiet
-    )
+        request_options=request_options)
+    return optimizer.Optimizer.optimize(dag=dag,
+                                        minimize=minimize,
+                                        blocked_resources=blocked_resources,
+                                        quiet=quiet)
 
 
 @usage_lib.entrypoint
-def validate_dag(dag: 'dag_lib.Dag',
-                request_options: admin_policy.RequestOptions = None) -> None:
+def validate_dag(
+        dag: 'dag_lib.Dag',
+        request_options: Optional[admin_policy.RequestOptions] = None) -> None:
     """Validates the specified DAG.
 
     Args:
@@ -98,9 +98,8 @@ def validate_dag(dag: 'dag_lib.Dag',
     dag, _ = admin_policy_utils.apply(
         dag,
         use_mutated_config_in_current_request=True,
-        request_options=request_options
-    )
-    
+        request_options=request_options)
+
     for task in dag.tasks:
         # Will validate workdir and file_mounts in the backend, as those
         # need to be validated after the files are uploaded to the SkyPilot

@@ -252,7 +252,7 @@ async def list_accelerator_counts(
 
 @app.post('/validate')
 async def validate(request: fastapi.Request,
-                validate_body: payloads.ValidateBody) -> None:
+                   validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
@@ -260,14 +260,12 @@ async def validate(request: fastapi.Request,
     # We make the validation a separate request as it may require expensive
     # network calls if an admin policy is applied.
     logger.debug(f'Validating tasks: {validate_body.dag}')
-    executor.schedule_request(
-            request_id=request.state.request_id,
-            request_name='validate',
-            request_body=validate_body,
-            ignore_return_value=True,
-            func=core.validate_dag,
-            schedule_type=requests_lib.ScheduleType.SHORT
-        )
+    executor.schedule_request(request_id=request.state.request_id,
+                              request_name='validate',
+                              request_body=validate_body,
+                              ignore_return_value=True,
+                              func=core.validate_dag,
+                              schedule_type=requests_lib.ScheduleType.SHORT)
 
 
 @app.post('/optimize')
