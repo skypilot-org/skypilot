@@ -6,7 +6,6 @@ from typing import Any, Callable, Optional, Set
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
 from sky.utils import annotations
-from sky.utils import env_options
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
