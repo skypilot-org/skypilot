@@ -6,9 +6,9 @@ import argparse
 import logging
 import os
 import pickle
-import uuid
 import time
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, List, Optional
+import uuid
 
 import chromadb
 from fastapi import FastAPI
@@ -277,10 +277,10 @@ async def get_documents(request: DocumentsOnlyRequest):
 
         # Get relevant documents
         results = query_collection(query_embedding, request.n_results)
-        
+
         # Generate a unique request ID
         request_id = str(uuid.uuid4())
-        
+
         # Store the request data for later LLM processing
         active_requests[request_id] = {
             "query": request.query,
@@ -288,16 +288,18 @@ async def get_documents(request: DocumentsOnlyRequest):
             "status": "documents_ready",
             "timestamp": time.time()
         }
-        
+
         # Clean up old requests (older than 30 minutes)
         current_time = time.time()
-        expired_requests = [req_id for req_id, data in active_requests.items() 
-                          if current_time - data["timestamp"] > 1800]
+        expired_requests = [
+            req_id for req_id, data in active_requests.items()
+            if current_time - data["timestamp"] > 1800
+        ]
         for req_id in expired_requests:
             active_requests.pop(req_id, None)
-        
+
         return DocumentsOnlyResponse(sources=results, request_id=request_id)
-        
+
     except Exception as e:
         logger.error(f"Error retrieving documents: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -307,43 +309,43 @@ async def get_documents(request: DocumentsOnlyRequest):
 async def process_llm(request: StartLLMRequest):
     """Process a query with the LLM using previously retrieved documents."""
     request_id = request.request_id
-    
+
     # Check if the request exists and is ready for LLM processing
-    if request_id not in active_requests or active_requests[request_id]["status"] != "documents_ready":
-        raise HTTPException(status_code=404, detail="Request not found or documents not ready")
-    
+    if request_id not in active_requests or active_requests[request_id][
+            "status"] != "documents_ready":
+        raise HTTPException(status_code=404,
+                            detail="Request not found or documents not ready")
+
     # Mark the request as in progress
     active_requests[request_id]["status"] = "llm_processing"
-    
+
     try:
         # Get stored data
         query = active_requests[request_id]["query"]
         results = active_requests[request_id]["results"]
-        
+
         # Generate prompt
         prompt = generate_prompt(query, results)
-        
+
         # Get LLM response
         thinking, answer = await query_llm(prompt, request.temperature)
-        
+
         # Store the response and mark as completed
         active_requests[request_id]["status"] = "completed"
         active_requests[request_id]["thinking"] = thinking
         active_requests[request_id]["answer"] = answer
         active_requests[request_id]["timestamp"] = time.time()
-        
-        return LLMStatusResponse(
-            status="completed",
-            answer=answer,
-            thinking_process=thinking
-        )
-        
+
+        return LLMStatusResponse(status="completed",
+                                 answer=answer,
+                                 thinking_process=thinking)
+
     except Exception as e:
         # Mark as error
         active_requests[request_id]["status"] = "error"
         active_requests[request_id]["error"] = str(e)
         active_requests[request_id]["timestamp"] = time.time()
-        
+
         logger.error(f"Error processing LLM request: {str(e)}")
         return LLMStatusResponse(status="error", error=str(e))
 
@@ -353,20 +355,17 @@ async def get_llm_status(request_id: str):
     """Get the status of an LLM request."""
     if request_id not in active_requests:
         raise HTTPException(status_code=404, detail="Request not found")
-    
+
     request_data = active_requests[request_id]
-    
+
     if request_data["status"] == "completed":
-        return LLMStatusResponse(
-            status="completed",
-            answer=request_data["answer"],
-            thinking_process=request_data["thinking"]
-        )
+        return LLMStatusResponse(status="completed",
+                                 answer=request_data["answer"],
+                                 thinking_process=request_data["thinking"])
     elif request_data["status"] == "error":
-        return LLMStatusResponse(
-            status="error", 
-            error=request_data.get("error", "Unknown error")
-        )
+        return LLMStatusResponse(status="error",
+                                 error=request_data.get("error",
+                                                        "Unknown error"))
     else:
         return LLMStatusResponse(status="pending")
 
