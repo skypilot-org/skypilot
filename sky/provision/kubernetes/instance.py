@@ -908,8 +908,10 @@ def terminate_instances(
         # high availability controller, and then remove
         # `controller.high_availability` from the config, which creates a
         # resource leak.
-        # TODO(andyl): Could be resolved by storing the high availability
-        # property in the provider config.
+        # TODO(andyl): We should check if the pod name ends with "deployment"
+        # Bascially, after provisioned, we can only retrieve cluster infos
+        # through cloud apis. And for Kubernetes, we check it by querying
+        # if the deployment exists.
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 

@@ -2471,7 +2471,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # to manually update the cluster info here.
         # TODO(andy): See if we can prevent this refresh. Like pass in
         # deployment name as identifier for KubernetesCommandRunner.
-        # TODO(andyl): Should also check through the cluster config. Same as
+        # TODO(andyl): Should check through the real cluster info. Same as
         # the TODO in kubernetes/instance.py:terminate_instances
         if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
                 common_utils.high_availability_specified(
