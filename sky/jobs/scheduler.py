@@ -49,6 +49,7 @@ from sky import sky_logging
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import state
 from sky.skylet import constants
+from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 logger = sky_logging.init_logger('sky.jobs.controller')
@@ -151,12 +152,20 @@ def maybe_schedule_next_jobs() -> None:
                     job_id = maybe_next_job['job_id']
                     dag_yaml_path = maybe_next_job['dag_yaml_path']
 
+                    activate_python_env_cmd = (
+                        f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};')
+                    env_file = maybe_next_job['env_file_path']
+                    source_environment_cmd = (f'source {env_file};'
+                                              if env_file else '')
+                    run_controller_cmd = ('python -u -m sky.jobs.controller '
+                                          f'{dag_yaml_path} --job-id {job_id};')
+
                     # If the command line here is changed, please also update
                     # utils._controller_process_alive. `--job-id X` should be at
                     # the end.
-                    run_cmd = (f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV};'
-                               'python -u -m sky.jobs.controller '
-                               f'{dag_yaml_path} --job-id {job_id}')
+                    run_cmd = (f'{activate_python_env_cmd}'
+                               f'{source_environment_cmd}'
+                               f'{run_controller_cmd}')
 
                     logs_dir = os.path.expanduser(
                         managed_job_constants.JOBS_CONTROLLER_LOGS_DIR)
@@ -175,16 +184,19 @@ def maybe_schedule_next_jobs() -> None:
         pass
 
 
-def submit_job(job_id: int, dag_yaml_path: str) -> None:
+def submit_job(job_id: int, dag_yaml_path: str, env_file_path: str) -> None:
     """Submit an existing job to the scheduler.
 
     This should be called after a job is created in the `spot` table as
     PENDING. It will tell the scheduler to try and start the job controller, if
     there are resources available. It may block to acquire the lock, so it
     should not be on the critical path for `sky jobs launch -d`.
+
+    The user hash should be set (e.g. via SKYPILOT_USER_ID) before calling this.
     """
     with filelock.FileLock(_get_lock_path()):
-        state.scheduler_set_waiting(job_id, dag_yaml_path)
+        state.scheduler_set_waiting(job_id, dag_yaml_path, env_file_path,
+                                    common_utils.get_user_hash())
     maybe_schedule_next_jobs()
 
 
@@ -281,12 +293,15 @@ def _can_lauch_in_alive_job() -> bool:
 
 if __name__ == '__main__':
     parser = ArgumentParser()
+    parser.add_argument('dag_yaml',
+                        type=str,
+                        help='The path to the user job yaml file.')
     parser.add_argument('--job-id',
                         required=True,
                         type=int,
                         help='Job id for the controller job.')
-    parser.add_argument('dag_yaml',
+    parser.add_argument('--env-file',
                         type=str,
-                        help='The path to the user job yaml file.')
+                        help='The path to the controller env file.')
     args = parser.parse_args()
-    submit_job(args.job_id, args.dag_yaml)
+    submit_job(args.job_id, args.dag_yaml, args.env_file)
