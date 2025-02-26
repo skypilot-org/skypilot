@@ -869,9 +869,9 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
 # ================== Table Formatter for `sky serve status` ==================
 
 
-def _get_replicas(service_record: Dict[str, Any]) -> str:
+def _get_replicas(service_record: Dict[str, Any], replica_key: str) -> str:
     ready_replica_num, total_replica_num = 0, 0
-    for info in service_record['replica_info']:
+    for info in service_record[replica_key]:
         if info['status'] == serve_state.ReplicaStatus.READY:
             ready_replica_num += 1
         # TODO(MaoZiming): add a column showing failed replicas number.
@@ -886,7 +886,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
         return 'No existing services.'
 
     service_columns = [
-        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
+        'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'EXTERNAL_LBS', 'ENDPOINT'
     ]
     if show_all:
         service_columns.extend([
@@ -916,7 +916,8 @@ def format_service_table(service_records: List[Dict[str, Any]],
                                                   absolute=True)
         service_status = record['status']
         status_str = service_status.colored_str()
-        replicas = _get_replicas(record)
+        replicas = _get_replicas(record, 'replica_info')
+        external_lbs = _get_replicas(record, 'external_lb_info')
         endpoint = record['endpoint']
         if endpoint is None:
             endpoint = '-'
@@ -930,6 +931,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             uptime,
             status_str,
             replicas,
+            external_lbs,
             endpoint,
         ]
         if show_all:
