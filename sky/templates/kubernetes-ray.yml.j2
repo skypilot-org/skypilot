@@ -528,6 +528,7 @@ available_node_types:
                 done
               }
 
+              {%if high_availability %}
               mkdir -p ~/.sky/.controller_recovery_task_run
               if [ -f ~/.sky/k8s_container_ready ]; then
                 # ! Keep this aligned with `CloudVmRayBackend._setup()`
@@ -546,6 +547,7 @@ available_node_types:
               fi
 
               touch ~/.sky/k8s_container_ready
+              {% endif %}
 
               trap : TERM INT; log_tail || sleep infinity & wait
 

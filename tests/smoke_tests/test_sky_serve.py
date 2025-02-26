@@ -458,7 +458,7 @@ def test_skyserve_auto_restart():
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
             # sleep for 20 seconds (initial delay) to make sure it will
             # be restarted
-            f'sleep 20',
+            'sleep 20',
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name,
                 cmd=smoke_tests_utils.terminate_gcp_replica(name, zone, 1)),
@@ -968,8 +968,8 @@ def test_skyserve_ha_kill_after_ready():
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
             # Verify service is accessible
-            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             # Kill controller and verify recovery
             _kill_and_wait_controller(),
             # Verify service remains accessible after controller recovery
@@ -1007,8 +1007,8 @@ def test_skyserve_ha_kill_during_provision():
             # Verify service eventually becomes ready
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
-            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             # Check there is only one cluster
             f'instance_names=$(gcloud compute instances list --filter="name~{name}" --format="value(name)"); '
             'echo "Initial instances: $instance_names"; '
@@ -1041,8 +1041,8 @@ def test_skyserve_ha_kill_during_pending():
             # Verify service eventually becomes ready and accessible
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             _check_replica_in_status(name, [(1, False, 'READY')]),
-            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             # Check there are one cluster
             f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)"); '
             'echo "Initial instances: $instance_names"; '
@@ -1069,8 +1069,8 @@ def test_skyserve_ha_kill_during_shutdown():
             # Launch service and wait for ready
             f'sky serve up -n {name} -y tests/skyserve/high_availability/service.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
-            # f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            # 'curl $endpoint | grep "Hi, SkyPilot here"',
+            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+            'curl $endpoint | grep "Hi, SkyPilot here"',
             # Record instance names and initiate shutdown of the replica
             f'instance_names=$(gcloud compute instances list --filter="(labels.ray-cluster-name:{replica_cluster_name})" --format="value(name)"); '
             'echo "Initial instances: $instance_names"; '
