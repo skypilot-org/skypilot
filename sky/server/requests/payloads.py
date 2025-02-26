@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
 
+from sky import admin_policy
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
@@ -116,12 +117,14 @@ class CheckBody(RequestBody):
 class ValidateBody(RequestBody):
     """The request body for the validate endpoint."""
     dag: str
+    request_options: admin_policy.RequestOptions
 
 
 class OptimizeBody(RequestBody):
     """The request body for the optimize endpoint."""
     dag: str
     minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
+    request_options: admin_policy.RequestOptions
 
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
