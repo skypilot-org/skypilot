@@ -52,6 +52,7 @@ Contents
    :maxdepth: 1
    :caption: Applications
 
+   Retrieval Augmented Generation <applications/rag>
    Image Vector Database <applications/vector_database>
    Tabby: Coding Assistant <applications/tabby>
    LocalGPT: Chat with PDF <applications/localgpt>

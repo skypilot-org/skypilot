@@ -178,7 +178,8 @@ def override_request_env_and_config(
     os.environ['CLICOLOR_FORCE'] = '1'
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command)
+        client_command=request_body.entrypoint_command,
+        using_remote_api_server=request_body.using_remote_api_server)
     try:
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config):
@@ -255,6 +256,7 @@ def _request_execution_wrapper(request_id: str,
         try:
             with override_request_env_and_config(request_body):
                 return_value = func(**request_body.to_kwargs())
+                f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             _restore_output(original_stdout, original_stderr)

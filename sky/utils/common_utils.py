@@ -247,18 +247,23 @@ class Backoff:
 
 _current_command: Optional[str] = None
 _current_client_entrypoint: Optional[str] = None
+_using_remote_api_server: Optional[bool] = None
 
 
-def set_client_entrypoint_and_command(client_entrypoint: Optional[str],
-                                      client_command: Optional[str]):
+def set_client_status(client_entrypoint: Optional[str],
+                      client_command: Optional[str],
+                      using_remote_api_server: bool):
     """Override the current client entrypoint and command.
 
     This is useful when we are on the SkyPilot API server side and we have a
     client entrypoint and command from the client.
     """
-    global _current_command, _current_client_entrypoint
+    global _current_command
+    global _current_client_entrypoint
+    global _using_remote_api_server
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
+    _using_remote_api_server = using_remote_api_server
 
 
 def get_current_command() -> str:
@@ -282,6 +287,17 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
     if _current_client_entrypoint is not None:
         return _current_client_entrypoint
     return server_entrypoint
+
+
+def get_using_remote_api_server() -> bool:
+    """Returns whether the API server is remote."""
+    if _using_remote_api_server is not None:
+        return _using_remote_api_server
+    # This gets the right status for the local client.
+    # TODO(zhwu): This is to prevent circular import. We should refactor this.
+    # pylint: disable=import-outside-toplevel
+    from sky.server import common as server_common
+    return not server_common.is_api_server_local()
 
 
 def get_pretty_entrypoint_cmd() -> str:
@@ -758,13 +774,10 @@ def is_port_available(port: int, reuse_addr: bool = True) -> bool:
             return False
 
 
-# TODO(aylei): should be aware of cgroups
 def get_cpu_count() -> int:
-    """Get the number of CPUs.
-
-    If the API server is deployed as a pod in k8s cluster, we assume the
-    number of CPUs is provided by the downward API.
-    """
+    """Get the number of CPUs, with cgroup awareness."""
+    # This env-var is kept since it is still useful for limiting the resource
+    # of SkyPilot in non-containerized environments.
     cpu_count = os.getenv('SKYPILOT_POD_CPU_CORE_LIMIT')
     if cpu_count is not None:
         try:
@@ -774,16 +787,11 @@ def get_cpu_count() -> int:
                 raise ValueError(
                     f'Failed to parse the number of CPUs from {cpu_count}'
                 ) from e
-    return psutil.cpu_count()
+    return _cpu_count()
 
 
-# TODO(aylei): should be aware of cgroups
 def get_mem_size_gb() -> float:
-    """Get the memory size in GB.
-
-    If the API server is deployed as a pod in k8s cluster, we assume the
-    memory size is provided by the downward API.
-    """
+    """Get the memory size in GB, with cgroup awareness."""
     mem_size = os.getenv('SKYPILOT_POD_MEMORY_GB_LIMIT')
     if mem_size is not None:
         try:
@@ -792,4 +800,92 @@ def get_mem_size_gb() -> float:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'Failed to parse the memory size from {mem_size}') from e
-    return psutil.virtual_memory().total / (1024**3)
+    return _mem_size_gb()
+
+
+def _cpu_count() -> int:
+    # host cpu cores (logical)
+    cpu = psutil.cpu_count()
+    # cpu affinity on Linux
+    if hasattr(os, 'sched_getaffinity'):
+        # just for safe, length of CPU set should always <= logical cpu cores
+        cpu = min(cpu, len(os.sched_getaffinity(0)))
+    cgroup_cpu = _get_cgroup_cpu_limit()
+    if cgroup_cpu is not None:
+        cpu = min(cpu, int(cgroup_cpu))
+    return cpu
+
+
+def _mem_size_gb() -> float:
+    # host memory limit
+    mem = psutil.virtual_memory().total
+    cgroup_mem = _get_cgroup_memory_limit()
+    if cgroup_mem is not None:
+        mem = min(mem, cgroup_mem)
+    return mem / (1024**3)
+
+
+# Refer to:
+# - https://docs.kernel.org/admin-guide/cgroup-v1/index.html
+# - https://docs.kernel.org/admin-guide/cgroup-v2.html
+# for the standards of handler files in cgroupv1 and v2.
+# Since all those paths are well-known standards that are unlikely to change,
+# we use string literals instead of defining extra constants.
+def _get_cgroup_cpu_limit() -> Optional[float]:
+    """Return cpu limit from cgroups in cores.
+
+    Returns:
+        The cpu limit in cores as a float (can be fractional), or None if there
+        is no limit in cgroups.
+    """
+    try:
+        if _is_cgroup_v2():
+            with open('/sys/fs/cgroup/cpu.max', 'r', encoding='utf-8') as f:
+                quota_str, period_str = f.read().strip().split()
+                if quota_str == 'max':
+                    return None
+                quota = float(quota_str)
+                period = float(period_str)
+                return quota / period if quota > 0 else None
+        else:
+            # cgroup v1
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_quota_us',
+                      'r',
+                      encoding='utf-8') as f:
+                quota = float(f.read().strip())
+            with open('/sys/fs/cgroup/cpu/cpu.cfs_period_us',
+                      'r',
+                      encoding='utf-8') as f:
+                period = float(f.read().strip())
+            # Return unlimited if cpu quota is not set.
+            # Note that we do not use cpu.shares since it is a relative weight
+            # instead of a hard limit. It is okay to get CPU throttling under
+            # high contention. And unlimited enables the server to use as much
+            # CPU as available if there is no contention.
+            return quota / period if (quota > 0 and period > 0) else None
+    except (OSError, ValueError):
+        return None
+
+
+def _get_cgroup_memory_limit() -> Optional[int]:
+    """Return memory limit from cgroups in bytes.
+
+    Returns:
+        The memory limit in bytes, or None if there is no limit in cgroups.
+    """
+    try:
+        path = ('/sys/fs/cgroup/memory.max' if _is_cgroup_v2() else
+                '/sys/fs/cgroup/memory/memory.limit_in_bytes')
+        with open(path, 'r', encoding='utf-8') as f:
+            value = f.read().strip()
+            if value == 'max' or not value:
+                return None
+            limit = int(value)
+            return limit if limit > 0 else None
+    except (OSError, ValueError):
+        return None
+
+
+def _is_cgroup_v2() -> bool:
+    """Return True if the environment is running cgroup v2."""
+    return os.path.isfile('/sys/fs/cgroup/cgroup.controllers')
