@@ -606,10 +606,9 @@ def test_skyserve_update(generic_cloud: str):
     if generic_cloud == 'kubernetes':
         # EKS requires more resources to reduce the likelihood of flakiness.
         resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
-        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update',
@@ -645,6 +644,12 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
+    if generic_cloud == 'kubernetes':
+        # EKS requires more resources to reduce the likelihood of flakiness.
+        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+    else:
+        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
+
     name = _get_service_name()
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
@@ -652,10 +657,10 @@ def test_skyserve_rolling_update(generic_cloud: str):
     test = smoke_tests_utils.Test(
         f'test-skyserve-rolling-update',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/old.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/new.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
             # with even id will sleep 60 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
@@ -731,16 +736,22 @@ def test_skyserve_fast_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
+    if generic_cloud == 'kubernetes':
+        # EKS requires more resources to reduce the likelihood of flakiness.
+        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+    else:
+        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
+
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update-autoscale',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/num_min_two.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/num_min_two.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
             _check_service_version(name, "1"),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
@@ -749,7 +760,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'curl $endpoint | grep "Hi, SkyPilot here!"',
             # Rolling Update
-            f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/num_min_two.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/num_min_two.yaml',
             # sleep before update is registered.
             'sleep 20',
             # Timeout will be triggered when update fails.
@@ -842,12 +853,17 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
+    if generic_cloud == 'kubernetes':
+        # EKS requires more resources to reduce the likelihood of flakiness.
+        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+    else:
+        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = _get_service_name()
 
     test = smoke_tests_utils.Test(
         'test-skyserve-failures',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/failures/initial_delay.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/failures/initial_delay.yaml',
             f's=$(sky serve status {name}); '
             f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
             'echo "Waiting for replica to be failed..."; sleep 5; '
@@ -856,7 +872,7 @@ def test_skyserve_failures(generic_cloud: str):
             f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
             # Make sure no new replicas are started for early failure.
             f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
-            f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/failures/probing.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/failures/probing.yaml',
             f's=$(sky serve status {name}); '
             # Wait for replica to be ready.
             f'until echo "$s" | grep "READY"; do '
