@@ -6,6 +6,5 @@ Frameworks
 
    Airflow <airflow>
    DVC <dvc>
-   Cog <cog>
    MPI <mpi>
    Jupyter <jupyter>

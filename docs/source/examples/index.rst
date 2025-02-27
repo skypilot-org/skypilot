@@ -33,6 +33,7 @@ If you have any questions, please feel free to ask in the `SkyPilot Slack <https
 
    Quickstart: PyTorch <../getting-started/tutorial>
    Training <training/index>
-   Serving <../gallery/llms/index>
+   Serving <serving/index>
+   Models <../gallery/llms/index>
    Other Frameworks <frameworks/index>
    AI Applications <applications/index>
