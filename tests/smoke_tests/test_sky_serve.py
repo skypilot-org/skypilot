@@ -603,11 +603,18 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
+    if generic_cloud == 'kubernetes':
+        # EKS need higher resource for reducing the probability of flakyness
+        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        env = None
+    else:
+        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/update/old.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode blue_green -y tests/skyserve/update/new.yaml',
