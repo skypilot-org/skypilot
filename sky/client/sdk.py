@@ -418,7 +418,8 @@ def launch(
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
             # exist.
-            request_id = optimize(dag, admin_policy_request_options=request_options)
+            request_id = optimize(dag,
+                                  admin_policy_request_options=request_options)
             stream_and_get(request_id)
         else:
             cluster_record = clusters[0]
