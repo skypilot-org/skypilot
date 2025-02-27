@@ -1,1 +1,1 @@
-../../../../llm/llama-3_1-finetuning/readme.md
+../../generated-examples/llama-3_1-finetuning.md

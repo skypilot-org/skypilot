@@ -1,1 +1,1 @@
-../../../../examples/vector_database/README.md
+../../generated-examples/vector_database.md

@@ -1,14 +1,8 @@
-LLM Serving
+Models
 ============
 
 .. toctree::
    :maxdepth: 1
-
-   vLLM <../frameworks/vllm>
-   SGLang <../frameworks/sglang>
-   Ollama <../frameworks/ollama>
-   Hugging Face TGI <../frameworks/tgi>
-   LoRAX <../frameworks/lorax>
 
    DeepSeek-R1 <deepseek-r1>
    DeepSeek-R1 Distilled <deepseek-r1-distilled>
