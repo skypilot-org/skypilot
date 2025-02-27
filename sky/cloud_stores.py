@@ -585,7 +585,7 @@ class NebiusCloudStorage(CloudStorage):
             source = source.replace('nebius://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                'sync --no-follow-symlinks '
-                               f'{source} {destination}'
+                               f'{source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
@@ -597,7 +597,7 @@ class NebiusCloudStorage(CloudStorage):
         """Downloads a file using AWS CLI."""
         endpoint_url = nebius.create_endpoint()
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-                               f'cp {source} {destination}'
+                               f'cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
                                f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
