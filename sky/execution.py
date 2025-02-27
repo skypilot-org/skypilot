@@ -18,7 +18,6 @@ from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
 from sky.utils import common
-from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
@@ -215,8 +214,8 @@ def _execute(
     if controller is not None:
         requested_features.add(
             clouds.CloudImplementationFeatures.HOST_CONTROLLERS)
-        if common_utils.high_availability_specified(cluster_name,
-                                                    skip_warning=False):
+        if controller_utils.high_availability_specified(cluster_name,
+                                                        skip_warning=False):
             requested_features.add(clouds.CloudImplementationFeatures.
                                    HIGH_AVAILABILITY_CONTROLLERS)
             # If we provision a cluster that supports high availability

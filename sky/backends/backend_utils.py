@@ -694,7 +694,7 @@ def write_cluster_config(
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
 
-    high_availability_specified = common_utils.high_availability_specified(
+    high_availability_specified = controller_utils.high_availability_specified(
         cluster_name_on_cloud)
 
     # Use a tmp file path to avoid incomplete YAML file being re-used in the

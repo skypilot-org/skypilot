@@ -2474,7 +2474,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # TODO(andyl): Should check through the real cluster info. Same as
         # the TODO in kubernetes/instance.py:terminate_instances
         if (isinstance(self.launched_resources.cloud, clouds.Kubernetes) and
-                common_utils.high_availability_specified(
+                controller_utils.high_availability_specified(
                     self.cluster_name_on_cloud)):
             self._update_cluster_info()
 

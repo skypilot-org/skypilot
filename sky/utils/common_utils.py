@@ -16,7 +16,6 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
-import colorama
 import jinja2
 import jsonschema
 import psutil
@@ -43,41 +42,6 @@ _COLOR_PATTERN = re.compile(r'\x1b[^m]*m')
 _VALID_ENV_VAR_REGEX = '[a-zA-Z_][a-zA-Z0-9_]*'
 
 logger = sky_logging.init_logger(__name__)
-
-
-# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-def high_availability_specified(cluster_name: Optional[str],
-                                skip_warning: bool = True) -> bool:
-    """Check if the controller high availability is supported.
-    """
-    if cluster_name is None:
-        return False
-    # Workaround for circular import: mocking the `Controllers` enum.
-    if cluster_name.startswith('sky-serve-controller'):
-        controller_type = 'serve'
-        controller_value = 'serve controller'
-    elif cluster_name.startswith('sky-jobs-controller'):
-        controller_type = 'jobs'
-        controller_value = 'jobs controller'
-    else:
-        return False
-
-    # Workaround for circular import: import skypilot_config here.
-    # pylint: disable=import-outside-toplevel
-    from sky import skypilot_config
-    if skypilot_config.loaded():
-        high_availability = skypilot_config.get_nested(
-            (controller_type, 'controller', 'high_availability'), False)
-        if high_availability:
-            if controller_type != 'serve':
-                if not skip_warning:
-                    print(f'{colorama.Fore.RED}High availability controller is'
-                          'only supported for SkyServe controller. It cannot'
-                          f'be enabled for {controller_value}.'
-                          f'Skipping this flag.{colorama.Style.RESET_ALL}')
-            else:
-                return True
-    return False
 
 
 @annotations.lru_cache(scope='request')
