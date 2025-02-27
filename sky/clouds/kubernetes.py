@@ -512,6 +512,10 @@ class Kubernetes(clouds.Cloud):
             'k8s_high_availability_deployment_volume_mount_path':
                 (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
                 ),
+            'k8s_high_availability_deployment_setup_script_path':
+                (constants.PERSISTENT_SETUP_SCRIPT_PATH),
+            'k8s_high_availability_deployment_run_script_dir':
+                (constants.PERSISTENT_RUN_SCRIPT_DIR),
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

@@ -40,6 +40,11 @@ if typing.TYPE_CHECKING:
     from sky import backends
     from sky import resources as resources_lib
 
+# Please be careful when changing this.
+# When mounting, Kubernetes changes the ownership of the parent directory
+# to root:root.
+# pylint: disable=line-too-long
+# See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
 HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
 
