@@ -142,15 +142,19 @@ def _cleanup(service_name: str,
             cn = info.cluster_name
             if is_external_lb:
                 lb_record = global_user_state.get_cluster_from_name(cn)
-                assert lb_record is not None
-                lb_region = lb_record['handle'].launched_resources.region
-                lb_ip = _get_cluster_ip(cn)
-                assert lb_ip is not None
-                # Hosted zone must be set for external LBs.
-                assert hosted_zone is not None
-                change_batch.append(
-                    _get_route53_change('DELETE', service_name, hosted_zone,
-                                        'A', lb_region, lb_ip))
+                if lb_record is not None:
+                    lb_region = lb_record['handle'].launched_resources.region
+                    lb_ip = _get_cluster_ip(cn)
+                    if lb_ip is not None:
+                        # Hosted zone must be set for external LBs.
+                        assert hosted_zone is not None
+                        change_batch.append(
+                            _get_route53_change('DELETE', service_name,
+                                                hosted_zone, 'A', lb_region,
+                                                lb_ip))
+                # If lb_record is None or the ip is None, that means the LB does
+                # not have an IP address yet, which means the record is not
+                # added to Route53 yet. Hence we skip the cleanup for it.
             p = multiprocessing.Process(
                 target=replica_managers.terminate_cluster, args=(cn,))
             p.start()
