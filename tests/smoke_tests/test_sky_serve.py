@@ -389,11 +389,17 @@ def test_skyserve_dynamic_ondemand_fallback():
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
+    if generic_cloud == 'kubernetes':
+        # EKS requires more resources to reduce the likelihood of flakiness.
+        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+    else:
+        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
+
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-user-bug-restart',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/restart/user_bug.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/restart/user_bug.yaml',
             f's=$(sky serve status {name}); echo "$s";'
             'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
             'do echo "Waiting for first service to be SHUTTING DOWN..."; '
@@ -406,7 +412,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
             # User bug failure will cause no further scaling.
             f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
             f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
-            f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/auto_restart.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/auto_restart.yaml',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'until curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"; do sleep 1; done; sleep 2; '
             + _check_replica_in_status(name, [(1, False, 'READY'),
@@ -622,7 +628,7 @@ def test_skyserve_update(generic_cloud: str):
             f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/old.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --mode blue_green -y tests/skyserve/update/new.yaml',
+            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} --mode blue_green -y tests/skyserve/update/new.yaml',
             # sleep before update is registered.
             'sleep 20',
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
