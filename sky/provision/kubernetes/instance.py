@@ -57,6 +57,23 @@ def _head_service_selector(cluster_name: str) -> Dict[str, str]:
     return {'component': f'{cluster_name}-head'}
 
 
+def infer_deployment_name_from_pods(pod_name: str) -> str:
+    """Kubernetes pod adds random suffix to the deployment name."""
+    return pod_name[:pod_name.rfind('-')]
+
+
+def is_high_availability_controller(cluster_name: str) -> bool:
+    """Check if a cluster is a high availability controller based on naming
+    pattern.
+    """
+    # TODO(andyl): We should let config['cluster_name'] be the deployment name.
+    # Or even k8s identifier like 'deployment/sky-serve-controller-deployment'.
+    # So that we can further avoid checking the naming pattern here.
+    # But this means we need to change the update_cluster_info logic and
+    # what stored in handle.cluster_name_on_cloud as well.
+    return cluster_name.startswith('sky-serve-controller')
+
+
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
     # Returns a formatted string of resource requirements for a pod.
     resource_requirements = {}
@@ -898,15 +915,8 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    if cluster_name_on_cloud.startswith('sky-serve-controller'):
-        # We chooese to only check cluster name, because users may launch a
-        # high availability controller, and then remove
-        # `controller.high_availability` from the config, which creates a
-        # resource leak.
-        # TODO(andyl): We should check if the pod name ends with "deployment"
-        # Bascially, after provisioned, we can only retrieve cluster infos
-        # through cloud apis. And for Kubernetes, we check it by querying
-        # if the deployment exists.
+    if is_high_availability_controller(cluster_name_on_cloud):
+        # For high availability controllers, terminate the deployment
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
 
@@ -1058,11 +1068,25 @@ def get_command_runners(
         cluster_info.provider_config)
     context = kubernetes_utils.get_context_from_config(
         cluster_info.provider_config)
+
+    cluster_name_on_cloud: str = cluster_info.provider_config['cluster_name']
+    is_ha_controller = is_high_availability_controller(cluster_name_on_cloud)
+
     node_list = []
+    if is_ha_controller:
+        deployment_name = infer_deployment_name_from_pods(cluster_name_on_cloud)
+        node_list = [((namespace, context), deployment_name)]
+        return command_runner.KubernetesCommandRunner.make_runner_list(
+            node_list,
+            resource_type=command_runner.KubernetesCommandRunner.ResourceType.
+            DEPLOYMENT,
+            **credentials)
+
     if cluster_info.head_instance_id is not None:
         node_list = [((namespace, context), cluster_info.head_instance_id)]
     node_list.extend(((namespace, context), pod_name)
                      for pod_name in instances.keys()
                      if pod_name != cluster_info.head_instance_id)
+
     return command_runner.KubernetesCommandRunner.make_runner_list(
-        node_list=node_list, **credentials)
+        node_list, **credentials)

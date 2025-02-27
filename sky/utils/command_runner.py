@@ -719,9 +719,15 @@ class KubernetesCommandRunner(CommandRunner):
 
     _MAX_RETRIES_FOR_RSYNC = 3
 
+    class ResourceType(enum.Enum):
+        """Enum for Kubernetes resource types."""
+        POD = 'pod'
+        DEPLOYMENT = 'deployment'
+
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
+        resource_type: ResourceType = ResourceType.POD,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -732,15 +738,28 @@ class KubernetesCommandRunner(CommandRunner):
             runner.rsync(source, target, up=True)
 
         Args:
-            node: The namespace and pod_name of the remote machine.
+            node: The namespace and resource name of the remote machine.
+            resource_type: The type of Kubernetes resource (pod or deployment).
+                           Defaults to POD if not specified.
         """
         del kwargs
         super().__init__(node)
-        (self.namespace, self.context), self.pod_name = node
+        (self.namespace, self.context), self.resource_name = node
+        self.resource_type = resource_type
 
     @property
     def node_id(self) -> str:
-        return f'{self.context}-{self.namespace}-{self.pod_name}'
+        """Returns a unique identifier for the node."""
+        if self.resource_type == self.ResourceType.DEPLOYMENT:
+            return (f'{self.context}-{self.namespace}-{self.resource_name}-'
+                    f'{self.resource_type.value}')
+        return f'{self.context}-{self.namespace}-{self.resource_name}'
+
+    @property
+    def kube_identifier(self) -> str:
+        """Returns the kube identifier for the node."""
+        resource_type_value = self.resource_type.value
+        return f'{resource_type_value}/{self.resource_name}'
 
     def port_forward_command(self,
                              port_forward: List[Tuple[int, int]],
@@ -766,7 +785,7 @@ class KubernetesCommandRunner(CommandRunner):
             'kubectl',
             *kubectl_args,
             'port-forward',
-            f'pod/{self.pod_name}',
+            self.kube_identifier,
             f'{local_port_str}:{remote_port}',
         ]
         return kubectl_cmd
@@ -789,7 +808,8 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
+        """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
+        name and namespace.
 
         Args:
             cmd: The command to run.
@@ -832,7 +852,9 @@ class KubernetesCommandRunner(CommandRunner):
         # case, need to set KUBECONFIG to /dev/null to avoid using kubeconfig.
         if self.context is None:
             kubectl_args += ['--kubeconfig', '/dev/null']
-        kubectl_args += [self.pod_name]
+
+        kubectl_args += [self.kube_identifier]
+
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']
@@ -940,7 +962,8 @@ class KubernetesCommandRunner(CommandRunner):
         self._rsync(
             source,
             target,
-            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
+            node_destination=
+            f'{self.kube_identifier}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,
