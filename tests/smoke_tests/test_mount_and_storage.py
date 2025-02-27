@@ -117,7 +117,6 @@ def test_oci_mounts():
     smoke_tests_utils.run_one_test(test)
 
 
-
 @pytest.mark.no_vast  # Requires GCP
 @pytest.mark.no_fluidstack  # Requires GCP to be enabled
 def test_using_file_mounts_with_env_vars(generic_cloud: str):
