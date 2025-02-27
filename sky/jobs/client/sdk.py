@@ -178,7 +178,7 @@ def tail_logs(name: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -192,6 +192,9 @@ def tail_logs(name: Optional[str] = None,
         refresh: Whether to restart the jobs controller if it is stopped.
         output_stream: The stream to write the logs to. If None, print to the
             console.
+    
+    Returns:
+        Return code based on success or failure of the job. 0 if success, 1 if the job failed.
 
     Request Raises:
         ValueError: invalid arguments.
@@ -211,7 +214,7 @@ def tail_logs(name: Optional[str] = None,
         timeout=(5, None),
     )
     request_id = server_common.get_request_id(response)
-    sdk.stream_response(request_id, response, output_stream)
+    return sdk.stream_response(request_id, response, output_stream)
 
 
 @usage_lib.entrypoint

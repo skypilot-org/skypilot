@@ -1374,7 +1374,8 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        sdk.tail_logs(cluster, job_id, follow=True)
+        ret_code = sdk.tail_logs(cluster, job_id, follow=True)
+        sys.exit(ret_code)
 
 
 def _handle_jobs_queue_request(
@@ -3879,10 +3880,11 @@ def jobs_launch(
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
         job_id = job_id_handle[0]
-        managed_jobs.tail_logs(name=None,
+        ret_code = managed_jobs.tail_logs(name=None,
                                job_id=job_id,
                                follow=True,
                                controller=False)
+        sys.exit(ret_code)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4090,11 +4092,12 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
-            managed_jobs.tail_logs(name=name,
+            ret_code = managed_jobs.tail_logs(name=name,
                                    job_id=job_id,
                                    follow=follow,
                                    controller=controller,
                                    refresh=refresh)
+            sys.exit(ret_code)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

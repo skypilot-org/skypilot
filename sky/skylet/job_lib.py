@@ -936,13 +936,13 @@ def check_job_status_and_exit(job_id: int) -> None:
         
     Returns:
         None. If the job has failed or the status is None, this method
-        will exit the process with exit code 1.
+        will exit the process with exit code 100 (arbitrary code).
     """
     job_status = get_status(job_id)
     if job_status is None:
-        sys.exit(1)
+        sys.exit(100)
     if job_status and job_status in JobStatus.user_code_failure_states() or job_status == JobStatus.FAILED_DRIVER:
-            sys.exit(1)
+            sys.exit(100)
     else:
         sys.exit(0)
 

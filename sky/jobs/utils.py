@@ -509,8 +509,16 @@ def cancel_job_by_name(job_name: str) -> str:
     return f'Job {job_name!r} is scheduled to be cancelled.'
 
 
-def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
-    """Stream logs by job id."""
+def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
+    """Stream logs by job id.
+    
+    Returns:
+        A tuple containing the log message and the return code.
+        0: success
+        98: job has not finished yet
+        99: job not found
+        100: job failed
+    """
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
         # If we see CANCELLING, just exit - we could miss some job logs but the
@@ -545,13 +553,14 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
                             start_streaming = True
                         if start_streaming:
                             print(line, end='', flush=True)
-                return ''
+                return '', (100 if managed_job_status.is_failed() else 0)
             return (f'{colorama.Fore.YELLOW}'
                     f'Job {job_id} is already in terminal state '
                     f'{managed_job_status.value}. For more details, run: '
                     f'sky jobs logs --controller {job_id}'
                     f'{colorama.Style.RESET_ALL}'
-                    f'{job_msg}')
+                    f'{job_msg}', 
+                    100 if managed_job_status.is_failed() else 0)
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -726,18 +735,26 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> str:
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))
-    return ''
+    return '', (0 if not managed_job_status.is_failed() else 100)
 
 
 def stream_logs(job_id: Optional[int],
                 job_name: Optional[str],
                 controller: bool = False,
-                follow: bool = True) -> str:
-    """Stream logs by job id or job name."""
+                follow: bool = True) -> Tuple[str, int]:
+    """Stream logs by job id or job name.
+    
+    Returns:
+        A tuple containing the log message and the return code.
+        0: success
+        98: job has not finished yet
+        99: job not found
+        100: job failed
+    """
     if job_id is None and job_name is None:
         job_id = managed_job_state.get_latest_job_id()
         if job_id is None:
-            return 'No managed job found.'
+            return 'No managed job found.', 99 
 
     if controller:
         if job_id is None:
@@ -752,7 +769,7 @@ def stream_logs(job_id: Optional[int],
                 if job['job_name'] == job_name
             }
             if not managed_job_ids:
-                return f'No managed job found with name {job_name!r}.'
+                return f'No managed job found with name {job_name!r}.', 99
             if len(managed_job_ids) > 1:
                 job_ids_str = ', '.join(
                     str(job_id) for job_id in managed_job_ids)
@@ -774,7 +791,7 @@ def stream_logs(job_id: Optional[int],
             if not follow:
                 # Assume that the log file hasn't been written yet. Since we
                 # aren't following, just return.
-                return ''
+                return '', 98
 
             job_status = managed_job_state.get_status(job_id)
             if job_status is None:
@@ -785,7 +802,7 @@ def stream_logs(job_id: Optional[int],
                 # point, it never will be. This job may have been submitted
                 # using an old version that did not create the log file, so this
                 # is not considered an exceptional case.
-                return ''
+                return '', 0
 
             time.sleep(log_lib.SKY_LOG_WAITING_GAP_SECONDS)
 
@@ -830,10 +847,11 @@ def stream_logs(job_id: Optional[int],
             print(f.read(), end='', flush=True)
 
         if follow:
+            return_code = 100 if job_status.is_failed() else 0
             return ux_utils.finishing_message(
-                f'Job finished (status: {job_status}).')
+                f'Job finished (status: {job_status}).'), return_code
 
-        return ''
+        return '', 0
 
     if job_id is None:
         assert job_name is not None
@@ -1177,7 +1195,7 @@ class ManagedJobCodeGen:
                     follow: bool = True,
                     controller: bool = False) -> str:
         code = textwrap.dedent(f"""\
-        msg = utils.stream_logs({job_id!r}, {job_name!r},
+        msg, retcode = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                 follow={follow}, controller={controller})
         print(msg, flush=True)
         """)

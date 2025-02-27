@@ -436,11 +436,14 @@ def cancel(name: Optional[str] = None,
 
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool) -> None:
+              controller: bool, refresh: bool) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
+
+    Returns:
+        Return code based on success or failure of the job. 0 if success, 1 if the job failed.
 
     Raises:
         ValueError: invalid arguments.
@@ -470,7 +473,7 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    backend.tail_managed_job_logs(handle,
+    return backend.tail_managed_job_logs(handle,
                                   job_id=job_id,
                                   job_name=name,
                                   follow=follow,
