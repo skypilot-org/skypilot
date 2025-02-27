@@ -216,6 +216,13 @@ class GCP(clouds.Cloud):
             unsupported[clouds.CloudImplementationFeatures.SPOT_INSTANCE] = (
                 'Managed Instance Group with DWS does not support '
                 'spot instances.')
+
+        unsupported[
+            clouds.CloudImplementationFeatures.
+            HIGH_AVAILABILITY_CONTROLLERS] = (
+                f'High availability controllers are not supported on {cls._REPR}.'
+            )
+
         return unsupported
 
     @classmethod

@@ -607,15 +607,6 @@ class Cloud:
         unsupported_features2reason = cls._unsupported_features_for_resources(
             resources)
 
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds import kubernetes
-        if cls is not kubernetes.Kubernetes:
-            unsupported_features2reason.update({
-                CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
-                    ('Currently, for all clouds except Kubernetes, '
-                     'high availability controllers are not supported.')
-            })
-
         # Docker image is not compatible with ssh proxy command.
         if skypilot_config.get_nested(
             (str(cls._REPR).lower(), 'ssh_proxy_command'), None) is not None:
