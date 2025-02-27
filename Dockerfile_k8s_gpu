@@ -52,14 +52,15 @@ RUN ARCH=$(uname -m) && \
     conda init && \
     conda config --set auto_activate_base true && \
     export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-    python3 -m venv ~/skypilot-runtime && \
-    PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
+    source ~/skypilot-runtime/bin/activate && \
+    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $HOME/.local/bin/uv pip uninstall skypilot-nightly -y && \
     if [ "$ARCH" = "x86_64" ]; then \
-        curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl"; \
+        curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/amd64/kubectl"; \
     else \
-        curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/arm64/kubectl"; \
+        curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/arm64/kubectl"; \
     fi && \
     sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
