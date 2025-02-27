@@ -1,10 +1,11 @@
+# Stable Diffusion
 ## Setup
 
 1. Install skypilot package by following these [instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
 
 2. Run `git clone https://github.com/skypilot-org/skypilot.git && cd examples/stable_diffusion`
 
-3. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml` 
+3. Run `sky launch -c stable-diffusion stable_diffusion_docker.yaml`
 
 4. Run `ssh -L 7860:localhost:7860 stable-diffusion`
 
@@ -12,7 +13,7 @@
 
 6. Type in text prompt and click "Generate".
 
-![Stable Diffusion Web Tool UI](assets/stable_diffusion_ui.png)
+![Stable Diffusion Web Tool UI](https://i.imgur.com/4MS9pwX.png)
 
 7. Once you are done, run `sky stop stable-diffusion` to stop the VM.
 
@@ -39,4 +40,4 @@
    - "rap song album cover"
    - "Wall Street bull rodeo"
    - "Trump in minecraft"
-   
+

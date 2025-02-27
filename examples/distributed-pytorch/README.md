@@ -2,7 +2,7 @@
 
 This example demonstrates how to run distributed training with PyTorch using SkyPilot.
 
-**The example is based on [PyTorch's official minGPT example](https://github.com/pytorch/examples/tree/main/distributed/minGPT-ddp)**
+**The example is based on [PyTorch's official minGPT example](https://github.com/pytorch/examples/tree/main/distributed/minGPT-ddp)**.
 
 
 ## Overview

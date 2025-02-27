@@ -35,4 +35,4 @@ If you have any questions, please feel free to ask in the `SkyPilot Slack <https
    Training <../gallery/tutorials/index>
    Serving <../gallery/llms/index>
    Other Frameworks <frameworks/index>
-   AI Applications <../gallery/applications/index>
+   AI Applications <applications/index>

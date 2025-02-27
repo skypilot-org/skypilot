@@ -37,30 +37,21 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
+    "sphinx_togglebutton",  # Used for collapsible sections in examples.
     'sphinxcontrib.googleanalytics',
     'sphinxemoji.sphinxemoji',
     'sphinx_design',
     'myst_parser',
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
-    ##### vllm #####
-    "sphinx.ext.napoleon",
-    # "sphinx.ext.linkcode",
-    "sphinx.ext.intersphinx",
-    "sphinx_copybutton",
-    "sphinx.ext.autodoc",
-    "sphinx.ext.autosummary",
-    "myst_parser",
-    "sphinxarg.ext",  # pip install sphinx-argparse
-    "sphinx_design",
-    "sphinx_togglebutton",
+    # "sphinxarg.ext",  # pip install sphinx-argparse
 ]
 # Needed for admonitions in markdown:
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
 myst_enable_extensions = [
     "colon_fence",
+    "linkify",
 ]
-
 
 intersphinx_mapping = {
     'python': ('https://docs.python.org/3/', None),
@@ -188,28 +179,13 @@ show_sphinx = False
 exclude_patterns = ['_gallery_original']
 # myst_heading_anchors = 3
 myst_url_schemes = {
-    'http': {
-        'classes': ['external-link'],  # Add a CSS class for styling
-        # 'title': 'External link'     # Optional tooltip text
-    },
-    'https': {
-        'classes': ['external-link'],
-    },
-    'mailto': {
-        'classes': ['email-link'],
-    },
-    'ftp': {
-        'classes': ['file-link'],
-    },
     'gh-issue': {
-        'url':
-        'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',
+        'url': 'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',
         'title': 'Issue #{{path}}',
         'classes': ['github'],
     },
     'gh-pr': {
-        'url':
-        'https://github.com/skypilot-org/skypilot/pull/{{path}}#{{fragment}}',
+        'url': 'https://github.com/skypilot-org/skypilot/pull/{{path}}#{{fragment}}',
         'title': 'Pull Request #{{path}}',
         'classes': ['github'],
     },
@@ -225,9 +201,6 @@ myst_url_schemes = {
     },
 }
 
-
-
-
 googleanalytics_id = 'G-92WF3MDCJV'
 
 autosectionlabel_prefix_document = True
@@ -238,7 +211,5 @@ suppress_warnings = [
 
 
 def setup(app):
-    from docs.source.generate_examples import generate_examples
     app.connect('builder-inited',
                 prepare_github_markdown.handle_markdown_in_gallery)
-    generate_examples()

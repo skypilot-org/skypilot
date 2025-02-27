@@ -3,13 +3,30 @@
 
 import itertools
 import re
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
-EXAMPLE_DIR = ROOT_DIR / "llm"
-EXAMPLE_DOC_DIR = ROOT_DIR / "docs/source/getting_started/examples"
+
+# Scan this subdir and its subdirs.
+EXAMPLE_DIRS = [
+    ROOT_DIR / "llm",
+    ROOT_DIR / "examples",
+]
+
+# File suffixes to include as the examples.
+_GLOB_PATTERNS = [
+    "*.md",
+    "*.yaml",
+    # "*.py",
+    # "*.sh",
+]
+
+# Output generated markdown files to this dir.
+EXAMPLE_DOC_DIR = ROOT_DIR / "docs/source/generated-examples"
+# EXAMPLE_DOC_DIR = ROOT_DIR / "docs/source/getting_started/examples"
 
 _SUFFIX_TO_LANGUAGE = {
     ".md": "markdown",
@@ -123,15 +140,40 @@ class Example:
 
         This method checks if the given path is a file. If it is, it returns an empty list.
         Otherwise, it recursively searches through the directory and returns a list of all
-        files that are not the main file.
+        files that are not the main file and are tracked by git.
 
         Returns:
-            list[Path]: A list of Path objects representing the other files in the directory.
+            list[Path]: A list of Path objects representing the other git-tracked files in the directory.
         """ # noqa: E501
         if self.path.is_file():
             return []
-        is_other_file = lambda file: file.is_file() and file != self.main_file
-        return [file for file in self.path.rglob("*") if is_other_file(file)]
+
+        # Get all files in the directory
+        all_files = [
+            file for file in self.path.rglob("*")
+            if file.is_file() and file != self.main_file
+        ]
+
+        # Filter for git-tracked files only
+        git_tracked_files = []
+        for file in all_files:
+            try:
+                # Use git ls-files to check if the file is tracked
+                result = subprocess.run([
+                    "git", "ls-files", "--error-unmatch",
+                    str(file.relative_to(ROOT_DIR))
+                ],
+                                        cwd=ROOT_DIR,
+                                        stdout=subprocess.PIPE,
+                                        stderr=subprocess.PIPE,
+                                        check=False)
+                if result.returncode == 0:  # Return code 0 means file is tracked
+                    git_tracked_files.append(file)
+            except Exception:
+                # Skip files that cause errors
+                continue
+
+        return git_tracked_files
 
     def determine_title(self) -> str:
         return fix_case(self.path.stem.replace("_", " ").title())
@@ -154,7 +196,7 @@ class Example:
         if not self.other_files:
             return content
 
-        content += "## Example materials\n\n"
+        content += "## Included files\n\n"
         for file in sorted(self.other_files):
             include = "include" if file.suffix == ".md" else "literalinclude"
             content += f":::{{admonition}} {file.relative_to(self.path)}\n"
@@ -172,6 +214,11 @@ def generate_examples():
     if not EXAMPLE_DOC_DIR.exists():
         EXAMPLE_DOC_DIR.mkdir(parents=True)
 
+    for example_dir in EXAMPLE_DIRS:
+        _work(example_dir)
+
+
+def _work(example_dir: Path):
     # Create empty indices
     examples_index = Index(
         path=EXAMPLE_DOC_DIR / "examples_index.md",
@@ -183,50 +230,49 @@ def generate_examples():
     # Category indices stored in reverse order because they are inserted into
     # examples_index.documents at index 0 in order
     category_indices = {
-        "other": Index(
-            path=EXAMPLE_DOC_DIR / "examples_other_index.md",
-            title="Other",
-            description=
-            "Other examples that don't strongly fit into the online or offline serving categories.",  # noqa: E501
-            caption="Examples",
-        ),
-        "online_serving": Index(
-            path=EXAMPLE_DOC_DIR / "examples_online_serving_index.md",
-            title="Online Serving",
-            description=
-            "Online serving examples demonstrate how to use vLLM in an online setting, where the model is queried for predictions in real-time.",  # noqa: E501
-            caption="Examples",
-        ),
-        "offline_inference": Index(
-            path=EXAMPLE_DOC_DIR / "examples_offline_inference_index.md",
-            title="Offline Inference",
-            description=
-            "Offline inference examples demonstrate how to use vLLM in an offline setting, where the model is queried for predictions in batches. We recommend starting with <project:basic.md>.",  # noqa: E501
+        # "other": Index(
+        #     path=EXAMPLE_DOC_DIR / "examples_other_index.md",
+        #     title="Other",
+        #     description=
+        #     "Other examples that don't strongly fit into the online or offline serving categories.",  # noqa: E501
+        #     caption="Examples",
+        # ),
+        # "online_serving": Index(
+        #     path=EXAMPLE_DOC_DIR / "examples_online_serving_index.md",
+        #     title="Online Serving",
+        #     description=
+        #     "Online serving examples demonstrate how to use vLLM in an online setting, where the model is queried for predictions in real-time.",  # noqa: E501
+        #     caption="Examples",
+        # ),
+        "training": Index(
+            path=EXAMPLE_DOC_DIR / "examples_training_index.md",
+            title="Training",
+            description="Training.",  # noqa: E501
             caption="Examples",
         ),
     }
 
     examples = []
-    glob_patterns = [
-        # "*.py",
-        "*.md",
-        # "*.sh",
-    ]
+
     # Find categorised examples
     for category in category_indices:
-        category_dir = EXAMPLE_DIR / category
-        globs = [category_dir.glob(pattern) for pattern in glob_patterns]
+        category_dir = example_dir / category
+        globs = [category_dir.glob(pattern) for pattern in _GLOB_PATTERNS]
+        print('category_dir: ', category_dir)
+        print('globs: ', globs)
         for path in itertools.chain(*globs):
             examples.append(Example(path, category))
         # Find examples in subdirectories
         for path in category_dir.glob("*/*.md"):
             examples.append(Example(path.parent, category))
     # Find uncategorised examples
-    globs = [EXAMPLE_DIR.glob(pattern) for pattern in glob_patterns]
+    globs = [example_dir.glob(pattern) for pattern in _GLOB_PATTERNS]
+    print('uncategorised globs: ', globs)
     for path in itertools.chain(*globs):
+        print('uncategorised path: ', path)
         examples.append(Example(path))
     # Find examples in subdirectories
-    for path in EXAMPLE_DIR.glob("*/*.md"):
+    for path in example_dir.glob("*/*.md"):
         # Skip categorised examples
         if path.parent.name in category_indices:
             continue
@@ -237,24 +283,25 @@ def generate_examples():
         doc_path = EXAMPLE_DOC_DIR / f"{example.path.stem}.md"
         with open(doc_path, "w+") as f:
             f.write(example.generate())
-        print('Written to: ', doc_path)
+        # print('Written to: ', doc_path)
         # Add the example to the appropriate index
         index = category_indices.get(example.category, examples_index)
         index.documents.append(example.path.stem)
 
     for category_index in category_indices.values():
         if category_index.documents:
-            import ipdb
-            ipdb.set_trace()  # Generate the index files
+            # import ipdb
+            # ipdb.set_trace()  # Generate the index files
 
             examples_index.documents.insert(0, category_index.path.name)
             with open(category_index.path, "w+") as f:
                 f.write(category_index.generate())
-            print('Written to: ', category_index.path)
+            # print('Written to: ', category_index.path)
 
     with open(examples_index.path, "w+") as f:
         f.write(examples_index.generate())
-    print('Written to: ', examples_index.path)
+    # print('Written to: ', examples_index.path)
+
 
 if __name__ == "__main__":
     generate_examples()
