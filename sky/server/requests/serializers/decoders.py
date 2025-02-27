@@ -172,12 +172,13 @@ def decode_storage_ls(
 
 @register_decoders('job_status')
 def decode_job_status(
-    return_value: Dict[int, Optional[str]]
+    return_value: Dict[str, Optional[str]]
 ) -> Dict[int, Optional['job_lib.JobStatus']]:
     job_statuses: Dict[int, Optional['job_lib.JobStatus']] = {}
-    for job_id in return_value.keys():
-        if return_value[job_id] is not None:
-            job_statuses[job_id] = job_lib.JobStatus(return_value[job_id])
+    for job_id_str in return_value.keys():
+        job_id = int(job_id_str)  # Cast to int since JSON loses type info
+        if return_value[job_id_str] is not None:
+            job_statuses[job_id] = job_lib.JobStatus(return_value[job_id_str])
         else:
             job_statuses[job_id] = None
     return job_statuses
