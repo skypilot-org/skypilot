@@ -10,9 +10,8 @@ import pathlib
 import shlex
 import signal
 import sqlite3
-import sys
 import time
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, TYPE_CHECKING
 
 import colorama
 import filelock
@@ -26,6 +25,9 @@ from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
+
+if TYPE_CHECKING:
+    from sky.jobs.state import ManagedJobStatus
 
 logger = sky_logging.init_logger(__name__)
 
@@ -206,6 +208,33 @@ class JobExitCode(enum.IntEnum):
     
     FAILED = 100
     """The job failed (due to user code, setup, or driver failure)"""
+    
+    @classmethod
+    def from_job_status(cls, status: Optional[JobStatus]) -> 'JobExitCode':
+        """Convert a job status to an exit code."""
+        if status is None:
+            return cls.FAILED
+        if status in JobStatus.user_code_failure_states() or status == JobStatus.FAILED_DRIVER:
+            return cls.FAILED
+        return cls.SUCCESS
+    
+    @classmethod
+    def from_managed_job_status(cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
+        """Convert a managed job status to an exit code.
+        
+        Args:
+            status: A ManagedJobStatus object.
+            
+        Returns:
+            JobExitCode.SUCCESS for successful status, JobExitCode.FAILED for failed status,
+            and JobExitCode.NOT_FOUND if status is None.
+        """
+        if status is None:
+            return cls.NOT_FOUND
+        if status.is_failed():
+            return cls.FAILED
+        return cls.SUCCESS
+    
 
 
 # We have two steps for job submissions:
@@ -948,26 +977,6 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
     return message_utils.encode_payload(run_timestamps)
 
 
-def check_job_status_and_exit(job_id: int) -> None:
-    """Check the status of a job and exit with an appropriate code.
-
-    Args:
-        job_id: The ID of the job to check.
-
-    Returns:
-        None. If the job has failed or the status is None, this method
-        will exit the process with exit code from JobExitCode.
-    """
-    job_status = get_status(job_id)
-    if job_status is None:
-        sys.exit(JobExitCode.FAILED)
-    if job_status and job_status in JobStatus.user_code_failure_states(
-    ) or job_status == JobStatus.FAILED_DRIVER:
-        sys.exit(JobExitCode.FAILED)
-    else:
-        sys.exit(JobExitCode.SUCCESS)
-
-
 class JobLibCodeGen:
     """Code generator for job utility functions.
 
@@ -979,6 +988,7 @@ class JobLibCodeGen:
     _PREFIX = [
         'import os',
         'import getpass',
+        'import sys',
         'from sky.skylet import job_lib, log_lib, constants',
     ]
 
@@ -1075,9 +1085,9 @@ class JobLibCodeGen:
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
-            # TODO: consider returning the job's exit code instead of a fixed
-            # exit code 100 on failure.
-            'job_lib.check_job_status_and_exit(job_id)',
+            'job_status = job_lib.get_status(job_id)',
+            'exit_code = job_lib.JobExitCode.from_job_status(job_status)',
+            'sys.exit(exit_code)',
         ]
         return cls._build(code)
 
