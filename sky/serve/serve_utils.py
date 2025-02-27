@@ -26,6 +26,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -47,26 +48,11 @@ else:
     requests = adaptors_common.LazyImport('requests')
 
 
-def _get_system_memory_gb():
-    """Get system memory in GB."""
-    return psutil.virtual_memory().total // (1024**3)
-
-
-def _get_num_service_threshold():
-    """Get number of services threshold based on available memory."""
-    return _get_system_memory_gb() // constants.CONTROLLER_MEMORY_USAGE_GB
-
-
-# Only calculate these when actually needed
-_num_service_threshold = None
-
-
+@annotations.lru_cache(scope='request')
 def get_num_service_threshold():
     """Get number of services threshold, calculating it only when needed."""
-    global _num_service_threshold
-    if _num_service_threshold is None:
-        _num_service_threshold = _get_num_service_threshold()
-    return _num_service_threshold
+    system_memory_gb = psutil.virtual_memory().total // (1024**3)
+    return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
 
 
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
