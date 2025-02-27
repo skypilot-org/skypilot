@@ -87,34 +87,6 @@ def optimize(
 
 
 @usage_lib.entrypoint
-def validate_dag(
-        dag: 'dag_lib.Dag',
-        request_options: Optional[admin_policy.RequestOptions] = None) -> None:
-    """Validates the specified DAG.
-
-    Args:
-        dag: The DAG to validate.
-        request_options: Request options used in enforcing admin policies.
-
-    Raises:
-        ValueError: if the DAG is invalid.
-    """
-    dag, _ = admin_policy_utils.apply(
-        dag,
-        use_mutated_config_in_current_request=True,
-        request_options=request_options)
-
-    for task in dag.tasks:
-        # Will validate workdir and file_mounts in the backend, as those
-        # need to be validated after the files are uploaded to the SkyPilot
-        # API server with `upload_mounts_to_api_server`.
-        task.validate_name()
-        task.validate_run()
-        for r in task.resources:
-            r.validate()
-
-
-@usage_lib.entrypoint
 def status(
     cluster_names: Optional[Union[str, List[str]]] = None,
     refresh: common.StatusRefreshMode = common.StatusRefreshMode.NONE,
