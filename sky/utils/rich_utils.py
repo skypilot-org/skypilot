@@ -20,7 +20,8 @@ else:
 _console = None  # Lazy initialized console
 
 
-# Move global console to a function
+# Move global console to a function to avoid
+# importing rich console if not used
 def get_console():
     """Get or create the rich console."""
     global _console
