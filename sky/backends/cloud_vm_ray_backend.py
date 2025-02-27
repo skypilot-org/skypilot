@@ -3311,7 +3311,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # setup script, rather than a reference to a temporary file that
             # would no longer exist after restart.
             if self._dump_final_script:
-                _dump_final_script(setup_script, constants.PERSISTENT_SETUP_SCRIPT_PATH)
+                _dump_final_script(setup_script,
+                                   constants.PERSISTENT_SETUP_SCRIPT_PATH)
 
             if detach_setup or _is_command_length_over_limit(encoded_script):
                 _dump_final_script(setup_script)
