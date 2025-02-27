@@ -42,7 +42,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
-from sky.utils import common as common_lib
+from sky.utils import common as common_lib, controller_utils
 from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import status_lib
@@ -478,6 +478,7 @@ async def launch(launch_body: payloads.LaunchBody,
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
+    execution.exec_precondition(exec_body.task, exec_body.cluster_name, dryrun=True)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='exec',

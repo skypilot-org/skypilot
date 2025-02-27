@@ -9,6 +9,7 @@ import getpass
 import json
 import os
 from typing import Any, Dict, List, Optional, Tuple, Union
+import typing
 
 import pydantic
 
@@ -26,6 +27,8 @@ from sky.utils import registry
 
 logger = sky_logging.init_logger(__name__)
 
+if typing.TYPE_CHECKING:
+    from sky import dag as dag_lib
 
 @annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
@@ -188,16 +191,21 @@ class ExecBody(RequestBody):
     down: bool = False
     backend: Optional[str] = None
 
+    wait: bool = True
+    dag: Optional['dag_lib.Dag'] = None
+
     def to_kwargs(self) -> Dict[str, Any]:
 
         kwargs = super().to_kwargs()
-        dag = common.process_mounts_in_task_on_api_server(self.task,
-                                                          self.env_vars,
-                                                          workdir_only=True)
+        if self.dag is None:
+            self.dag = common.process_mounts_in_task_on_api_server(
+                self.task, self.env_vars, workdir_only=True)
         backend_cls = registry.BACKEND_REGISTRY.from_str(self.backend)
         backend = backend_cls() if backend_cls is not None else None
-        kwargs['task'] = dag
+        kwargs['task'] = self.dag
         kwargs['backend'] = backend
+        kwargs.pop('dag')
+        kwargs.pop('wait')
         return kwargs
 
 

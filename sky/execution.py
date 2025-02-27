@@ -28,6 +28,7 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import sky
+    import cloud_vm_ray_backend
 
 logger = sky_logging.init_logger(__name__)
 
@@ -552,6 +553,22 @@ def launch(
         _is_launched_by_sky_serve_controller,
     )
 
+def exec_precondition(task: Union['sky.Task', 'sky.Dag'],
+    cluster_name: str,
+    dryrun: bool = False,
+    down: bool = False,
+    stream_logs: bool = True,
+    backend: Optional[backends.Backend] = None,
+                      ) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+    entrypoint = task
+    entrypoint.validate(workdir_only=True)
+    controller_utils.check_cluster_name_not_controller(cluster_name,
+                                                       operation_str='sky.exec')
+    return backend_utils.check_cluster_available(
+        cluster_name,
+        operation='executing tasks',
+        check_cloud_vm_ray_backend=False,
+        dryrun=dryrun)
 
 @usage_lib.entrypoint
 def exec(  # pylint: disable=redefined-builtin
@@ -613,18 +630,9 @@ def exec(  # pylint: disable=redefined-builtin
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
-    entrypoint = task
-    entrypoint.validate(workdir_only=True)
-    controller_utils.check_cluster_name_not_controller(cluster_name,
-                                                       operation_str='sky.exec')
-
-    handle = backend_utils.check_cluster_available(
-        cluster_name,
-        operation='executing tasks',
-        check_cloud_vm_ray_backend=False,
-        dryrun=dryrun)
+    handle = exec_precondition(task, cluster_name, dryrun)
     return _execute(
-        entrypoint=entrypoint,
+        entrypoint=task,
         dryrun=dryrun,
         down=down,
         stream_logs=stream_logs,

@@ -1255,6 +1255,10 @@ def launch(
     is_flag=True,
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
+@click.option('--dryrun',
+              default=False,
+              is_flag=True,
+              help='If True, do not actually run the job.')
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
                     _COMMON_OPTIONS)
 @usage_lib.entrypoint
@@ -1267,7 +1271,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
          use_spot: Optional[bool], image_id: Optional[str],
          env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
          cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-         disk_tier: Optional[str], async_call: bool):
+         disk_tier: Optional[str], async_call: bool, dryrun: bool):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1338,8 +1342,8 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     assert cluster is not None, (cluster, cluster_option, entrypoint)
 
     env = _merge_env_vars(env_file, env)
-    controller_utils.check_cluster_name_not_controller(
-        cluster, operation_str='Executing task on it')
+#    controller_utils.check_cluster_name_not_controller(
+#        cluster, operation_str='Executing task on it')
 
     task_or_dag = _make_task_or_dag_from_entrypoint_with_overrides(
         entrypoint=entrypoint,
@@ -1369,7 +1373,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
 
     click.secho('Submitting job to cluster: ', fg='cyan', nl=False)
     click.secho(cluster)
-    request_id = sdk.exec(task, cluster_name=cluster)
+    request_id = sdk.exec(task, cluster_name=cluster, dryrun=dryrun)
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
