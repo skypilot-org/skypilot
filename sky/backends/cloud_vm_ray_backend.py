@@ -2469,7 +2469,7 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         # the controller pod is part of a deployment, and once the pod is
         # killed and a new one is created, the pod name changes, so we need
         # to manually update the cluster info here.
-        # TODO(andy): See if we can prevent this refresh. Like pass in
+        # TODO(andyl): See if we can prevent this refresh. Like pass in
         # deployment name as identifier for KubernetesCommandRunner.
         # TODO(andyl): Should check through the real cluster info. Same as
         # the TODO in kubernetes/instance.py:terminate_instances
