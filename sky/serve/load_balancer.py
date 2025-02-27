@@ -18,6 +18,8 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
+
 
 class ClientPool:
     """ClientPool: A pool of httpx.AsyncClient for the load balancer.
@@ -111,7 +113,8 @@ class SkyServeLoadBalancer:
         self._region: Optional[str] = region
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
-        self._client_pool: ClientPool = ClientPool(load_balancing_policy_name)
+        self._replica_pool: ClientPool = ClientPool(load_balancing_policy_name)
+        self._lb_pool: ClientPool = ClientPool(load_balancing_policy_name)
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -145,6 +148,7 @@ class SkyServeLoadBalancer:
                         response_json = await response.json()
                         ready_replica_urls = response_json.get(
                             'ready_replica_urls', {})
+                        ready_lb_urls = response_json.get('ready_lb_urls', {})
                 except aiohttp.ClientError as e:
                     logger.error('An error occurred when syncing with '
                                  f'the controller: {e}')
@@ -156,15 +160,20 @@ class SkyServeLoadBalancer:
                                 f' Ready URLs in local region {self._region}: '
                                 f'{ready_urls}')
                     close_client_tasks.extend(
-                        self._client_pool.refresh_with_new_urls(ready_urls))
+                        self._replica_pool.refresh_with_new_urls(ready_urls))
+                    # For LB, we dont need to separate them by region.
+                    all_lb_urls = sum(ready_lb_urls.values(), [])
+                    logger.info(f'Available LB URLs: {all_lb_urls}')
+                    close_client_tasks.extend(
+                        self._lb_pool.refresh_with_new_urls(all_lb_urls))
 
             await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
             # Await those tasks after the interval to avoid blocking.
             await asyncio.gather(*close_client_tasks)
 
     async def _proxy_request_to(
-        self, url: str, request: fastapi.Request
-    ) -> Union[fastapi.responses.Response, Exception]:
+            self, url: str, request: fastapi.Request,
+            is_from_lb: bool) -> Union[fastapi.responses.Response, Exception]:
         """Proxy the request to the specified URL.
 
         Returns:
@@ -172,29 +181,35 @@ class SkyServeLoadBalancer:
             encountered if anything goes wrong.
         """
         logger.info(f'Proxy request to {url}')
-        self._client_pool.pre_execute_hook(url, request)
+        pool_to_use = self._replica_pool if is_from_lb else self._lb_pool
+        pool_to_use.pre_execute_hook(url, request)
         try:
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_proxy_with_retries` but refreshed before
             # entering this function. In that case we will return an error here
             # and retry to find next ready replica. We also need to wait for the
             # update of the client pool to finish before getting the client.
-            client = self._client_pool.get_client(url)
+            client = pool_to_use.get_client(url)
             if client is None:
                 return RuntimeError(f'Client for {url} not found.')
             worker_url = httpx.URL(path=request.url.path,
                                    query=request.url.query.encode('utf-8'))
+            headers = request.headers.mutablecopy()
+            if not is_from_lb:
+                # If it is not from LB, then the following request will be sent
+                # out from LB. So we add the header to indicate it.
+                headers[_IS_FROM_LB_HEADER] = 'true'
             proxy_request = client.build_request(
                 request.method,
                 worker_url,
-                headers=request.headers.raw,
+                headers=headers.raw,
                 content=await request.body(),
                 timeout=constants.LB_STREAM_TIMEOUT)
             proxy_response = await client.send(proxy_request, stream=True)
 
             async def background_func():
                 await proxy_response.aclose()
-                self._client_pool.post_execute_hook(url, request)
+                pool_to_use.post_execute_hook(url, request)
 
             return fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
@@ -210,6 +225,11 @@ class SkyServeLoadBalancer:
             self, request: fastapi.Request) -> fastapi.responses.Response:
         """Try to proxy the request to the endpoint replica with retries."""
         self._request_aggregator.add(request)
+        # Check if request is from another load balancer to avoid infinite loops
+        is_from_lb = request.headers.get(_IS_FROM_LB_HEADER, False)
+        pool_to_use = self._replica_pool if is_from_lb else self._lb_pool
+        source_identity = 'LB' if is_from_lb else 'User'
+        logger.info(f'Received request {request.url} from {source_identity}.')
         # TODO(tian): Finetune backoff parameters.
         backoff = common_utils.Backoff(initial_backoff=1)
         # SkyServe supports serving on Spot Instances. To avoid preemptions
@@ -217,7 +237,8 @@ class SkyServeLoadBalancer:
         retry_cnt = 0
         while True:
             retry_cnt += 1
-            ready_replica_url = self._client_pool.select_replica(request)
+            # TODO(tian): If route to self, not adding another layer of proxy.
+            ready_replica_url = pool_to_use.select_replica(request)
             if ready_replica_url is None:
                 response_or_exception = fastapi.HTTPException(
                     # 503 means that the server is currently
@@ -228,7 +249,7 @@ class SkyServeLoadBalancer:
                     'to check the replica status.')
             else:
                 response_or_exception = await self._proxy_request_to(
-                    ready_replica_url, request)
+                    ready_replica_url, request, is_from_lb)
             if not isinstance(response_or_exception, Exception):
                 return response_or_exception
             # When the user aborts the request during streaming, the request
