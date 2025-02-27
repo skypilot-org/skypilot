@@ -73,8 +73,8 @@ cd "$(git rev-parse --show-toplevel)"
 if [[ $push == "true" ]]; then
   # If gpu is used, build the GPU image
   if [[ $gpu == "true" ]]; then
-    echo "Building and pushing GPU image for amd64: $TAG"
-    docker buildx build --push --platform linux/amd64 -t $TAG -f Dockerfile_k8s_gpu ./sky
+    echo "Building and pushing GPU image for amd64 and arm64: $TAG"
+    docker buildx build --push --platform linux/amd64,linux/arm64 -t $TAG -f Dockerfile_k8s_gpu ./sky
   else
     echo "Building and pushing CPU image for amd64 and arm64: $TAG"
     docker buildx build --push --platform linux/arm64,linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
