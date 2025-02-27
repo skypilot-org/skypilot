@@ -736,21 +736,26 @@ class KubernetesCommandRunner(CommandRunner):
             runner.rsync(source, target, up=True)
 
         Args:
-            node: The namespace and resource name of the remote machine.
+            node: The namespace and pod_name of the remote machine.
         """
         del kwargs
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
 
+        self.deployment: Optional[str] = None
         if self.pod_name.startswith('sky-serve-controller'):
-            self.deployment = self.pod_name[:self.pod_name.find('-')] + '-deployment'
-        else:
-            self.deployment = None
+            self.deployment = self.pod_name[:self.pod_name.rfind('-')]
 
     @property
     def node_id(self) -> str:
-        """Returns a unique identifier for the node."""
         return f'{self.context}-{self.namespace}-{self.pod_name}'
+
+    @property
+    def kube_identifier(self) -> str:
+        if self.deployment is not None:
+            return f'deployment/{self.deployment}'
+        else:
+            return f'pod/{self.pod_name}'
 
     def port_forward_command(self,
                              port_forward: List[Tuple[int, int]],
@@ -773,12 +778,11 @@ class KubernetesCommandRunner(CommandRunner):
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
 
-        kube_identifier = self.deployment if self.deployment else self.pod_name
         kubectl_cmd = [
             'kubectl',
             *kubectl_args,
             'port-forward',
-            kube_identifier,
+            self.kube_identifier,
             f'{local_port_str}:{remote_port}',
         ]
         return kubectl_cmd
@@ -846,8 +850,7 @@ class KubernetesCommandRunner(CommandRunner):
         if self.context is None:
             kubectl_args += ['--kubeconfig', '/dev/null']
 
-        kube_identifier = self.deployment if self.deployment else self.pod_name
-        kubectl_args += [kube_identifier]
+        kubectl_args += [self.kube_identifier]
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
