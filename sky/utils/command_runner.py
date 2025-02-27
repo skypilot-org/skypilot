@@ -310,6 +310,10 @@ class CommandRunner:
         command = ' '.join(rsync_command)
         logger.debug(f'Running rsync command: {command}')
 
+        logger.info(
+            f'command {command}'
+        )
+
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
         stdout, stderr = '', ''
@@ -719,15 +723,9 @@ class KubernetesCommandRunner(CommandRunner):
 
     _MAX_RETRIES_FOR_RSYNC = 3
 
-    class ResourceType(enum.Enum):
-        """Enum for Kubernetes resource types."""
-        POD = 'pod'
-        DEPLOYMENT = 'deployment'
-
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
-        resource_type: ResourceType = ResourceType.POD,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -739,27 +737,20 @@ class KubernetesCommandRunner(CommandRunner):
 
         Args:
             node: The namespace and resource name of the remote machine.
-            resource_type: The type of Kubernetes resource (pod or deployment).
-                           Defaults to POD if not specified.
         """
         del kwargs
         super().__init__(node)
-        (self.namespace, self.context), self.resource_name = node
-        self.resource_type = resource_type
+        (self.namespace, self.context), self.pod_name = node
+
+        if self.pod_name.startswith('sky-serve-controller'):
+            self.deployment = self.pod_name[:self.pod_name.find('-')] + '-deployment'
+        else:
+            self.deployment = None
 
     @property
     def node_id(self) -> str:
         """Returns a unique identifier for the node."""
-        if self.resource_type == self.ResourceType.DEPLOYMENT:
-            return (f'{self.context}-{self.namespace}-{self.resource_name}-'
-                    f'{self.resource_type.value}')
-        return f'{self.context}-{self.namespace}-{self.resource_name}'
-
-    @property
-    def kube_identifier(self) -> str:
-        """Returns the kube identifier for the node."""
-        resource_type_value = self.resource_type.value
-        return f'{resource_type_value}/{self.resource_name}'
+        return f'{self.context}-{self.namespace}-{self.pod_name}'
 
     def port_forward_command(self,
                              port_forward: List[Tuple[int, int]],
@@ -781,11 +772,13 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_args += ['--context', self.context]
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
+
+        kube_identifier = self.deployment if self.deployment else self.pod_name
         kubectl_cmd = [
             'kubectl',
             *kubectl_args,
             'port-forward',
-            self.kube_identifier,
+            kube_identifier,
             f'{local_port_str}:{remote_port}',
         ]
         return kubectl_cmd
@@ -853,7 +846,8 @@ class KubernetesCommandRunner(CommandRunner):
         if self.context is None:
             kubectl_args += ['--kubeconfig', '/dev/null']
 
-        kubectl_args += [self.kube_identifier]
+        kube_identifier = self.deployment if self.deployment else self.pod_name
+        kubectl_args += [kube_identifier]
 
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
@@ -963,7 +957,7 @@ class KubernetesCommandRunner(CommandRunner):
             source,
             target,
             node_destination=
-            f'{self.kube_identifier}@{encoded_namespace_context}',
+            f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,

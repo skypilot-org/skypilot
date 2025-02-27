@@ -202,15 +202,9 @@ class SSHCommandRunner(CommandRunner):
 
 
 class KubernetesCommandRunner(CommandRunner):
-
-    class ResourceType(enum.Enum):
-        POD = 'pod'
-        DEPLOYMENT = 'deployment'
-
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
-        resource_type: ResourceType = ResourceType.POD,
         **kwargs,
     ) -> None:
         ...
