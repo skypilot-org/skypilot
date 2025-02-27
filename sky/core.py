@@ -783,7 +783,7 @@ def cancel(
 def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool = True,
-              tail: int = 0) -> None:
+              tail: int = 0) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tails the logs of a job.
 
@@ -799,6 +799,11 @@ def tail_logs(cluster_name: str,
           not the same as the user who created the cluster.
         sky.exceptions.CloudUserIdentityError: if we fail to get the current
           user identity.
+
+    Returns:
+        Return code based on success or failure of the job. 0 if success, 1 if the job failed.
+        Note: This is not the return code of the job.
+
     """
     # Check the status of the cluster.
     handle = backend_utils.check_cluster_available(
@@ -808,7 +813,12 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    val = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
+    # Write to file
+    with open('/tmp/skypilot.txt', 'a') as f:
+        f.write(str(val))
+        f.write("\n")
+    return val
 
 
 @usage_lib.entrypoint

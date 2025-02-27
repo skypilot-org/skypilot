@@ -234,7 +234,7 @@ class CommandError(SkyPilotExcludeArgsBaseException):
         else:
             if (len(command) > 100 and
                     not env_options.Options.SHOW_DEBUG_INFO.get()):
-                # Chunck the command to avoid overflow.
+                # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}')

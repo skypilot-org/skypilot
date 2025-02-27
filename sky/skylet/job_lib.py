@@ -9,6 +9,7 @@ import os
 import pathlib
 import shlex
 import signal
+import sys
 import sqlite3
 import time
 from typing import Any, Dict, List, Optional, Sequence
@@ -927,6 +928,25 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
     return message_utils.encode_payload(run_timestamps)
 
 
+def check_job_status_and_exit(job_id: int) -> None:
+    """Check the status of a job and exit with an appropriate code.
+    
+    Args:
+        job_id: The ID of the job to check.
+        
+    Returns:
+        None. If the job has failed or the status is None, this method
+        will exit the process with exit code 1.
+    """
+    job_status = get_status(job_id)
+    if job_status is None:
+        sys.exit(1)
+    if job_status and job_status in JobStatus.user_code_failure_states() or job_status == JobStatus.FAILED_DRIVER:
+            sys.exit(1)
+    else:
+        sys.exit(0)
+
+
 class JobLibCodeGen:
     """Code generator for job utility functions.
 
@@ -1015,7 +1035,7 @@ class JobLibCodeGen:
         # Used only for restarting a cluster.
         code = ['job_lib.fail_all_jobs_in_progress()']
         return cls._build(code)
-
+    
     @classmethod
     def tail_logs(cls,
                   job_id: Optional[int],
@@ -1033,6 +1053,10 @@ class JobLibCodeGen:
             f'tail_log_kwargs = {{"job_id": job_id, "log_dir": log_dir, "managed_job_id": {managed_job_id!r}, "follow": {follow}}}',
             f'{_LINUX_NEW_LINE}if getattr(constants, "SKYLET_LIB_VERSION", 1) > 1: tail_log_kwargs["tail"] = {tail}',
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
+            # After tailing, check the job status and exit with appropriate code
+            # TODO: consider returning the job's exit code instead of a fixed
+            # exit code 1 on failure.
+            'job_lib.check_job_status_and_exit(job_id)',
         ]
         return cls._build(code)
 

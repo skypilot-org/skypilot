@@ -1224,10 +1224,11 @@ def launch(
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
         if not detach_run and job_id is not None:
-            sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
+            ret_code = sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
+        sys.exit(ret_code)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
