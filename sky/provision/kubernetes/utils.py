@@ -40,6 +40,9 @@ if typing.TYPE_CHECKING:
     from sky import backends
     from sky import resources as resources_lib
 
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME = 'sky-data'
+HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH = '/home/sky'
+
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
 

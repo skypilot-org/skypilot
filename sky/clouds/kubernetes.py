@@ -506,6 +506,12 @@ class Kubernetes(clouds.Cloud):
             'skypilot_ray_port': constants.SKY_REMOTE_RAY_PORT,
             'ray_worker_start_command': instance_setup.ray_worker_start_command(
                 custom_resources, custom_ray_options, no_restart=False),
+            'k8s_high_availability_deployment_volume_mount_name':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME
+                ),
+            'k8s_high_availability_deployment_volume_mount_path':
+                (kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_PATH
+                ),
         }
 
         # Add kubecontext if it is set. It may be None if SkyPilot is running

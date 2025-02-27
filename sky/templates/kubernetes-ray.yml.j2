@@ -317,9 +317,9 @@ available_node_types:
           hostPath:
             path: /dev/fuse
         {% if high_availability %}
-        - name: sky-data
+        - name: {{k8s_high_availability_deployment_volume_mount_name}}
           persistentVolumeClaim:
-            claimName: {{cluster_name_on_cloud}}-sky-data
+            claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
         {% endif %}
         containers:
         - name: ray-node
@@ -575,8 +575,8 @@ available_node_types:
           # to root:root.
           # pylint: disable=line-too-long
           # See https://stackoverflow.com/questions/50818029/mounted-folder-created-as-root-instead-of-current-user-in-docker/50820023#50820023.
-          - name: sky-data
-            mountPath: /home/sky
+          - name: {{k8s_high_availability_deployment_volume_mount_name}}
+            mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
           {% endif %}
           {% if k8s_fuse_device_required %}
           securityContext:
@@ -617,7 +617,7 @@ available_node_types:
         apiVersion: v1
         kind: PersistentVolumeClaim
         metadata:
-          name: {{cluster_name_on_cloud}}-sky-data
+          name: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
           namespace: {{k8s_namespace}}
         spec:
           accessModes:
@@ -642,13 +642,15 @@ available_node_types:
             metadata:
               # should be replaced by pod metadata
             spec:
+              # To prevent the home dir provided by the docker image from being overriden by pvc mounting,
+              # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
               initContainers:
                 - name: init-copy-home
                   image: {{image_id}}
                   command: ["/bin/sh", "-c"]
-                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a /home/sky/ /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
+                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a {{k8s_high_availability_deployment_volume_mount_path}} /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
                   volumeMounts:
-                    - name: sky-data
+                    - name: {{k8s_high_availability_deployment_volume_mount_name}}
                       mountPath: /mnt/home
               # should be replaced by pod spec
       {% endif %}

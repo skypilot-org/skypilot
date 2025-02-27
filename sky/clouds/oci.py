@@ -76,10 +76,9 @@ class OCI(clouds.Cloud):
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS: (
-                'High availability controllers are not supported on '
-                f'{cls._REPR}.'
-            ),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on '
+                 f'{cls._REPR}.'),
         }
         if resources.use_spot:
             unsupported_features[clouds.CloudImplementationFeatures.STOP] = (

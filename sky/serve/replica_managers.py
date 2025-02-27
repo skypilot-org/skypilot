@@ -643,7 +643,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert (not self._launch_process_pool and not self._down_process_pool
                ), 'We should not have any running processes in a recovery run'
 
-        # sky.launch should be robust enough to handle the case where the
+        # execution.launch should be robust enough to handle the case where the
         # provisioning is partially done.
         to_up_replicas = serve_state.get_replicas_at_statuses(
             self._service_name, [

@@ -36,12 +36,6 @@ def ray_tag_filter(cluster_name: str) -> Dict[str, str]:
     return {TAG_RAY_CLUSTER_NAME: cluster_name}
 
 
-HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS = {
-    # volume name -> mount path
-    'sky-data': '/home/sky',
-}
-
-
 def _is_head(pod) -> bool:
     return pod.metadata.labels.get(constants.TAG_RAY_NODE_KIND) == 'head'
 
@@ -867,16 +861,17 @@ def _terminate_deployment(cluster_name: str, namespace: str,
                                     resource_name=deployment_name)
 
     # Delete PVCs
-    for volume_name in HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNTS:
-        pvc_name = _get_pvc_name(cluster_name, volume_name)
-        # pylint: disable=cell-var-from-loop
-        _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
-            context).delete_namespaced_persistent_volume_claim(
-                name=pvc_name,
-                namespace=namespace,
-                _request_timeout=config_lib.DELETION_TIMEOUT),
-                                        resource_type='pvc',
-                                        resource_name=pvc_name)
+    pvc_name = _get_pvc_name(
+        cluster_name,
+        kubernetes_utils.HIGH_AVAILABILITY_DEPLOYMENT_VOLUME_MOUNT_NAME)
+    # pylint: disable=cell-var-from-loop
+    _delete_k8s_resource_with_retry(delete_func=lambda: kubernetes.core_api(
+        context).delete_namespaced_persistent_volume_claim(
+            name=pvc_name,
+            namespace=namespace,
+            _request_timeout=config_lib.DELETION_TIMEOUT),
+                                    resource_type='pvc',
+                                    resource_name=pvc_name)
 
 
 def terminate_instances(
