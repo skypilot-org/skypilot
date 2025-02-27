@@ -147,7 +147,9 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': ['nebius>=0.2.0',]
+    'nebius': [
+        'nebius>=0.2.0',
+    ] + aws_dependencies
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius

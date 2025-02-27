@@ -54,6 +54,26 @@ def get_s3_mount_cmd(bucket_name: str,
     return mount_cmd
 
 
+def get_nebius_mount_cmd(nebius_credentials_path: str,
+                         nebius_profile_name: str,
+                         endpoint_url: str,
+                         bucket_name: str,
+                         mount_path: str,
+                         _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to install Nebius mount utility goofys."""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
+    mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={nebius_credentials_path} '
+                 f'AWS_PROFILE={nebius_profile_name} goofys -o allow_other '
+                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                 f'--endpoint {endpoint_url} '
+                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+    return mount_cmd
+
+
 def get_gcs_mount_install_cmd() -> str:
     """Returns a command to install GCS mount utility gcsfuse."""
     install_cmd = ('ARCH=$(uname -m) && '
