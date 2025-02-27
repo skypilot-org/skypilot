@@ -115,6 +115,7 @@ class SkyServeLoadBalancer:
             tls_credential)
         self._replica_pool: ClientPool = ClientPool(load_balancing_policy_name)
         self._lb_pool: ClientPool = ClientPool(load_balancing_policy_name)
+        # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
 
@@ -227,8 +228,7 @@ class SkyServeLoadBalancer:
                 await proxy_response.aclose()
                 pool_to_use.post_execute_hook(url, request)
 
-            proxy_response.headers.update(
-                {log_key: log_to_request})
+            proxy_response.headers.update({log_key: log_to_request})
             return fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
