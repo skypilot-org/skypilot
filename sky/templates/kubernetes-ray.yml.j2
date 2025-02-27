@@ -643,7 +643,7 @@ available_node_types:
                 - name: init-copy-home
                   image: {{image_id}}
                   command: ["/bin/sh", "-c"]
-                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a {{k8s_high_availability_deployment_volume_mount_path}} /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
+                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a {{k8s_high_availability_deployment_volume_mount_path}}/ /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
                   volumeMounts:
                     - name: {{k8s_high_availability_deployment_volume_mount_name}}
                       mountPath: /mnt/home

@@ -310,10 +310,6 @@ class CommandRunner:
         command = ' '.join(rsync_command)
         logger.debug(f'Running rsync command: {command}')
 
-        logger.info(
-            f'command {command}'
-        )
-
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
         stdout, stderr = '', ''
@@ -959,8 +955,7 @@ class KubernetesCommandRunner(CommandRunner):
         self._rsync(
             source,
             target,
-            node_destination=
-            f'{self.pod_name}@{encoded_namespace_context}',
+            node_destination=f'{self.pod_name}@{encoded_namespace_context}',
             up=up,
             rsh_option=helper_path,
             log_path=log_path,
