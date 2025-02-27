@@ -21,7 +21,6 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import inspect
 
-    import click
     import requests
 
     from sky import resources as resources_lib
@@ -32,7 +31,6 @@ else:
     # collection phase or skipped if user specifies no collection
     requests = adaptors_common.LazyImport('requests')
     inspect = adaptors_common.LazyImport('inspect')
-    click = adaptors_common.LazyImport('click')
 
 logger = sky_logging.init_logger(__name__)
 

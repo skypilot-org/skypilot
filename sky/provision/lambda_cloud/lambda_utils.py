@@ -20,54 +20,6 @@ INITIAL_BACKOFF_SECONDS = 10
 MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 
-# Move request functionality into a separate module-level object
-_request_handler = None
-
-
-def _get_request_handler():
-    """Lazy initialize the request handler."""
-    global _request_handler
-    if _request_handler is None:
-        _request_handler = _RequestHandler()
-    return _request_handler
-
-
-class _RequestHandler:
-    """Handles all HTTP requests to avoid early imports."""
-
-    def __init__(self):
-        self._session = None
-
-    @property
-    def session(self):
-        """Lazy initialize the session."""
-        if self._session is None:
-            self._session = requests.Session()
-        return self._session
-
-    def try_request_with_backoff(self,
-                                 method: str,
-                                 url: str,
-                                 headers: Dict[str, str],
-                                 data: Optional[str] = None):
-        """Make HTTP request with exponential backoff."""
-        backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
-                                       max_backoff_factor=MAX_BACKOFF_FACTOR)
-        for i in range(MAX_ATTEMPTS):
-            if method == 'get':
-                response = self.session.get(url, headers=headers)
-            elif method == 'post':
-                response = self.session.post(url, headers=headers, data=data)
-            else:
-                raise ValueError(f'Unsupported requests method: {method}')
-            # If rate limited, wait and try again
-            if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
-                time.sleep(backoff.current_backoff())
-                continue
-            if response.status_code == 200:
-                return response
-            raise_lambda_error(response)
-
 
 class LambdaCloudError(Exception):
     pass
@@ -149,6 +101,28 @@ def raise_lambda_error(response: 'requests.Response') -> None:
     raise LambdaCloudError(f'{code}: {message}')
 
 
+def _try_request_with_backoff(method: str,
+                              url: str,
+                              headers: Dict[str, str],
+                              data: Optional[str] = None):
+    backoff = common_utils.Backoff(initial_backoff=INITIAL_BACKOFF_SECONDS,
+                                   max_backoff_factor=MAX_BACKOFF_FACTOR)
+    for i in range(MAX_ATTEMPTS):
+        if method == 'get':
+            response = requests.get(url, headers=headers)
+        elif method == 'post':
+            response = requests.post(url, headers=headers, data=data)
+        else:
+            raise ValueError(f'Unsupported requests method: {method}')
+        # If rate limited, wait and try again
+        if response.status_code == 429 and i != MAX_ATTEMPTS - 1:
+            time.sleep(backoff.current_backoff())
+            continue
+        if response.status_code == 200:
+            return response
+        raise_lambda_error(response)
+
+
 class LambdaCloudClient:
     """Wrapper functions for Lambda Cloud API."""
 
@@ -199,35 +173,37 @@ class LambdaCloudClient:
             'quantity': quantity,
             'name': name,
         })
-        response = _get_request_handler().try_request_with_backoff(
+        response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/launch',
-            headers=self.headers,
             data=data,
+            headers=self.headers,
         )
         return response.json().get('data', []).get('instance_ids', [])
 
     def remove_instances(self, instance_ids: List[str]) -> Dict[str, Any]:
         """Terminate instances."""
         data = json.dumps({'instance_ids': instance_ids})
-        response = _get_request_handler().try_request_with_backoff(
+        response = _try_request_with_backoff(
             'post',
             f'{API_ENDPOINT}/instance-operations/terminate',
-            headers=self.headers,
             data=data,
+            headers=self.headers,
         )
         return response.json().get('data', []).get('terminated_instances', [])
 
     def list_instances(self) -> List[Dict[str, Any]]:
         """List existing instances."""
-        response = _get_request_handler().try_request_with_backoff(
-            'get', f'{API_ENDPOINT}/instances', headers=self.headers)
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/instances',
+                                             headers=self.headers)
         return response.json().get('data', [])
 
     def list_ssh_keys(self) -> List[Dict[str, str]]:
         """List ssh keys."""
-        response = _get_request_handler().try_request_with_backoff(
-            'get', f'{API_ENDPOINT}/ssh-keys', headers=self.headers)
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/ssh-keys',
+                                             headers=self.headers)
         return response.json().get('data', [])
 
     def get_unique_ssh_key_name(self, prefix: str,
@@ -263,11 +239,14 @@ class LambdaCloudClient:
     def register_ssh_key(self, name: str, pub_key: str) -> None:
         """Register ssh key with Lambda."""
         data = json.dumps({'name': name, 'public_key': pub_key})
-        _get_request_handler().try_request_with_backoff(
-            'post', f'{API_ENDPOINT}/ssh-keys', headers=self.headers, data=data)
+        _try_request_with_backoff('post',
+                                  f'{API_ENDPOINT}/ssh-keys',
+                                  data=data,
+                                  headers=self.headers)
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = _get_request_handler().try_request_with_backoff(
-            'get', f'{API_ENDPOINT}/instance-types', headers=self.headers)
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/instance-types',
+                                             headers=self.headers)
         return response.json().get('data', [])
