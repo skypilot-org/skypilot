@@ -2,11 +2,16 @@ Examples
 ====================
 
 A collection of examples demonstrating the use cases of SkyPilot.
-You can directly run these recipes on your own infrastructure, such as :ref:`cloud VMs <installation>` or :ref:`Kubernetes <kubernetes-overview>`.
 
-.. .. image:: ../images/ai-gallery-cover.png
-..    :alt: AI Gallery
-..    :align: center
+.. grid:: 1 1 1 1
+    :gutter: 3
+
+    .. grid-item-card::  👋 New to SkyPilot?
+        :link: quickstart
+        :link-type: ref
+        :text-align: center
+
+        Click here to read Quickstart first.
 
 .. toctree::
    :maxdepth: 2
