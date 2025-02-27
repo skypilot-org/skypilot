@@ -71,7 +71,7 @@ def is_high_availability_controller(cluster_name: str) -> bool:
     # So that we can further avoid checking the naming pattern here.
     # But this means we need to change the update_cluster_info logic and
     # what stored in handle.cluster_name_on_cloud as well.
-    return cluster_name.startswith('sky-serve-controller')
+    return 'deployment' in cluster_name
 
 
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
@@ -1069,12 +1069,21 @@ def get_command_runners(
     context = kubernetes_utils.get_context_from_config(
         cluster_info.provider_config)
 
-    node_list = []
+    runners: List[command_runner.CommandRunner] = []
     if cluster_info.head_instance_id is not None:
-        node_list = [((namespace, context), cluster_info.head_instance_id)]
-    node_list.extend(((namespace, context), pod_name)
-                     for pod_name in instances.keys()
-                     if pod_name != cluster_info.head_instance_id)
+        pod_name = cluster_info.head_instance_id
+        deployment = (infer_deployment_name_from_pods(pod_name)
+                      if is_high_availability_controller(pod_name) else None)
+        node_list = [((namespace, context), pod_name)]
+        head_runner = command_runner.KubernetesCommandRunner(
+            node_list[0], deployment=deployment, **credentials)
+        runners.append(head_runner)
 
-    return command_runner.KubernetesCommandRunner.make_runner_list(
-        node_list, **credentials)
+    node_list = [((namespace, context), pod_name)
+                 for pod_name in instances.keys()
+                 if pod_name != cluster_info.head_instance_id]
+    runners.extend(
+        command_runner.KubernetesCommandRunner.make_runner_list(
+            node_list, **credentials))
+
+    return runners

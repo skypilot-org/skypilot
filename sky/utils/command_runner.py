@@ -722,6 +722,7 @@ class KubernetesCommandRunner(CommandRunner):
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
+        deployment: Optional[str] = None,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -737,10 +738,7 @@ class KubernetesCommandRunner(CommandRunner):
         del kwargs
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
-
-        self.deployment: Optional[str] = None
-        if self.pod_name.startswith('sky-serve-controller'):
-            self.deployment = self.pod_name[:self.pod_name.rfind('-')]
+        self.deployment = deployment
 
     @property
     def node_id(self) -> str:
