@@ -549,13 +549,16 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                             start_streaming = True
                         if start_streaming:
                             print(line, end='', flush=True)
-                return '', job_lib.JobExitCode.from_managed_job_status(managed_job_status)
-            return (f'{colorama.Fore.YELLOW}'
-                    f'Job {job_id} is already in terminal state '
-                    f'{managed_job_status.value}. For more details, run: '
-                    f'sky jobs logs --controller {job_id}'
-                    f'{colorama.Style.RESET_ALL}'
-                    f'{job_msg}', job_lib.JobExitCode.from_managed_job_status(managed_job_status))
+                return '', job_lib.JobExitCode.from_managed_job_status(
+                    managed_job_status)
+            return (
+                f'{colorama.Fore.YELLOW}'
+                f'Job {job_id} is already in terminal state '
+                f'{managed_job_status.value}. For more details, run: '
+                f'sky jobs logs --controller {job_id}'
+                f'{colorama.Style.RESET_ALL}'
+                f'{job_msg}',
+                job_lib.JobExitCode.from_managed_job_status(managed_job_status))
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -793,7 +796,8 @@ def stream_logs(job_id: Optional[int],
                 # point, it never will be. This job may have been submitted
                 # using an old version that did not create the log file, so this
                 # is not considered an exceptional case.
-                return '', job_lib.JobExitCode.from_managed_job_status(job_status)
+                return '', job_lib.JobExitCode.from_managed_job_status(
+                    job_status)
 
             time.sleep(log_lib.SKY_LOG_WAITING_GAP_SECONDS)
 
@@ -839,7 +843,8 @@ def stream_logs(job_id: Optional[int],
 
         if follow:
             return ux_utils.finishing_message(
-                f'Job finished (status: {job_status}).'), job_lib.JobExitCode.from_managed_job_status(job_status)
+                f'Job finished (status: {job_status}).'
+            ), job_lib.JobExitCode.from_managed_job_status(job_status)
 
         return '', job_lib.JobExitCode.SUCCESS
 

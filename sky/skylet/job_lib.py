@@ -196,30 +196,32 @@ class JobExitCode(enum.IntEnum):
     These codes are used as return codes for job-related operations and as
     process exit codes to indicate job status.
     """
-    
+
     SUCCESS = 0
     """The job completed successfully"""
-    
+
     NOT_FINISHED = 98
     """The job has not finished yet"""
-    
+
     NOT_FOUND = 99
     """The job was not found"""
-    
+
     FAILED = 100
     """The job failed (due to user code, setup, or driver failure)"""
-    
+
     @classmethod
     def from_job_status(cls, status: Optional[JobStatus]) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         if status is None:
             return cls.FAILED
-        if status in JobStatus.user_code_failure_states() or status == JobStatus.FAILED_DRIVER:
+        if status in JobStatus.user_code_failure_states(
+        ) or status == JobStatus.FAILED_DRIVER:
             return cls.FAILED
         return cls.SUCCESS
-    
+
     @classmethod
-    def from_managed_job_status(cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
+    def from_managed_job_status(
+            cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code.
         
         Args:
@@ -234,7 +236,6 @@ class JobExitCode(enum.IntEnum):
         if status.is_failed():
             return cls.FAILED
         return cls.SUCCESS
-    
 
 
 # We have two steps for job submissions:
