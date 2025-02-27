@@ -604,7 +604,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     if generic_cloud == 'kubernetes':
-        # EKS need higher resource for reducing the probability of flakyness
+        # EKS requires more resources to reduce the likelihood of flakiness.
         resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
         env = None
     else:
