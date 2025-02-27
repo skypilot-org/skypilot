@@ -555,13 +555,7 @@ def exec(  # pylint: disable=redefined-builtin
           controller that does not support this operation.
     """
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    request_options = admin_policy.RequestOptions(cluster_name=cluster_name,
-                                                  idle_minutes_to_autostop=None,
-                                                  down=down,
-                                                  dryrun=dryrun)
-    validate(dag,
-             workdir_only=True,
-             admin_policy_request_options=request_options)
+    validate(dag, workdir_only=True)
     dag = client_common.upload_mounts_to_api_server(dag, workdir_only=True)
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ExecBody(
