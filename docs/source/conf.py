@@ -44,7 +44,6 @@ extensions = [
     'myst_parser',
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
-    # "sphinxarg.ext",  # pip install sphinx-argparse
 ]
 # Needed for admonitions in markdown:
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
