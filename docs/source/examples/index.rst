@@ -32,7 +32,7 @@ If you have any questions, please feel free to ask in the `SkyPilot Slack <https
    :maxdepth: 2
 
    Quickstart: PyTorch <../getting-started/tutorial>
-   Training <../gallery/tutorials/index>
+   Training <training/index>
    Serving <../gallery/llms/index>
    Other Frameworks <frameworks/index>
    AI Applications <applications/index>
