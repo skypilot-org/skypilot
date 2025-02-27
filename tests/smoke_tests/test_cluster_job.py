@@ -1402,9 +1402,14 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
         'cancel-pytorch',
         [
             f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
-            # Wait the GPU process to start. Azure takes longer to start due to
-            # the long Azure VM setup time.
-            'sleep 150' if generic_cloud == 'azure' else 'sleep 90',
+            # Wait until the setup finishes.
+            smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.RUNNING],
+                timeout=150),
+            # Wait the GPU process to start.
+            'sleep 90',
             f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; echo "$s" | grep python || '
             # When run inside container/k8s, nvidia-smi cannot show process ids.
             # See https://github.com/NVIDIA/nvidia-docker/issues/179
