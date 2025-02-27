@@ -1,6 +1,11 @@
 #!/bin/bash
 # Builds the Dockerfile_k8s image as the SkyPilot image.
 # Uses buildx to build the image for both amd64 and arm64.
+#
+# Note: Running `docker run --rm --privileged multiarch/qemu-user-static --reset -p yes`
+# first may solve some segmentation faults issue with QEMU when building the
+# image across architectures.
+#
 # Usage: ./skypilot-k8s-image.sh [-p] [-g] [-l] [-r region]
 # -p: Push the image to the registry
 # -g: Builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64
