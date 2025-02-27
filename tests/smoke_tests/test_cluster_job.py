@@ -1403,7 +1403,8 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
         [
             f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
             # Wait until the setup finishes.
-            smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
                 cluster_name=name,
                 job_id='1',
                 job_status=[sky.JobStatus.RUNNING],

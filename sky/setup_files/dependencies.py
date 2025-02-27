@@ -123,7 +123,7 @@ extras_require: Dict[str, List[str]] = {
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
     'docker': ['docker'] + local_ray,
-    'lambda': [], # No dependencies needed for lambda
+    'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
