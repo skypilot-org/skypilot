@@ -1069,18 +1069,26 @@ def get_command_runners(
     context = kubernetes_utils.get_context_from_config(
         cluster_info.provider_config)
 
-    cluster_name_on_cloud: str = cluster_info.provider_config['cluster_name']
-    is_ha_controller = is_high_availability_controller(cluster_name_on_cloud)
+    cluster_name_on_cloud = None
+
+    head_instance = cluster_info.get_head_instance()
+    if head_instance is not None and head_instance.tags is not None:
+        cluster_name_on_cloud = head_instance.tags.get(
+            TAG_SKYPILOT_CLUSTER_NAME)
 
     node_list = []
-    if is_ha_controller:
-        deployment_name = infer_deployment_name_from_pods(cluster_name_on_cloud)
-        node_list = [((namespace, context), deployment_name)]
-        return command_runner.KubernetesCommandRunner.make_runner_list(
-            node_list,
-            resource_type=command_runner.KubernetesCommandRunner.ResourceType.
-            DEPLOYMENT,
-            **credentials)
+
+    if cluster_name_on_cloud is not None:
+        is_ha_controller = is_high_availability_controller(
+            cluster_name_on_cloud)
+        if is_ha_controller:
+            deployment_name = _get_deployment_name(cluster_name_on_cloud)
+            node_list = [((namespace, context), deployment_name)]
+            return command_runner.KubernetesCommandRunner.make_runner_list(
+                node_list,
+                resource_type=command_runner.KubernetesCommandRunner.
+                ResourceType.DEPLOYMENT,
+                **credentials)
 
     if cluster_info.head_instance_id is not None:
         node_list = [((namespace, context), cluster_info.head_instance_id)]
