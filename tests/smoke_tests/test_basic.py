@@ -31,6 +31,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.skylet import constants
 from sky.skylet import events
+import sky.skypilot_config
 from sky.utils import common_utils
 
 
@@ -389,23 +390,25 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 def test_jobs_launch_and_logs(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    task = sky.Task(run="echo start job; sleep 30; echo end job",
-                    envs=smoke_tests_utils.LOW_RESOURCE_ENV)
-    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
-    task.set_resources(
-        sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
-    job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
-    assert handle is not None
-    try:
-        with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
-            sky.jobs.tail_logs(job_id=job_id, output_stream=f)
-            f.seek(0)
-            content = f.read()
-            assert content.count('start job') == 1
-            assert content.count('end job') == 1
-    finally:
-        sky.jobs.cancel(job_ids=[job_id])
+    # Use the context manager
+    with sky.skypilot_config.override_skypilot_config(
+            smoke_tests_utils.LOW_RESOURCE_OVERRIDE_CONFIG):
+        name = smoke_tests_utils.get_cluster_name()
+        task = sky.Task(run="echo start job; sleep 30; echo end job")
+        cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
+        task.set_resources(
+            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
+        assert handle is not None
+        try:
+            with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
+                sky.jobs.tail_logs(job_id=job_id, output_stream=f)
+                f.seek(0)
+                content = f.read()
+                assert content.count('start job') == 1
+                assert content.count('end job') == 1
+        finally:
+            sky.jobs.cancel(job_ids=[job_id])
 
 
 # ---------- Testing YAML Specs ----------

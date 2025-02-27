@@ -48,6 +48,16 @@ LOW_RESOURCE_PARAM = {
 LOW_RESOURCE_ENV = {
     'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
 }
+LOW_RESOURCE_OVERRIDE_CONFIG = {
+    'jobs': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    }
+}
 
 # Get the job queue, and print it once on its own, then print it again to
 # use with grep by the caller.
