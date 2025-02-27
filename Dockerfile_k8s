@@ -31,7 +31,7 @@ RUN useradd -m -s /bin/bash sky && \
 USER sky
 
 # Set HOME environment variable for sky user
-ENV HOME /home/sky
+ENV HOME=/home/sky
 
 # Set current working directory
 WORKDIR /home/sky
@@ -45,7 +45,7 @@ RUN conda init && \
     $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
     source ~/skypilot-runtime/bin/activate && \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-    $HOME/.local/bin/uv pip uninstall skypilot-nightly -y && \
+    $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
     ARCH=$(uname -m) && \
     if [ "$ARCH" = "x86_64" ]; then \
         curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/amd64/kubectl"; \
