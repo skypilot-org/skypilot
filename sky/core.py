@@ -813,12 +813,7 @@ def tail_logs(cluster_name: str,
     backend = backend_utils.get_backend_from_handle(handle)
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
-    val = backend.tail_logs(handle, job_id, follow=follow, tail=tail)
-    # Write to file
-    with open('/tmp/skypilot.txt', 'a') as f:
-        f.write(str(val))
-        f.write("\n")
-    return val
+    return backend.tail_logs(handle, job_id, follow=follow, tail=tail)
 
 
 @usage_lib.entrypoint

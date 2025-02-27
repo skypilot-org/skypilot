@@ -1035,7 +1035,7 @@ class JobLibCodeGen:
         # Used only for restarting a cluster.
         code = ['job_lib.fail_all_jobs_in_progress()']
         return cls._build(code)
-    
+
     @classmethod
     def tail_logs(cls,
                   job_id: Optional[int],
@@ -1055,7 +1055,7 @@ class JobLibCodeGen:
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
             # TODO: consider returning the job's exit code instead of a fixed
-            # exit code 1 on failure.
+            # exit code 100 on failure.
             'job_lib.check_job_status_and_exit(job_id)',
         ]
         return cls._build(code)

@@ -562,7 +562,7 @@ def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
               tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None) -> Any:
+              output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails the logs of a job.
 
     Args:
@@ -575,7 +575,7 @@ def tail_logs(cluster_name: str,
             console.
 
     Returns:
-        Return code based on success or failure of the job. 0 if success, 1 if the job failed.
+        Return code based on success or failure of the job. 0 if success, 100 if the job failed.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
