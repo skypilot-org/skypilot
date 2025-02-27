@@ -62,7 +62,11 @@ RUN ARCH=$(uname -m) && \
     else \
         curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/arm64/kubectl"; \
     fi && \
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    # Install kubectl to user's local bin instead of system path to avoid
+    # sudo-related issues during cross-architecture builds, especially on ARM
+    chmod +x kubectl && \
+    mkdir -p $HOME/.local/bin && \
+    mv kubectl $HOME/.local/bin/ && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
