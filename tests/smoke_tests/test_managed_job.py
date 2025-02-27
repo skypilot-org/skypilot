@@ -769,6 +769,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
+    low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
         'examples/managed_job_with_storage.yaml').read_text()
@@ -819,6 +820,9 @@ def test_managed_jobs_storage(generic_cloud: str):
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
     elif generic_cloud == 'azure':
         region = 'centralus'
+        # Region centralus seems don't have the quota for low resource.
+        # so we keep the default resource to avoid flakiness.
+        low_resource_arg = ""
         region_flag = f' --region {region}'
         storage_account_name = test_mount_and_storage.TestStorageWithCredentials. \
             get_az_storage_account_name(region)
@@ -885,7 +889,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                     generic_cloud, name),
                 # Override CPU/memory requirements to relax resource constraints
                 # and reduce the chance of out-of-stock
-                f'sky jobs launch -n {name}{use_spot} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
+                f'sky jobs launch -n {name}{use_spot} {low_resource_arg} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(

@@ -61,6 +61,10 @@ ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL = (
 @pytest.mark.no_vast  # VAST does not support num_nodes > 1 yet
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_file_mounts instead.
 def test_file_mounts(generic_cloud: str):
+    if generic_cloud == 'azure':
+        low_resource_arg = ""
+    else:
+        low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     extra_flags = ''
     if generic_cloud in 'kubernetes':
@@ -70,7 +74,7 @@ def test_file_mounts(generic_cloud: str):
         extra_flags = '--num-nodes 1'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {extra_flags} examples/using_file_mounts.yaml',
+        f'sky launch -y -c {name} --cloud {generic_cloud} {low_resource_arg} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(
