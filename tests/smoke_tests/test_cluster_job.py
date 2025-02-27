@@ -46,6 +46,7 @@ from sky.utils import resources_utils
 @pytest.mark.no_paperspace  # Paperspace does not have T4 gpus.
 @pytest.mark.no_oci  # OCI does not have T4 gpus
 @pytest.mark.no_nebius  # Nebius does not support T4 GPUs
+@pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')

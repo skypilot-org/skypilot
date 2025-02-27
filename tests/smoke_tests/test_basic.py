@@ -390,7 +390,8 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 def test_jobs_launch_and_logs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
-    task = sky.Task(run="echo start job; sleep 30; echo end job")
+    task = sky.Task(run="echo start job; sleep 30; echo end job",
+                    envs=smoke_tests_utils.LOW_RESOURCE_ENV)
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     task.set_resources(
         sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
