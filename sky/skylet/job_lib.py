@@ -191,7 +191,7 @@ class JobStatus(enum.Enum):
 
 
 class JobExitCode(enum.IntEnum):
-    """Job exit/return code enum.
+    """Job exit code enum.
     
     These codes are used as return codes for job-related operations and as
     process exit codes to indicate job status.

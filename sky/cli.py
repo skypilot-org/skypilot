@@ -2187,7 +2187,8 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    sdk.tail_logs(cluster, job_id, follow, tail=tail)
+    ret_code = sdk.tail_logs(cluster, job_id, follow, tail=tail)
+    sys.exit(ret_code)
 
 
 @cli.command()

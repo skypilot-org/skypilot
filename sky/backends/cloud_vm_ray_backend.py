@@ -3825,8 +3825,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 log file. If 0, print all lines.
 
         Returns:
-            The return code of the tail command. The tail command will exit
-            with code 100 if the job has failed.
+            The exit code of the tail command. Returns code 100 if the job has
+            failed. See job_lib.JobExitCode for possible return codes.
         """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,

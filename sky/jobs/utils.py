@@ -513,7 +513,9 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
     """Stream logs by job id.
 
     Returns:
-        A tuple containing the log message and the return code. See job_lib.JobExitCode for possible return codes.
+        A tuple containing the log message and an exit code based on success or
+        failure of the job. 0 if success, 100 if the job failed.
+        See job_lib.JobExitCode for possible exit codes.
     """
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
@@ -743,7 +745,9 @@ def stream_logs(job_id: Optional[int],
     """Stream logs by job id or job name.
 
     Returns:
-        A tuple containing the log message and the return code. See job_lib.JobExitCode for possible return codes.
+        A tuple containing the log message and the exit code based on success
+        or failure of the job. 0 if success, 100 if the job failed.
+        See job_lib.JobExitCode for possible exit codes.
     """
     if job_id is None and job_name is None:
         job_id = managed_job_state.get_latest_job_id()
@@ -1146,6 +1150,7 @@ class ManagedJobCodeGen:
       >> codegen = ManagedJobCodeGen.show_jobs(...)
     """
     _PREFIX = textwrap.dedent("""\
+        import sys
         from sky.jobs import utils
         from sky.jobs import state as managed_job_state
         """)
@@ -1193,6 +1198,7 @@ class ManagedJobCodeGen:
         msg, retcode = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                 follow={follow}, controller={controller})
         print(msg, flush=True)
+        sys.exit(retcode)
         """)
         return cls._build(code)
 
