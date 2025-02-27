@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
+from sky.adaptors import nebius
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -115,22 +116,6 @@ def test_oci_mounts():
     )
     smoke_tests_utils.run_one_test(test)
 
-
-@pytest.mark.nebius  # For Nebius object storage mounts and file mounts.
-def test_nebius_mounts():
-    name = smoke_tests_utils.get_cluster_name()
-    test_commands = [
-        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --cloud nebius --num-nodes 2 examples/nebius-mounts.yaml',
-        f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-    ]
-    test = smoke_tests_utils.Test(
-        'nebius_mounts',
-        test_commands,
-        f'sky down -y {name}',
-        timeout=20 * 60,  # 20 mins
-    )
-    smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_vast  # Requires GCP
@@ -469,6 +454,35 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
         test = smoke_tests_utils.Test(
             'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_storage_mounts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_nebius_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = nebius.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'AWS_SHARED_CREDENTIALS_FILE={nebius.NEBIUS_CREDENTIALS_PATH} aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+        ]
+
+        test = smoke_tests_utils.Test(
+            'nebius_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
