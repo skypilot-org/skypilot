@@ -188,6 +188,26 @@ class JobStatus(enum.Enum):
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
 
 
+class JobExitCode(enum.IntEnum):
+    """Job exit/return code enum.
+    
+    These codes are used as return codes for job-related operations and as
+    process exit codes to indicate job status.
+    """
+    
+    SUCCESS = 0
+    """The job completed successfully"""
+    
+    NOT_FINISHED = 98
+    """The job has not finished yet"""
+    
+    NOT_FOUND = 99
+    """The job was not found"""
+    
+    FAILED = 100
+    """The job failed (due to user code, setup, or driver failure)"""
+
+
 # We have two steps for job submissions:
 # 1. Client reserve a job id from the job table by adding a INIT state job.
 # 2. Client updates the job status to PENDING by actually submitting the job's
@@ -936,16 +956,16 @@ def check_job_status_and_exit(job_id: int) -> None:
 
     Returns:
         None. If the job has failed or the status is None, this method
-        will exit the process with exit code 100 (arbitrary code).
+        will exit the process with exit code from JobExitCode.
     """
     job_status = get_status(job_id)
     if job_status is None:
-        sys.exit(100)
+        sys.exit(JobExitCode.FAILED)
     if job_status and job_status in JobStatus.user_code_failure_states(
     ) or job_status == JobStatus.FAILED_DRIVER:
-        sys.exit(100)
+        sys.exit(JobExitCode.FAILED)
     else:
-        sys.exit(0)
+        sys.exit(JobExitCode.SUCCESS)
 
 
 class JobLibCodeGen:
