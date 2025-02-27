@@ -115,6 +115,8 @@ class SkyServeLoadBalancer:
             tls_credential)
         self._replica_pool: ClientPool = ClientPool(load_balancing_policy_name)
         self._lb_pool: ClientPool = ClientPool(load_balancing_policy_name)
+        self._replica2id: Dict[str, str] = {}
+        self._lb2region: Dict[str, str] = {}
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -161,8 +163,14 @@ class SkyServeLoadBalancer:
                                 f'{ready_urls}')
                     close_client_tasks.extend(
                         self._replica_pool.refresh_with_new_urls(ready_urls))
+                    for rurl in ready_urls:
+                        if rurl not in self._replica2id:
+                            self._replica2id[rurl] = str(len(self._replica2id))
                     # For LB, we dont need to separate them by region.
                     all_lb_urls = sum(ready_lb_urls.values(), [])
+                    for r, lbs in ready_lb_urls.items():
+                        for lb in lbs:
+                            self._lb2region[lb] = r
                     logger.info(f'Available LB URLs: {all_lb_urls}')
                     close_client_tasks.extend(
                         self._lb_pool.refresh_with_new_urls(all_lb_urls))
@@ -180,6 +188,14 @@ class SkyServeLoadBalancer:
             The response from the endpoint replica. Return the exception
             encountered if anything goes wrong.
         """
+        if is_from_lb:
+            log_key = 'replica-decision'
+            replica_id = self._replica2id.get(url, 'N/A')
+            log_to_request = (f'Select Replica with id {replica_id} ({url})')
+        else:
+            log_key = 'lb-decision'
+            lb_region = self._lb2region.get(url, 'N/A')
+            log_to_request = (f'Select LB in region {lb_region} ({url})')
         logger.info(f'Proxy request to {url}')
         pool_to_use = self._replica_pool if is_from_lb else self._lb_pool
         pool_to_use.pre_execute_hook(url, request)
@@ -211,6 +227,8 @@ class SkyServeLoadBalancer:
                 await proxy_response.aclose()
                 pool_to_use.post_execute_hook(url, request)
 
+            proxy_response.headers.update(
+                {log_key: log_to_request})
             return fastapi.responses.StreamingResponse(
                 content=proxy_response.aiter_raw(),
                 status_code=proxy_response.status_code,
