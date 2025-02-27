@@ -511,7 +511,7 @@ def cancel_job_by_name(job_name: str) -> str:
 
 def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
     """Stream logs by job id.
-    
+
     Returns:
         A tuple containing the log message and the return code.
         0: success
@@ -559,8 +559,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                     f'{managed_job_status.value}. For more details, run: '
                     f'sky jobs logs --controller {job_id}'
                     f'{colorama.Style.RESET_ALL}'
-                    f'{job_msg}', 
-                    100 if managed_job_status.is_failed() else 0)
+                    f'{job_msg}', 100 if managed_job_status.is_failed() else 0)
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -743,7 +742,7 @@ def stream_logs(job_id: Optional[int],
                 controller: bool = False,
                 follow: bool = True) -> Tuple[str, int]:
     """Stream logs by job id or job name.
-    
+
     Returns:
         A tuple containing the log message and the return code.
         0: success
@@ -754,7 +753,7 @@ def stream_logs(job_id: Optional[int],
     if job_id is None and job_name is None:
         job_id = managed_job_state.get_latest_job_id()
         if job_id is None:
-            return 'No managed job found.', 99 
+            return 'No managed job found.', 99
 
     if controller:
         if job_id is None:
@@ -847,7 +846,10 @@ def stream_logs(job_id: Optional[int],
             print(f.read(), end='', flush=True)
 
         if follow:
-            return_code = 100 if job_status.is_failed() else 0
+            if job_status is None:
+                return_code = 99
+            else:
+                return_code = 100 if job_status.is_failed() else 0
             return ux_utils.finishing_message(
                 f'Job finished (status: {job_status}).'), return_code
 
@@ -857,7 +859,7 @@ def stream_logs(job_id: Optional[int],
         assert job_name is not None
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
         if not job_ids:
-            return f'No running managed job found with name {job_name!r}.'
+            return f'No running managed job found with name {job_name!r}.', 99
         if len(job_ids) > 1:
             raise ValueError(
                 f'Multiple running jobs found with name {job_name!r}.')

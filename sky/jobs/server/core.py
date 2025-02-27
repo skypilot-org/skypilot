@@ -443,7 +443,8 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     Please refer to sky.cli.job_logs for documentation.
 
     Returns:
-        Return code based on success or failure of the job. 0 if success, 1 if the job failed.
+        Return code based on success or failure of the job. 0 if success,
+        100 if the job failed.
 
     Raises:
         ValueError: invalid arguments.
@@ -474,10 +475,10 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
     return backend.tail_managed_job_logs(handle,
-                                  job_id=job_id,
-                                  job_name=name,
-                                  follow=follow,
-                                  controller=controller)
+                                         job_id=job_id,
+                                         job_name=name,
+                                         follow=follow,
+                                         controller=controller)
 
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:

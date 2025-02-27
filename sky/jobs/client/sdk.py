@@ -192,9 +192,10 @@ def tail_logs(name: Optional[str] = None,
         refresh: Whether to restart the jobs controller if it is stopped.
         output_stream: The stream to write the logs to. If None, print to the
             console.
-    
+
     Returns:
-        Return code based on success or failure of the job. 0 if success, 1 if the job failed.
+        Return code based on success or failure of the job. 0 if success,
+        100 if the job failed.
 
     Request Raises:
         ValueError: invalid arguments.

@@ -9,8 +9,8 @@ import os
 import pathlib
 import shlex
 import signal
-import sys
 import sqlite3
+import sys
 import time
 from typing import Any, Dict, List, Optional, Sequence
 
@@ -930,10 +930,10 @@ def run_timestamp_with_globbing_payload(job_ids: List[Optional[str]]) -> str:
 
 def check_job_status_and_exit(job_id: int) -> None:
     """Check the status of a job and exit with an appropriate code.
-    
+
     Args:
         job_id: The ID of the job to check.
-        
+
     Returns:
         None. If the job has failed or the status is None, this method
         will exit the process with exit code 100 (arbitrary code).
@@ -941,8 +941,9 @@ def check_job_status_and_exit(job_id: int) -> None:
     job_status = get_status(job_id)
     if job_status is None:
         sys.exit(100)
-    if job_status and job_status in JobStatus.user_code_failure_states() or job_status == JobStatus.FAILED_DRIVER:
-            sys.exit(100)
+    if job_status and job_status in JobStatus.user_code_failure_states(
+    ) or job_status == JobStatus.FAILED_DRIVER:
+        sys.exit(100)
     else:
         sys.exit(0)
 

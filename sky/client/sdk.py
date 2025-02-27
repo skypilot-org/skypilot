@@ -575,7 +575,8 @@ def tail_logs(cluster_name: str,
             console.
 
     Returns:
-        Return code based on success or failure of the job. 0 if success, 100 if the job failed.
+        Return code based on success or failure of the job. 0 if success,
+        100 if the job failed.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
