@@ -529,11 +529,17 @@ def test_skyserve_cancel(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
+    if generic_cloud == 'kubernetes':
+        # EKS requires more resources to reduce the likelihood of flakiness.
+        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+    else:
+        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
+
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-streaming',
         [
-            f'sky serve up -n {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y tests/skyserve/streaming/streaming.yaml',
+            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/streaming/streaming.yaml',
             _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1),
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
             'python3 tests/skyserve/streaming/send_streaming_request.py '
