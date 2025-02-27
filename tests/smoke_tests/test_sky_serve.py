@@ -656,7 +656,13 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
-    if generic_cloud == 'kubernetes':
+    env = smoke_tests_utils.LOW_RESOURCE_ENV
+    if generic_cloud == 'azure':
+        # Lower resource of azure will cause flakiness
+        # so we keep the default resource.
+        resource_arg = ""
+        env = None
+    elif generic_cloud == 'kubernetes':
         # EKS requires more resources to reduce the likelihood of flakiness.
         resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
     else:
@@ -691,7 +697,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
     )
     smoke_tests_utils.run_one_test(test)
 
