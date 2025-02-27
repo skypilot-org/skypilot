@@ -768,6 +768,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
+    low_resource_args = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
         'examples/managed_job_with_storage.yaml').read_text()
@@ -869,6 +870,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || true'))
+        low_resource_args = ""
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
@@ -884,7 +886,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                     generic_cloud, name),
                 # Override CPU/memory requirements to relax resource constraints
                 # and reduce the chance of out-of-stock
-                f'sky jobs launch -n {name}{use_spot} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
+                f'sky jobs launch -n {name}{use_spot} {low_resource_args} --cloud {generic_cloud}{region_flag} {file_path} -y -d',
                 region_validation_cmd,  # Check if the bucket is created in the correct region
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
