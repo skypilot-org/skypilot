@@ -172,9 +172,9 @@ def _get_cluster_records_and_set_ssh_config(
                 handle.ssh_user,
             )
         else:
-            # If the cluster is not UP or does not have IPs, we need to remove
-            # the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+            # If the cluster is not UP or does not have credentials available,
+            # we need to remove the cluster from the SSH config.
+            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
 
     # Clean up SSH configs for clusters that do not exist.
     #
