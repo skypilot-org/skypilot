@@ -54,8 +54,8 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        'aws --version >/dev/null 2>&1 || '
-        f'{constants.SKY_UV_PIP_CMD} install awscli',
+        f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws --version >/dev/null 2>&1 '
+        f'|| {constants.SKY_UV_PIP_CMD} install awscli',
     ]
 
     def is_directory(self, url: str) -> bool:
