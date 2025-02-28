@@ -2119,7 +2119,7 @@ def logs(
 
     3. If ``--sync-down`` is specified, the logs of the job will be downloaded
     from the cluster and saved to the local machine under
-    ``~/sky_logs``. Mulitple job_ids can be specified.
+    ``~/sky_logs``. Multiple job_ids can be specified.
     """
     if sync_down and status:
         raise click.UsageError(
