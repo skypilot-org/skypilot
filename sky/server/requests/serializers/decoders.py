@@ -176,7 +176,7 @@ def decode_job_status(
 ) -> Dict[int, Optional['job_lib.JobStatus']]:
     job_statuses: Dict[int, Optional['job_lib.JobStatus']] = {}
     for job_id_str, status_str in return_value.items():
-        # When we json serialize the job ID for storing in the requests db, 
+        # When we json serialize the job ID for storing in the requests db,
         # the job_id gets converted to a string. Here we convert it back to int.
         job_id = int(job_id_str)
         if status_str is not None:
