@@ -136,7 +136,8 @@ def _get_cluster_records_and_set_ssh_config(
         # During the failover, even though a cluster does not exist, the handle
         # can still exist in the record, and we check for credentials to avoid
         # updating the SSH config for non-existent clusters.
-        if handle is not None and 'credentials' in record:
+        if (handle is not None and handle.cached_external_ips is not None and
+            'credentials' in record):
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the SkyPilot API
