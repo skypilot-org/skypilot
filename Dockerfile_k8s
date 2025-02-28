@@ -5,7 +5,6 @@ FROM continuumio/miniconda3:23.3.1-0
 
 ARG DEBIAN_FRONTEND=noninteractive
 # Detect architecture
-ARG TARGETPLATFORM="linux/amd64"
 ARG TARGETARCH
 
 # Initialize conda for root user, install ssh and other local dependencies
@@ -46,12 +45,12 @@ RUN conda init && \
     source ~/skypilot-runtime/bin/activate && \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
-    ARCH=$(uname -m) && \
-    if [ "$ARCH" = "x86_64" ]; then \
-        curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/amd64/kubectl"; \
-    else \
-        curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/arm64/kubectl"; \
-    fi && \
+    ARCH=$(TARGETARCH:-$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)} && \
+    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     chmod +x kubectl && \
     mkdir -p $HOME/.local/bin && \
     mv kubectl $HOME/.local/bin/ && \
