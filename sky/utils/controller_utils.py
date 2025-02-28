@@ -124,7 +124,7 @@ class Controllers(enum.Enum):
         cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status -a{colorama.Style.RESET_ALL}'),
+            f'sky serve status -v{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         _decline_down_when_failed_to_fetch_status_hint=(
