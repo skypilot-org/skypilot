@@ -498,10 +498,10 @@
                     <td data-full-text="{{ row[13] }}">{{ row[13] }}</td>  {# Details #}
                     <td>
                         {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
-                        <a href="{{ url_for('download_log', job_id=row[1]|string|replace(' \u21B3', '')) }}"
-                           class="btn btn-sm btn-outline-secondary">
+                        <button class="btn btn-sm btn-outline-secondary log-btn" 
+                                data-job-id="{{ row[1]|string|replace(' \u21B3', '') }}">
                             controller log
-                        </a>
+                        </button>
                         {% endif %}
                     </td>
                 </tr>
@@ -509,6 +509,41 @@
             </tbody>
         </table>
     </div>
+    
+    <!-- Hidden container for log content -->
+    <div style="display: none;">
+        {% for row in rows %}
+            {% if row[1]|string|replace(' \u21B3', '') and row[1]|string|replace(' \u21B3', '') != '-' %}
+            <pre id="log-content-{{ row[1]|string|replace(' \u21B3', '') }}">{{ row[-1]|e }}</pre>
+            {% endif %}
+        {% endfor %}
+    </div>
+    
+    <!-- Log Modal -->
+    <div class="modal fade" id="logModal" tabindex="-1" aria-labelledby="logModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="logModalLabel">Controller Log</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="logContent" style="white-space: pre-wrap; font-family: monospace; max-height: 70vh; overflow-y: auto;"></div>
+                    <div id="logError" class="alert alert-danger d-none">
+                        Error loading log content. Please try again.
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
+                    <a id="downloadLogBtn" href="#" class="btn btn-primary" download>Download</a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js" 
+        integrity="sha384-kenU1KFdBIe4zVF0s0G1M5b4hcpxyD9F7jL+jjXkk+Q2h455rYXK/7HAuoJl+0I4" 
+        crossorigin="anonymous"></script>
     <script>
         // Folder toggle for pipelines, this will fold/unfold the rows for
         // a pipeline and its tasks.
@@ -726,6 +761,68 @@
                     this.classList.toggle('expanded');
                 }
             });
+        });
+    });
+</script>
+<script>
+    // Function to show log modal and display pre-loaded log content
+    function showLogModal(jobId, logContent) {
+        try {
+            // Initialize modal
+            const logModal = new bootstrap.Modal(document.getElementById('logModal'));
+            const logContentEl = document.getElementById('logContent');
+            const logError = document.getElementById('logError');
+            const downloadBtn = document.getElementById('downloadLogBtn');
+            
+            // Create a Blob for download functionality
+            const blob = new Blob([logContent], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            
+            // Set download button href
+            downloadBtn.href = url;
+            downloadBtn.setAttribute('download', `job_${jobId}.log`);
+            
+            // Clear previous content and show new content directly
+            logContentEl.textContent = logContent || 'No log content available';
+            logError.classList.add('d-none');
+            
+            // Set modal title
+            document.getElementById('logModalLabel').textContent = `Controller Log - Job ${jobId}`;
+            
+            // Show modal
+            logModal.show();
+            
+            // Cleanup the URL object when the modal is hidden
+            document.getElementById('logModal').addEventListener('hidden.bs.modal', function() {
+                URL.revokeObjectURL(url);
+            }, { once: true });
+        } catch (error) {
+            console.error('Error showing log modal:', error);
+            document.getElementById('logError').classList.remove('d-none');
+            document.getElementById('logError').textContent = `Error showing log: ${error.message}`;
+        }
+    }
+
+    // Add event listeners for log buttons
+    document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('click', function(event) {
+            if (event.target.closest('.log-btn')) {
+                try {
+                    const button = event.target.closest('.log-btn');
+                    const jobId = button.dataset.jobId;
+                    const logContentEl = document.getElementById(`log-content-${jobId}`);
+                    
+                    if (!logContentEl) {
+                        throw new Error(`Log content element not found for job ${jobId}`);
+                    }
+                    
+                    const logContent = logContentEl.textContent;
+                    showLogModal(jobId, logContent);
+                } catch (error) {
+                    console.error('Error getting log content:', error);
+                    showLogModal(jobId, `Error loading log: ${error.message}`);
+                }
+            }
         });
     });
 </script>

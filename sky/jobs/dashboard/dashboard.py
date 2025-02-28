@@ -171,17 +171,24 @@ def home():
                         log_content = f.read()
                         row[JobTableColumns.FAILOVER] = _extract_launch_history(
                             log_content)
+                        
+                        # Store full log content for direct display
+                        row.append(log_content)  # Add log content as the last element
                 else:
                     row[JobTableColumns.FAILOVER] = 'Log file not found'
+                    row.append('Log file not found')  # Add placeholder for log content
             except (IOError, OSError) as e:
                 row[JobTableColumns.FAILOVER] = f'Error reading log: {str(e)}'
+                row.append(f'Error reading log: {str(e)}')  # Add error message for log content
+        else:
+            row.append('')  # Add empty log content for rows without a job ID
     app.logger.error('All managed jobs:')
 
-    # Validate column count
-    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
+    # Validate column count - Updated to account for the extra log content column
+    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS) + 1:  # +1 for log content
         raise RuntimeError(
             f'Dashboard code and managed job queue code are out of sync. '
-            f'Expected {(JOB_TABLE_COLUMNS)} columns, got {(rows[0])}')
+            f'Expected {len(JOB_TABLE_COLUMNS)} columns plus log content, got {len(rows[0])} total')
 
     # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
     for row in rows:
@@ -205,25 +212,9 @@ def home():
         last_updated_timestamp=timestamp,
         status_values=status_values,
         status_counts=status_counts,
+        request=flask.request,
     )
     return rendered_html
-
-
-@app.route('/download_log/<job_id>')
-def download_log(job_id):
-    try:
-        log_path = os.path.join(
-            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            f'{job_id}.log')
-        if not os.path.exists(log_path):
-            flask.abort(404)
-        return flask.send_file(log_path,
-                               mimetype='text/plain',
-                               as_attachment=True,
-                               download_name=f'job_{job_id}.log')
-    except (IOError, OSError) as e:
-        app.logger.error(f'Error downloading log for job {job_id}: {str(e)}')
-        flask.abort(500)
 
 
 if __name__ == '__main__':
