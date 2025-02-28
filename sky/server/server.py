@@ -1081,14 +1081,14 @@ if __name__ == '__main__':
     # that it is shown only when the API server is started.
     usage_lib.maybe_show_privacy_policy()
 
-    num_workers = None
+    num_workers = 1
     if cmd_args.deploy:
-        num_workers = os.cpu_count()
+        num_workers = common_utils.get_cpu_count()
 
     workers = []
     try:
         workers = executor.start(cmd_args.deploy)
-        logger.info('Starting SkyPilot API server')
+        logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
         uvicorn.run('sky.server.server:app',
