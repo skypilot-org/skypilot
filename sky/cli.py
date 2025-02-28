@@ -133,7 +133,11 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-        if handle is not None and handle.cached_external_ips is not None:
+        # During the failover, even though a cluster does not exist, the handle
+        # can still exist in the record, and we check for credentials to avoid
+        # updating the SSH config for non-existent clusters.
+        if (handle is not None and handle.cached_external_ips is not None and
+                'credentials' in record):
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the SkyPilot API
@@ -169,9 +173,9 @@ def _get_cluster_records_and_set_ssh_config(
                 handle.ssh_user,
             )
         else:
-            # If the cluster is not UP or does not have IPs, we need to remove
-            # the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+            # If the cluster is not UP or does not have credentials available,
+            # we need to remove the cluster from the SSH config.
+            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
 
     # Clean up SSH configs for clusters that do not exist.
     #
