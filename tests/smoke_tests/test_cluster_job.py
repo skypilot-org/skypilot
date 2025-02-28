@@ -1344,7 +1344,7 @@ def _get_cancel_task_with_cloud(name, cloud, timeout=15 * 60):
     test = smoke_tests_utils.Test(
         f'{cloud}-cancel-task',
         [
-            f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d',
+            f'sky launch -c {name} examples/resnet_app.yaml --cloud {cloud} -y -d',
             # Wait the job to be scheduled and finished setup.
             f'until sky queue {name} | grep "RUNNING"; do sleep 10; done',
             # Wait the setup and initialize before the GPU process starts.
