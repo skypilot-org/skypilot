@@ -113,3 +113,6 @@ SERVE_VERSION = 2
 TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
     'The version of service is outdated and does not support manually '
     'terminating replicas. Please terminate the service and spin up again.')
+
+# The health check endpoint for load balancer.
+LB_HEALTH_ENDPOINT = '/sky-lb-health'

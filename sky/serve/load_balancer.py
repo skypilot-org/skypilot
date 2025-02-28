@@ -48,11 +48,11 @@ class ClientPool:
         # updating it from _sync_with_controller.
         self._lock: threading.Lock = threading.Lock()
 
-    def refresh_with_new_urls(self,
-                              ready_urls: List[str]) -> List[asyncio.Task]:
+    async def refresh_with_new_urls(
+            self, ready_urls: List[str]) -> List[asyncio.Task]:
         close_client_tasks = []
         with self._lock:
-            self._load_balancing_policy.set_ready_replicas(ready_urls)
+            await self._load_balancing_policy.set_ready_replicas(ready_urls)
             for replica_url in ready_urls:
                 if replica_url not in self._pool:
                     self._pool[replica_url] = httpx.AsyncClient(
@@ -93,6 +93,7 @@ class SkyServeLoadBalancer:
             controller_url: str,
             load_balancer_port: int,
             load_balancing_policy_name: Optional[str] = None,
+            meta_load_balancing_policy_name: Optional[str] = None,
             region: Optional[str] = None,
             tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
         """Initialize the load balancer.
@@ -114,7 +115,7 @@ class SkyServeLoadBalancer:
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
         self._replica_pool: ClientPool = ClientPool(load_balancing_policy_name)
-        self._lb_pool: ClientPool = ClientPool(load_balancing_policy_name)
+        self._lb_pool: ClientPool = ClientPool(meta_load_balancing_policy_name)
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
@@ -158,11 +159,14 @@ class SkyServeLoadBalancer:
                 else:
                     # TODO(tian): Check if there is any replica that is not
                     # assigned a LB.
+                    logger.info(f'All ready replica URLs: {ready_replica_urls}')
+                    logger.info(f'All ready LB URLs: {ready_lb_urls}')
                     ready_urls = ready_replica_urls.get(self._region, [])
                     logger.info(f'Available Replica URLs: {ready_replica_urls},'
                                 f' Ready URLs in local region {self._region}: '
                                 f'{ready_urls}')
                     close_client_tasks.extend(
+                        await
                         self._replica_pool.refresh_with_new_urls(ready_urls))
                     for rurl in ready_urls:
                         if rurl not in self._replica2id:
@@ -174,7 +178,7 @@ class SkyServeLoadBalancer:
                             self._lb2region[lb] = r
                     logger.info(f'Available LB URLs: {all_lb_urls}')
                     close_client_tasks.extend(
-                        self._lb_pool.refresh_with_new_urls(all_lb_urls))
+                        await self._lb_pool.refresh_with_new_urls(all_lb_urls))
 
             await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
             # Await those tasks after the interval to avoid blocking.
@@ -300,7 +304,7 @@ class SkyServeLoadBalancer:
 
     def run(self):
         # Add health check endpoint first so it takes precedence
-        self._app.add_api_route('/sky-lb-health',
+        self._app.add_api_route(constants.LB_HEALTH_ENDPOINT,
                                 self._health_check,
                                 methods=['GET'])
 
@@ -336,6 +340,7 @@ def run_load_balancer(
         controller_addr: str,
         load_balancer_port: int,
         load_balancing_policy_name: Optional[str] = None,
+        meta_load_balancing_policy_name: Optional[str] = None,
         region: Optional[str] = None,
         tls_credential: Optional[serve_utils.TLSCredential] = None) -> None:
     """ Run the load balancer.
@@ -350,6 +355,7 @@ def run_load_balancer(
         controller_url=controller_addr,
         load_balancer_port=load_balancer_port,
         load_balancing_policy_name=load_balancing_policy_name,
+        meta_load_balancing_policy_name=meta_load_balancing_policy_name,
         region=region,
         tls_credential=tls_credential)
     load_balancer.run()
@@ -374,9 +380,16 @@ if __name__ == '__main__':
         default=lb_policies.DEFAULT_LB_POLICY,
         help=f'The load balancing policy to use. Available policies: '
         f'{", ".join(available_policies)}.')
+    parser.add_argument(
+        '--meta-load-balancing-policy',
+        choices=available_policies,
+        default=lb_policies.DEFAULT_LB_POLICY,
+        help=f'The meta load balancing policy to use. Available policies: '
+        f'{", ".join(available_policies)}.')
     parser.add_argument('--region',
                         required=True,
                         help='The region of the load balancer.')
     args = parser.parse_args()
     run_load_balancer(args.controller_addr, args.load_balancer_port,
-                      args.load_balancing_policy, args.region)
+                      args.load_balancing_policy,
+                      args.meta_load_balancing_policy, args.region)

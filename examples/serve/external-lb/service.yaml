@@ -14,15 +14,17 @@ service:
   replicas: 4
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
+  # Meta load balancing policy used to select the LB.
+  load_balancing_policy: proximate_first
   external_load_balancers:
     - resources:
         cloud: aws
         region: us-east-2
-      load_balancing_policy: round_robin
+      load_balancing_policy: consistent_hashing
     - resources:
         cloud: aws
         region: ap-northeast-1
-      load_balancing_policy: round_robin
+      load_balancing_policy: consistent_hashing
 
 resources:
   cloud: aws

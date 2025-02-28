@@ -147,6 +147,8 @@ def _cleanup(service_name: str,
                     lb_ip = _get_cluster_ip(cn)
                     if lb_ip is not None:
                         # Hosted zone must be set for external LBs.
+                        # TODO(tian): Directly query all related records,
+                        # so we don't need the LB IP anymore.
                         assert hosted_zone is not None
                         change_batch.append(
                             _get_route53_change('DELETE', service_name,

@@ -41,7 +41,7 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
 
 def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
-                    lb_policy: str) -> Dict[str, Any]:
+                    lb_policy: str, meta_lb_policy: str) -> Dict[str, Any]:
     return {
         'load_balancer_port': lb_port,
         'controller_addr': controller_addr,
@@ -50,6 +50,7 @@ def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
         'lb_envs': controller_utils.sky_managed_cluster_envs(),
         'region': lb_region,
         'load_balancing_policy': lb_policy,
+        'meta_lb_policy': meta_lb_policy,
     }
 
 
@@ -93,7 +94,7 @@ class SkyServeController:
             # sky/templates/sky-serve-external-load-balancer.yaml.j2
             # TODO(tian): Make it configurable.
             lb_service_spec._readiness_headers = None
-            lb_service_spec._readiness_path = '/sky-lb-health'
+            lb_service_spec._readiness_path = constants.LB_HEALTH_ENDPOINT
             lb_service_spec._readiness_timeout_seconds = 20
             lb_service_spec._initial_delay_seconds = 120
             lb_service_spec._post_data = None
@@ -108,7 +109,8 @@ class SkyServeController:
                 j2_vars = _get_lb_j2_vars(controller_addr,
                                           constants.EXTERNAL_LB_PORT,
                                           lb_config['resources']['region'],
-                                          lb_config['load_balancing_policy'])
+                                          lb_config['load_balancing_policy'],
+                                          service_spec.load_balancing_policy)
                 rc = copy.deepcopy(lb_config['resources'])
                 if 'cloud' in rc:
                     rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])
