@@ -93,7 +93,7 @@ SKYLET_VERSION = '12'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 2
+SKYLET_LIB_VERSION = 3
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related
