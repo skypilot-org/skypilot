@@ -1085,9 +1085,9 @@ if __name__ == '__main__':
     if cmd_args.deploy:
         num_workers = os.cpu_count()
 
-    workers = []
+    sub_procs = []
     try:
-        workers = executor.start(cmd_args.deploy)
+        sub_procs = executor.start(cmd_args.deploy)
         logger.info('Starting SkyPilot API server')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
@@ -1101,5 +1101,6 @@ if __name__ == '__main__':
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for worker in workers:
-            worker.terminate()
+        for sub_proc in sub_procs:
+            sub_proc.terminate()
+            sub_proc.join()
