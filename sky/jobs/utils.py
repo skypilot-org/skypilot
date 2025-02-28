@@ -1242,10 +1242,17 @@ class ManagedJobCodeGen:
                     follow: bool = True,
                     controller: bool = False) -> str:
         code = textwrap.dedent(f"""\
-        msg, retcode = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
+        result = utils.stream_logs(job_id={job_id!r}, job_name={job_name!r},
                                 follow={follow}, controller={controller})
-        print(msg, flush=True)
-        sys.exit(retcode)
+        if managed_job_version < 3:
+            # Versions 2 and older did not return a retcode, so we just print
+            # the result.
+            # TODO: Remove compatibility before 0.12.0
+            print(result, flush=True)
+        else:
+            msg, retcode = result
+            print(msg, flush=True)
+            sys.exit(retcode)
         """)
         return cls._build(code)
 
