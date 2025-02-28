@@ -49,9 +49,15 @@ def get_s3_mount_cmd(bucket_name: str,
 
 def get_gcs_mount_install_cmd() -> str:
     """Returns a command to install GCS mount utility gcsfuse."""
-    install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
+    install_cmd = ('ARCH=$(uname -m) && '
+                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                   '  ARCH_SUFFIX="arm64"; '
+                   'else '
+                   '  ARCH_SUFFIX="amd64"; '
+                   'fi && '
+                   'wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
                    f'/releases/download/v{GCSFUSE_VERSION}/'
-                   f'gcsfuse_{GCSFUSE_VERSION}_amd64.deb '
+                   f'gcsfuse_{GCSFUSE_VERSION}_${{ARCH_SUFFIX}}.deb '
                    '-O /tmp/gcsfuse.deb && '
                    'sudo dpkg --install /tmp/gcsfuse.deb')
     return install_cmd
@@ -81,9 +87,16 @@ def get_az_mount_install_cmd() -> str:
                    'sudo apt-get install -y '
                    '-o Dpkg::Options::="--force-confdef" '
                    'fuse3 libfuse3-dev && '
+                   'ARCH=$(uname -m) && '
+                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                   '  echo "blobfuse2 is not supported on $ARCH" && '
+                   '  exit 1; '
+                   'else '
+                   '  ARCH_SUFFIX="x86_64"; '
+                   'fi && '
                    'wget -nc https://github.com/Azure/azure-storage-fuse'
                    f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
-                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
+                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.${{ARCH_SUFFIX}}.deb '
                    '-O /tmp/blobfuse2.deb && '
                    'sudo dpkg --install /tmp/blobfuse2.deb && '
                    f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
@@ -207,14 +220,20 @@ def get_rclone_install_cmd() -> str:
     """
     # pylint: disable=line-too-long
     install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
         f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-amd64.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.deb)))'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
         f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-amd64.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.rpm))')
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
     return install_cmd
 
 

@@ -44,10 +44,10 @@ RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
     esac)} && \
-    if [ "$ARCH" = "amd64" ]; then \
-        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
-    else \
+    if [ "$ARCH" = "arm64" ]; then \
         curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-aarch64.sh -o miniconda.sh; \
+    else \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
     fi && \
     bash miniconda.sh -b -p $HOME/miniconda3 && \
     rm miniconda.sh && \
