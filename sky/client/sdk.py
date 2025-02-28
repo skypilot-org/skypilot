@@ -222,7 +222,8 @@ def optimize(
         dag: the DAG to optimize.
         minimize: whether to minimize cost or time.
         admin_policy_request_options: Request options used for admin policy
-            validation.
+            validation. This is only required when a admin policy is in use,
+            see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
 
     Returns:
         The request ID of the optimize request.
@@ -265,7 +266,8 @@ def validate(
         workdir_only: whether to only validate the workdir. This is used for
             `exec` as it does not need other files/folders in file_mounts.
         admin_policy_request_options: Request options used for admin policy
-            validation.
+            validation. This is only required when a admin policy is in use,
+            see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     for task in dag.tasks:
         task.expand_and_validate_workdir()

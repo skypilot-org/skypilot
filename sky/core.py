@@ -63,7 +63,8 @@ def optimize(
         blocked_resources: a list of resources that should not be used.
         quiet: whether to suppress logging.
         request_options: Request options used in enforcing admin policies.
-
+            This is only required when a admin policy is in use,
+            see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     Returns:
         The optimized DAG.
 
