@@ -213,6 +213,6 @@ def botocore_exceptions():
     return exceptions
 
 
-def create_endpoint(region: Optional[str] = nebius.DEFAULT_REGION):
+def create_endpoint(region: Optional[str] = DEFAULT_REGION):
     """Reads accountid necessary to interact with R2"""
     return f'https://storage.{region}.nebius.cloud:443'

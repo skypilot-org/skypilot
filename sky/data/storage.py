@@ -4590,7 +4590,7 @@ class NebiusStore(AbstractStore):
                  _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
-        self.region = region or nebius.NEBIUS_PROFILE_NAME
+        self.region = region or nebius.DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
 
