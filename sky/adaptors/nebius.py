@@ -1,9 +1,9 @@
 """Nebius cloud adaptor."""
 # pylint: disable=import-outside-toplevel
 
-import contextlib
 import os
 import threading
+from typing import Optional
 
 from sky.adaptors import common
 from sky.utils import annotations
@@ -16,8 +16,9 @@ NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
 NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
 NEBIUS_PROJECT_ID_PATH = '~/.nebius/' + NEBIUS_PROJECT_ID_FILENAME
 
+DEFAULT_REGION = 'eu-north1'
+
 NEBIUS_PROFILE_NAME = 'nebius'
-NEBIUS_CREDENTIALS_PATH = '~/.aws/credentials'
 
 MAX_RETRIES_TO_DISK_CREATE = 120
 MAX_RETRIES_TO_INSTANCE_STOP = 120
@@ -121,20 +122,6 @@ def sdk():
     return nebius.sdk.SDK(credentials=get_iam_token())
 
 
-@contextlib.contextmanager
-def _load_nebius_credentials_env():
-    """Context manager to temporarily change the AWS credentials file path."""
-    prev_credentials_path = os.environ.get('AWS_SHARED_CREDENTIALS_FILE')
-    os.environ['AWS_SHARED_CREDENTIALS_FILE'] = NEBIUS_CREDENTIALS_PATH
-    try:
-        yield
-    finally:
-        if prev_credentials_path is None:
-            del os.environ['AWS_SHARED_CREDENTIALS_FILE']
-        else:
-            os.environ['AWS_SHARED_CREDENTIALS_FILE'] = prev_credentials_path
-
-
 def get_nebius_credentials(boto3_session):
     """Gets the Nebius credentials from the boto3 session object.
 
@@ -143,15 +130,14 @@ def get_nebius_credentials(boto3_session):
     Returns:
         botocore.credentials.ReadOnlyCredentials object with the R2 credentials.
     """
-    with _load_nebius_credentials_env():
-        nebius_credentials = boto3_session.get_credentials()
-        if nebius_credentials is None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('Nebius credentials not found. Run '
-                                 '`sky check` to verify credentials are '
-                                 'correctly set up.')
-        else:
-            return nebius_credentials.get_frozen_credentials()
+    nebius_credentials = boto3_session.get_credentials()
+    if nebius_credentials is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Nebius credentials not found. Run '
+                             '`sky check` to verify credentials are '
+                             'correctly set up.')
+    else:
+        return nebius_credentials.get_frozen_credentials()
 
 
 # lru_cache() is thread-safe and it will return the same session object
@@ -166,9 +152,8 @@ def session():
     # However, the session object itself is thread-safe, so we are
     # able to use lru_cache() to cache the session object.
     with _session_creation_lock:
-        with _load_nebius_credentials_env():
-            session_ = boto3.session.Session(profile_name=NEBIUS_PROFILE_NAME)
-        return session_
+        session_ = boto3.session.Session(profile_name=NEBIUS_PROFILE_NAME)
+    return session_
 
 
 @annotations.lru_cache(scope='global')
@@ -212,7 +197,7 @@ def client(service_name: str, region):
 
     session_ = session()
     nebius_credentials = get_nebius_credentials(session_)
-    endpoint = create_endpoint()
+    endpoint = create_endpoint(region)
 
     return session_.client(service_name,
                            endpoint_url=endpoint,
@@ -228,6 +213,6 @@ def botocore_exceptions():
     return exceptions
 
 
-def create_endpoint(region: str = 'eu-north1'):
+def create_endpoint(region: Optional[str] = nebius.DEFAULT_REGION):
     """Reads accountid necessary to interact with R2"""
     return f'https://storage.{region}.nebius.cloud:443'
