@@ -3,5 +3,6 @@ jobs:
 
 controller:
   resources:
-    cpus: 2+
-    memory: 4+
+    jobs:
+      cpus: 2+
+      memory: 4+
