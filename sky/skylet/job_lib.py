@@ -1079,7 +1079,7 @@ class JobLibCodeGen:
             f'{_LINUX_NEW_LINE}log_lib.tail_logs(**tail_log_kwargs)',
             # After tailing, check the job status and exit with appropriate code
             'job_status = job_lib.get_status(job_id)',
-            # Backward compatibility for returning exit code: Skylet versions 2 
+            # Backward compatibility for returning exit code: Skylet versions 2
             # and older did not have JobExitCode, so we use 0 for those versions
             # TODO: Remove this special handling after 0.10.0.
             'exit_code = job_lib.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
