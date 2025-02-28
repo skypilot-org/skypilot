@@ -39,7 +39,7 @@ SHELL ["/bin/bash", "-c"]
 # Install conda and other dependencies based on architecture
 # Keep the conda and Ray versions below in sync with the ones in skylet.constants
 # Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
-RUN ARCH=$(TARGETARCH:-$(case "$(uname -m)" in \
+RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \

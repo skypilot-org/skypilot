@@ -15,7 +15,7 @@ RUN conda install -c conda-forge google-cloud-sdk && \
         pciutils nano fuse socat netcat-openbsd curl rsync vim tini && \
     rm -rf /var/lib/apt/lists/* && \
     # Install kubectl based on architecture
-    ARCH=$(TARGETARCH:-$(case "$(uname -m)" in \
+    ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
         "x86_64") echo "amd64" ;; \
         "aarch64") echo "arm64" ;; \
         *) echo "$(uname -m)" ;; \
