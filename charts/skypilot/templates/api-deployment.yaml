@@ -52,11 +52,7 @@ spec:
           # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
           cp /tmp/config.yaml /root/.sky/config.yaml
           {{- end }}
-          if sky api start --deploy; then
-            tail -n+0 -f /root/.sky/api_server/server.log
-          else
-            cat /root/.sky/api_server/server.log
-          fi
+          exec python -m sky.server.server --deploy --host 0.0.0.0 --port 46580
         ports:
         - containerPort: 46580
         livenessProbe:
