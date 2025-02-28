@@ -10,6 +10,7 @@ import shutil
 import signal
 import sqlite3
 import time
+import traceback
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import colorama
@@ -27,6 +28,7 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import env_options
+from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -34,6 +36,7 @@ logger = sky_logging.init_logger(__name__)
 REQUEST_TABLE = 'requests'
 COL_CLUSTER_NAME = 'cluster_name'
 COL_USER_ID = 'user_id'
+COL_STATUS_MSG = 'status_msg'
 REQUEST_LOG_PATH_PREFIX = '~/sky_logs/api_server/requests'
 
 # TODO(zhwu): For scalability, there are several TODOs:
@@ -81,6 +84,7 @@ REQUEST_COLUMNS = [
     COL_CLUSTER_NAME,
     'schedule_type',
     COL_USER_ID,
+    COL_STATUS_MSG,
 ]
 
 
@@ -109,6 +113,7 @@ class RequestPayload:
     user_name: Optional[str] = None
     # Resources the request operates on.
     cluster_name: Optional[str] = None
+    status_msg: Optional[str] = None
 
 
 @dataclasses.dataclass
@@ -129,6 +134,8 @@ class Request:
     schedule_type: ScheduleType = ScheduleType.LONG
     # Resources the request operates on.
     cluster_name: Optional[str] = None
+    # Status message of the request, indicates the reason of current status.
+    status_msg: Optional[str] = None
 
     @property
     def log_path(self) -> pathlib.Path:
@@ -212,6 +219,7 @@ class Request:
             user_id=self.user_id,
             user_name=user_name,
             cluster_name=self.cluster_name,
+            status_msg=self.status_msg,
         )
 
     def encode(self) -> RequestPayload:
@@ -232,6 +240,7 @@ class Request:
                 schedule_type=self.schedule_type.value,
                 user_id=self.user_id,
                 cluster_name=self.cluster_name,
+                status_msg=self.status_msg,
             )
         except (TypeError, ValueError) as e:
             # The error is unexpected, so we don't suppress the stack trace.
@@ -262,6 +271,7 @@ class Request:
                 schedule_type=ScheduleType(payload.schedule_type),
                 user_id=payload.user_id,
                 cluster_name=payload.cluster_name,
+                status_msg=payload.status_msg,
             )
         except (TypeError, ValueError) as e:
             logger.error(
@@ -415,7 +425,8 @@ def create_table(cursor, conn):
         pid INTEGER,
         {COL_CLUSTER_NAME} TEXT,
         schedule_type TEXT,
-        {COL_USER_ID} TEXT)""")
+        {COL_USER_ID} TEXT,
+        {COL_STATUS_MSG} TEXT)""")
 
 
 _DB = None
@@ -509,6 +520,7 @@ def get_request_tasks(
     cluster_names: Optional[List[str]] = None,
     exclude_request_names: Optional[List[str]] = None,
     user_id: Optional[str] = None,
+    request_names: Optional[List[str]] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -518,6 +530,7 @@ def get_request_tasks(
         exclude_request_names: a list of request names to exclude from results.
         user_id: the user ID to filter requests on.
             If None, all users are included.
+        request_names: a list of request names to filter on.
     """
     filters = []
     filter_params = []
@@ -534,6 +547,9 @@ def get_request_tasks(
     if user_id is not None:
         filters.append(f'{COL_USER_ID} = ?')
         filter_params.append(user_id)
+    if request_names is not None:
+        request_names_str = ','.join(repr(name) for name in request_names)
+        filters.append(f'name IN ({request_names_str})')
     assert _DB is not None
     with _DB.conn:
         cursor = _DB.conn.cursor()
@@ -565,3 +581,14 @@ def _add_or_update_request_no_lock(request: Request):
         cursor.execute(
             f'INSERT OR REPLACE INTO {REQUEST_TABLE} ({key_str}) '
             f'VALUES ({fill_str})', row)
+
+
+def set_request_failed(request_id: str, e: Exception) -> None:
+    """Set a request to failed and populate the error message."""
+    with ux_utils.enable_traceback():
+        stacktrace = traceback.format_exc()
+    setattr(e, 'stacktrace', stacktrace)
+    with update_request(request_id) as request_task:
+        assert request_task is not None, request_id
+        request_task.status = RequestStatus.FAILED
+        request_task.set_error(e)

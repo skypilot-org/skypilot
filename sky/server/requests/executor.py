@@ -28,7 +28,6 @@ import queue as queue_lib
 import signal
 import sys
 import time
-import traceback
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
@@ -42,12 +41,12 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests as api_requests
+from sky.server.requests.precond import Precondition
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import timeline
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import types
@@ -262,13 +261,7 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            with ux_utils.enable_traceback():
-                stacktrace = traceback.format_exc()
-            setattr(e, 'stacktrace', stacktrace)
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.FAILED
-                request_task.set_error(e)
+            api_requests.set_request_failed(request_id, e)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to '
                         f'{common_utils.format_exception(e)}')
@@ -289,10 +282,16 @@ def schedule_request(request_id: str,
                      func: Callable[P, Any],
                      request_cluster_name: Optional[str] = None,
                      ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = api_requests.
-                     ScheduleType.LONG,
-                     is_skypilot_system: bool = False) -> None:
-    """Enqueue a request to the request queue."""
+                     schedule_type: api_requests.ScheduleType = (
+                         api_requests.ScheduleType.LONG),
+                     is_skypilot_system: bool = False,
+                     precondition: Optional[Precondition] = None) -> None:
+    """Enqueue a request to the request queue.
+
+    If a precondition is provided, the request will only be scheduled for
+    execution when the precondition is met (returns True). The precondition
+    is waited asynchronously and does not block the caller.
+    """
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
         user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
@@ -314,10 +313,17 @@ def schedule_request(request_id: str,
         return
 
     request.log_path.touch()
-    input_tuple = (request_id, ignore_return_value)
 
-    logger.info(f'Queuing request: {request_id}')
-    _get_queue(schedule_type).put(input_tuple)
+    def enqueue():
+        input_tuple = (request_id, ignore_return_value)
+        logger.info(f'Queuing request: {request_id}')
+        _get_queue(schedule_type).put(input_tuple)
+
+    if precondition is not None:
+        # Wait async to avoid blocking caller.
+        precondition.wait_async(on_condition_met=enqueue)
+    else:
+        enqueue()
 
 
 def executor_initializer(proc_group: str):

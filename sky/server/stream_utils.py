@@ -55,19 +55,20 @@ async def log_streamer(request_id: Optional[str],
         if show_request_waiting_spinner:
             yield status_msg.init()
             yield status_msg.start()
-        is_waiting_msg_logged = False
+        last_waiting_msg = ''
         waiting_msg = (f'Waiting for {request_task.name!r} request to be '
                        f'scheduled: {request_id}')
         while request_task.status < requests_lib.RequestStatus.RUNNING:
+            if request_task.status_msg is not None:
+                waiting_msg = request_task.status_msg
             if show_request_waiting_spinner:
                 yield status_msg.update(f'[dim]{waiting_msg}[/dim]')
-            elif plain_logs and not is_waiting_msg_logged:
-                is_waiting_msg_logged = True
+            elif plain_logs and waiting_msg != last_waiting_msg:
+                # Only log when waiting message changes.
+                last_waiting_msg = waiting_msg
                 # Use smaller padding (1024 bytes) to force browser rendering
                 yield f'{waiting_msg}' + ' ' * 4096 + '\n'
-            # Sleep 0 to yield, so other coroutines can run. This busy waiting
-            # loop is performance critical for short-running requests, so we do
-            # not want to yield too long.
+            # Sleep shortly to avoid storming the DB and CPU
             await asyncio.sleep(0.1)
             request_task = requests_lib.get_request(request_id)
             if not follow:
