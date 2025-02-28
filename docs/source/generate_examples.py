@@ -204,10 +204,10 @@ def _work(example_dir: Path):
                 f'Collision detected: Multiple examples with stem "{stem}".\n'
                 f'First path: {stems[stem]}\n'
                 f'Second path: {example.path}\n'
-                'Please rename one of them.'
-            )
+                'Please rename one of them.')
         stems[stem] = example.path
-        example.title = fix_case(stem.replace('_', ' ').title())  # Update title accordingly
+        example.title = fix_case(stem.replace(
+            '_', ' ').title())  # Update title accordingly
 
     # Generate the example documentation using the updated stem
     for example in sorted(examples, key=lambda e: e.path.name):
