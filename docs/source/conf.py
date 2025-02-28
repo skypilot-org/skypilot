@@ -139,7 +139,7 @@ html_context = {
 }
 
 html_sidebars = {
-    # 'index': [],
+    'index': [],
     '**': ['main-sidebar'],
 }
 
@@ -172,11 +172,11 @@ html_js_files = ['custom.js']
 html_css_files = ['custom.css']
 
 # Allowing cross references in markdown files to be parsed
-# myst_heading_anchors = 7
+myst_heading_anchors = 7
 show_sphinx = False
 
 exclude_patterns = ['_gallery_original']
-# myst_heading_anchors = 3
+myst_heading_anchors = 3
 myst_url_schemes = {
     'gh-issue': {
         'url': 'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',

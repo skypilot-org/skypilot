@@ -15,5 +15,3 @@ Training
    Training on TPUs <tpu>
    Unsloth <unsloth>
 
-
-.. Hugging Face <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_app.yaml>
