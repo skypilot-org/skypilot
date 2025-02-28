@@ -4584,12 +4584,13 @@ class NebiusStore(AbstractStore):
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = nebius.DEFAULT_REGION,
+                 region: Optional[str] = None,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
+        self.region = region or nebius.NEBIUS_PROFILE_NAME
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
 
