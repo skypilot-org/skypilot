@@ -151,7 +151,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def handle_request_error(response: requests.Response) -> None:
+def handle_request_error(response: 'requests.Response') -> None:
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
