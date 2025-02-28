@@ -83,23 +83,24 @@ def get_gcs_mount_cmd(bucket_name: str,
 
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ Container mount utility blobfuse2."""
-    install_cmd = ('sudo apt-get update; '
-                   'sudo apt-get install -y '
-                   '-o Dpkg::Options::="--force-confdef" '
-                   'fuse3 libfuse3-dev && '
-                   'ARCH=$(uname -m) && '
-                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
-                   '  echo "blobfuse2 is not supported on $ARCH" && '
-                   '  exit 1; '
-                   'else '
-                   '  ARCH_SUFFIX="x86_64"; '
-                   'fi && '
-                   'wget -nc https://github.com/Azure/azure-storage-fuse'
-                   f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
-                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.${{ARCH_SUFFIX}}.deb '
-                   '-O /tmp/blobfuse2.deb && '
-                   'sudo dpkg --install /tmp/blobfuse2.deb && '
-                   f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
+    install_cmd = (
+        'sudo apt-get update; '
+        'sudo apt-get install -y '
+        '-o Dpkg::Options::="--force-confdef" '
+        'fuse3 libfuse3-dev && '
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  echo "blobfuse2 is not supported on $ARCH" && '
+        '  exit 1; '
+        'else '
+        '  ARCH_SUFFIX="x86_64"; '
+        'fi && '
+        'wget -nc https://github.com/Azure/azure-storage-fuse'
+        f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
+        f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.${{ARCH_SUFFIX}}.deb '
+        '-O /tmp/blobfuse2.deb && '
+        'sudo dpkg --install /tmp/blobfuse2.deb && '
+        f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
 
     return install_cmd
 
