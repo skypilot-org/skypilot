@@ -49,6 +49,7 @@ extensions = [
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
 myst_enable_extensions = [
     "colon_fence",
+    # Converts http links to clickable links in HTML output.
     "linkify",
 ]
 
@@ -175,9 +176,20 @@ html_css_files = ['custom.css']
 myst_heading_anchors = 7
 show_sphinx = False
 
-exclude_patterns = ['_gallery_original']
+exclude_patterns = [
+    '_gallery_original',
+    'generated-examples',
+]
 myst_heading_anchors = 3
 myst_url_schemes = {
+    'http': None,
+    'https': None,
+    'mailto': None,
+    'ftp': None,
+    'local': {
+        'url': '{{path}}',
+        'title': '{{path}}',
+    },
     'gh-issue': {
         'url': 'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',
         'title': 'Issue #{{path}}',
@@ -204,9 +216,7 @@ googleanalytics_id = 'G-92WF3MDCJV'
 
 autosectionlabel_prefix_document = True
 
-suppress_warnings = [
-    'autosectionlabel.*',
-]
+suppress_warnings = ['autosectionlabel.*']
 
 
 def setup(app):
