@@ -87,6 +87,7 @@ def test_managed_jobs_basic(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
+
 @pytest.mark.managed_jobs
 @pytest.mark.no_nebius  # Autodown and Autostop not supported.
 def test_managed_jobs_cli_exit_codes(generic_cloud: str):
@@ -102,14 +103,14 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
                 job_name=f'jobs-{name}',
                 job_status=[sky.ManagedJobStatus.SUCCEEDED],
                 timeout=60),
-            
+
             # Get job ID from the queue and test logs with successful job
             f'JOB_ROW=$(sky jobs queue | grep jobs-{name} | head -n1) && '
             f'echo "$JOB_ROW" && '
             f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
             f'echo "JOB_ID=$JOB_ID" && '
             f'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
-            
+
             # Test jobs launch with failing job
             f'sky jobs launch -y -n jobs-fail-{name} --cloud {generic_cloud} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
             smoke_tests_utils.
@@ -117,7 +118,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
                 job_name=f'jobs-fail-{name}',
                 job_status=[sky.ManagedJobStatus.FAILED],
                 timeout=60),
-            
+
             # Get job ID from the queue and test logs with failed job
             f'JOB_ROW=$(sky jobs queue | grep jobs-fail-{name} | head -n1) && '
             f'echo "$JOB_ROW" && '
@@ -129,6 +130,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
         timeout=20 * 60,  # Consistent with other managed jobs tests
     )
     smoke_tests_utils.run_one_test(test)
+
 
 @pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances

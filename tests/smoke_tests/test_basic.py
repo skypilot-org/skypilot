@@ -669,10 +669,10 @@ def test_cli_exit_codes(generic_cloud: str):
             # Test successful job exit code (0)
             f'sky launch -y -c {name} --cloud {generic_cloud} "echo success" && echo "Exit code: $?"',
             f'sky logs {name} 1 --status | grep SUCCEEDED',
-            
+
             # Test that sky logs with successful job returns 0
             f'sky logs {name} 1 && echo "Exit code: $?"',
-            
+
             # Test failed job exit code (100)
             f'sky exec {name} "exit 1" || echo "Command failed with code: $?" | grep "Command failed with code: 100"',
             f'sky logs {name} 2 --status | grep FAILED',

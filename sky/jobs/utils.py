@@ -767,7 +767,8 @@ def stream_logs(job_id: Optional[int],
                 if job['job_name'] == job_name
             }
             if not managed_job_ids:
-                return f'No managed job found with name {job_name!r}.', job_lib.JobExitCode.NOT_FOUND
+                return (f'No managed job found with name {job_name!r}.',
+                        job_lib.JobExitCode.NOT_FOUND)
             if len(managed_job_ids) > 1:
                 job_ids_str = ', '.join(
                     str(job_id) for job_id in managed_job_ids)
@@ -856,7 +857,8 @@ def stream_logs(job_id: Optional[int],
         assert job_name is not None
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
         if not job_ids:
-            return f'No running managed job found with name {job_name!r}.', job_lib.JobExitCode.NOT_FOUND
+            return (f'No running managed job found with name {job_name!r}.',
+                    job_lib.JobExitCode.NOT_FOUND)
         if len(job_ids) > 1:
             raise ValueError(
                 f'Multiple running jobs found with name {job_name!r}.')

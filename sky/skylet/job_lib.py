@@ -192,7 +192,7 @@ class JobStatus(enum.Enum):
 
 class JobExitCode(enum.IntEnum):
     """Job exit code enum.
-    
+
     These codes are used as return codes for job-related operations and as
     process exit codes to indicate job status.
     """
@@ -222,15 +222,7 @@ class JobExitCode(enum.IntEnum):
     @classmethod
     def from_managed_job_status(
             cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
-        """Convert a managed job status to an exit code.
-        
-        Args:
-            status: A ManagedJobStatus object.
-            
-        Returns:
-            JobExitCode.SUCCESS for successful status, JobExitCode.FAILED for failed status,
-            and JobExitCode.NOT_FOUND if status is None.
-        """
+        """Convert a managed job status to an exit code."""
         if status is None:
             return cls.NOT_FOUND
         if status.is_failed():
