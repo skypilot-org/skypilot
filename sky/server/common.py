@@ -145,63 +145,6 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def do_start_api_server(deploy: bool = False,
-                        host: str = '127.0.0.1',
-                        foreground: bool = False):
-    if not is_api_server_local():
-        raise RuntimeError(
-            f'Cannot start API server: {get_server_url()} is not a local URL')
-
-    # Check available memory before starting the server.
-    avail_mem_size_gb: float = common_utils.get_mem_size_gb()
-    if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
-        logger.warning(
-            f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only has '
-            f'{avail_mem_size_gb:.1f}GB memory available. '
-            f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is recommended to '
-            f'support higher load with better performance.'
-            f'{colorama.Style.RESET_ALL}')
-
-    args = [sys.executable, *API_SERVER_CMD.split()]
-    if deploy:
-        args += ['--deploy']
-    if host is not None:
-        args += [f'--host={host}']
-
-    if foreground:
-        # replace the current process with the API server
-        os.execvp(args[0], args)
-
-    log_path = os.path.expanduser(constants.API_SERVER_LOGS)
-    os.makedirs(os.path.dirname(log_path), exist_ok=True)
-    cmd = f'{" ".join(args)} > {log_path} 2>&1 < /dev/null'
-
-    # Start the API server process in the background and don't wait for it.
-    # If this is called from a CLI invocation, we need start_new_session=True so
-    # that SIGINT on the CLI will not also kill the API server.
-    subprocess.Popen(cmd, shell=True, start_new_session=True)
-
-    # Wait for the server to start until timeout.
-    # Conservative upper time bound for starting the server based on profiling.
-    timeout_sec = 12
-    start_time = time.time()
-    while True:
-        api_server_info = get_api_server_status()
-        assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
-            f'API server version mismatch when starting the server. '
-            f'Server version: {api_server_info.api_version} '
-            f'Client version: {server_constants.API_VERSION}')
-        if api_server_info.status == ApiServerStatus.HEALTHY:
-            break
-        elif time.time() - start_time >= timeout_sec:
-            with ux_utils.print_exception_no_traceback():
-                raise RuntimeError(
-                    'Failed to start SkyPilot API server at '
-                    f'{get_server_url(host)}'
-                    f'\nView logs at: {constants.API_SERVER_LOGS}')
-        time.sleep(0.5)
-
-
 def handle_request_error(response: requests.Response) -> None:
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
@@ -228,8 +171,6 @@ def _start_api_server(deploy: bool = False,
                       host: str = '127.0.0.1',
                       foreground: bool = False):
     """Starts a SkyPilot API server locally."""
-    # Lock to prevent multiple processes from starting the server at the
-    # same time, causing issues with database initialization.
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
@@ -238,7 +179,60 @@ def _start_api_server(deploy: bool = False,
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        do_start_api_server(deploy=deploy, host=host, foreground=foreground)
+        if not is_api_server_local():
+            raise RuntimeError(f'Cannot start API server: {get_server_url()} '
+                               'is not a local URL')
+
+        # Check available memory before starting the server.
+        avail_mem_size_gb: float = common_utils.get_mem_size_gb()
+        if avail_mem_size_gb <= server_constants.MIN_AVAIL_MEM_GB:
+            logger.warning(
+                f'{colorama.Fore.YELLOW}Your SkyPilot API server machine only '
+                f'has {avail_mem_size_gb:.1f}GB memory available. '
+                f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is '
+                'recommended to support higher load with better performance.'
+                f'{colorama.Style.RESET_ALL}')
+
+        args = [sys.executable, *API_SERVER_CMD.split()]
+        if deploy:
+            args += ['--deploy']
+        if host is not None:
+            args += [f'--host={host}']
+
+        if foreground:
+            # Replaces the current process with the API server
+            os.execvp(args[0], args)
+
+        log_path = os.path.expanduser(constants.API_SERVER_LOGS)
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        cmd = f'{" ".join(args)} > {log_path} 2>&1 < /dev/null'
+
+        # Start the API server process in the background and don't wait for it.
+        # If this is called from a CLI invocation, we need
+        # start_new_session=True so that SIGINT on the CLI will not also kill
+        # the API server.
+        subprocess.Popen(cmd, shell=True, start_new_session=True)
+
+        # Wait for the server to start until timeout.
+        # Conservative upper time bound for starting the server based on
+        # profiling.
+        timeout_sec = 12
+        start_time = time.time()
+        while True:
+            api_server_info = get_api_server_status()
+            assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
+                f'API server version mismatch when starting the server. '
+                f'Server version: {api_server_info.api_version} '
+                f'Client version: {server_constants.API_VERSION}')
+            if api_server_info.status == ApiServerStatus.HEALTHY:
+                break
+            elif time.time() - start_time >= timeout_sec:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'Failed to start SkyPilot API server at '
+                        f'{get_server_url(host)}'
+                        f'\nView logs at: {constants.API_SERVER_LOGS}')
+            time.sleep(0.5)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
@@ -277,6 +271,8 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
         if not is_api_server_local():
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ApiServerConnectionError(endpoint) from exc
+        # Lock to prevent multiple processes from starting the server at the
+        # same time, causing issues with database initialization.
         with filelock.FileLock(
                 os.path.expanduser(constants.API_SERVER_CREATION_LOCK_PATH)):
             # Check again if server is already running. Other processes may

@@ -1645,6 +1645,7 @@ def api_start(
                              'variable.')
     server_common.check_server_healthy_or_start_fn(deploy, host, foreground)
     if foreground:
+        # Explain why current process exited
         logger.info('API server is already running:')
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
                 f'{server_common.get_server_url(host)}\n'

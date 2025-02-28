@@ -37,6 +37,11 @@ spec:
         {{- end }}
         # Use tini as the init process
         command: ["tini", "--"]
+        # Start API server in foreground (if supported) to:
+        # 1. Bypass the healthz check of `sky api start`, let kubernetes probes manage the lifecycle directly.
+        # 2. Capture all logs in container to stdout/stderr, bypass in-container log file overhead.
+        # 3. Exec ensures the process is a direct child of tini, enables correct signal handling.
+        # Note: this comment is moved here to avoid appearing in the final start script.
         args:
         - /bin/sh
         - -c
@@ -57,6 +62,7 @@ spec:
             exec sky api start --deploy --foreground
           else
             # For backward compatibility, run in background if --foreground is not supported.
+            # TODO(aylei): this will bedropped in 0.11.0.
             if sky api start --deploy; then
               tail -n+0 -f /root/.sky/api_server/server.log
             else

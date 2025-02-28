@@ -364,6 +364,15 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
+        except KeyboardInterrupt:
+            # Interrupt the worker process will stop request execution, but
+            # the SIGTERM request should be respected anyway since it might
+            # be explicitly sent by user.
+            # TODO(aylei): crash the API server or recreate the worker process
+            # to avoid broken state.
+            logger.error(f'[{worker}] Worker process interrupted')
+            with ux_utils.print_exception_no_traceback():
+                raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
@@ -381,14 +390,7 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
             initializer=executor_initializer,
             initargs=(proc_group,)) as executor:
         while True:
-            try:
-                process_request(executor)
-            except KeyboardInterrupt:
-                # Gracefully exit the worker process on server shutdown.
-                # TODO(aylei): if the server is still running, crash the API
-                # server or recreate the worker process to avoid broken state.
-                logger.info(f'[{worker}] Worker process exited')
-                break
+            process_request(executor)
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
@@ -407,6 +409,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         f'long requests and will allow at max '
         f'{max_parallel_for_short} short requests in parallel.')
 
+    sub_procs = []
     # Setup the queues.
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
@@ -423,27 +426,26 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
-
+        sub_procs.append(queue_server)
         mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
 
     logger.info('Request queues created')
 
-    worker_procs = []
     for worker_id in range(max_parallel_for_long):
         worker = RequestWorker(id=worker_id,
                                schedule_type=api_requests.ScheduleType.LONG)
         worker_proc = multiprocessing.Process(target=request_worker,
                                               args=(worker, 1))
         worker_proc.start()
-        worker_procs.append(worker_proc)
+        sub_procs.append(worker_proc)
 
     # Start a worker for short requests.
     worker = RequestWorker(id=1, schedule_type=api_requests.ScheduleType.SHORT)
     worker_proc = multiprocessing.Process(target=request_worker,
                                           args=(worker, max_parallel_for_short))
     worker_proc.start()
-    worker_procs.append(worker_proc)
-    return worker_procs
+    sub_procs.append(worker_proc)
+    return sub_procs
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
