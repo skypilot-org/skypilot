@@ -52,10 +52,16 @@ spec:
           # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
           cp /tmp/config.yaml /root/.sky/config.yaml
           {{- end }}
-          if sky api start --deploy; then
-            tail -n+0 -f /root/.sky/api_server/server.log
+
+          if sky api start -h | grep -q -- "--foreground"; then
+            exec sky api start --deploy --foreground
           else
-            cat /root/.sky/api_server/server.log
+            # For backward compatibility, run in background if --foreground is not supported.
+            if sky api start --deploy; then
+              tail -n+0 -f /root/.sky/api_server/server.log
+            else
+              cat /root/.sky/api_server/server.log
+            fi
           fi
         ports:
         - containerPort: 46580

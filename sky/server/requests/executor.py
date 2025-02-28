@@ -364,14 +364,6 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
-        except KeyboardInterrupt:
-            # Interrupt the worker process will stop request execution, but
-            # the SIGTERM request should be respected anyway since it might
-            # be explicitly sent by user.
-            # TODO(aylei): crash the API server or recreate the worker process
-            # to avoid broken state.
-            logger.error(f'[{worker}] Worker process interrupted')
-            raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
@@ -389,7 +381,14 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
             initializer=executor_initializer,
             initargs=(proc_group,)) as executor:
         while True:
-            process_request(executor)
+            try:
+                process_request(executor)
+            except KeyboardInterrupt:
+                # Gracefully exit the worker process on server shutdown.
+                # TODO(aylei): if the server is still running, crash the API
+                # server or recreate the worker process to avoid broken state.
+                logger.info(f'[{worker}] Worker process exited')
+                break
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:

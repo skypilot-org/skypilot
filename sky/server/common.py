@@ -145,8 +145,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def start_api_server_in_background(deploy: bool = False,
-                                   host: str = '127.0.0.1'):
+def do_start_api_server(deploy: bool = False,
+                        host: str = '127.0.0.1',
+                        foreground: bool = False):
     if not is_api_server_local():
         raise RuntimeError(
             f'Cannot start API server: {get_server_url()} is not a local URL')
@@ -160,15 +161,20 @@ def start_api_server_in_background(deploy: bool = False,
             f'At least {server_constants.MIN_AVAIL_MEM_GB}GB is recommended to '
             f'support higher load with better performance.'
             f'{colorama.Style.RESET_ALL}')
+
+    args = [sys.executable, *API_SERVER_CMD.split()]
+    if deploy:
+        args += ['--deploy']
+    if host is not None:
+        args += [f'--host={host}']
+
+    if foreground:
+        # replace the current process with the API server
+        os.execvp(args[0], args)
+
     log_path = os.path.expanduser(constants.API_SERVER_LOGS)
     os.makedirs(os.path.dirname(log_path), exist_ok=True)
-
-    api_server_cmd = API_SERVER_CMD
-    if deploy:
-        api_server_cmd += ' --deploy'
-    if host is not None:
-        api_server_cmd += f' --host {host}'
-    cmd = f'{sys.executable} {api_server_cmd} > {log_path} 2>&1 < /dev/null'
+    cmd = f'{" ".join(args)} > {log_path} 2>&1 < /dev/null'
 
     # Start the API server process in the background and don't wait for it.
     # If this is called from a CLI invocation, we need start_new_session=True so
@@ -218,7 +224,9 @@ def get_request_id(response: requests.Response) -> RequestId:
     return request_id
 
 
-def _start_api_server(deploy: bool = False, host: str = '127.0.0.1'):
+def _start_api_server(deploy: bool = False,
+                      host: str = '127.0.0.1',
+                      foreground: bool = False):
     """Starts a SkyPilot API server locally."""
     # Lock to prevent multiple processes from starting the server at the
     # same time, causing issues with database initialization.
@@ -230,7 +238,7 @@ def _start_api_server(deploy: bool = False, host: str = '127.0.0.1'):
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
                     f'{colorama.Style.RESET_ALL}')
-        start_api_server_in_background(deploy=deploy, host=host)
+        do_start_api_server(deploy=deploy, host=host, foreground=foreground)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
@@ -260,7 +268,8 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
 
 
 def check_server_healthy_or_start_fn(deploy: bool = False,
-                                     host: str = '127.0.0.1'):
+                                     host: str = '127.0.0.1',
+                                     foreground: bool = False):
     try:
         check_server_healthy()
     except exceptions.ApiServerConnectionError as exc:
@@ -274,7 +283,7 @@ def check_server_healthy_or_start_fn(deploy: bool = False,
             # have started the server while we were waiting for the lock.
             api_server_info = get_api_server_status(endpoint)
             if api_server_info.status == ApiServerStatus.UNHEALTHY:
-                _start_api_server(deploy, host)
+                _start_api_server(deploy, host, foreground)
 
 
 def check_server_healthy_or_start(func):

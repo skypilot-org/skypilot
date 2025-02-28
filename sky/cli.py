@@ -5504,10 +5504,15 @@ def api():
               required=False,
               help=('The host to deploy the SkyPilot API server. To allow '
                     'remote access, set this to 0.0.0.0'))
+@click.option('--foreground',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Run the SkyPilot API server in the foreground.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str]):
+def api_start(deploy: bool, host: Optional[str], foreground: bool):
     """Starts the SkyPilot API server locally."""
-    sdk.api_start(deploy=deploy, host=host)
+    sdk.api_start(deploy=deploy, host=host, foreground=foreground)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
