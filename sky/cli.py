@@ -133,7 +133,11 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-        if handle is not None and handle.cached_external_ips is not None:
+        # During the failover, even though a cluster does not exist, the handle
+        # can still exist in the record, and we check for credentials to avoid
+        # updating the SSH config for non-existent clusters.
+        if (handle is not None and handle.cached_external_ips is not None and
+                'credentials' in record):
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the SkyPilot API
@@ -169,9 +173,9 @@ def _get_cluster_records_and_set_ssh_config(
                 handle.ssh_user,
             )
         else:
-            # If the cluster is not UP or does not have IPs, we need to remove
-            # the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+            # If the cluster is not UP or does not have credentials available,
+            # we need to remove the cluster from the SSH config.
+            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -1383,12 +1387,14 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
 def _handle_jobs_queue_request(
         request_id: str,
         show_all: bool,
+        show_user: bool,
         limit_num_jobs_to_show: bool = False,
         is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get the in-progress managed jobs.
 
     Args:
         show_all: Show all information of each job (e.g., region, price).
+        show_user: Show the user who submitted the job.
         limit_num_jobs_to_show: If True, limit the number of jobs to show to
             _NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS, which is mainly used by
             `sky status`.
@@ -1456,6 +1462,7 @@ def _handle_jobs_queue_request(
                             if limit_num_jobs_to_show else None)
         msg = managed_jobs.format_job_table(managed_jobs_,
                                             show_all=show_all,
+                                            show_user=show_user,
                                             max_jobs=max_jobs_to_show)
     return num_in_progress_jobs, msg
 
@@ -1565,7 +1572,9 @@ def _status_kubernetes(show_all: bool):
         click.echo(f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Managed jobs'
                    f'{colorama.Style.RESET_ALL}')
-        msg = managed_jobs.format_job_table(all_jobs, show_all=show_all)
+        msg = managed_jobs.format_job_table(all_jobs,
+                                            show_all=show_all,
+                                            show_user=False)
         click.echo(msg)
     if any(['sky-serve-controller' in c.cluster_name for c in all_clusters]):
         # TODO: Parse serve controllers and show services separately.
@@ -1783,7 +1792,8 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     show_managed_jobs = show_managed_jobs and not any([clusters, ip, endpoints])
     if show_managed_jobs:
         managed_jobs_queue_request_id = managed_jobs.queue(refresh=False,
-                                                           skip_finished=True)
+                                                           skip_finished=True,
+                                                           all_users=all_users)
     show_endpoints = endpoints or endpoint is not None
     show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
@@ -1863,6 +1873,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
                     show_all=False,
+                    show_user=False,
                     limit_num_jobs_to_show=not all,
                     is_called_by_user=False)
             except KeyboardInterrupt:
@@ -2759,7 +2770,7 @@ def start(
 def down(
     clusters: List[str],
     all: bool,  # pylint: disable=redefined-builtin
-    all_users: bool,  # pylint: disable=redefined-builtin
+    all_users: bool,
     yes: bool,
     purge: bool,
     async_call: bool,
@@ -2820,7 +2831,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
     with rich_utils.client_status(
             '[bold cyan]Checking for in-progress managed jobs[/]'):
         try:
-            request_id = managed_jobs.queue(refresh=False, skip_finished=True)
+            request_id = managed_jobs.queue(refresh=False,
+                                            skip_finished=True,
+                                            all_users=True)
             managed_jobs_ = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:
             if controller.value.connection_error_hint in str(e):
@@ -2844,7 +2857,9 @@ def _hint_or_raise_for_down_jobs_controller(controller_name: str,
            'jobs (output of `sky jobs queue`) will be lost.')
     click.echo(msg)
     if managed_jobs_:
-        job_table = managed_jobs.format_job_table(managed_jobs_, show_all=False)
+        job_table = managed_jobs.format_job_table(managed_jobs_,
+                                                  show_all=False,
+                                                  show_user=True)
         msg = controller.value.decline_down_for_dirty_controller_hint
         # Add prefix to each line to align with the bullet point.
         msg += '\n'.join(
@@ -3914,9 +3929,16 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show only pending/running jobs\' information.')
+@click.option('--all-users',
+              '-u',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show jobs from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
+def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
+               all_users: bool):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -3973,9 +3995,10 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
     click.secho('Fetching managed job statuses...', fg='cyan')
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         managed_jobs_request_id = managed_jobs.queue(
-            refresh=refresh, skip_finished=skip_finished)
+            refresh=refresh, skip_finished=skip_finished, all_users=all_users)
         _, msg = _handle_jobs_queue_request(managed_jobs_request_id,
                                             show_all=verbose,
+                                            show_user=all_users,
                                             is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
@@ -3998,16 +4021,23 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool):
               is_flag=True,
               default=False,
               required=False,
-              help='Cancel all managed jobs.')
+              help='Cancel all managed jobs for the current user.')
 @click.option('--yes',
               '-y',
               is_flag=True,
               default=False,
               required=False,
               help='Skip confirmation prompt.')
+@click.option('--all-users',
+              '-u',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Cancel all managed jobs from all users.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
+def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
+                all_users: bool):
     """Cancel managed jobs.
 
     You can provide either a job name or a list of job IDs to be cancelled.
@@ -4024,25 +4054,33 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool):
       $ sky jobs cancel 1 2 3
     """
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all]) != 1:
-        argument_str = f'--job-ids {job_id_str}' if job_ids else ''
-        argument_str += f' --name {name}' if name is not None else ''
-        argument_str += ' --all' if all else ''
+    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+        arguments = []
+        arguments += [f'--job-ids {job_id_str}'] if job_ids else []
+        arguments += [f'--name {name}'] if name is not None else []
+        arguments += ['--all'] if all else []
+        arguments += ['--all-users'] if all_users else []
         raise click.UsageError(
-            'Can only specify one of JOB_IDS or --name or --all. '
-            f'Provided {argument_str!r}.')
+            'Can only specify one of JOB_IDS, --name, or --all/--all-users. '
+            f'Provided {" ".join(arguments)!r}.')
 
     if not yes:
         job_identity_str = (f'managed jobs with IDs {job_id_str}'
                             if job_ids else repr(name))
-        if all:
+        if all_users:
+            job_identity_str = 'all managed jobs FOR ALL USERS'
+        elif all:
             job_identity_str = 'all managed jobs'
         click.confirm(f'Cancelling {job_identity_str}. Proceed?',
                       default=True,
                       abort=True,
                       show_default=True)
 
-    sdk.stream_and_get(managed_jobs.cancel(job_ids=job_ids, name=name, all=all))
+    sdk.stream_and_get(
+        managed_jobs.cancel(job_ids=job_ids,
+                            name=name,
+                            all=all,
+                            all_users=all_users))
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
@@ -5476,10 +5514,19 @@ def api():
               required=False,
               help=('The host to deploy the SkyPilot API server. To allow '
                     'remote access, set this to 0.0.0.0'))
+@click.option('--foreground',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Run the SkyPilot API server in the foreground and output '
+              'its logs to stdout/stderr. Allowing external systems '
+              'to manage the process lifecycle and collect logs directly. '
+              'This is useful when the API server is managed by systems '
+              'like systemd and Kubernetes.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str]):
+def api_start(deploy: bool, host: Optional[str], foreground: bool):
     """Starts the SkyPilot API server locally."""
-    sdk.api_start(deploy=deploy, host=host)
+    sdk.api_start(deploy=deploy, host=host, foreground=foreground)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)

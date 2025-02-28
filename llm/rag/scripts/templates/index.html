@@ -1,0 +1,485 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title>SkyPilot Legal RAG</title>
+        <style>
+            * { box-sizing: border-box; margin: 0; padding: 0; }
+            body { 
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                line-height: 1.6;
+                background-color: #f5f5f5;
+                color: #333;
+                min-height: 100vh;
+            }
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+                padding: 2rem;
+            }
+            .search-container {
+                background: white;
+                padding: 2rem;
+                border-radius: 10px;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+                margin-bottom: 2rem;
+                text-align: center;
+            }
+            h1 {
+                color: #2c3e50;
+                margin-bottom: 1.5rem;
+                font-size: 2.5rem;
+            }
+            .search-box {
+                display: flex;
+                gap: 10px;
+                max-width: 800px;
+                margin: 0 auto;
+            }
+            input {
+                flex: 1;
+                padding: 12px 20px;
+                border: 2px solid #e0e0e0;
+                border-radius: 25px;
+                font-size: 16px;
+                transition: all 0.3s ease;
+            }
+            input:focus {
+                outline: none;
+                border-color: #3498db;
+                box-shadow: 0 0 5px rgba(52, 152, 219, 0.3);
+            }
+            button {
+                padding: 12px 30px;
+                background: #3498db;
+                color: white;
+                border: none;
+                border-radius: 25px;
+                cursor: pointer;
+                font-size: 16px;
+                transition: background 0.3s ease;
+            }
+            button:hover {
+                background: #2980b9;
+            }
+            .results-container {
+                display: grid;
+                gap: 2rem;
+            }
+            .result-section {
+                background: white;
+                border-radius: 10px;
+                padding: 1.5rem;
+                box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            }
+            .section-title {
+                color: #2c3e50;
+                margin-bottom: 1rem;
+                font-size: 1.5rem;
+                border-bottom: 2px solid #e0e0e0;
+                padding-bottom: 0.5rem;
+            }
+            .source-document {
+                background: #f8f9fa;
+                padding: 1rem;
+                margin-bottom: 1rem;
+                border-radius: 5px;
+                border-left: 4px solid #3498db;
+                white-space: pre-wrap;
+            }
+            .source-header {
+                font-weight: bold;
+                color: #2c3e50;
+                margin-bottom: 0.5rem;
+            }
+            .source-url {
+                color: #3498db;
+                text-decoration: underline;
+                word-break: break-all;
+                margin-bottom: 0.5rem;
+            }
+            .thinking-process {
+                background: #fff3e0;
+                padding: 1rem;
+                border-radius: 5px;
+                border-left: 4px solid #ff9800;
+                white-space: pre-wrap;
+            }
+            .final-answer {
+                background: #e8f5e9;
+                padding: 1rem;
+                border-radius: 5px;
+                border-left: 4px solid #4caf50;
+                white-space: pre-wrap;
+            }
+            #loading {
+                display: none;
+                text-align: center;
+                margin: 2rem 0;
+                font-size: 1.2rem;
+                color: #666;
+            }
+            .similarity-score {
+                color: #666;
+                font-size: 0.9rem;
+                margin-top: 0.5rem;
+            }
+            .citation {
+                color: #3498db;
+                cursor: pointer;
+                text-decoration: underline;
+            }
+            .citation:hover {
+                color: #2980b9;
+            }
+            .highlighted-source {
+                animation: highlight 2s;
+            }
+            @keyframes highlight {
+                0% { background-color: #fff3cd; }
+                100% { background-color: #f8f9fa; }
+            }
+            .disclaimer {
+                color: #666;
+                font-size: 1rem;
+                margin-bottom: 2rem;
+                font-style: italic;
+            }
+            .thinking-indicator {
+                text-align: center;
+                background: #e0f7fa;
+                padding: 1.5rem;
+                border-radius: 10px;
+                margin-bottom: 1rem;
+                display: flex;
+                flex-direction: column;
+                align-items: center;
+                justify-content: center;
+                border-left: 4px solid #00acc1;
+            }
+            .thinking-indicator h3 {
+                margin-bottom: 0.5rem;
+                color: #00838f;
+            }
+            .loading-bar {
+                height: 6px;
+                width: 200px;
+                background-color: #e0e0e0;
+                border-radius: 3px;
+                overflow: hidden;
+                position: relative;
+            }
+            .loading-bar::after {
+                content: '';
+                position: absolute;
+                left: -100%;
+                height: 100%;
+                width: 50%;
+                background-color: #00acc1;
+                animation: loading 1.5s infinite ease-in-out;
+            }
+            @keyframes loading {
+                0% { left: -50% }
+                100% { left: 150% }
+            }
+            .github-corner {
+                position: absolute;
+                top: 0;
+                right: 0;
+                border: 0;
+                z-index: 999;
+            }
+            .github-corner svg {
+                fill: #24292e;
+                color: #fff;
+                width: 80px;
+                height: 80px;
+            }
+            .github-corner:hover .octo-arm {
+                animation: octocat-wave 560ms ease-in-out;
+            }
+            @keyframes octocat-wave {
+                0%, 100% { transform: rotate(0); }
+                20%, 60% { transform: rotate(-25deg); }
+                40%, 80% { transform: rotate(10deg); }
+            }
+            @media (max-width: 500px) {
+                .github-corner svg {
+                    width: 60px;
+                    height: 60px;
+                }
+                .github-corner:hover .octo-arm {
+                    animation: none;
+                }
+                .github-corner .octo-arm {
+                    animation: octocat-wave 560ms ease-in-out;
+                }
+            }
+        </style>
+    </head>
+    <body>
+        <!-- GitHub Corner -->
+        <a href="https://github.com/skypilot-org/skypilot/tree/master/llm/rag" class="github-corner" aria-label="Star us on GitHub">
+            <svg viewBox="0 0 250 250" aria-hidden="true">
+                <path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path>
+                <path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path>
+                <path d="M115.0,115.0 C114.9,115.1 118.7,116.5 119.8,115.4 L133.7,101.6 C136.9,99.2 139.9,98.4 142.2,98.6 C133.8,88.0 127.5,74.4 143.8,58.0 C148.5,53.4 154.0,51.2 159.7,51.0 C160.3,49.4 163.2,43.6 171.4,40.1 C171.4,40.1 176.1,42.5 178.8,56.2 C183.1,58.6 187.2,61.8 190.9,65.4 C194.5,69.0 197.7,73.2 200.1,77.6 C213.8,80.2 216.3,84.9 216.3,84.9 C212.7,93.1 206.9,96.0 205.4,96.6 C205.1,102.4 203.0,107.8 198.3,112.5 C181.9,128.9 168.3,122.5 157.7,114.1 C157.9,116.9 156.7,120.9 152.7,124.9 L141.0,136.5 C139.8,137.7 141.6,141.9 141.8,141.8 Z" fill="currentColor" class="octo-body"></path>
+            </svg>
+        </a>
+        <div class="container">
+            <div class="search-container">
+                <h1>SkyPilot Legal RAG</h1>
+                <div class="search-box">
+                    <input type="text" id="searchInput" placeholder="Ask a question about legal documents..."
+                        onkeypress="if(event.key === 'Enter') search()">
+                    <button onclick="search()">Ask</button>
+                </div>
+            </div>
+            <div id="document-search-indicator" class="thinking-indicator" style="display: none;">
+                <h3>Searching for documents...</h3>
+                <div class="loading-bar"></div>
+            </div>
+            <div id="thinking-indicator" class="thinking-indicator" style="display: none;">
+                <h3>DeepSeek is thinking...</h3>
+                <div class="loading-bar"></div>
+            </div>
+            <div id="results" class="results-container"></div>
+        </div>
+        
+        <script>
+        function escapeHtml(unsafe) {
+            return unsafe
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;")
+                .replace(/"/g, "&quot;")
+                .replace(/'/g, "&#039;");
+        }
+
+        function highlightSource(docNumber) {
+            // Remove previous highlights
+            document.querySelectorAll('.highlighted-source').forEach(el => {
+                el.classList.remove('highlighted-source');
+            });
+            
+            // Add highlight to clicked source
+            const sourceElement = document.querySelector(`[data-doc-number="${docNumber}"]`);
+            if (sourceElement) {
+                sourceElement.classList.add('highlighted-source');
+                sourceElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+        }
+
+        function processCitations(text) {
+            // Handle both [citation:X] and Document X formats
+            return text
+                .replace(/\[citation:(\d+)\]/g, (match, docNumber) => {
+                    return `<span class="citation" onclick="highlightSource(${docNumber})">[${docNumber}]</span>`;
+                })
+                .replace(/Document (\d+)/g, (match, docNumber) => {
+                    return `<span class="citation" onclick="highlightSource(${docNumber})">Document ${docNumber}</span>`;
+                });
+        }
+
+        async function search() {
+            const searchInput = document.getElementById('searchInput');
+            const resultsDiv = document.getElementById('results');
+            const thinkingIndicator = document.getElementById('thinking-indicator');
+            const documentSearchIndicator = document.getElementById('document-search-indicator');
+            
+            if (!searchInput.value.trim()) return;
+            
+            // Clear previous results and show document search indicator
+            resultsDiv.innerHTML = '';
+            documentSearchIndicator.style.display = 'flex';
+            thinkingIndicator.style.display = 'none';
+            
+            // Step 1: Get documents first
+            try {
+                // First call to get the documents
+                const docsResponse = await fetch('/documents', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        query: searchInput.value.trim(),
+                        n_results: 10
+                    })
+                });
+                
+                if (!docsResponse.ok) {
+                    const errorData = await docsResponse.json();
+                    throw new Error(errorData.detail || 'Failed to retrieve documents');
+                }
+                
+                const docsResult = await docsResponse.json();
+                const requestId = docsResult.request_id;
+                
+                // Hide document search indicator and show DeepSeek indicator
+                documentSearchIndicator.style.display = 'none';
+                thinkingIndicator.style.display = 'flex';
+                
+                // Display the documents first
+                let sourcesHtml = '<div class="result-section"><h2 class="section-title">Source Documents</h2>';
+                docsResult.sources.forEach((source, index) => {
+                    sourcesHtml += `
+                        <div class="source-document" data-doc-number="${index + 1}">
+                            <div class="source-header">Source: ${escapeHtml(source.source)}</div>
+                            <div class="source-url">URL: ${escapeHtml(source.name)}</div>
+                            <div>${escapeHtml(source.content)}</div>
+                            <div class="similarity-score">Similarity: ${(source.similarity * 100).toFixed(1)}%</div>
+                        </div>
+                    `;
+                });
+                sourcesHtml += '</div>';
+                
+                // Display sources
+                resultsDiv.innerHTML = sourcesHtml;
+                
+                // Step 2: Start the LLM reasoning process in the background
+                const llmResponse = await fetch('/process_llm', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Accept': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        request_id: requestId,
+                        temperature: 0.7
+                    })
+                });
+                
+                if (!llmResponse.ok) {
+                    const errorData = await llmResponse.json();
+                    throw new Error(errorData.detail || 'LLM processing failed');
+                }
+                
+                const llmResult = await llmResponse.json();
+                
+                // Handle different response statuses
+                if (llmResult.status === "completed") {
+                    // Hide thinking indicator
+                    thinkingIndicator.style.display = 'none';
+                    
+                    // Add thinking process and answer at the top
+                    const thinkingHtml = `
+                        <div class="result-section">
+                            <h2 class="section-title">Thinking Process</h2>
+                            <div class="thinking-process">${processCitations(escapeHtml(llmResult.thinking_process))}</div>
+                        </div>
+                    `;
+                    
+                    const answerHtml = `
+                        <div class="result-section">
+                            <h2 class="section-title">Final Answer</h2>
+                            <div class="final-answer">${processCitations(escapeHtml(llmResult.answer)).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>
+                        </div>
+                    `;
+                    
+                    // Insert before the sources section
+                    const sourcesSection = document.querySelector('.result-section');
+                    sourcesSection.insertAdjacentHTML('beforebegin', answerHtml + thinkingHtml);
+                } else if (llmResult.status === "error") {
+                    // Handle error case
+                    thinkingIndicator.style.display = 'none';
+                    resultsDiv.insertAdjacentHTML('afterbegin', `
+                        <div class="result-section" style="color: #e74c3c;">
+                            <h2 class="section-title">Error</h2>
+                            <p>${llmResult.error || "An error occurred while processing the query"}</p>
+                        </div>
+                    `);
+                } else {
+                    // Handle if status is still pending (should not happen with direct call)
+                    pollForResults(requestId);
+                }
+                
+            } catch (error) {
+                documentSearchIndicator.style.display = 'none';
+                thinkingIndicator.style.display = 'none';
+                resultsDiv.innerHTML = `
+                    <div class="result-section" style="color: #e74c3c;">
+                        <h2 class="section-title">Error</h2>
+                        <p>${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+        
+        // Function to poll for results if needed
+        async function pollForResults(requestId) {
+            const maxAttempts = 60; // 5 minutes at 5-second intervals
+            let attempts = 0;
+            const thinkingIndicator = document.getElementById('thinking-indicator');
+            
+            const poll = async () => {
+                if (attempts >= maxAttempts) {
+                    thinkingIndicator.style.display = 'none';
+                    const errorHtml = `
+                        <div class="result-section" style="color: #e74c3c;">
+                            <h2 class="section-title">Timeout</h2>
+                            <p>Request timed out after 5 minutes. Please try again.</p>
+                        </div>
+                    `;
+                    document.getElementById('results').insertAdjacentHTML('afterbegin', errorHtml);
+                    return;
+                }
+                
+                attempts++;
+                
+                try {
+                    const response = await fetch(`/llm_status/${requestId}`);
+                    if (!response.ok) {
+                        throw new Error("Failed to retrieve status");
+                    }
+                    
+                    const result = await response.json();
+                    
+                    if (result.status === "completed") {
+                        // Hide thinking indicator
+                        thinkingIndicator.style.display = 'none';
+                        
+                        // Add thinking process and answer
+                        const thinkingHtml = `
+                            <div class="result-section">
+                                <h2 class="section-title">Thinking Process</h2>
+                                <div class="thinking-process">${processCitations(escapeHtml(result.thinking_process))}</div>
+                            </div>
+                        `;
+                        
+                        const answerHtml = `
+                            <div class="result-section">
+                                <h2 class="section-title">Final Answer</h2>
+                                <div class="final-answer">${processCitations(escapeHtml(result.answer)).replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')}</div>
+                            </div>
+                        `;
+                        
+                        // Insert at the beginning of results
+                        const sourcesSection = document.querySelector('.result-section');
+                        sourcesSection.insertAdjacentHTML('beforebegin', answerHtml + thinkingHtml);
+                    } else if (result.status === "error") {
+                        // Handle error
+                        thinkingIndicator.style.display = 'none';
+                        const errorHtml = `
+                            <div class="result-section" style="color: #e74c3c;">
+                                <h2 class="section-title">Error</h2>
+                                <p>${result.error || "An error occurred during processing"}</p>
+                            </div>
+                        `;
+                        document.getElementById('results').insertAdjacentHTML('afterbegin', errorHtml);
+                    } else {
+                        // Still processing, wait and try again
+                        setTimeout(poll, 5000); // Check again after 5 seconds
+                    }
+                } catch (error) {
+                    console.error("Error polling for results:", error);
+                    setTimeout(poll, 5000); // Try again after 5 seconds
+                }
+            };
+            
+            // Start polling
+            poll();
+        }
+        </script>
+    </body>
+</html> 

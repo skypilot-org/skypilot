@@ -60,7 +60,7 @@ def create_table(cursor, conn):
         last_use TEXT,
         status TEXT,
         autostop INTEGER DEFAULT -1,
-        metadata TEXT DEFAULT "{}",
+        metadata TEXT DEFAULT '{}',
         to_down INTEGER DEFAULT 0,
         owner TEXT DEFAULT null,
         cluster_hash TEXT DEFAULT null,
@@ -118,7 +118,7 @@ def create_table(cursor, conn):
                                  'INTEGER DEFAULT -1')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'metadata',
-                                 'TEXT DEFAULT "{}"')
+                                 'TEXT DEFAULT \'{}\'')
 
     db_utils.add_column_to_table(cursor, conn, 'clusters', 'to_down',
                                  'INTEGER DEFAULT 0')
@@ -271,7 +271,7 @@ def add_or_update_cluster(cluster_name: str,
         # Keep the old metadata value if it exists, otherwise set it to
         # default {}.
         'COALESCE('
-        '(SELECT metadata FROM clusters WHERE name=?), "{}"),'
+        '(SELECT metadata FROM clusters WHERE name=?), \'{}\'),'
         # Keep the old owner value if it exists, otherwise set it to
         # default null.
         'COALESCE('

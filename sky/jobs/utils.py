@@ -449,13 +449,15 @@ def generate_managed_job_cluster_name(task_name: str, job_id: int) -> str:
     return f'{cluster_name}-{job_id}'
 
 
-def cancel_jobs_by_id(job_ids: Optional[List[int]]) -> str:
+def cancel_jobs_by_id(job_ids: Optional[List[int]],
+                      all_users: bool = False) -> str:
     """Cancel jobs by id.
 
     If job_ids is None, cancel all jobs.
     """
     if job_ids is None:
-        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(None)
+        job_ids = managed_job_state.get_nonterminal_job_ids_by_name(
+            None, all_users)
     job_ids = list(set(job_ids))
     if not job_ids:
         return 'No job to cancel.'
@@ -936,6 +938,7 @@ def _get_job_status_from_tasks(
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
+                     show_user: bool,
                      return_rows: Literal[False] = False,
                      max_jobs: Optional[int] = None) -> str:
     ...
@@ -944,6 +947,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 @typing.overload
 def format_job_table(tasks: List[Dict[str, Any]],
                      show_all: bool,
+                     show_user: bool,
                      return_rows: Literal[True],
                      max_jobs: Optional[int] = None) -> List[List[str]]:
     ...
@@ -952,6 +956,7 @@ def format_job_table(tasks: List[Dict[str, Any]],
 def format_job_table(
         tasks: List[Dict[str, Any]],
         show_all: bool,
+        show_user: bool,
         return_rows: bool = False,
         max_jobs: Optional[int] = None) -> Union[str, List[List[str]]]:
     """Returns managed jobs as a formatted string.
@@ -967,13 +972,14 @@ def format_job_table(
       a list of "rows" (each of which is a list of str).
     """
     jobs = collections.defaultdict(list)
-    # Check if the tasks have user information.
-    tasks_have_user = any([task.get('user') for task in tasks])
-    if max_jobs and tasks_have_user:
+    # Check if the tasks have user information from kubernetes.
+    # This is only used for sky status --kubernetes.
+    tasks_have_k8s_user = any([task.get('user') for task in tasks])
+    if max_jobs and tasks_have_k8s_user:
         raise ValueError('max_jobs is not supported when tasks have user info.')
 
     def get_hash(task):
-        if tasks_have_user:
+        if tasks_have_k8s_user:
             return (task['user'], task['job_id'])
         return task['job_id']
 
@@ -988,10 +994,17 @@ def format_job_table(
         if not managed_job_status.is_terminal():
             status_counts[managed_job_status.value] += 1
 
+    user_cols: List[str] = []
+    if show_user:
+        user_cols = ['USER']
+        if show_all:
+            user_cols.append('USER_ID')
+
     columns = [
         'ID',
         'TASK',
         'NAME',
+        *user_cols,
         'RESOURCES',
         'SUBMITTED',
         'TOT. DURATION',
@@ -1002,7 +1015,7 @@ def format_job_table(
     if show_all:
         # TODO: move SCHED. STATE to a separate flag (e.g. --debug)
         columns += ['STARTED', 'CLUSTER', 'REGION', 'SCHED. STATE', 'DETAILS']
-    if tasks_have_user:
+    if tasks_have_k8s_user:
         columns.insert(0, 'USER')
     job_table = log_utils.create_table(columns)
 
@@ -1024,6 +1037,22 @@ def format_job_table(
         if failure_reason is not None:
             return f'Failure: {failure_reason}'
         return '-'
+
+    def get_user_column_values(task: Dict[str, Any]) -> List[str]:
+        user_values: List[str] = []
+        if show_user:
+
+            user_name = '-'
+            user_hash = task.get('user_hash', None)
+            if user_hash:
+                user = global_user_state.get_user(user_hash)
+                user_name = user.name if user.name else '-'
+            user_values = [user_name]
+
+            if show_all:
+                user_values.append(user_hash if user_hash is not None else '-')
+
+        return user_values
 
     for job_hash, job_tasks in jobs.items():
         if show_all:
@@ -1063,11 +1092,14 @@ def format_job_table(
             if not managed_job_status.is_terminal():
                 status_str += f' (task: {current_task_id})'
 
-            job_id = job_hash[1] if tasks_have_user else job_hash
+            user_values = get_user_column_values(job_tasks[0])
+
+            job_id = job_hash[1] if tasks_have_k8s_user else job_hash
             job_values = [
                 job_id,
                 '',
                 job_name,
+                *user_values,
                 '-',
                 submitted,
                 total_duration,
@@ -1084,7 +1116,7 @@ def format_job_table(
                     job_tasks[0]['schedule_state'],
                     generate_details(failure_reason),
                 ])
-            if tasks_have_user:
+            if tasks_have_k8s_user:
                 job_values.insert(0, job_tasks[0].get('user', '-'))
             job_table.add_row(job_values)
 
@@ -1094,10 +1126,12 @@ def format_job_table(
             job_duration = log_utils.readable_time_duration(
                 0, task['job_duration'], absolute=True)
             submitted = log_utils.readable_time_duration(task['submitted_at'])
+            user_values = get_user_column_values(task)
             values = [
                 task['job_id'] if len(job_tasks) == 1 else ' \u21B3',
                 task['task_id'] if len(job_tasks) > 1 else '-',
                 task['task_name'],
+                *user_values,
                 task['resources'],
                 # SUBMITTED
                 submitted if submitted != '-' else submitted,
@@ -1122,7 +1156,7 @@ def format_job_table(
                     schedule_state,
                     generate_details(task['failure_reason']),
                 ])
-            if tasks_have_user:
+            if tasks_have_k8s_user:
                 values.insert(0, task.get('user', '-'))
             job_table.add_row(values)
 
@@ -1155,6 +1189,9 @@ class ManagedJobCodeGen:
         import sys
         from sky.jobs import utils
         from sky.jobs import state as managed_job_state
+        from sky.jobs import constants as managed_job_constants
+
+        managed_job_version = managed_job_constants.MANAGED_JOBS_VERSION
         """)
 
     @classmethod
@@ -1166,9 +1203,17 @@ class ManagedJobCodeGen:
         return cls._build(code)
 
     @classmethod
-    def cancel_jobs_by_id(cls, job_ids: Optional[List[int]]) -> str:
+    def cancel_jobs_by_id(cls,
+                          job_ids: Optional[List[int]],
+                          all_users: bool = False) -> str:
         code = textwrap.dedent(f"""\
-        msg = utils.cancel_jobs_by_id({job_ids})
+        if managed_job_version < 2:
+            # For backward compatibility, since all_users is not supported
+            # before #4787. Assume th
+            # TODO(cooperc): Remove compatibility before 0.12.0
+            msg = utils.cancel_jobs_by_id({job_ids})
+        else:
+            msg = utils.cancel_jobs_by_id({job_ids}, all_users={all_users})
         print(msg, end="", flush=True)
         """)
         return cls._build(code)
