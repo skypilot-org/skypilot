@@ -1112,7 +1112,7 @@ class Storage(object):
                          f'name {self.name}. General initialization error.')
             raise
         except exceptions.StorageSpecError:
-            logger.error(f'Could not mount externally created {store_type}'
+            logger.error(f'Could not mount externally created {store_type} '
                          f'store with name {self.name!r}.')
             raise
 
@@ -4584,7 +4584,7 @@ class NebiusStore(AbstractStore):
     def __init__(self,
                  name: str,
                  source: str,
-                 region: Optional[str] = 'auto',
+                 region: Optional[str] = nebius.DEFAULT_REGION,
                  is_sky_managed: Optional[bool] = None,
                  sync_on_reconstruction: bool = True,
                  _bucket_sub_path: Optional[str] = None):
@@ -4628,10 +4628,6 @@ class NebiusStore(AbstractStore):
                     self.source)[0], (
                         'Nebius Object Storage is specified as path, the name '
                         'should be the same as Nebius Object Storage bucket.')
-                assert data_utils.verify_nebius_bucket(self.name), (
-                    f'Source specified as {self.source}, a Nebius Object '
-                    f'Storage bucket. Nebius Object Storage Bucket '
-                    f'should exist.')
             elif self.source.startswith('cos://'):
                 assert self.name == data_utils.split_cos_path(self.source)[0], (
                     'COS Bucket is specified as path, the name should be '
@@ -4763,7 +4759,7 @@ class NebiusStore(AbstractStore):
                 f'--include {shlex.quote(file_name)}'
                 for file_name in file_names
             ])
-            endpoint_url = nebius.create_endpoint()
+            endpoint_url = nebius.create_endpoint(self.region)
             base_dir_path = shlex.quote(base_dir_path)
             sync_command = ('aws s3 sync --no-follow-symlinks --exclude="*" '
                             f'{includes} {base_dir_path} '
@@ -4780,7 +4776,7 @@ class NebiusStore(AbstractStore):
                 f'--exclude {shlex.quote(file_name)}'
                 for file_name in excluded_list
             ])
-            endpoint_url = nebius.create_endpoint()
+            endpoint_url = nebius.create_endpoint(self.region)
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
                             f'{src_dir_path} '
@@ -4844,7 +4840,7 @@ class NebiusStore(AbstractStore):
         """
         nebius_s = nebius.resource('s3')
         bucket = nebius_s.Bucket(self.name)
-        endpoint_url = nebius.create_endpoint()
+        endpoint_url = nebius.create_endpoint(self.region)
         try:
             # Try Public bucket case.
             # This line does not error out if the bucket is an external public
@@ -4908,12 +4904,13 @@ class NebiusStore(AbstractStore):
           mount_path: str; Path to mount the bucket to.
         """
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
-        endpoint_url = nebius.create_endpoint()
-        nebius_credential_path = nebius.NEBIUS_CREDENTIALS_PATH
+        endpoint_url = nebius.create_endpoint(self.region)
         nebius_profile_name = nebius.NEBIUS_PROFILE_NAME
-        mount_cmd = mounting_utils.get_nebius_mount_cmd(
-            nebius_credential_path, nebius_profile_name, endpoint_url,
-            self.bucket.name, mount_path, self._bucket_sub_path)
+        mount_cmd = mounting_utils.get_nebius_mount_cmd(nebius_profile_name,
+                                                        endpoint_url,
+                                                        self.bucket.name,
+                                                        mount_path,
+                                                        self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -4949,11 +4946,13 @@ class NebiusStore(AbstractStore):
     def _execute_nebius_remove_command(self, command: str, bucket_name: str,
                                        hint_operating: str,
                                        hint_failed: str) -> bool:
+        print('command::::', command)
         try:
             with rich_utils.safe_status(
                     ux_utils.spinner_message(hint_operating)):
-                subprocess.check_output(command.split(' '),
-                                        stderr=subprocess.STDOUT)
+                a = subprocess.check_output(command.split(' '),
+                                            stderr=subprocess.STDOUT)
+                print('aaaaaa', a, command)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
@@ -4986,12 +4985,10 @@ class NebiusStore(AbstractStore):
         # https://stackoverflow.com/questions/49239351/why-is-it-so-much-slower-to-delete-objects-in-aws-s3-than-it-is-to-create-them
         # The fastest way to delete is to run `aws s3 rb --force`,
         # which removes the bucket by force.
-        endpoint_url = nebius.create_endpoint()
-        remove_command = (
-            f'AWS_SHARED_CREDENTIALS_FILE={nebius.NEBIUS_CREDENTIALS_PATH} '
-            f'aws s3 rb s3://{bucket_name} --force '
-            f'--endpoint {endpoint_url} '
-            f'--profile={nebius.NEBIUS_PROFILE_NAME}')
+        endpoint_url = nebius.create_endpoint(self.region)
+        remove_command = (f'aws s3 rb s3://{bucket_name} --force '
+                          f'--endpoint {endpoint_url} '
+                          f'--profile={nebius.NEBIUS_PROFILE_NAME}')
 
         success = self._execute_nebius_remove_command(
             remove_command, bucket_name,
@@ -5001,16 +4998,15 @@ class NebiusStore(AbstractStore):
             return False
 
         # Wait until bucket deletion propagates on AWS servers
-        while data_utils.verify_r2_bucket(bucket_name):
+        while data_utils.verify_nebius_bucket(bucket_name):
             time.sleep(0.1)
         return True
 
     def _delete_nebius_bucket_sub_path(self, bucket_name: str,
                                        sub_path: str) -> bool:
         """Deletes the sub path from the bucket."""
-        endpoint_url = nebius.create_endpoint()
+        endpoint_url = nebius.create_endpoint(self.region)
         remove_command = (
-            f'AWS_SHARED_CREDENTIALS_FILE={nebius.NEBIUS_CREDENTIALS_PATH} '
             f'aws s3 rm s3://{bucket_name}/{sub_path}/ --recursive '
             f'--endpoint {endpoint_url} '
             f'--profile={nebius.NEBIUS_PROFILE_NAME}')
