@@ -175,10 +175,12 @@ def decode_job_status(
     return_value: Dict[str, Optional[str]]
 ) -> Dict[int, Optional['job_lib.JobStatus']]:
     job_statuses: Dict[int, Optional['job_lib.JobStatus']] = {}
-    for job_id_str in return_value.keys():
-        job_id = int(job_id_str)  # Cast to int since JSON loses type info
-        if return_value[job_id_str] is not None:
-            job_statuses[job_id] = job_lib.JobStatus(return_value[job_id_str])
+    for job_id_str, status_str in return_value.items():
+        # When we json serialize the job ID for storing in the requests db, 
+        # the job_id gets converted to a string. Here we convert it back to int.
+        job_id = int(job_id_str)
+        if status_str is not None:
+            job_statuses[job_id] = job_lib.JobStatus(status_str)
         else:
             job_statuses[job_id] = None
     return job_statuses
