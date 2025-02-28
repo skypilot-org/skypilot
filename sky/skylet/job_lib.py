@@ -213,7 +213,7 @@ class JobExitCode(enum.IntEnum):
     def from_job_status(cls, status: Optional[JobStatus]) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         if status is None:
-            return cls.FAILED
+            return cls.NOT_FOUND
         if status in JobStatus.user_code_failure_states(
         ) or status == JobStatus.FAILED_DRIVER:
             return cls.FAILED
