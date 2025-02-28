@@ -87,6 +87,48 @@ def test_managed_jobs_basic(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
+@pytest.mark.managed_jobs
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
+def test_managed_jobs_cli_exit_codes(generic_cloud: str):
+    """Test that managed jobs CLI commands properly return exit codes based on job success/failure."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'managed_jobs_exit_codes',
+        [
+            # Test jobs launch with successful job
+            f'sky jobs launch -y -n jobs-{name} --cloud {generic_cloud} "echo jobs success" && echo "Jobs launch exit code: $?"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'jobs-{name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=60),
+            
+            # Get job ID from the queue and test logs with successful job
+            f'JOB_ROW=$(sky jobs queue | grep jobs-{name} | head -n1) && '
+            f'echo "$JOB_ROW" && '
+            f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
+            f'echo "JOB_ID=$JOB_ID" && '
+            f'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
+            
+            # Test jobs launch with failing job
+            f'sky jobs launch -y -n jobs-fail-{name} --cloud {generic_cloud} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'jobs-fail-{name}',
+                job_status=[sky.ManagedJobStatus.FAILED],
+                timeout=60),
+            
+            # Get job ID from the queue and test logs with failed job
+            f'JOB_ROW=$(sky jobs queue | grep jobs-fail-{name} | head -n1) && '
+            f'echo "$JOB_ROW" && '
+            f'JOB_ID=$(echo "$JOB_ROW" | awk \'{{print $1}}\') && '
+            f'echo "JOB_ID=$JOB_ID" && '
+            f'sky jobs logs $JOB_ID || echo "Failed jobs logs exit code: $?" | grep "Failed jobs logs exit code: 100"',
+        ],
+        f'sky jobs cancel -y -n jobs-{name}; sky jobs cancel -y -n jobs-fail-{name}',
+        timeout=20 * 60,  # Consistent with other managed jobs tests
+    )
+    smoke_tests_utils.run_one_test(test)
 
 @pytest.mark.no_fluidstack  #fluidstack does not support spot instances
 @pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
