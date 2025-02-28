@@ -1,0 +1,10 @@
+jobs:
+  controller:
+    resources:
+      cpus: 2+
+      memory: 4+
+serve:
+  controller:
+    resources:
+      cpus: 2+
+      memory: 4+
