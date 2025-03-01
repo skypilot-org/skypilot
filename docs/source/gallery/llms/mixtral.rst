@@ -5,6 +5,6 @@
 .. raw:: html
 
    <script type="text/javascript">
-       window.location.href = "../../examples/serving/sglang.html";
+       window.location.href = "../../examples/models/mixtral.html";
    </script>
-   <meta http-equiv="refresh" content="0; url=../../examples/serving/sglang.html">
+   <meta http-equiv="refresh" content="0; url=../../examples/models/mixtral.html"> 

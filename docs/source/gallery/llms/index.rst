@@ -1,23 +1,12 @@
-Models
-============
+.. The whole gallery/ folder is deprecated, and replaced by examples/. It is only kept here for redirecting old URLs.
+.. People may hit this old URL; we redirect to the new one instead of 404ing.
 
-.. toctree::
-   :maxdepth: 1
+:orphan:
 
-   DeepSeek-R1 <deepseek-r1>
-   DeepSeek-R1 Distilled <deepseek-r1-distilled>
-   DeepSeek-Janus <deepseek-janus>
-   Llama 3.2 <llama-3_2>
-   Llama 3.1 <llama-3_1>
-   Llama 3 <llama-3>
-   Llama 2 <llama-2>
-   CodeLlama <codellama>
-   Pixtral <pixtral>
-   Mixtral <mixtral>
-   Mistral 7B <https://docs.mistral.ai/self-deployment/skypilot/>
-   Qwen 2.5 <qwen>
-   Yi <yi>
-   Gemma <gemma>
-   DBRX <dbrx>
-   GPT-2 via llm.c <gpt-2>
-   Vicuna <vicuna>
+.. raw:: html
+
+   <script type="text/javascript">
+       window.location.href = "../../examples/models/index.html";
+   </script>
+   <meta http-equiv="refresh" content="0; url=../../examples/models/index.html">
+

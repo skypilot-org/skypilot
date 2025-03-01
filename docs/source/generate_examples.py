@@ -194,7 +194,7 @@ class Example:
             content += f':::{{include}} {make_relative(markdown_contents_path)}\n'
         else:
             content += f'# {self.title}\n\n'
-            content += f':::{{include}} {make_relative(self.main_file)}\n'
+            content += f':::{{literalinclude}} {make_relative(self.main_file)}\n'
             content += f':language: {self.main_file.suffix[1:]}\n'
         content += ':::\n\n'
 
@@ -237,7 +237,7 @@ def _work(example_dir: Path):
     # Check for stem collisions using full directory names
     stems = {}
     for example in examples:
-        stem = example.path.name  # Use full directory name instead of stem
+        stem = example.path.stem
         if stem in stems and stems[stem] != example.path:
             raise ValueError(
                 f'Collision detected: Multiple examples with stem "{stem}".\n'
@@ -250,7 +250,7 @@ def _work(example_dir: Path):
 
     # Generate the example documentation using the updated stem
     for example in sorted(examples, key=lambda e: e.path.name):
-        doc_path = EXAMPLE_DOC_DIR / f'{example.path.name}.md'
+        doc_path = EXAMPLE_DOC_DIR / f'{example.path.stem}.md'
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
 

@@ -1,1 +1,0 @@
-../../../../llm/gpt-2/README.md
