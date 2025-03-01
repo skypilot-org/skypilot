@@ -1,4 +1,5 @@
 # Stable Diffusion
+
 ## Setup
 
 1. Install skypilot package by following these [instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
@@ -21,23 +22,24 @@
 
 
 ## Usage Tips
- - Avoid exceeding 900x900 for image resolution due GPU memory constraints
- - You can toggle "Classifier Free Guidance Scale" to higher value to enforce adherence to prompt
- - Here are some good example text prompts (Classifier Free Guidance Scale = 7.5, sampling steps = 50):
-   - "donkey playing poker"
-   - "UC Berkeley student writing code on a laptop"
-   - "Marvel vs. DC"
-   - "corgi on Golden Gate Bridge"
-   - "desert golf"
-   - "Indian McDonald's"
-   - "Elon Musk robot"
-   - "mechanical heart"
-   - "Batman in San Francisco"
-   - "futuristic city in the sky and clouds"
-   - "bear ballroom dancing"
-   - "wall-e terminator"
-   - "psychedelic Yosemite"
-   - "rap song album cover"
-   - "Wall Street bull rodeo"
-   - "Trump in minecraft"
+
+- Avoid exceeding 900x900 for image resolution due GPU memory constraints
+- You can toggle "Classifier Free Guidance Scale" to higher value to enforce adherence to prompt
+- Here are some good example text prompts (Classifier Free Guidance Scale = 7.5, sampling steps = 50):
+  - "donkey playing poker"
+  - "UC Berkeley student writing code on a laptop"
+  - "Marvel vs. DC"
+  - "corgi on Golden Gate Bridge"
+  - "desert golf"
+  - "Indian McDonald's"
+  - "Elon Musk robot"
+  - "mechanical heart"
+  - "Batman in San Francisco"
+  - "futuristic city in the sky and clouds"
+  - "bear ballroom dancing"
+  - "wall-e terminator"
+  - "psychedelic Yosemite"
+  - "rap song album cover"
+  - "Wall Street bull rodeo"
+  - "Trump in minecraft"
 
