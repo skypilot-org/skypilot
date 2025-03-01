@@ -1,4 +1,7 @@
+.. The whole gallery/ folder is deprecated, and replaced by examples/. It is only kept here for redirecting old URLs.
 .. People may hit this old URL; we redirect to the new one instead of 404ing.
+
+:orphan:
 
 .. _ai-gallery:
 
