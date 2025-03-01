@@ -761,3 +761,9 @@ With this configuration, you'll get the following performance:
      - Standard_E96s_v5
      - **384 launches at once**
      - **1930 running at once**
+
+.. toctree::
+   :hidden:
+   :maxdepth: 1
+
+   Job Priorities <../running-jobs/priorities>
