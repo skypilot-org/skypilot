@@ -450,6 +450,7 @@ class LocalUpBody(RequestBody):
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None
     cleanup: bool = False
+    context_name: Optional[str] = None
 
 
 class ServeTerminateReplicaBody(RequestBody):
