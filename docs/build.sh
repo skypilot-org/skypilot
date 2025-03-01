@@ -18,7 +18,7 @@ if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
     sky show-gpus H100:8 > source/compute/show-gpus-h100-8.txt
 fi
 
-rm -rf build docs
+rm -rf build docs source/generated-examples
 
 # Add command line argument parsing
 AUTO_BUILD=false
@@ -38,7 +38,7 @@ if [ "$AUTO_BUILD" = true ]; then
         --ignore "*.md" \
         --port $PORT
 else
-    rm -rf build docs
+    rm -rf build docs source/generated-examples
 
     # MacOS and GNU `script` have different usages
     if [ "$(uname -s)" = "Linux" ]; then
