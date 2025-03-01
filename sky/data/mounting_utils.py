@@ -24,7 +24,14 @@ RCLONE_VERSION = 'v1.68.2'
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
-    install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
+    install_cmd = ('ARCH=$(uname -m) && '
+                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                   '  echo "goofys is not supported on $ARCH" && '
+                   f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
+                   'else '
+                   '  ARCH_SUFFIX="amd64"; '
+                   'fi && '
+                   'sudo wget -nc https://github.com/romilbhardwaj/goofys/'
                    'releases/download/0.24.0-romilb-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
                    'sudo chmod 755 /usr/local/bin/goofys')
@@ -91,7 +98,7 @@ def get_az_mount_install_cmd() -> str:
         'ARCH=$(uname -m) && '
         'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
         '  echo "blobfuse2 is not supported on $ARCH" && '
-        '  exit 1; '
+        f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
         'else '
         '  ARCH_SUFFIX="x86_64"; '
         'fi && '
