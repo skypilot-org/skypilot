@@ -1227,6 +1227,7 @@ def launch(
             clusters=[handle.get_cluster_name()])
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
+        ret_code = 0
         if not detach_run and job_id is not None:
             ret_code = sdk.tail_logs(handle.get_cluster_name(),
                                      job_id,
