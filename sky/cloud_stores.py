@@ -54,8 +54,9 @@ class S3CloudStorage(CloudStorage):
 
     # List of commands to install AWS CLI
     _GET_AWSCLI = [
-        f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws --version >/dev/null 2>&1 '
-        f'|| {constants.SKY_UV_PIP_CMD} install awscli',
+        'awscli_path=$(which aws) || '
+        f'{{ {constants.SKY_UV_PIP_CMD} install awscli && '
+        f'awscli_path={constants.SKY_REMOTE_PYTHON_ENV}/bin/aws; }}',
     ]
 
     def is_directory(self, url: str) -> bool:
@@ -85,8 +86,7 @@ class S3CloudStorage(CloudStorage):
         # AWS Sync by default uses 10 threads to upload files to the bucket.
         # To increase parallelism, modify max_concurrent_requests in your
         # aws config file (Default path: ~/.aws/config).
-        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-                               'sync --no-follow-symlinks '
+        download_via_awscli = (f'$awscli_path s3 sync --no-follow-symlinks '
                                f'{source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
@@ -95,8 +95,7 @@ class S3CloudStorage(CloudStorage):
 
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
-        download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
-                               f'cp {source} {destination}')
+        download_via_awscli = (f'$awscli_path s3 cp {source} {destination}')
 
         all_commands = list(self._GET_AWSCLI)
         all_commands.append(download_via_awscli)
