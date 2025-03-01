@@ -1,1 +1,0 @@
-../../../../llm/mixtral/README.md

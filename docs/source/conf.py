@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
 
-import prepare_github_markdown
+import generate_examples
 
 # -- Project information
 
@@ -221,4 +221,4 @@ suppress_warnings = ['autosectionlabel.*']
 
 def setup(app):
     app.connect('builder-inited',
-                prepare_github_markdown.handle_markdown_in_gallery)
+                generate_examples.generate_examples)

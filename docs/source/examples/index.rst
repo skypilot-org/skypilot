@@ -1,3 +1,5 @@
+.. _examples:
+
 Examples
 ====================
 
@@ -19,7 +21,7 @@ A collection of examples demonstrating the use cases of SkyPilot.
    Quickstart: PyTorch <../getting-started/tutorial>
    Training <training/index>
    Serving <serving/index>
-   Models <../gallery/llms/index>
+   Models <models/index>
    Other Frameworks <frameworks/index>
    AI Applications <applications/index>
 
@@ -40,13 +42,12 @@ We welcome contributions from the community. Instructions below:
       - Add a README.md, a SkyPilot YAML, and other necessary files to run the AI project.
       - ``git add`` the files.
 
-   4. Run ``cd docs/source; python generate_examples.py``. This builds a ``generated-examples/my-llm.md``. ``git add`` it.
-   5. Go to the appropriate subdir under Examples and add your example.
+   4. Go to the appropriate subdir under Examples and add your example.
 
       - For example, if you want to add to "Examples / Serving":
       - ``cd docs/source/examples/serving; ln -s ../generated-examples/my-llm.md``.
       - Add a heading for your example to the TOC in the index.rst file.
       - ``git add index.rst my-llm.md``
 
-   6. Build the docs as usual.
+   5. Build the docs as usual.
 

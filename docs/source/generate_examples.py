@@ -7,6 +7,7 @@ import itertools
 import pathlib
 import re
 import subprocess
+from typing import Optional
 
 ROOT_DIR = pathlib.Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
@@ -55,6 +56,39 @@ def fix_case(text: str) -> str:
         text = re.sub(rf'\b{pattern}\b', repl, text, flags=re.IGNORECASE)
     return text
 
+
+def preprocess_github_markdown_file(source_path: str,
+                                    dest_path: Optional[str] = None):
+    """
+    Preprocesses GitHub Markdown files by:
+        - Uncommenting all ``<!-- -->`` comments in which opening tag is immediately
+          succeeded by ``$UNCOMMENT``(eg. ``<!--$UNCOMMENTthis will be uncommented-->``)
+        - Removing text between ``<!--$REMOVE-->`` and ``<!--$END_REMOVE-->``
+
+    This is to enable translation between GitHub Markdown and MyST Markdown used
+    in docs. For more details, see ``doc/README.md``.
+
+    Args:
+        source_path: The path to the locally saved markdown file to preprocess.
+        dest_path: The destination path to save the preprocessed markdown file.
+            If not provided, save to the same location as source_path.
+    """
+    dest_path = dest_path if dest_path else source_path
+    with open(source_path, 'r') as f:
+        text = f.read()
+    # $UNCOMMENT
+    text = re.sub(r'<!--\s*\$UNCOMMENT(.*?)(-->)',
+                  r'\1', text, flags=re.DOTALL)
+    # $REMOVE
+    text = re.sub(
+        r'(<!--\s*\$REMOVE\s*-->)(.*?)(<!--\s*\$END_REMOVE\s*-->)',
+        r'',
+        text,
+        flags=re.DOTALL,
+    )
+
+    with open(dest_path, 'w') as f:
+        f.write(text)
 
 @dataclasses.dataclass
 class Example:
@@ -148,14 +182,19 @@ class Example:
         # Convert the path to a relative path from __file__
         def make_relative(path: pathlib.Path) -> pathlib.Path:
             return ROOT_DIR_RELATIVE / path.relative_to(ROOT_DIR)
+        
+        markdown_contents_dir = EXAMPLE_DOC_DIR / 'markdown_contents'
+        markdown_contents_dir.mkdir(exist_ok=True)
+        if self.main_file.suffix == '.md':
+            markdown_contents_path = (markdown_contents_dir / self.path.name).with_suffix('.md')
+            preprocess_github_markdown_file(self.main_file, markdown_contents_path)
 
         content = f'Source: <gh-file:{self.path.relative_to(ROOT_DIR)}>\n\n'
-        include = 'include' if self.main_file.suffix == '.md' else \
-            'literalinclude'
-        if include == 'literalinclude':
+        if self.main_file.suffix == '.md':
+            content += f':::{{include}} {make_relative(markdown_contents_path)}\n'
+        else:
             content += f'# {self.title}\n\n'
-        content += f':::{{{include}}} {make_relative(self.main_file)}\n'
-        if include == 'literalinclude':
+            content += f':::{{literalinclude}} {make_relative(self.main_file)}\n'
             content += f':language: {self.main_file.suffix[1:]}\n'
         content += ':::\n\n'
 
@@ -175,7 +214,7 @@ class Example:
         return content
 
 
-def generate_examples():
+def generate_examples(self, *args, **kwargs):
     # Create the EXAMPLE_DOC_DIR if it doesn't exist
     if not EXAMPLE_DOC_DIR.exists():
         EXAMPLE_DOC_DIR.mkdir(parents=True)
@@ -198,7 +237,7 @@ def _work(example_dir: pathlib.Path):
     # Check for stem collisions using full directory names
     stems = {}
     for example in examples:
-        stem = example.path.name  # Use full directory name instead of stem
+        stem = example.path.stem
         if stem in stems and stems[stem] != example.path:
             raise ValueError(
                 f'Collision detected: Multiple examples with stem "{stem}".\n'
@@ -211,10 +250,8 @@ def _work(example_dir: pathlib.Path):
 
     # Generate the example documentation using the updated stem
     for example in sorted(examples, key=lambda e: e.path.name):
-        doc_path = EXAMPLE_DOC_DIR / f'{example.path.name}.md'
+        doc_path = EXAMPLE_DOC_DIR / f'{example.path.stem}.md'
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
 
 
-if __name__ == '__main__':
-    generate_examples()

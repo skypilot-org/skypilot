@@ -1,3 +1,5 @@
+:orphan:
+
 .. People may hit this old URL; we redirect to the new one instead of 404ing.
 .. raw:: html
 
