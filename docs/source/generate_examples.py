@@ -2,13 +2,13 @@
 # https://github.com/vllm-project/vllm/blob/01c184b8f3d98d842ffe0022583decb70bf75582/docs/source/generate_examples.py
 # SPDX-License-Identifier: Apache-2.0
 
-from dataclasses import dataclass, field
+import dataclasses
 import itertools
-from pathlib import Path
+import pathlib
 import re
 import subprocess
 
-ROOT_DIR = Path(__file__).parent.parent.parent.resolve()
+ROOT_DIR = pathlib.Path(__file__).parent.parent.parent.resolve()
 ROOT_DIR_RELATIVE = '../../../..'
 
 # Scan this subdir and its subdirs.
@@ -56,7 +56,7 @@ def fix_case(text: str) -> str:
     return text
 
 
-@dataclass
+@dataclasses.dataclass
 class Example:
     """
     Example class for generating documentation content from a given path.
@@ -75,24 +75,24 @@ class Example:
         determine_title() -> str: Determines the title of the document.
         generate() -> str: Generates the documentation content.
     """ # noqa: E501
-    path: Path
+    path: pathlib.Path
     category: str = None
-    main_file: Path = field(init=False)
-    other_files: list[Path] = field(init=False)
-    title: str = field(init=False)
+    main_file: pathlib.Path = dataclasses.field(init=False)
+    other_files: list[pathlib.Path] = dataclasses.field(init=False)
+    title: str = dataclasses.field(init=False)
 
     def __post_init__(self):
         self.main_file = self.determine_main_file()
         self.other_files = self.determine_other_files()
         self.title = self.determine_title()
 
-    def determine_main_file(self) -> Path:
+    def determine_main_file(self) -> pathlib.Path:
         """
         Determines the main file in the given path.
         If the path is a file, it returns the path itself. Otherwise, it searches
         for Markdown files (*.md) in the directory and returns the first one found.
         Returns:
-            Path: The main file path, either the original path if it's a file or the first
+            pathlib.Path: The main file path, either the original path if it's a file or the first
             Markdown file found in the directory.
         Raises:
             IndexError: If no Markdown files are found in the directory.
@@ -100,7 +100,7 @@ class Example:
         return self.path if self.path.is_file() else list(
             self.path.glob('*.md')).pop()
 
-    def determine_other_files(self) -> list[Path]:
+    def determine_other_files(self) -> list[pathlib.Path]:
         """
         Determine other files in the directory excluding the main file.
 
@@ -109,7 +109,7 @@ class Example:
         files that are not the main file and are tracked by git.
 
         Returns:
-            list[Path]: A list of Path objects representing the other git-tracked files in the directory.
+            list[pathlib.Path]: A list of pathlib.Path objects representing the other git-tracked files in the directory.
         """ # noqa: E501
         if self.path.is_file():
             return []
@@ -146,8 +146,8 @@ class Example:
 
     def generate(self) -> str:
         # Convert the path to a relative path from __file__
-        make_relative = lambda path: ROOT_DIR_RELATIVE / path.relative_to(
-            ROOT_DIR)
+        def make_relative(path: pathlib.Path) -> pathlib.Path:
+            return ROOT_DIR_RELATIVE / path.relative_to(ROOT_DIR)
 
         content = f'Source: <gh-file:{self.path.relative_to(ROOT_DIR)}>\n\n'
         include = 'include' if self.main_file.suffix == '.md' else \
@@ -184,7 +184,7 @@ def generate_examples():
         _work(example_dir)
 
 
-def _work(example_dir: Path):
+def _work(example_dir: pathlib.Path):
     examples = []
 
     # Find uncategorised examples
