@@ -214,10 +214,8 @@ class Example:
         return content
 
 
-def generate_examples(self, *args, **kwargs):
-    # Create the EXAMPLE_DOC_DIR if it doesn't exist
-    if not EXAMPLE_DOC_DIR.exists():
-        EXAMPLE_DOC_DIR.mkdir(parents=True)
+def generate_examples(app=None, *args, **kwargs):
+    EXAMPLE_DOC_DIR.mkdir(parents=True, exist_ok=True)
 
     for example_dir in EXAMPLE_DIRS:
         _work(example_dir)

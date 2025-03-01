@@ -220,5 +220,6 @@ suppress_warnings = ['autosectionlabel.*']
 
 
 def setup(app):
-    app.connect('builder-inited',
-                generate_examples.generate_examples)
+    # Run generate_examples directly during setup instead of connecting to builder-inited
+    # This ensures it completes fully before any build steps start
+    generate_examples.generate_examples(app)
