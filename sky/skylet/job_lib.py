@@ -241,8 +241,8 @@ class JobExitCode(enum.IntEnum):
             cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code."""
         # Import here to avoid circular imports
-        from sky.jobs.state import (
-            ManagedJobStatus)  # pylint: disable=import-outside-toplevel
+        # pylint: disable=import-outside-toplevel
+        from sky.jobs.state import ManagedJobStatus
 
         if status is None:
             return cls.NOT_FOUND
