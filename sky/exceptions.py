@@ -152,6 +152,15 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class KubeAPIUnreachableError(ResourcesUnavailableError):
+    """Raised when the Kubernetes API is currently unreachable.
+
+    This is a subclass of ResourcesUnavailableError to trigger same failover
+    behavior as other ResourcesUnavailableError.
+    """
+    pass
+
+
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
     pass
