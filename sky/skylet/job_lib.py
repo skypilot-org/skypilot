@@ -210,29 +210,29 @@ class JobExitCode(enum.IntEnum):
 
     NOT_FOUND = 102
     """The job was not found"""
-    
+
     CANCELLED = 103
     """The job was cancelled by the user"""
-
 
     @classmethod
     def from_job_status(cls, status: Optional[JobStatus]) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         if status is None:
             return cls.NOT_FOUND
-        
+
         if not status.is_terminal():
             return cls.NOT_FINISHED
-            
+
         if status == JobStatus.SUCCEEDED:
             return cls.SUCCESS
-            
+
         if status == JobStatus.CANCELLED:
             return cls.CANCELLED
-            
-        if status in JobStatus.user_code_failure_states() or status == JobStatus.FAILED_DRIVER:
+
+        if status in JobStatus.user_code_failure_states(
+        ) or status == JobStatus.FAILED_DRIVER:
             return cls.FAILED
-            
+
         # Should not hit this case, but included to avoid errors
         return cls.FAILED
 
@@ -241,23 +241,24 @@ class JobExitCode(enum.IntEnum):
             cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code."""
         # Import here to avoid circular imports
-        from sky.jobs.state import ManagedJobStatus
-        
+        from sky.jobs.state import (
+            ManagedJobStatus)  # pylint: disable=import-outside-toplevel
+
         if status is None:
             return cls.NOT_FOUND
-            
+
         if not status.is_terminal():
             return cls.NOT_FINISHED
-            
+
         if status == ManagedJobStatus.SUCCEEDED:
             return cls.SUCCESS
-            
+
         if status == ManagedJobStatus.CANCELLED:
             return cls.CANCELLED
-            
+
         if status.is_failed():
             return cls.FAILED
-            
+
         # Should not hit this case, but included to avoid errors
         return cls.FAILED
 
