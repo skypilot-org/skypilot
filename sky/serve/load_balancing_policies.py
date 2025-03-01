@@ -181,21 +181,18 @@ async def _check_lb_latency(url: str) -> float:
         await asyncio.sleep(1)
 
 
-class ProximateFirstPolicy(LoadBalancingPolicy, name='proximate_first'):
+class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
     """Proximate first load balancing policy."""
 
     def __init__(self) -> None:
         super().__init__()
         self.replica2latency: Dict[str, float] = {}
+        self.max_load_threshold = 10
 
     async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
             return
-        # If the autoscaler keeps scaling up and down the replicas,
-        # we need this shuffle to not let the first replica have the
-        # most of the load.
-        random.shuffle(ready_replicas)
-        self.ready_replicas = ready_replicas
+        await super().set_ready_replicas(ready_replicas)
         self.replica2latency = {}
         # TODO(tian): Parallel this.
         for url in self.ready_replicas:
@@ -206,8 +203,21 @@ class ProximateFirstPolicy(LoadBalancingPolicy, name='proximate_first'):
         del request  # Unused.
         if not self.ready_replicas:
             return None
+
+        min_load = min(self.load_map.values())
+        available_replicas = [
+            replica for replica in self.ready_replicas
+            if self.load_map.get(replica, 0) -
+            min_load < self.max_load_threshold
+        ]
+
+        if not available_replicas:
+            logger.error('All replicas exceed max load threshold of '
+                         f'{self.max_load_threshold}. THIS SHOULD NOT HAPPEN.')
+            available_replicas = self.ready_replicas
+
         return min(
-            self.ready_replicas,
+            available_replicas,
             key=lambda replica: self.replica2latency.get(replica, float('inf')))
 
 
@@ -236,6 +246,7 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
         self.hash_key = 'x-hash-key'
         # Ring of hash values to replica URLs
         self.hash_ring: List[RingEntry] = []
+        self.max_load_threshold = 10
 
     def _hash_function(self, key: str) -> int:
         return xxhash.xxh64(key, seed=0).intdigest()
@@ -269,8 +280,19 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
             return None
         key_hash = self._hash_function(key)
         logger.info(f'Key hash to find: {key_hash}')
-        idx = bisect.bisect_right([entry.hash_val for entry in self.hash_ring],
-                                  key_hash)
+        # TODO(tian): Avoid this O(n) scan on every request.
+        min_load = min(self.load_map.values())
+        hashes_in_ring = [
+            entry.hash_val
+            for entry in self.hash_ring
+            if self.load_map.get(entry.replica, 0) -
+            min_load < self.max_load_threshold
+        ]
+        if not hashes_in_ring:
+            logger.error('All replicas exceed max load threshold of '
+                         f'{self.max_load_threshold}. THIS SHOULD NOT HAPPEN.')
+            hashes_in_ring = [entry.hash_val for entry in self.hash_ring]
+        idx = bisect.bisect_right(hashes_in_ring, key_hash)
         if idx >= len(self.hash_ring):
             idx = 0
         logger.info(f'Selected replica {idx}: {self.hash_ring[idx]}')
