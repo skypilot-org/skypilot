@@ -77,8 +77,7 @@ def preprocess_github_markdown_file(source_path: str,
     with open(source_path, 'r') as f:
         text = f.read()
     # $UNCOMMENT
-    text = re.sub(r'<!--\s*\$UNCOMMENT(.*?)(-->)',
-                  r'\1', text, flags=re.DOTALL)
+    text = re.sub(r'<!--\s*\$UNCOMMENT(.*?)(-->)', r'\1', text, flags=re.DOTALL)
     # $REMOVE
     text = re.sub(
         r'(<!--\s*\$REMOVE\s*-->)(.*?)(<!--\s*\$END_REMOVE\s*-->)',
@@ -89,6 +88,7 @@ def preprocess_github_markdown_file(source_path: str,
 
     with open(dest_path, 'w') as f:
         f.write(text)
+
 
 @dataclasses.dataclass
 class Example:
@@ -132,7 +132,8 @@ class Example:
             IndexError: If no Markdown files are found in the directory.
         """ # noqa: E501
         return self.path if self.path.is_file() else list(
-            sorted(self.path.glob('*.md'), key=lambda x: x.stem == 'README')).pop()
+            sorted(self.path.glob('*.md'),
+                   key=lambda x: x.stem == 'README')).pop()
 
     def determine_other_files(self) -> list[pathlib.Path]:
         """
@@ -182,12 +183,14 @@ class Example:
         # Convert the path to a relative path from __file__
         def make_relative(path: pathlib.Path) -> pathlib.Path:
             return ROOT_DIR_RELATIVE / path.relative_to(ROOT_DIR)
-        
+
         markdown_contents_dir = EXAMPLE_DOC_DIR / 'markdown_contents'
         markdown_contents_dir.mkdir(exist_ok=True)
         if self.main_file.suffix == '.md':
-            markdown_contents_path = (markdown_contents_dir / self.path.name).with_suffix('.md')
-            preprocess_github_markdown_file(self.main_file, markdown_contents_path)
+            markdown_contents_path = (markdown_contents_dir /
+                                      self.path.name).with_suffix('.md')
+            preprocess_github_markdown_file(self.main_file,
+                                            markdown_contents_path)
 
         content = f'Source: <gh-file:{self.path.relative_to(ROOT_DIR)}>\n\n'
         if self.main_file.suffix == '.md':
@@ -251,5 +254,3 @@ def _work(example_dir: pathlib.Path):
         doc_path = EXAMPLE_DOC_DIR / f'{example.path.stem}.md'
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
-
-
