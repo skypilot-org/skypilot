@@ -79,8 +79,6 @@ To learn more, see :ref:`SkyPilot Overview <overview>` and `SkyPilot blog <https
 
 Case Studies and integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
 
-Tutorials: `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_
-
 Follow updates:
 
 * `Slack <http://slack.skypilot.co>`_
