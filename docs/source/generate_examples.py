@@ -241,6 +241,7 @@ def _work(example_dir: pathlib.Path):
         # Use full directory name instead of stem. Avoids e.g., 'llama-3' and
         # 'llama-3.1' mapping to the same stem.
         stem = example.path.name
+        stem = example.path.stem
         if stem in stems and stems[stem] != example.path:
             raise ValueError(
                 f'Collision detected: Multiple examples with stem "{stem}".\n'
@@ -254,6 +255,7 @@ def _work(example_dir: pathlib.Path):
     # Generate the example documentation using the updated stem
     for example in sorted(examples, key=lambda e: e.path.name):
         stem = example.path.name
+        stem = example.path.stem
         doc_path = EXAMPLE_DOC_DIR / f'{stem}.md'
         with open(doc_path, 'w+') as f:
             f.write(example.generate())
