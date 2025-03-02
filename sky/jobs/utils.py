@@ -613,11 +613,12 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                                            job_id=None,
                                            managed_job_id=job_id,
                                            follow=follow)
-            if returncode == 0:
-                # If the log tailing exit successfully (the real job can be
-                # SUCCEEDED or FAILED), we can safely break the loop. We use the
-                # status in job queue to show the information, as the
-                # ManagedJobStatus is not updated yet.
+            if returncode in [rc.value for rc in job_lib.JobExitCode]:
+                # If the log tailing exits with a known exit code we can safely
+                # break the loop because it indicates the tailing process
+                # succeeded (even though the real job can be SUCCEEDED or
+                # FAILED). We use the status in job queue to show the
+                # information, as the ManagedJobStatus is not updated yet.
                 job_statuses = backend.get_job_status(handle, stream_logs=False)
                 job_status = list(job_statuses.values())[0]
                 assert job_status is not None, 'No job found.'
