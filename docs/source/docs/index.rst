@@ -75,16 +75,17 @@ You can chat with the SkyPilot team and community on the `SkyPilot Slack <http:/
 Learn more
 --------------------------
 
-To learn more, see :ref:`Concept: Sky Computing <sky-computing>` and `SkyPilot blog <https://blog.skypilot.co/>`_.
+To learn more, see :ref:`SkyPilot Overview <overview>` and `SkyPilot blog <https://blog.skypilot.co/>`_.
 
-Case Studies and Integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
+Case Studies and integrations: `Community Spotlights <https://blog.skypilot.co/community/>`_
 
 Tutorials: `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_
 
 Follow updates:
 
-* `Twitter <https://twitter.com/skypilot_org>`_
 * `Slack <http://slack.skypilot.co>`_
+* `X / Twitter <https://twitter.com/skypilot_org>`_
+* `LinkedIn <https://www.linkedin.com/company/skypilot-oss/>`_
 * `SkyPilot Blog <https://blog.skypilot.co/>`_ (`Introductory blog post <https://blog.skypilot.co/introducing-skypilot/>`_)
 
 Read the research:
@@ -92,7 +93,8 @@ Read the research:
 * `SkyPilot paper <https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf>`_ and `talk <https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng>`_ (NSDI 2023)
 * `Sky Computing whitepaper <https://arxiv.org/abs/2205.07147>`_
 * `Sky Computing vision paper <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ (HotOS 2021)
-
+* `SkyServe: AI serving across regions and clouds <https://arxiv.org/pdf/2411.01438>`_ (EuroSys 2025)
+* `Managed jobs spot instance policy <https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao>`_ (NSDI 2024)
 
 .. toctree::
    :hidden:
