@@ -1,0 +1,20 @@
+envs:
+  MODEL_NAME: 01-ai/Yi-1.5-34B-Chat
+  
+resources:
+  accelerators: {A100:4, A100:8, A100-80GB:2, A100-80GB:4, A100-80GB:8}
+  disk_size: 1024
+  disk_tier: best
+  memory: 32+
+  ports: 8000
+
+setup: |
+  pip install vllm==0.6.1.post2
+  pip install vllm-flash-attn
+
+run: |
+  export PATH=$PATH:/sbin
+  vllm serve $MODEL_NAME \
+    --host 0.0.0.0 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --max-model-len 1024 | tee ~/openai_api_server.log

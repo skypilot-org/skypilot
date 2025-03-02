@@ -48,18 +48,24 @@ then:
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> None
 """
+import contextlib
 import copy
 import os
 import pprint
-from typing import Any, Dict, Iterable, Optional, Tuple
+import tempfile
+from typing import Any, Dict, Iterator, Optional, Tuple
 
 import yaml
 
+from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+
+logger = sky_logging.init_logger(__name__)
 
 # The config path is discovered in this order:
 #
@@ -73,30 +79,14 @@ from sky.utils import ux_utils
 # (Used internally) An env var holding the path to the local config file. This
 # is only used by jobs controller tasks to ensure recoveries of the same job
 # use the same config file.
-ENV_VAR_SKYPILOT_CONFIG = 'SKYPILOT_CONFIG'
+ENV_VAR_SKYPILOT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}CONFIG'
 
 # Path to the local config file.
 CONFIG_PATH = '~/.sky/config.yaml'
 
-logger = sky_logging.init_logger(__name__)
-
 # The loaded config.
-_dict: Optional[Dict[str, Any]] = None
-_loaded_config_path = None
-
-
-def _get_nested(configs: Optional[Dict[str, Any]], keys: Iterable[str],
-                default_value: Any) -> Any:
-    if configs is None:
-        return default_value
-    curr = configs
-    for key in keys:
-        if isinstance(curr, dict) and key in curr:
-            curr = curr[key]
-        else:
-            return default_value
-    logger.debug(f'User config: {".".join(keys)} -> {curr}')
-    return curr
+_dict = config_utils.Config()
+_loaded_config_path: Optional[str] = None
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -119,37 +109,12 @@ def get_nested(keys: Tuple[str, ...],
     Returns:
         The value of the nested key, or 'default_value' if not found.
     """
-    assert not (
-        keys in constants.OVERRIDEABLE_CONFIG_KEYS and
-        override_configs is None), (
-            f'Override configs must be provided when keys {keys} is within '
-            'constants.OVERRIDEABLE_CONFIG_KEYS: '
-            f'{constants.OVERRIDEABLE_CONFIG_KEYS}')
-    assert not (
-        keys not in constants.OVERRIDEABLE_CONFIG_KEYS and
-        override_configs is not None
-    ), (f'Override configs must not be provided when keys {keys} is not within '
-        'constants.OVERRIDEABLE_CONFIG_KEYS: '
-        f'{constants.OVERRIDEABLE_CONFIG_KEYS}')
-    config: Dict[str, Any] = {}
-    if _dict is not None:
-        config = copy.deepcopy(_dict)
-    if override_configs is None:
-        override_configs = {}
-    config = _recursive_update(config, override_configs)
-    return _get_nested(config, keys, default_value)
-
-
-def _recursive_update(base_config: Dict[str, Any],
-                      override_config: Dict[str, Any]) -> Dict[str, Any]:
-    """Recursively updates base configuration with override configuration"""
-    for key, value in override_config.items():
-        if (isinstance(value, dict) and key in base_config and
-                isinstance(base_config[key], dict)):
-            _recursive_update(base_config[key], value)
-        else:
-            base_config[key] = value
-    return base_config
+    return _dict.get_nested(
+        keys,
+        default_value,
+        override_configs,
+        allowed_override_keys=constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK,
+        disallowed_override_keys=None)
 
 
 def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
@@ -157,26 +122,22 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
 
     Like get_nested(), if any key is not found, this will not raise an error.
     """
-    _check_loaded_or_die()
-    assert _dict is not None
-    override = {}
-    for i, key in enumerate(reversed(keys)):
-        if i == 0:
-            override = {key: value}
-        else:
-            override = {key: override}
-    return _recursive_update(copy.deepcopy(_dict), override)
+    copied_dict = copy.deepcopy(_dict)
+    copied_dict.set_nested(keys, value)
+    return dict(**copied_dict)
 
 
-def to_dict() -> Dict[str, Any]:
+def to_dict() -> config_utils.Config:
     """Returns a deep-copied version of the current config."""
-    if _dict is not None:
-        return copy.deepcopy(_dict)
-    return {}
+    return copy.deepcopy(_dict)
 
 
-def _try_load_config() -> None:
+def _reload_config() -> None:
     global _dict, _loaded_config_path
+    # Reset the global variables, to avoid using stale values.
+    _dict = config_utils.Config()
+    _loaded_config_path = None
+
     config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
     if config_path_via_env_var is not None:
         config_path = os.path.expanduser(config_path_via_env_var)
@@ -192,18 +153,19 @@ def _try_load_config() -> None:
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
-        _loaded_config_path = config_path
         try:
-            _dict = common_utils.read_yaml(config_path)
+            config = common_utils.read_yaml(config_path)
+            _dict = config_utils.Config.from_dict(config)
+            _loaded_config_path = config_path
             logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
-        if _dict is not None:
+        if _dict:
             common_utils.validate_schema(
                 _dict,
                 schemas.get_config_schema(),
                 f'Invalid config YAML ({config_path}). See: '
-                'https://skypilot.readthedocs.io/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
                 'Error: ',
                 skip_none=False)
 
@@ -216,17 +178,67 @@ def loaded_config_path() -> Optional[str]:
 
 
 # Load on import.
-_try_load_config()
-
-
-def _check_loaded_or_die():
-    """Checks loaded() is true; otherwise raises RuntimeError."""
-    if _dict is None:
-        raise RuntimeError(
-            f'No user configs loaded. Check {CONFIG_PATH} exists and '
-            'can be loaded.')
+_reload_config()
 
 
 def loaded() -> bool:
     """Returns if the user configurations are loaded."""
-    return _dict is not None
+    return bool(_dict)
+
+
+@contextlib.contextmanager
+def override_skypilot_config(
+        override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
+    """Overrides the user configurations."""
+    # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
+    # allowed keys.
+    if not override_configs:
+        # If no override configs (None or empty dict), do nothing.
+        yield
+        return
+    original_env_config_path = _loaded_config_path
+    original_config = dict(_dict)
+    config = _dict.get_nested(
+        keys=tuple(),
+        default_value=None,
+        override_configs=override_configs,
+        allowed_override_keys=None,
+        disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+    with tempfile.NamedTemporaryFile(
+            mode='w',
+            prefix='skypilot_config',
+            # Have to avoid deleting the file as the underlying function needs
+            # to read the config file, and we need to close the file mode='w'
+            # to enable reading.
+            delete=False) as f:
+        common_utils.dump_yaml(f.name, dict(config))
+        os.environ[ENV_VAR_SKYPILOT_CONFIG] = f.name
+    try:
+        _reload_config()
+        yield
+    except exceptions.InvalidSkyPilotConfigError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidSkyPilotConfigError(
+                'Failed to override the SkyPilot config on API '
+                'server with your local SkyPilot config:\n'
+                '=== SkyPilot config on API server ===\n'
+                f'{common_utils.dump_yaml_str(original_config)}\n'
+                '=== Your local SkyPilot config ===\n'
+                f'{common_utils.dump_yaml_str(override_configs)}\n'
+                f'Details: {e}') from e
+
+    finally:
+        if original_env_config_path is not None:
+            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_config_path
+        else:
+            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
+        # Reload the config to restore the original config to avoid the next
+        # request reusing the same process to use the config for the current
+        # request.
+        _reload_config()
+
+        try:
+            os.remove(f.name)
+        except Exception:  # pylint: disable=broad-except
+            # Failing to delete the file is not critical.
+            pass

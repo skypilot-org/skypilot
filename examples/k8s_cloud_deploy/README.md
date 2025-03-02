@@ -44,8 +44,8 @@ NAME              STATUS   ROLES                  AGE   VERSION
 
 $ sky show-gpus --cloud kubernetes
 Kubernetes GPUs
-GPU  QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
-A10  1             2           2              
+GPU  REQUESTABLE_QTY_PER_NODE  TOTAL_GPUS  TOTAL_FREE_GPUS
+A10  1                         2           2              
 
 Kubernetes per node GPU availability
 NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
@@ -56,11 +56,11 @@ NODE_NAME        GPU_NAME  TOTAL_GPUS  FREE_GPUS
 ## Run AI workloads on your Kubernetes cluster with SkyPilot
 
 ### Development clusters
-To launch a [GPU enabled development cluster](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html), run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`. 
+To launch a [GPU enabled development cluster](https://docs.skypilot.co/en/latest/examples/interactive-development.html), run `sky launch -c mycluster --cloud kubernetes --gpus A10:1`. 
 
 SkyPilot will setup SSH config for you.
-* [SSH access](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#ssh): `ssh mycluster`
-* [VSCode remote development](https://skypilot.readthedocs.io/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/"`
+* [SSH access](https://docs.skypilot.co/en/latest/examples/interactive-development.html#ssh): `ssh mycluster`
+* [VSCode remote development](https://docs.skypilot.co/en/latest/examples/interactive-development.html#vscode): `code --remote ssh-remote+mycluster "/"`
 
 
 ### Jobs
@@ -87,7 +87,7 @@ sky-cmd-1-2ea4-head                      1/1     Running   0          8m36s
 sky-jobs-controller-2ea485ea-2ea4-head   1/1     Running   0          10m
 ```
 
-Refer to [SkyPilot docs](https://skypilot.readthedocs.io/) for more.
+Refer to [SkyPilot docs](https://docs.skypilot.co/) for more.
 
 ## Teardown
 To teardown the Kubernetes cluster, run:

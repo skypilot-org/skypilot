@@ -1,14 +1,14 @@
 """ Paperspace Cloud. """
 
-import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.provision.paperspace import utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -20,7 +20,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Paperspace(clouds.Cloud):
     """Paperspace GPU Cloud"""
 
@@ -162,7 +162,7 @@ class Paperspace(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls, instance_type: str) -> Optional[Dict[str, int]]:
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='paperspace')
 
@@ -176,15 +176,14 @@ class Paperspace(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': resources.instance_type,
@@ -260,7 +259,7 @@ class Paperspace(clouds.Cloud):
             return False, (
                 'Failed to access Paperspace Cloud with credentials.\n    '
                 'To configure credentials, follow the instructions at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#paperspace\n    '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#paperspace\n    '
                 'Generate API key and create a json at `~/.paperspace/config.json` with \n     '
                 '    {"apiKey": "[YOUR API KEY]"}\n    '
                 f'Reason: {str(e)}')

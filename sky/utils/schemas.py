@@ -86,13 +86,28 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
-            # Deprecated: use 'job_recovery' instead. This is for backward
-            # compatibility, and can be removed in 0.8.0.
-            'spot_recovery': {
-                'type': 'string',
-            },
             'job_recovery': {
-                'type': 'string',
+                # Either a string or a dict.
+                'anyOf': [{
+                    'type': 'string',
+                }, {
+                    'type': 'object',
+                    'required': [],
+                    'additionalProperties': False,
+                    'properties': {
+                        'strategy': {
+                            'anyOf': [{
+                                'type': 'string',
+                            }, {
+                                'type': 'null',
+                            }],
+                        },
+                        'max_restarts_on_errors': {
+                            'type': 'integer',
+                            'minimum': 0,
+                        },
+                    }
+                }],
             },
             'disk_size': {
                 'type': 'integer',
@@ -236,8 +251,6 @@ def get_resources_schema():
                 'items': multi_resources_schema,
             }
         },
-        # Avoid job_recovery and spot_recovery being present at the same time.
-        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -279,6 +292,12 @@ def get_storage_schema():
                     mode.value for mode in storage.StorageMode
                 ]
             },
+            '_is_sky_managed': {
+                'type': 'boolean',
+            },
+            '_bucket_sub_path': {
+                'type': 'string',
+            },
             '_force_delete': {
                 'type': 'boolean',
             }
@@ -288,6 +307,9 @@ def get_storage_schema():
 
 def get_service_schema():
     """Schema for top-level `service:` field (for SkyServe)."""
+    # To avoid circular imports, only import when needed.
+    # pylint: disable=import-outside-toplevel
+    from sky.serve import load_balancing_policies
     return {
         '$schema': 'https://json-schema.org/draft/2020-12/schema',
         'type': 'object',
@@ -357,23 +379,31 @@ def get_service_schema():
                     'downscale_delay_seconds': {
                         'type': 'number',
                     },
-                    # TODO(MaoZiming): Fields `qps_upper_threshold`,
-                    # `qps_lower_threshold` and `auto_restart` are deprecated.
-                    # Temporarily keep these fields for backward compatibility.
-                    # Remove after 2 minor release, i.e., 0.6.0.
-                    'auto_restart': {
-                        'type': 'boolean',
-                    },
-                    'qps_upper_threshold': {
-                        'type': 'number',
-                    },
-                    'qps_lower_threshold': {
-                        'type': 'number',
-                    },
                 }
+            },
+            'ports': {
+                'type': 'integer',
             },
             'replicas': {
                 'type': 'integer',
+            },
+            'load_balancing_policy': {
+                'type': 'string',
+                'case_insensitive_enum': list(
+                    load_balancing_policies.LB_POLICIES.keys())
+            },
+            'tls': {
+                'type': 'object',
+                'required': ['keyfile', 'certfile'],
+                'additionalProperties': False,
+                'properties': {
+                    'keyfile': {
+                        'type': 'string',
+                    },
+                    'certfile': {
+                        'type': 'string',
+                    },
+                },
             },
         }
     }
@@ -433,8 +463,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
-    config_override_schema = _filter_schema(get_config_schema(),
-                                            constants.OVERRIDEABLE_CONFIG_KEYS)
+    config_override_schema = _filter_schema(
+        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
         'experimental': {
             'type': 'object',
@@ -511,6 +541,9 @@ def get_task_schema():
                 'additionalProperties': {
                     'type': 'number'
                 }
+            },
+            'file_mounts_mapping': {
+                'type': 'object',
             },
             **_experimental_task_schema(),
         }
@@ -594,15 +627,6 @@ _NETWORK_CONFIG_SCHEMA = {
 }
 
 _LABELS_SCHEMA = {
-    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.7.0.
-    'instance_tags': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': {
-            'type': 'string',
-        },
-    },
     'labels': {
         'type': 'object',
         'required': [],
@@ -648,6 +672,7 @@ class RemoteIdentityOptions(enum.Enum):
     """
     LOCAL_CREDENTIALS = 'LOCAL_CREDENTIALS'
     SERVICE_ACCOUNT = 'SERVICE_ACCOUNT'
+    NO_UPLOAD = 'NO_UPLOAD'
 
 
 def get_default_remote_identity(cloud: str) -> str:
@@ -668,7 +693,14 @@ _REMOTE_IDENTITY_SCHEMA = {
 
 _REMOTE_IDENTITY_SCHEMA_KUBERNETES = {
     'remote_identity': {
-        'type': 'string'
+        'anyOf': [{
+            'type': 'string'
+        }, {
+            'type': 'object',
+            'additionalProperties': {
+                'type': 'string'
+            }
+        }]
     },
 }
 
@@ -698,6 +730,11 @@ def get_config_schema():
                     'resources': resources_schema,
                 }
             },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            }
         }
     }
     cloud_configs = {
@@ -755,6 +792,9 @@ def get_config_schema():
                 'force_enable_external_ips': {
                     'type': 'boolean'
                 },
+                'enable_gvnic': {
+                    'type': 'boolean'
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -768,6 +808,9 @@ def get_config_schema():
                 'storage_account': {
                     'type': 'string',
                 },
+                'resource_group_vm': {
+                    'type': 'string',
+                },
             }
         },
         'kubernetes': {
@@ -775,6 +818,12 @@ def get_config_schema():
             'required': [],
             'additionalProperties': False,
             'properties': {
+                'allowed_contexts': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'string',
+                    },
+                },
                 'networking': {
                     'type': 'string',
                     'case_insensitive_enum': [
@@ -840,12 +889,22 @@ def get_config_schema():
                     'image_tag_gpu': {
                         'type': 'string',
                     },
+                    'vcn_ocid': {
+                        'type': 'string',
+                    },
                     'vcn_subnet': {
                         'type': 'string',
                     },
                 }
             },
         },
+    }
+
+    admin_policy_schema = {
+        'type': 'string',
+        # Check regex to be a valid python module path
+        'pattern': (r'^[a-zA-Z_][a-zA-Z0-9_]*'
+                    r'(\.[a-zA-Z_][a-zA-Z0-9_]*)+$'),
     }
 
     allowed_clouds = {
@@ -886,6 +945,19 @@ def get_config_schema():
         }
     }
 
+    api_server = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'endpoint': {
+                'type': 'string',
+                # Apply validation for URL
+                'pattern': r'^https?://.*$',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -902,13 +974,12 @@ def get_config_schema():
         'additionalProperties': False,
         'properties': {
             'jobs': controller_resources_schema,
-            'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
+            'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
+            'api_server': api_server,
             **cloud_configs,
         },
-        # Avoid spot and jobs being present at the same time.
-        **_check_not_both_fields_present('spot', 'jobs')
     }

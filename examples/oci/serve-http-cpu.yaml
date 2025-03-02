@@ -1,0 +1,11 @@
+service:
+  readiness_probe: /
+  replicas: 2
+
+resources:
+  cloud: oci
+  region: us-sanjose-1
+  ports: 8080
+  cpus: 2+
+
+run: python -m http.server 8080

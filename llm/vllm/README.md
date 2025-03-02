@@ -29,9 +29,9 @@ Before you get started, you need to have access to the Llama-2 model weights on 
 ```bash
 sky launch -c vllm-llama2 serve-openai-api.yaml --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
-**Optional**: Only GCP offers the specified L4 GPUs currently. To use other clouds, use the `--gpus` flag to request other GPUs. For example, to use V100 GPUs:
+**Optional**: Only GCP offers the specified L4 GPUs currently. To use other clouds, use the `--gpus` flag to request other GPUs. For example, to use H100 GPUs:
 ```bash
-sky launch -c vllm-llama2 serve-openai-api.yaml --gpus V100:1 --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
+sky launch -c vllm-llama2 serve-openai-api.yaml --gpus H100:1 --env HF_TOKEN=YOUR_HUGGING_FACE_API_TOKEN
 ```
 **Tip**: You can also use the vLLM docker container for faster setup. Refer to [serve-openai-api-docker.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/serve-openai-api-docker.yaml) for more.
 
@@ -112,7 +112,7 @@ curl http://$IP:8000/v1/chat/completions \
 
 ## Serving Llama-2 with vLLM for more traffic using SkyServe
 To scale up the model serving for more traffic, we introduced SkyServe to enable a user to easily deploy multiple replica of the model:
-1. Adding an `service` section in the above `serve-openai-api.yaml` file to make it an [`SkyServe Service YAML`](https://skypilot.readthedocs.io/en/latest/serving/service-yaml-spec.html):
+1. Adding an `service` section in the above `serve-openai-api.yaml` file to make it an [`SkyServe Service YAML`](https://docs.skypilot.co/en/latest/serving/service-yaml-spec.html):
 
 ```yaml
 # The newly-added `service` section to the `serve-openai-api.yaml` file.
@@ -125,7 +125,7 @@ service:
 
 The entire Service YAML can be found here: [service.yaml](https://github.com/skypilot-org/skypilot/tree/master/llm/vllm/service.yaml).
 
-2. Start serving by using [SkyServe](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) CLI:
+2. Start serving by using [SkyServe](https://docs.skypilot.co/en/latest/serving/sky-serve.html) CLI:
 ```bash
 sky serve up -n vllm-llama2 service.yaml
 ```

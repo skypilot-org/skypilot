@@ -3,16 +3,16 @@ import copy
 from typing import Any, Dict, List, Optional, Tuple
 
 from sky import dag as dag_lib
-from sky import jobs
 from sky import sky_logging
 from sky import task as task_lib
-from sky.backends import backend_utils
+from sky.utils import cluster_utils
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
 
-# Message thrown when APIs sky.{exec,launch,spot.launch}() received a string
+# Message thrown when APIs sky.{exec,launch,jobs.launch}() received a string
 # instead of a Dag.  CLI (cli.py) is implemented by us so should not trigger
 # this.
 _ENTRYPOINT_STRING_AS_DAG_MESSAGE = """\
@@ -31,34 +31,65 @@ The command can then be run as:
 
   sky.launch(task, ...)
 
-  sky.spot.launch(task, ...)
+  sky.jobs.launch(task, ...)
 """.strip()
 
 
 def convert_entrypoint_to_dag(entrypoint: Any) -> 'dag_lib.Dag':
-    """Convert the entrypoint to a sky.Dag.
+    """Converts the entrypoint to a sky.Dag and applies the policy.
 
     Raises TypeError if 'entrypoint' is not a 'sky.Task' or 'sky.Dag'.
     """
     # Not suppressing stacktrace: when calling this via API user may want to
     # see their own program in the stacktrace. Our CLI impl would not trigger
     # these errors.
+    converted_dag: 'dag_lib.Dag'
     if isinstance(entrypoint, str):
         with ux_utils.print_exception_no_traceback():
             raise TypeError(_ENTRYPOINT_STRING_AS_DAG_MESSAGE)
     elif isinstance(entrypoint, dag_lib.Dag):
-        return copy.deepcopy(entrypoint)
+        converted_dag = copy.deepcopy(entrypoint)
     elif isinstance(entrypoint, task_lib.Task):
         entrypoint = copy.deepcopy(entrypoint)
         with dag_lib.Dag() as dag:
             dag.add(entrypoint)
             dag.name = entrypoint.name
-        return dag
+        converted_dag = dag
     else:
         with ux_utils.print_exception_no_traceback():
             raise TypeError(
                 'Expected a sky.Task or sky.Dag but received argument of type: '
                 f'{type(entrypoint)}')
+
+    return converted_dag
+
+
+def _load_chain_dag(
+        configs: List[Dict[str, Any]],
+        env_overrides: Optional[List[Tuple[str, str]]] = None) -> dag_lib.Dag:
+    """Loads a chain DAG from a list of YAML configs."""
+    dag_name = None
+    if set(configs[0].keys()) == {'name'}:
+        dag_name = configs[0]['name']
+        configs = configs[1:]
+    elif len(configs) == 1:
+        dag_name = configs[0].get('name')
+
+    if not configs:
+        # YAML has only `name: xxx`. Still instantiate a task.
+        configs = [{'name': dag_name}]
+
+    current_task = None
+    with dag_lib.Dag() as dag:
+        for task_config in configs:
+            if task_config is None:
+                continue
+            task = task_lib.Task.from_yaml_config(task_config, env_overrides)
+            if current_task is not None:
+                current_task >> task  # pylint: disable=pointless-statement
+            current_task = task
+    dag.name = dag_name
+    return dag
 
 
 def load_chain_dag_from_yaml(
@@ -79,36 +110,56 @@ def load_chain_dag_from_yaml(
       trivial task).
     """
     configs = common_utils.read_yaml_all(path)
-    dag_name = None
-    if set(configs[0].keys()) == {'name'}:
-        dag_name = configs[0]['name']
-        configs = configs[1:]
-    elif len(configs) == 1:
-        dag_name = configs[0].get('name')
-
-    if len(configs) == 0:
-        # YAML has only `name: xxx`. Still instantiate a task.
-        configs = [{'name': dag_name}]
-
-    current_task = None
-    with dag_lib.Dag() as dag:
-        for task_config in configs:
-            if task_config is None:
-                continue
-            task = task_lib.Task.from_yaml_config(task_config, env_overrides)
-            if current_task is not None:
-                current_task >> task  # pylint: disable=pointless-statement
-            current_task = task
-    dag.name = dag_name
-    return dag
+    return _load_chain_dag(configs, env_overrides)
 
 
-def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
+def load_chain_dag_from_yaml_str(
+    yaml_str: str,
+    env_overrides: Optional[List[Tuple[str, str]]] = None,
+) -> dag_lib.Dag:
+    """Loads a chain DAG from a YAML string.
+
+    Has special handling for an initial section in YAML that contains only the
+    'name' field, which is the DAG name.
+
+    'env_overrides' is a list of (key, value) pairs that will be used to update
+    the task's 'envs' section. If it is a chain dag, the envs will be updated
+    for all tasks in the chain.
+
+    Returns:
+      A chain Dag with 1 or more tasks (an empty entrypoint would create a
+      trivial task).
+    """
+    configs = common_utils.read_yaml_all_str(yaml_str)
+    return _load_chain_dag(configs, env_overrides)
+
+
+def dump_chain_dag_to_yaml_str(dag: dag_lib.Dag) -> str:
+    """Dumps a chain DAG to a YAML string.
+
+    Args:
+        dag: the DAG to dump.
+
+    Returns:
+        The YAML string.
+    """
     assert dag.is_chain(), dag
     configs = [{'name': dag.name}]
     for task in dag.tasks:
         configs.append(task.to_yaml_config())
-    common_utils.dump_yaml(path, configs)
+    return common_utils.dump_yaml_str(configs)
+
+
+def dump_chain_dag_to_yaml(dag: dag_lib.Dag, path: str) -> None:
+    """Dumps a chain DAG to a YAML file.
+
+    Args:
+        dag: the DAG to dump.
+        path: the path to the YAML file.
+    """
+    dag_str = dump_chain_dag_to_yaml_str(dag)
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write(dag_str)
 
 
 def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
@@ -125,7 +176,7 @@ def maybe_infer_and_fill_dag_and_task_names(dag: dag_lib.Dag) -> None:
             dag.name = first_task.name
 
     if dag.name is None:
-        dag.name = backend_utils.generate_cluster_name()
+        dag.name = cluster_utils.generate_cluster_name()
 
     if len(dag.tasks) == 1:
         if first_task.name is None:
@@ -140,11 +191,21 @@ def fill_default_config_in_dag_for_job_launch(dag: dag_lib.Dag) -> None:
     for task_ in dag.tasks:
 
         new_resources_list = []
+        default_strategy = registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
+        assert default_strategy is not None
         for resources in list(task_.resources):
-            change_default_value: Dict[str, Any] = {}
-            if resources.job_recovery is None:
-                change_default_value[
-                    'job_recovery'] = jobs.DEFAULT_RECOVERY_STRATEGY
+            original_job_recovery = resources.job_recovery
+            job_recovery = {'strategy': default_strategy}
+            if isinstance(original_job_recovery, str):
+                job_recovery['strategy'] = original_job_recovery
+            elif isinstance(original_job_recovery, dict):
+                job_recovery.update(original_job_recovery)
+                strategy = job_recovery.get('strategy')
+                if strategy is None:
+                    job_recovery['strategy'] = default_strategy
+            change_default_value: Dict[str, Any] = {
+                'job_recovery': job_recovery
+            }
 
             new_resources = resources.copy(**change_default_value)
             new_resources_list.append(new_resources)

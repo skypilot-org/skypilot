@@ -11,26 +11,26 @@ Frequently Asked Questions
 Git and GitHub
 --------------
 
-How to clone private GitHub repositories in a task's ``setup`` commands?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+How to clone private GitHub repositories in a job?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-This is possible provided you have `set up SSH agent forwarding <https://docs.github.com/en/developers/overview/using-ssh-agent-forwarding>`_.
-For example, run the following on your laptop:
-
-.. code-block:: bash
-
-   eval $(ssh-agent -s)
-   ssh-add ~/.ssh/id_rsa
-
-Then, any SkyPilot clusters launched from this machine would be able to clone private GitHub repositories. For example:
+Currently, SkyPilot does not support secret management or SSH agent forwarding to your sky clusters.
+You will need to use `file_mounts` to sync your Github SSH private key to your sky cluster.
 
 .. code-block:: yaml
 
-    # your_task.yaml
-    setup: |
-      git clone git@github.com:your-proj/your-repo.git
+  # your_task.yaml
+  file_mounts:
+    ~/.ssh/id_rsa: ~/.ssh/your-ssh-private-key
 
-Note: currently, cloning private repositories in the ``run`` commands is not supported yet.
+  setup: |
+    chmod 600 ~/.ssh/id_rsa
+    git clone git@github.com:your-proj/your-repo.git
+
+  run: |
+    cd your-repo
+    git pull
+
 
 How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -38,7 +38,7 @@ How to ensure my workdir's ``.git`` is synced up for managed spot jobs?
 Currently, there is a difference in whether ``.git`` is synced up depending on the command used:
 
 - For regular ``sky launch``, the workdir's ``.git`` is synced up by default.
-- For managed spot jobs ``sky spot launch``, the workdir's ``.git`` is excluded by default.
+- For managed jobs ``sky jobs launch``, the workdir's ``.git`` is excluded by default.
 
 In the second case, to ensure the workdir's ``.git`` is synced up for managed spot jobs, you can explicitly add a file mount to sync it up:
 
@@ -192,6 +192,22 @@ For example, if you have access to special regions of GCP, add the data to ``~/.
 Also, you can update the catalog for a specific cloud by deleting the CSV file (e.g., ``rm ~/.sky/catalogs/<schema-version>/gcp.csv``).
 SkyPilot will automatically download the latest catalog in the next run.
 
+Package installation
+---------------------
+
+Unable to import PyTorch in a SkyPilot task.
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+For `PyTorch <https://pytorch.org/>`_ installation, if you are using the default SkyPilot images (not passing in `--image-id`), ``pip install torch`` should work.
+
+But if you use your own image which has an older NVIDIA driver (535.161.08 or lower) and you install the default PyTorch, you may encounter the following error:
+
+.. code-block:: bash
+
+  ImportError: /home/azureuser/miniconda3/lib/python3.10/site-packages/torch/lib/../../nvidia/cusparse/lib/libcusparse.so.12: undefined symbol: __nvJitLinkComplete_12_4, version libnvJitLink.so.12
+
+You will need to install a PyTorch version that is compatible with your NVIDIA driver, e.g., ``pip install torch --index-url https://download.pytorch.org/whl/cu121``.
+
+
 Miscellaneous
 -------------
 
@@ -213,3 +229,48 @@ To launch a VS Code tunnel using a SkyPilot task definition, you can use the fol
 
 Note that you'll be prompted to authenticate with your GitHub account to launch a VS Code tunnel.
 
+
+.. _upgrade-skypilot:
+
+Upgrading SkyPilot
+------------------
+
+As SkyPilot runs an API server in the background, whenever you upgrade SkyPilot you will
+need to manually stop the old API server to have the new version take effect.
+
+.. code-block:: bash
+
+  sky api stop
+
+
+
+
+.. _migration-0.8.0:
+
+Migration from ``SkyPilot<=0.8.0``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+After ``SkyPilot v0.8.0``, SkyPilot has moved to a new client-server architecture, which is more flexible and powerful.
+It also introduces the :ref:`asynchronous execution model <async>`, which may cause compatibility issues with user programs using
+previous SkyPilot SDKs.
+
+All SkyPilot SDKs (except log related functions, including ``sky.tail_logs``, ``sky.jobs.tail_logs``, ``sky.serve.tail_logs``) are now asynchronous, and they return a request ID that can be used to manage the request.
+
+**Action needed**: Wrapping all SkyPilot SDK function calls with ``sky.stream_and_get()`` will make your program behave mostly the same as before:
+
+``SkyPilot<=0.8.0``:
+
+.. code-block:: python
+
+  task = sky.Task(run="echo hello SkyPilot")
+  job_id, handle = sky.launch(task)
+  sky.tail_logs(job_id)
+
+``SkyPilot>0.8.0``:
+
+.. code-block:: python
+  :emphasize-lines: 2
+
+  task = sky.Task(run="echo hello SkyPilot")
+  job_id, handle = sky.stream_and_get(sky.launch(task))
+  sky.tail_logs(job_id)

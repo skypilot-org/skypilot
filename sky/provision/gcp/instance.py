@@ -7,13 +7,13 @@ import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -52,6 +52,8 @@ def _filter_instances(
 # non_terminated_only=True?
 # Will there be callers who would want this to be False?
 # stop() and terminate() for example already implicitly assume non-terminated.
+# Currently, even with non_terminated_only=False, we may not have a dict entry
+# for terminated instances, if they have already been fully deleted.
 @common_utils.retry
 def query_instances(
     cluster_name_on_cloud: str,
@@ -632,13 +634,6 @@ def cleanup_ports(
     del ports  # Unused.
     assert provider_config is not None, cluster_name_on_cloud
     project_id = provider_config['project_id']
-    if 'ports' in provider_config:
-        # Backward compatibility for old provider config.
-        # TODO(tian): remove this after 2 minor releases, 0.6.0.
-        for port in provider_config['ports']:
-            firewall_rule_name = f'user-ports-{cluster_name_on_cloud}-{port}'
-            instance_utils.GCPComputeInstance.delete_firewall_rule(
-                project_id, firewall_rule_name)
     if 'firewall_rule' in provider_config:
         firewall_rule_name = provider_config['firewall_rule']
         instance_utils.GCPComputeInstance.delete_firewall_rule(

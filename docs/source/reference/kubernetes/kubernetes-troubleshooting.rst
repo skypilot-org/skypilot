@@ -87,7 +87,7 @@ Next, try running a simple hello world task to verify that SkyPilot can launch t
 
 .. code-block:: bash
 
-    $ sky launch -y -c mycluster --cloud kubernetes -- "echo hello world"
+    $ sky launch -y -c mycluster --cloud k8s -- "echo hello world"
     # Task should run and print "hello world" to the console
 
     # Once you have verified that the task runs, you can delete it
@@ -174,7 +174,7 @@ Run :code:`sky check` to verify that SkyPilot can see your GPUs.
     # Should show `Kubernetes: Enabled` and should not print any warnings about GPU support.
 
     # List the available GPUs in your cluster
-    $ sky show-gpus --cloud kubernetes
+    $ sky show-gpus --cloud k8s
 
 Step B4 - Try launching a dummy GPU task
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -184,7 +184,7 @@ Next, try running a simple GPU task to verify that SkyPilot can launch GPU tasks
 .. code-block:: bash
 
     # Replace the GPU type from the sky show-gpus output in the task launch command
-    $ sky launch -y -c mygpucluster --cloud kubernetes --gpu <gpu-type>:1 -- "nvidia-smi"
+    $ sky launch -y -c mygpucluster --cloud k8s --gpu <gpu-type>:1 -- "nvidia-smi"
 
     # Task should run and print the nvidia-smi output to the console
 
@@ -298,7 +298,7 @@ Next, try running a simple task with a service to verify that SkyPilot can launc
 
 .. code-block:: bash
 
-    $ sky launch -y -c myserver --cloud kubernetes --ports 8080 -- "python -m http.server 8080"
+    $ sky launch -y -c myserver --cloud k8s --ports 8080 -- "python -m http.server 8080"
 
     # Obtain the endpoint of the service
     $ sky status --endpoint 8080 myserver

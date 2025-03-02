@@ -14,6 +14,7 @@ from sky.backends import backend_utils
 from sky.backends import docker_utils
 from sky.data import storage as storage_lib
 from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
@@ -130,13 +131,14 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         pass
 
     def _provision(
-            self,
-            task: 'task_lib.Task',
-            to_provision: Optional['resources.Resources'],
-            dryrun: bool,
-            stream_logs: bool,
-            cluster_name: str,
-            retry_until_up: bool = False
+        self,
+        task: 'task_lib.Task',
+        to_provision: Optional['resources.Resources'],
+        dryrun: bool,
+        stream_logs: bool,
+        cluster_name: str,
+        retry_until_up: bool = False,
+        skip_unnecessary_provisioning: bool = False,
     ) -> Optional[LocalDockerResourceHandle]:
         """Builds docker image for the task and returns cluster name as handle.
 
@@ -152,6 +154,9 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
             logger.warning(
                 f'Retrying until up is not supported in backend: {self.NAME}. '
                 'Ignored the flag.')
+        if skip_unnecessary_provisioning:
+            logger.warning(f'skip_unnecessary_provisioning is not supported in '
+                           f'backend: {self.NAME}. Ignored the flag.')
         if stream_logs:
             logger.info(
                 'Streaming build logs is not supported in LocalDockerBackend. '
@@ -159,7 +164,8 @@ class LocalDockerBackend(backends.Backend['LocalDockerResourceHandle']):
         handle = LocalDockerResourceHandle(cluster_name)
         logger.info(f'Building docker image for task {task.name}. '
                     'This might take some time.')
-        with rich_utils.safe_status('[bold cyan]Building Docker image[/]'):
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Building Docker image')):
             image_tag, metadata = docker_utils.build_dockerimage_from_task(task)
         self.images[handle] = (image_tag, metadata)
         logger.info(f'Image {image_tag} built.')

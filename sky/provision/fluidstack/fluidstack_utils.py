@@ -1,6 +1,5 @@
 """FluidStack API client."""
 
-import functools
 import json
 import os
 import time
@@ -8,6 +7,8 @@ from typing import Any, Dict, List
 import uuid
 
 import requests
+
+from sky.utils import annotations
 
 
 def get_key_suffix():
@@ -30,7 +31,7 @@ class FluidstackAPIError(Exception):
         super().__init__(message)
 
 
-def raise_fluidstack_error(response: requests.Response) -> None:
+def raise_fluidstack_error(response: 'requests.Response') -> None:
     """Raise FluidstackAPIError if appropriate."""
     status_code = response.status_code
     if response.ok:
@@ -135,7 +136,7 @@ class FluidstackClient:
         raise_fluidstack_error(response)
         return {'name': ssh_key_name, 'ssh_key': ssh_pub_key}
 
-    @functools.lru_cache()
+    @annotations.lru_cache(scope='global')
     def list_regions(self):
         plans = self.get_plans()
 
