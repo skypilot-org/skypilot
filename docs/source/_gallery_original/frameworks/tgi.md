@@ -1,1 +1,0 @@
-../../../../llm/tgi/README.md

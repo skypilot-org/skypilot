@@ -1,1 +1,0 @@
-../../../../llm/localgpt/README.md

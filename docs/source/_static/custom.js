@@ -31,6 +31,8 @@ document.addEventListener('DOMContentLoaded', () => {
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
         { selector: '.toctree-l1 > a', text: 'Asynchronous Execution' },
         { selector: '.toctree-l1 > a', text: 'Team Deployment' },
+        { selector: '.toctree-l1 > a', text: 'Examples' },
+        { selector: '.toctree-l3 > a', text: 'DeepSeek-R1 for RAG' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {
