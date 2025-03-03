@@ -1280,12 +1280,17 @@ def parallel_data_transfer_to_nodes(
                                             stream_logs=stream_logs,
                                             require_outputs=True,
                                             source_bashrc=source_bashrc)
-            err_msg = ('Failed to run command before rsync '
+            err_msg = (f'{colorama.Style.RESET_ALL}{colorama.Style.DIM}'
+                       f'----- CMD -----\n'
+                       f'{cmd}\n'
+                       f'----- CMD END -----\n'
+                       f'{colorama.Style.RESET_ALL}'
+                       f'{colorama.Fore.RED}'
+                       f'Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
-                       'Ensure that the network is stable, then retry. '
-                       f'{cmd}')
+                       f'{colorama.Style.RESET_ALL}')
             if log_path != os.devnull:
-                err_msg += f' See logs in {log_path}'
+                err_msg += ux_utils.log_path_hint(log_path)
             subprocess_utils.handle_returncode(rc,
                                                cmd,
                                                err_msg,
