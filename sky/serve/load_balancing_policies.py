@@ -187,7 +187,7 @@ class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
     def __init__(self) -> None:
         super().__init__()
         self.replica2latency: Dict[str, float] = {}
-        self.max_load_threshold = 10
+        self.max_load_threshold = 3
 
     async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
@@ -246,7 +246,7 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
         self.hash_key = 'x-hash-key'
         # Ring of hash values to replica URLs
         self.hash_ring: List[RingEntry] = []
-        self.max_load_threshold = 10
+        self.max_load_threshold = 3
 
     def _hash_function(self, key: str) -> int:
         return xxhash.xxh64(key, seed=0).intdigest()
