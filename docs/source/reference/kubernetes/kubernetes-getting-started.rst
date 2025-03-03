@@ -281,25 +281,6 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
                   rdma/rdma_shared_device_a: 1
 
 
-Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) directly to your SkyPilot pods:
-
-.. code-block:: yaml
-
-    # ~/.sky/config.yaml
-    kubernetes:
-      pod_config:
-        spec:
-          containers:
-            - volumeMounts:       # Custom volume mounts for the pod
-                - mountPath: /data
-                  name: nfs-volume
-          volumes:
-            - name: nfs-volume
-              nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
-                server: nfs.example.com
-                path: /nfs
-
-
 .. tip::
 
     As an alternative to setting ``pod_config`` globally, you can also set it on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <task-yaml-experimental>`.
@@ -315,6 +296,32 @@ Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concep
          config_overrides:
            pod_config:
              ...
+
+
+Mounting volumes
+----------------
+
+Using the ``pod_config`` field, you can also attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) to your SkyPilot pods directly from the task YAML:
+
+.. code-block:: yaml
+
+    # task.yaml
+    run: |
+      echo "Hello, world!" > /nfs/hello.txt
+
+    experimental:
+      config_overrides:
+        pod_config:
+          spec:
+            containers:
+              - volumeMounts:       # Custom volume mounts for the pod
+                  - mountPath: /data
+                    name: nfs-volume
+            volumes:
+              - name: nfs-volume
+                nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
+                  server: nfs.example.com
+                  path: /nfs
 
 
 FAQs

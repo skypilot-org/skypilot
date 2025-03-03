@@ -1263,8 +1263,12 @@ def storage_delete(name: str) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool) -> server_common.RequestId:
+def local_up(gpus: bool,
+             ips: Optional[List[str]],
+             ssh_user: Optional[str],
+             ssh_key: Optional[str],
+             cleanup: bool,
+             context_name: Optional[str] = None) -> server_common.RequestId:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1282,7 +1286,8 @@ def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
                                 ips=ips,
                                 ssh_user=ssh_user,
                                 ssh_key=ssh_key,
-                                cleanup=cleanup)
+                                cleanup=cleanup,
+                                context_name=context_name)
     response = requests.post(f'{server_common.get_server_url()}/local_up',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1611,6 +1616,7 @@ def api_start(
     *,
     deploy: bool = False,
     host: str = '127.0.0.1',
+    foreground: bool = False,
 ) -> None:
     """Starts the API server.
 
@@ -1622,7 +1628,8 @@ def api_start(
             resources of the machine.
         host: The host to deploy the API server. It will be set to 0.0.0.0
             if deploy is True, to allow remote access.
-
+        foreground: Whether to run the API server in the foreground (run in
+            the current process).
     Returns:
         None
     """
@@ -1641,7 +1648,10 @@ def api_start(
                              'from the config file and/or unset the '
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
-    server_common.check_server_healthy_or_start_fn(deploy, host)
+    server_common.check_server_healthy_or_start_fn(deploy, host, foreground)
+    if foreground:
+        # Explain why current process exited
+        logger.info('API server is already running:')
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
                 f'{server_common.get_server_url(host)}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'

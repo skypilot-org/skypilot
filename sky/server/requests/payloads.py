@@ -322,6 +322,7 @@ class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False
+    all_users: bool = False
 
 
 class JobsCancelBody(RequestBody):
@@ -329,6 +330,7 @@ class JobsCancelBody(RequestBody):
     name: Optional[str]
     job_ids: Optional[List[int]]
     all: bool = False
+    all_users: bool = False
 
 
 class JobsLogsBody(RequestBody):
@@ -448,6 +450,7 @@ class LocalUpBody(RequestBody):
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None
     cleanup: bool = False
+    context_name: Optional[str] = None
 
 
 class ServeTerminateReplicaBody(RequestBody):

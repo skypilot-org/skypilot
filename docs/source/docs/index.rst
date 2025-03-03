@@ -172,11 +172,11 @@ Read the research:
    :maxdepth: 1
    :caption: Infra Choices
 
-   ../compute/gpus
-   Using Cloud VMs <../compute/cloud-vm>
    ../reference/kubernetes/index
    Using Existing Machines <../reservations/existing-machines>
    ../reservations/reservations
+   Using Cloud VMs <../compute/cloud-vm>
+   ../compute/gpus
 
 
 
