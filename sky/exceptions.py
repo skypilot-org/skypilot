@@ -22,6 +22,8 @@ MOUNT_PATH_NON_EMPTY_CODE = 42
 INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
+# Architecture, such as arm64, not supported by the dependency
+ARCH_NOT_SUPPORTED_EXIT_CODE = 133
 
 
 def is_safe_exception(exc: Exception) -> bool:

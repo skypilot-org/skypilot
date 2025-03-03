@@ -133,7 +133,11 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-        if handle is not None and handle.cached_external_ips is not None:
+        # During the failover, even though a cluster does not exist, the handle
+        # can still exist in the record, and we check for credentials to avoid
+        # updating the SSH config for non-existent clusters.
+        if (handle is not None and handle.cached_external_ips is not None and
+                'credentials' in record):
             credentials = record['credentials']
             if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
                 # Replace the proxy command to proxy through the SkyPilot API
@@ -169,9 +173,9 @@ def _get_cluster_records_and_set_ssh_config(
                 handle.ssh_user,
             )
         else:
-            # If the cluster is not UP or does not have IPs, we need to remove
-            # the cluster from the SSH config.
-            cluster_utils.SSHConfigHelper.remove_cluster(handle.cluster_name)
+            # If the cluster is not UP or does not have credentials available,
+            # we need to remove the cluster from the SSH config.
+            cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -5415,11 +5419,16 @@ def local():
 @click.option('--cleanup',
               is_flag=True,
               help='Clean up the remote cluster instead of deploying it.')
+@click.option(
+    '--context-name',
+    type=str,
+    required=False,
+    help='Name to use for the kubeconfig context. Defaults to "default".')
 @local.command('up', cls=_DocumentedCodeCommand)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, async_call: bool):
+             cleanup: bool, context_name: Optional[str], async_call: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5464,7 +5473,8 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
             raise click.BadParameter(
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
-    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup)
+    request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
+                              context_name)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 
@@ -5500,10 +5510,19 @@ def api():
               required=False,
               help=('The host to deploy the SkyPilot API server. To allow '
                     'remote access, set this to 0.0.0.0'))
+@click.option('--foreground',
+              is_flag=True,
+              default=False,
+              required=False,
+              help='Run the SkyPilot API server in the foreground and output '
+              'its logs to stdout/stderr. Allowing external systems '
+              'to manage the process lifecycle and collect logs directly. '
+              'This is useful when the API server is managed by systems '
+              'like systemd and Kubernetes.')
 @usage_lib.entrypoint
-def api_start(deploy: bool, host: Optional[str]):
+def api_start(deploy: bool, host: Optional[str], foreground: bool):
     """Starts the SkyPilot API server locally."""
-    sdk.api_start(deploy=deploy, host=host)
+    sdk.api_start(deploy=deploy, host=host, foreground=foreground)
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
