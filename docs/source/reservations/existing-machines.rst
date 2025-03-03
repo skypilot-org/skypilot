@@ -75,7 +75,8 @@ Deploying SkyPilot
       IP_FILE=ips.txt
       SSH_USER=username
       SSH_KEY=path/to/ssh/key
-      sky local up --ips $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY
+      CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
+      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
 
    SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
@@ -83,8 +84,7 @@ Deploying SkyPilot
 
    .. code-block:: console
 
-      $ sky local up --ips ips.txt --ssh-user gcpuser --ssh-key-path ~/.ssh/id_rsa
-      Found existing kube config. It will be backed up to ~/.kube/config.bak.
+      $ sky local up --ips ips.txt --ssh-user gcpuser --ssh-key-path ~/.ssh/id_rsa --context-name mycluster
       To view detailed progress: tail -n100 -f ~/sky_logs/sky-2024-09-23-18-53-14-165534/local_up.log
       ✔ K3s successfully deployed on head node.
       ✔ K3s successfully deployed on worker node.
@@ -151,3 +151,48 @@ To clean up all state created by SkyPilot on your machines, use the ``--cleanup`
     sky local up --ip $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --cleanup
 
 This will stop all Kubernetes services on the remote machines.
+
+
+Setting up Multiple Clusters
+----------------------------
+
+You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster:
+
+.. code-block:: bash
+
+    # Set up first cluster and save the kubeconfig
+    sky local up --ips cluster1-ips.txt --ssh-user user1 --ssh-key-path key1.pem --context-name cluster1
+    # Set up second cluster
+    sky local up --ips cluster2-ips.txt --ssh-user user2 --ssh-key-path key2.pem --context-name cluster2
+
+
+You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi-kubernetes>` by adding them to ``allowed_contexts`` in your ``~/.sky/config.yaml`` file:
+
+.. code-block:: yaml
+
+   # ~/.sky/config.yaml
+    allowed_contexts:
+      - cluster1
+      - cluster2
+
+
+.. code-block:: bash
+
+    # Run on cluster1
+    sky launch --cloud k8s --region cluster1 -- echo "Running on cluster 1"
+
+    # Run on cluster2
+    sky launch --cloud k8s --region cluster2 -- echo "Running on cluster 2"
+
+    # Let SkyPilot automatically select the cluster with available resources
+    sky launch --cloud k8s -- echo "Running on SkyPilot selected cluster"
+
+You can view the available clusters and GPUs using:
+
+.. code-block:: bash
+
+    # List GPUs on cluster1
+    sky show-gpus --cloud k8s --region cluster1
+
+    # List GPUs on cluster2
+    sky show-gpus --cloud k8s --region cluster2

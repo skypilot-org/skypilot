@@ -124,7 +124,7 @@ class Controllers(enum.Enum):
         cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status -a{colorama.Style.RESET_ALL}'),
+            f'sky serve status -v{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         _decline_down_when_failed_to_fetch_status_hint=(
@@ -246,11 +246,15 @@ def _get_cloud_dependencies_installation_commands(
                 'apt install curl socat netcat -y &> /dev/null; '
                 'fi" && '
                 # Install kubectl
+                'ARCH=$(uname -m) && '
+                'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                '  ARCH="arm64"; '
+                'else '
+                '  ARCH="amd64"; '
+                'fi && '
                 '(command -v kubectl &>/dev/null || '
-                '(curl -s -LO "https://dl.k8s.io/release/'
-                '$(curl -L -s https://dl.k8s.io/release/stable.txt)'
-                '/bin/linux/amd64/kubectl" && '
-                'sudo install -o root -g root -m 0755 '
+                '("https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" '
+                '&& sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
         elif isinstance(cloud, clouds.Cudo):
             step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
