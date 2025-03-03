@@ -27,7 +27,6 @@ from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import optimizer
 from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.data import storage_utils
@@ -42,6 +41,7 @@ from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
@@ -258,9 +258,22 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
+
+    # TODO: Our current launch process is split into three calls:
+    # validate, optimize, and launch. This requires us to apply the admin policy
+    # in each step, which may be an expensive operation. We should consolidate
+    # these into a single call or have a TTL cache for (task, admin_policy)
+    # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        # TODO: Admin policy may contain arbitrary code, which may be expensive
+        # to run and may block the server thread. However, moving it into the
+        # executor adds a ~150ms penalty on the local API server because of
+        # added RTTs. For now, we stick to doing the validation inline in the
+        # server thread.
+        dag, _ = admin_policy_utils.apply(
+            dag, request_options=validate_body.request_options)
         for task in dag.tasks:
             # Will validate workdir and file_mounts in the backend, as those
             # need to be validated after the files are uploaded to the SkyPilot
@@ -283,7 +296,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_name='optimize',
         request_body=optimize_body,
         ignore_return_value=True,
-        func=optimizer.Optimizer.optimize,
+        func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 

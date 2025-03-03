@@ -6,16 +6,18 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
+from sky import admin_policy
 from sky import backends
 from sky import check as sky_check
 from sky import clouds
-from sky import dag
+from sky import dag as dag_lib
 from sky import data
 from sky import exceptions
 from sky import global_user_state
 from sky import models
+from sky import optimizer
 from sky import sky_logging
-from sky import task
+from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
@@ -25,6 +27,7 @@ from sky.skylet import constants
 from sky.skylet import job_lib
 from sky.skylet import log_lib
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -42,6 +45,46 @@ logger = sky_logging.init_logger(__name__)
 # ======================
 # = Cluster Management =
 # ======================
+
+
+@usage_lib.entrypoint
+def optimize(
+    dag: 'dag_lib.Dag',
+    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+    blocked_resources: Optional[List['resources_lib.Resources']] = None,
+    quiet: bool = False,
+    request_options: Optional[admin_policy.RequestOptions] = None
+) -> 'dag_lib.Dag':
+    """Finds the best execution plan for the given DAG.
+
+    Args:
+        dag: the DAG to optimize.
+        minimize: whether to minimize cost or time.
+        blocked_resources: a list of resources that should not be used.
+        quiet: whether to suppress logging.
+        request_options: Request options used in enforcing admin policies.
+            This is only required when a admin policy is in use,
+            see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
+    Returns:
+        The optimized DAG.
+
+    Raises:
+        exceptions.ResourcesUnavailableError: if no resources are available
+            for a task.
+        exceptions.NoCloudAccessError: if no public clouds are enabled.
+    """
+    # TODO: We apply the admin policy only on the first DAG optimization which
+    # is shown on `sky launch`. The optimizer is also invoked during failover,
+    # but we do not apply the admin policy there. We should apply the admin
+    # policy in the optimizer, but that will require some refactoring.
+    dag, _ = admin_policy_utils.apply(
+        dag,
+        use_mutated_config_in_current_request=True,
+        request_options=request_options)
+    return optimizer.Optimizer.optimize(dag=dag,
+                                        minimize=minimize,
+                                        blocked_resources=blocked_resources,
+                                        quiet=quiet)
 
 
 @usage_lib.entrypoint
@@ -325,8 +368,8 @@ def _start(
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
-    with dag.Dag():
-        dummy_task = task.Task().set_resources(handle.launched_resources)
+    with dag_lib.Dag():
+        dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
     handle = backend.provision(dummy_task,
                                to_provision=handle.launched_resources,
