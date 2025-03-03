@@ -11,7 +11,6 @@ import shlex
 import signal
 import sqlite3
 import time
-import typing
 from typing import Any, Dict, List, Optional, Sequence
 
 import colorama
@@ -26,7 +25,6 @@ from sky.utils import db_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
-
 
 logger = sky_logging.init_logger(__name__)
 

@@ -555,14 +555,14 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                             print(line, end='', flush=True)
                 return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
-            return (
-                f'{colorama.Fore.YELLOW}'
-                f'Job {job_id} is already in terminal state '
-                f'{managed_job_status.value}. For more details, run: '
-                f'sky jobs logs --controller {job_id}'
-                f'{colorama.Style.RESET_ALL}'
-                f'{job_msg}',
-                exceptions.JobExitCode.from_managed_job_status(managed_job_status))
+            return (f'{colorama.Fore.YELLOW}'
+                    f'Job {job_id} is already in terminal state '
+                    f'{managed_job_status.value}. For more details, run: '
+                    f'sky jobs logs --controller {job_id}'
+                    f'{colorama.Style.RESET_ALL}'
+                    f'{job_msg}',
+                    exceptions.JobExitCode.from_managed_job_status(
+                        managed_job_status))
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -738,7 +738,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))
-    return '', exceptions.JobExitCode.from_managed_job_status(managed_job_status)
+    return '', exceptions.JobExitCode.from_managed_job_status(
+        managed_job_status)
 
 
 def stream_logs(job_id: Optional[int],

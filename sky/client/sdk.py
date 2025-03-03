@@ -576,7 +576,8 @@ def tail_logs(cluster_name: str,
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
-        100 if the job failed. See exceptions.JobExitCode for possible exit codes.
+        100 if the job failed. See exceptions.JobExitCode for possible exit
+        codes.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.

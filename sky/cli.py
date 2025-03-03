@@ -1230,8 +1230,8 @@ def launch(
         returncode = 0
         if not detach_run and job_id is not None:
             returncode = sdk.tail_logs(handle.get_cluster_name(),
-                                     job_id,
-                                     follow=True)
+                                       job_id,
+                                       follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
@@ -3909,9 +3909,9 @@ def jobs_launch(
     if not async_call and not detach_run:
         job_id = job_id_handle[0]
         returncode = managed_jobs.tail_logs(name=None,
-                                          job_id=job_id,
-                                          follow=True,
-                                          controller=False)
+                                            job_id=job_id,
+                                            follow=True,
+                                            controller=False)
         sys.exit(returncode)
 
 
@@ -4144,10 +4144,10 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                             f'{log_local_path}{style.RESET_ALL}')
         else:
             returncode = managed_jobs.tail_logs(name=name,
-                                              job_id=job_id,
-                                              follow=follow,
-                                              controller=controller,
-                                              refresh=refresh)
+                                                job_id=job_id,
+                                                follow=follow,
+                                                controller=controller,
+                                                refresh=refresh)
             sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():

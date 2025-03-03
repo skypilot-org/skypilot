@@ -474,7 +474,8 @@ class JobExitCode(enum.IntEnum):
     """The job was cancelled by the user"""
 
     @classmethod
-    def from_job_status(cls, status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
+    def from_job_status(cls,
+                        status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
         """Convert a job status to an exit code."""
         # Import here to avoid circular imports
         # pylint: disable=import-outside-toplevel
@@ -501,7 +502,8 @@ class JobExitCode(enum.IntEnum):
 
     @classmethod
     def from_managed_job_status(
-            cls, status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
+            cls,
+            status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
         """Convert a managed job status to an exit code."""
         # Import here to avoid circular imports
         # pylint: disable=import-outside-toplevel
