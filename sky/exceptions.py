@@ -62,6 +62,7 @@ def wrap_exception(exc: BaseException) -> BaseException:
                       error_type=type(exc).__name__)
 
 
+# Accept BaseException to handle SystemExit and KeyboardInterrupt
 def serialize_exception(e: BaseException) -> Dict[str, Any]:
     """Serialize the exception.
 

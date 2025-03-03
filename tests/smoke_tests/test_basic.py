@@ -662,14 +662,22 @@ def test_kubernetes_context_failover():
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
     name = smoke_tests_utils.get_cluster_name()
+    to_down = smoke_tests_utils.get_cluster_name() + '-down'
     test = smoke_tests_utils.Test(
         'launch_and_exec_async',
         [
             f'sky launch -c {name} -y --async',
             # Async exec.
-            f'sky exec {name} echo 1 --async',
+            f'sky exec {name} echo --async',
+            # Async exec and cancel immediately.
+            (f's=$(sky exec {name} echo --async) && '
+             'echo "$s" && '
+             'cancel_cmd=$(echo "$s" | grep "To cancel the request" | '
+             'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
+             'echo "Extracted cancel command: $cancel_cmd" && '
+             '$cancel_cmd'),
             # Sync exec.
-            f'sky exec {name} echo 2',
+            f'sky exec {name} echo',
             # Cluster must be UP since the sync exec has been completed.
             f'sky status {name} | grep "UP"',
             # The async one might be scheduled later and the job ID is
@@ -684,8 +692,30 @@ def test_launch_and_exec_async(generic_cloud: str):
                 retry_interval=5,
                 max_attempts=5,
             ),
+            # The cancelled job should not be scheduled.
+            f'! sky logs {name} 3 --status | grep "SUCCEEDED"',
         ],
         # Teardown: clean up the cluster
-        teardown=f'sky down -y {name}',
+        teardown=f'sky down -y {name} {to_down}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud))
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_cancel_launch_and_exec_async(generic_cloud: str):
+    """Test if async launch and exec commands work correctly when cluster is shutdown"""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test('cancel_launch_and_exec_async', [
+        (f'sky launch -c {name} -y --async && '
+         f's=$(sky exec {name} echo --async) && '
+         'echo "$s" && '
+         'logs_cmd=$(echo "$s" | grep "Check logs with" | sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
+         'echo "Extracted logs command: $logs_cmd" && '
+         f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT], 30)} &&'
+         f'sky down -y {name} && '
+         'log_output=$(eval $logs_cmd) && '
+         'echo "$log_output" | grep "cancelled by another process"'),
+    ],
+                                  teardown=f'sky down -y {name}',
+                                  timeout=smoke_tests_utils.get_timeout(
+                                      generic_cloud))
     smoke_tests_utils.run_one_test(test)
