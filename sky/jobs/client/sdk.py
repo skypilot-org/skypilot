@@ -201,7 +201,7 @@ def tail_logs(name: Optional[str] = None,
 
     Returns:
         Exit code based on success or failure of the job. 0 if success,
-        100 if the job failed. See job_lib.JobExitCode for possible exit codes.
+        100 if the job failed. See exceptions.JobExitCode for possible exit codes.
 
     Request Raises:
         ValueError: invalid arguments.

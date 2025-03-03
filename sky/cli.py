@@ -2187,14 +2187,14 @@ def logs(
         # it will return {None: None}.
         if job_id is None:
             click.secho(f'No job found on cluster {cluster!r}.', fg='red')
-            sys.exit(job_lib.JobExitCode.NOT_FOUND)
+            sys.exit(exceptions.JobExitCode.NOT_FOUND)
         job_status = list(job_statuses.values())[0]
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
             return
         else:
-            returncode = job_lib.JobExitCode.from_job_status(job_status)
+            returncode = exceptions.JobExitCode.from_job_status(job_status)
             if job_status is None:
                 id_str = '' if job_id is None else f'{job_id} '
                 click.secho(f'Job {id_str}not found', fg='red')

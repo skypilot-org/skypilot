@@ -27,8 +27,6 @@ from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 
-if typing.TYPE_CHECKING:
-    from sky.jobs.state import ManagedJobStatus
 
 logger = sky_logging.init_logger(__name__)
 
@@ -189,77 +187,6 @@ class JobStatus(enum.Enum):
     def colored_str(self) -> str:
         color = _JOB_STATUS_TO_COLOR[self]
         return f'{color}{self.value}{colorama.Style.RESET_ALL}'
-
-
-class JobExitCode(enum.IntEnum):
-    """Job exit code enum.
-
-    These codes are used as return codes for job-related operations and as
-    process exit codes to indicate job status.
-    """
-
-    SUCCEEDED = 0
-    """The job completed successfully"""
-
-    FAILED = 100
-    """The job failed (due to user code, setup, or driver failure)"""
-
-    NOT_FINISHED = 101
-    """The job has not finished yet"""
-
-    NOT_FOUND = 102
-    """The job was not found"""
-
-    CANCELLED = 103
-    """The job was cancelled by the user"""
-
-    @classmethod
-    def from_job_status(cls, status: Optional[JobStatus]) -> 'JobExitCode':
-        """Convert a job status to an exit code."""
-        if status is None:
-            return cls.NOT_FOUND
-
-        if not status.is_terminal():
-            return cls.NOT_FINISHED
-
-        if status == JobStatus.SUCCEEDED:
-            return cls.SUCCEEDED
-
-        if status == JobStatus.CANCELLED:
-            return cls.CANCELLED
-
-        if status in JobStatus.user_code_failure_states(
-        ) or status == JobStatus.FAILED_DRIVER:
-            return cls.FAILED
-
-        # Should not hit this case, but included to avoid errors
-        return cls.FAILED
-
-    @classmethod
-    def from_managed_job_status(
-            cls, status: Optional['ManagedJobStatus']) -> 'JobExitCode':
-        """Convert a managed job status to an exit code."""
-        # Import here to avoid circular imports
-        # pylint: disable=import-outside-toplevel
-        from sky.jobs.state import ManagedJobStatus
-
-        if status is None:
-            return cls.NOT_FOUND
-
-        if not status.is_terminal():
-            return cls.NOT_FINISHED
-
-        if status == ManagedJobStatus.SUCCEEDED:
-            return cls.SUCCEEDED
-
-        if status == ManagedJobStatus.CANCELLED:
-            return cls.CANCELLED
-
-        if status.is_failed():
-            return cls.FAILED
-
-        # Should not hit this case, but included to avoid errors
-        return cls.FAILED
 
 
 # We have two steps for job submissions:
@@ -1014,7 +941,8 @@ class JobLibCodeGen:
         'import os',
         'import getpass',
         'import sys',
-        'from sky.skylet import job_lib, log_lib, constants',
+        'from sky import exceptions',
+        'from sky.skylet import log_lib, job_lib, constants',
     ]
 
     @classmethod
@@ -1114,7 +1042,7 @@ class JobLibCodeGen:
             # Backward compatibility for returning exit code: Skylet versions 2
             # and older did not have JobExitCode, so we use 0 for those versions
             # TODO: Remove this special handling after 0.10.0.
-            'exit_code = job_lib.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
+            'exit_code = exceptions.JobExitCode.from_job_status(job_status) if getattr(constants, "SKYLET_LIB_VERSION", 1) > 2 else 0',
             'sys.exit(exit_code)',
         ]
         return cls._build(code)

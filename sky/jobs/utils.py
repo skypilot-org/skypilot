@@ -517,7 +517,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
     Returns:
         A tuple containing the log message and an exit code based on success or
         failure of the job. 0 if success, 100 if the job failed.
-        See job_lib.JobExitCode for possible exit codes.
+        See exceptions.JobExitCode for possible exit codes.
     """
 
     def should_keep_logging(status: managed_job_state.ManagedJobStatus) -> bool:
@@ -553,7 +553,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                             start_streaming = True
                         if start_streaming:
                             print(line, end='', flush=True)
-                return '', job_lib.JobExitCode.from_managed_job_status(
+                return '', exceptions.JobExitCode.from_managed_job_status(
                     managed_job_status)
             return (
                 f'{colorama.Fore.YELLOW}'
@@ -562,7 +562,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                 f'sky jobs logs --controller {job_id}'
                 f'{colorama.Style.RESET_ALL}'
                 f'{job_msg}',
-                job_lib.JobExitCode.from_managed_job_status(managed_job_status))
+                exceptions.JobExitCode.from_managed_job_status(managed_job_status))
         backend = backends.CloudVmRayBackend()
         task_id, managed_job_status = (
             managed_job_state.get_latest_task_id_status(job_id))
@@ -613,7 +613,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
                                            job_id=None,
                                            managed_job_id=job_id,
                                            follow=follow)
-            if returncode in [rc.value for rc in job_lib.JobExitCode]:
+            if returncode in [rc.value for rc in exceptions.JobExitCode]:
                 # If the log tailing exits with a known exit code we can safely
                 # break the loop because it indicates the tailing process
                 # succeeded (even though the real job can be SUCCEEDED or
@@ -738,7 +738,7 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))
-    return '', job_lib.JobExitCode.from_managed_job_status(managed_job_status)
+    return '', exceptions.JobExitCode.from_managed_job_status(managed_job_status)
 
 
 def stream_logs(job_id: Optional[int],
@@ -750,12 +750,12 @@ def stream_logs(job_id: Optional[int],
     Returns:
         A tuple containing the log message and the exit code based on success
         or failure of the job. 0 if success, 100 if the job failed.
-        See job_lib.JobExitCode for possible exit codes.
+        See exceptions.JobExitCode for possible exit codes.
     """
     if job_id is None and job_name is None:
         job_id = managed_job_state.get_latest_job_id()
         if job_id is None:
-            return 'No managed job found.', job_lib.JobExitCode.NOT_FOUND
+            return 'No managed job found.', exceptions.JobExitCode.NOT_FOUND
 
     if controller:
         if job_id is None:
@@ -771,7 +771,7 @@ def stream_logs(job_id: Optional[int],
             }
             if not managed_job_ids:
                 return (f'No managed job found with name {job_name!r}.',
-                        job_lib.JobExitCode.NOT_FOUND)
+                        exceptions.JobExitCode.NOT_FOUND)
             if len(managed_job_ids) > 1:
                 job_ids_str = ', '.join(
                     str(job_id) for job_id in managed_job_ids)
@@ -793,7 +793,7 @@ def stream_logs(job_id: Optional[int],
             if not follow:
                 # Assume that the log file hasn't been written yet. Since we
                 # aren't following, just return.
-                return '', job_lib.JobExitCode.SUCCEEDED
+                return '', exceptions.JobExitCode.SUCCEEDED
 
             job_status = managed_job_state.get_status(job_id)
             if job_status is None:
@@ -804,7 +804,7 @@ def stream_logs(job_id: Optional[int],
                 # point, it never will be. This job may have been submitted
                 # using an old version that did not create the log file, so this
                 # is not considered an exceptional case.
-                return '', job_lib.JobExitCode.from_managed_job_status(
+                return '', exceptions.JobExitCode.from_managed_job_status(
                     job_status)
 
             time.sleep(log_lib.SKY_LOG_WAITING_GAP_SECONDS)
@@ -852,16 +852,16 @@ def stream_logs(job_id: Optional[int],
         if follow:
             return ux_utils.finishing_message(
                 f'Job finished (status: {job_status}).'
-            ), job_lib.JobExitCode.from_managed_job_status(job_status)
+            ), exceptions.JobExitCode.from_managed_job_status(job_status)
 
-        return '', job_lib.JobExitCode.SUCCEEDED
+        return '', exceptions.JobExitCode.SUCCEEDED
 
     if job_id is None:
         assert job_name is not None
         job_ids = managed_job_state.get_nonterminal_job_ids_by_name(job_name)
         if not job_ids:
             return (f'No running managed job found with name {job_name!r}.',
-                    job_lib.JobExitCode.NOT_FOUND)
+                    exceptions.JobExitCode.NOT_FOUND)
         if len(job_ids) > 1:
             raise ValueError(
                 f'Multiple running jobs found with name {job_name!r}.')
