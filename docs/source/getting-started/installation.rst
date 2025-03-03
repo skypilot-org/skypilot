@@ -555,7 +555,7 @@ You can specify a preferable project ID, which will be used if a project ID is r
 To use Service Account authentication, follow these steps:
 1. Create a Service Account using the web console.
 2. Generate the credentials file and save it at `~/.nebius/credentials.json`. Make sure the file's structure matches the expected format.
-   (Note: Refer to the documentation for detailed instructions on creating and downloading the credentials file.)
+(Note: Refer to the documentation for detailed instructions on creating and downloading the credentials file.)
 
 **Important Notes:**
 - If the `NEBIUS_IAM_TOKEN` file exists, SkyPilot will prioritize using the token for authentication.
