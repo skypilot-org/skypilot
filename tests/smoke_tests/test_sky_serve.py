@@ -390,11 +390,11 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
     if generic_cloud == 'kubernetes':
-        # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        resource_arg = ""
+        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-user-bug-restart',
@@ -419,7 +419,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
                                               (1, False, 'FAILED')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -536,11 +536,11 @@ def test_skyserve_cancel(generic_cloud: str):
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
     if generic_cloud == 'kubernetes':
-        # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        resource_arg = ""
+        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-streaming',
@@ -552,7 +552,7 @@ def test_skyserve_streaming(generic_cloud: str):
             '--endpoint $endpoint | grep "Streaming test passed"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -617,10 +617,11 @@ def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
     if generic_cloud == 'kubernetes':
         # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        resource_arg = ""
+        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update',
@@ -642,7 +643,7 @@ def test_skyserve_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -657,11 +658,11 @@ def test_skyserve_update(generic_cloud: str):
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
     if generic_cloud == 'kubernetes':
-        # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        resource_arg = ""
+        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
@@ -691,7 +692,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -749,11 +750,11 @@ def test_skyserve_fast_update(generic_cloud: str):
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
     if generic_cloud == 'kubernetes':
-        # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        resource_arg = ""
+        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update-autoscale',
@@ -783,7 +784,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -866,10 +867,11 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
     if generic_cloud == 'kubernetes':
-        # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = smoke_tests_utils.HIGH_RESOURCE_ARG
+        resource_arg = ""
+        env = None
     else:
         resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
+        env = smoke_tests_utils.LOW_RESOURCE_ENV
     name = _get_service_name()
 
     test = smoke_tests_utils.Test(
@@ -910,7 +912,7 @@ def test_skyserve_failures(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=env,
     )
     smoke_tests_utils.run_one_test(test)
 

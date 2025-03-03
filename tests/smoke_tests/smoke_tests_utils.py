@@ -41,7 +41,6 @@ STORAGE_SETUP_COMMANDS = [
 ]
 
 LOW_RESOURCE_ARG = '--cpus 2+ --memory 4+'
-HIGH_RESOURCE_ARG = '--cpus 8+ --memory 16+'
 LOW_RESOURCE_PARAM = {
     'cpus': '2+',
     'memory': '4+',
