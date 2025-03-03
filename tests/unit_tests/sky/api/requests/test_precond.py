@@ -17,7 +17,9 @@ class TestPrecondition(unittest.TestCase):
     @mock.patch('sky.server.requests.requests.get_request')
     async def test_precondition_timeout(self, mock_get_request):
         """Test Precondition timeout behavior."""
+
         class Timeouted(precond.Precondition):
+
             async def check(self):
                 return False, 'Still checking'
 
@@ -29,14 +31,15 @@ class TestPrecondition(unittest.TestCase):
 
         self.assertFalse(result)
         api_requests.set_request_failed.assert_called_once()
-        self.assertIsInstance(
-            api_requests.set_request_failed.call_args[0][1],
-            exceptions.RequestCancelled)
+        self.assertIsInstance(api_requests.set_request_failed.call_args[0][1],
+                              exceptions.RequestCancelled)
 
     @mock.patch('sky.server.requests.requests.get_request')
     async def test_precondition_cancelled(self, mock_get_request):
         """Test Precondition cancellation behavior."""
+
         class Canceled(precond.Precondition):
+
             async def check(self):
                 return False, 'Waiting'
 
@@ -51,7 +54,9 @@ class TestPrecondition(unittest.TestCase):
     @mock.patch('sky.server.requests.requests.get_request')
     async def test_precondition_check_exception(self, mock_get_request):
         """Test Precondition behavior when check raises exception."""
+
         class Errored(precond.Precondition):
+
             async def check(self):
                 raise RuntimeError('Test error')
 
@@ -77,13 +82,11 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
     @mock.patch('sky.server.requests.requests.get_request_tasks')
     async def test_cluster_up(self, mock_get_tasks, mock_get_cluster):
         """Test when cluster is UP."""
-        mock_get_cluster.return_value = {
-            'status': status_lib.ClusterStatus.UP
-        }
+        mock_get_cluster.return_value = {'status': status_lib.ClusterStatus.UP}
         mock_get_tasks.return_value = []
 
-        p = precond.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
+        p = precond.ClusterStartCompletePrecondition(self.request_id,
+                                                     self.cluster_name)
         met, msg = await p.check()
 
         self.assertTrue(met)
@@ -98,8 +101,8 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         mock_get_cluster.return_value = None
         mock_get_tasks.return_value = []
 
-        p = precond.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
+        p = precond.ClusterStartCompletePrecondition(self.request_id,
+                                                     self.cluster_name)
         met, msg = await p.check()
 
         self.assertTrue(met)
@@ -114,8 +117,8 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         }
         mock_get_tasks.return_value = [mock.MagicMock()]
 
-        p = precond.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
+        p = precond.ClusterStartCompletePrecondition(self.request_id,
+                                                     self.cluster_name)
         met, msg = await p.check()
 
         self.assertFalse(met)
@@ -123,13 +126,14 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
 
     @mock.patch('sky.global_user_state.get_cluster_from_name')
     @mock.patch('sky.server.requests.requests.get_request_tasks')
-    async def test_cluster_not_found_but_tasks_running(self, mock_get_tasks, mock_get_cluster):
+    async def test_cluster_not_found_but_tasks_running(self, mock_get_tasks,
+                                                       mock_get_cluster):
         """Test when cluster is not found but there are tasks running."""
         mock_get_cluster.return_value = None
         mock_get_tasks.return_value = [mock.MagicMock()]
 
-        p = precond.ClusterStartCompletePrecondition(
-            self.request_id, self.cluster_name)
+        p = precond.ClusterStartCompletePrecondition(self.request_id,
+                                                     self.cluster_name)
         met, msg = await p.check()
 
         self.assertFalse(met)

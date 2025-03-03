@@ -47,6 +47,7 @@ from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import timeline
+from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import types

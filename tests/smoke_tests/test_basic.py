@@ -657,3 +657,35 @@ def test_kubernetes_context_failover():
             },
         )
         smoke_tests_utils.run_one_test(test)
+
+
+def test_launch_and_exec_async(generic_cloud: str):
+    """Test if the launch and exec commands work correctly with --async."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'launch_and_exec_async',
+        [
+            f'sky launch -c {name} -y --async',
+            # Async exec.
+            f'sky exec {name} echo 1 --async',
+            # Sync exec.
+            f'sky exec {name} echo 2',
+            # Cluster must be UP since the sync exec has been completed.
+            f'sky status {name} | grep "UP"',
+            # The async one might be scheduled later and the job ID is
+            # non-deterministic, so we wait for both jobs asynchronously.
+            smoke_tests_utils.RetriableCommand(
+                f'sky logs {name} 1 --status | grep "SUCCEEDED"',
+                retry_interval=5,
+                max_attempts=5,
+            ),
+            smoke_tests_utils.RetriableCommand(
+                f'sky logs {name} 2 --status | grep "SUCCEEDED"',
+                retry_interval=5,
+                max_attempts=5,
+            ),
+        ],
+        # Teardown: clean up the cluster
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud))
+    smoke_tests_utils.run_one_test(test)

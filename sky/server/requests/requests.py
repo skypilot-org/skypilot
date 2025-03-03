@@ -145,7 +145,7 @@ class Request:
         log_path = (log_path_prefix / self.request_id).with_suffix('.log')
         return log_path
 
-    def set_error(self, error: Exception) -> None:
+    def set_error(self, error: BaseException) -> None:
         """Set the error."""
         # TODO(zhwu): pickle.dump does not work well with custom exceptions if
         # it has more than 1 arguments.
@@ -583,7 +583,7 @@ def _add_or_update_request_no_lock(request: Request):
             f'VALUES ({fill_str})', row)
 
 
-def set_request_failed(request_id: str, e: Exception) -> None:
+def set_request_failed(request_id: str, e: BaseException) -> None:
     """Set a request to failed and populate the error message."""
     with ux_utils.enable_traceback():
         stacktrace = traceback.format_exc()

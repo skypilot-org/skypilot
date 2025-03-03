@@ -29,7 +29,7 @@ logger = sky_logging.init_logger(__name__)
 
 class Precondition(abc.ABC):
     """Abstract base class for a precondition for a request to be executed.
-    
+
     A Precondition can be waited in either of the following ways:
     - await Precondition: wait for the precondition to be met.
     - Precondition.wait_async: wait for the precondition to be met in background
@@ -63,7 +63,7 @@ class Precondition(abc.ABC):
     @abc.abstractmethod
     async def check(self) -> Tuple[bool, Optional[str]]:
         """Check if the precondition is met.
-        
+
         Returns:
             A tuple of (bool, Optional[str]).
             The bool indicates if the precondition is met.
@@ -73,7 +73,7 @@ class Precondition(abc.ABC):
 
     async def _wait(self) -> bool:
         """Wait for the precondition to be met.
-        
+
         Args:
             on_condition_met: Callback to execute when the precondition is met.
         """
@@ -115,7 +115,7 @@ class Precondition(abc.ABC):
                         assert req is not None, self.request_id
                         req.status_msg = status_msg
                     last_status_msg = status_msg
-            except (Exception, SystemExit, KeyboardInterrupt) as e:
+            except (Exception, SystemExit, KeyboardInterrupt) as e:  # pylint: disable=broad-except
                 api_requests.set_request_failed(self.request_id, e)
                 logger.info(f'Request {self.request_id} failed due to '
                             f'{common_utils.format_exception(e)}')
@@ -126,7 +126,7 @@ class Precondition(abc.ABC):
 
 class ClusterStartCompletePrecondition(Precondition):
     """Whether the start process of a cluster is complete.
-    
+
     This condition only waits the start process of a cluster to complete, e.g.
     `sky launch` or `sky start`.
     For cluster that has been started but not in UP status, bypass the waiting

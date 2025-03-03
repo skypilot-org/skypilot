@@ -5,7 +5,8 @@ import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence, Set
+import time
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Union
 import uuid
 
 import colorama
@@ -209,11 +210,29 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
+class RetriableCommand(NamedTuple):
+    """Command wrapper that retries if the command fails.
+
+    Args:
+        command: The command to run.
+        retry_interval: The interval between retries in seconds.
+        max_attempts: The maximum number of attempts.
+    """
+    command: str
+    retry_interval: int = 10
+    max_attempts: Optional[int] = None
+
+    def __str__(self) -> str:
+        return (f'RetriableCommand(command={self.command}, '
+                f'retry_interval={self.retry_interval}, '
+                f'max_attempts={self.max_attempts})')
+
+
 class Test(NamedTuple):
     name: str
     # Each command is executed serially.  If any failed, the remaining commands
     # are not run and the test is treated as failed.
-    commands: List[str]
+    commands: List[Union[str, RetriableCommand]]
     teardown: Optional[str] = None
     # Timeout for each command in seconds.
     timeout: int = DEFAULT_CMD_TIMEOUT
@@ -283,8 +302,12 @@ def run_one_test(test: Test) -> None:
     env_dict = os.environ.copy()
     if test.env:
         env_dict.update(test.env)
-    for command in test.commands:
-        write(f'+ {command}\n')
+
+    def run_command(command: str, retry_num: int = 0):
+        display_command = command
+        if retry_num > 0:
+            display_command = f"{command} # Retry attempt {retry_num}"
+        write(f'+ {display_command}\n')
         flush()
         proc = subprocess.Popen(
             command,
@@ -297,24 +320,38 @@ def run_one_test(test: Test) -> None:
         try:
             proc.wait(timeout=test.timeout)
         except subprocess.TimeoutExpired as e:
+            # Kill the current process.
+            proc.terminate()
+            # Raise to interrupt retry loop.
+            raise e
+        return proc.returncode
+
+    for command in test.commands:
+        try:
+            return_code = 0
+            if isinstance(command, RetriableCommand):
+                for i in range(command.max_attempts):
+                    return_code = run_command(command.command, i)
+                    if return_code == 0:
+                        break
+                    time.sleep(command.retry_interval)
+            else:
+                return_code = run_command(command)
+        except subprocess.TimeoutExpired as e:
             flush()
             test.echo(f'Timeout after {test.timeout} seconds.')
             test.echo(str(e))
             write(f'Timeout after {test.timeout} seconds.\n')
             flush()
-            # Kill the current process.
-            proc.terminate()
-            proc.returncode = 1  # None if we don't set it.
-            break
-
-        if proc.returncode:
+            return_code = 1
+        if return_code:
             break
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
-               if proc.returncode else f'{fore.GREEN}Passed{style.RESET_ALL}')
-    reason = f'\nReason: {command}' if proc.returncode else ''
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {return_code})'
+               if return_code else f'{fore.GREEN}Passed{style.RESET_ALL}')
+    reason = f'\nReason: {command}' if return_code else ''
     msg = (f'{outcome}.'
            f'{reason}')
     if log_to_stdout:
@@ -324,7 +361,7 @@ def run_one_test(test: Test) -> None:
         test.echo(msg)
         write(msg)
 
-    if (proc.returncode == 0 or
+    if (return_code == 0 or
             pytest.terminate_on_failure) and test.teardown is not None:
         subprocess_utils.run(
             test.teardown,
@@ -334,7 +371,7 @@ def run_one_test(test: Test) -> None:
             shell=True,
         )
 
-    if proc.returncode:
+    if return_code:
         if log_to_stdout:
             raise Exception(f'test failed')
         else:
