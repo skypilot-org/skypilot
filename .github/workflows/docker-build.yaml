@@ -66,9 +66,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          # TODO: add support for linux/arm64 for M series Macs
-          # It currently fails due to the failure to install google-cloud-sdk
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: true
           tags: "${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:latest,${{ secrets.DOCKER_USERNAME }}/${{ inputs.package_name }}:${{ steps.version.outputs.latest_version }}"
           cache-from: type=gha

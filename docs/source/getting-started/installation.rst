@@ -539,7 +539,18 @@ Nebius
 
   mkdir -p ~/.nebius
   nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
+
+If you have one tenant you can run:
+
+.. code-block:: shell
+
   nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
+
+You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
+
+.. code-block:: shell
+
+  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
 
 
 Request quotas for first time users
