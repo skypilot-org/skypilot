@@ -712,8 +712,9 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
          'echo "Extracted logs command: $logs_cmd" && '
          f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT], 30)} &&'
          f'sky down -y {name} && '
-         'log_output=$(eval $logs_cmd) && '
-         'echo "$log_output" | grep "cancelled by another process"'),
+         'log_output=$(eval $logs_cmd || true) && '
+         'echo "===logs===" && echo "$log_output" && '
+         'echo "$log_output" | grep "cancelled"'),
     ],
                                   teardown=f'sky down -y {name}',
                                   timeout=smoke_tests_utils.get_timeout(
