@@ -56,7 +56,7 @@ def test_multi_tenant(generic_cloud: str):
                 f's=$(sky queue -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
             *set_user(user_2, user_2_name, [
-                f'sky exec {name}-1 -n job-2 \'echo "hello" && exit 1\'',
+                f'sky exec {name}-1 -n job-2 \'echo "hello" && exit 1\' || [ $? -eq 100 ]',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-2 | grep FAILED | awk \'{{print $1}}\' | grep 2',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 && exit 1 || true',
                 f's=$(sky queue {name}-1 -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep job-2 | grep FAILED',

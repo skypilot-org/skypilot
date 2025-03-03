@@ -583,7 +583,7 @@ def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
               tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails the logs of a job.
 
     Args:
@@ -596,7 +596,9 @@ def tail_logs(cluster_name: str,
             console.
 
     Returns:
-        None
+        Exit code based on success or failure of the job. 0 if success,
+        100 if the job failed. See exceptions.JobExitCode for possible exit
+        codes.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
@@ -622,7 +624,7 @@ def tail_logs(cluster_name: str,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     request_id = server_common.get_request_id(response)
-    stream_response(request_id, response, output_stream)
+    return stream_response(request_id, response, output_stream)
 
 
 @usage_lib.entrypoint
