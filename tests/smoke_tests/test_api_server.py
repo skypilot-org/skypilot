@@ -1,5 +1,6 @@
 from typing import List
 
+import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
@@ -97,6 +98,7 @@ def test_multi_tenant(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.mark.resource_heavy
 def test_multi_tenant_managed_jobs(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     user_1 = 'abcdef12'
