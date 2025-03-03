@@ -1227,15 +1227,15 @@ def launch(
             clusters=[handle.get_cluster_name()])
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
-        ret_code = 0
+        returncode = 0
         if not detach_run and job_id is not None:
-            ret_code = sdk.tail_logs(handle.get_cluster_name(),
+            returncode = sdk.tail_logs(handle.get_cluster_name(),
                                      job_id,
                                      follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
-        sys.exit(ret_code)
+        sys.exit(returncode)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1381,8 +1381,8 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        ret_code = sdk.tail_logs(cluster, job_id, follow=True)
-        sys.exit(ret_code)
+        returncode = sdk.tail_logs(cluster, job_id, follow=True)
+        sys.exit(returncode)
 
 
 def _handle_jobs_queue_request(
@@ -2194,11 +2194,11 @@ def logs(
         if job_status == job_lib.JobStatus.SUCCEEDED:
             return
         else:
-            ret_code = job_lib.JobExitCode.from_job_status(job_status)
+            returncode = job_lib.JobExitCode.from_job_status(job_status)
             if job_status is None:
                 id_str = '' if job_id is None else f'{job_id} '
                 click.secho(f'Job {id_str}not found', fg='red')
-            sys.exit(ret_code)
+            sys.exit(returncode)
 
     job_str = f'job {job_id}'
     if job_id is None:
@@ -2208,8 +2208,8 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    ret_code = sdk.tail_logs(cluster, job_id, follow, tail=tail)
-    sys.exit(ret_code)
+    returncode = sdk.tail_logs(cluster, job_id, follow, tail=tail)
+    sys.exit(returncode)
 
 
 @cli.command()
@@ -3908,11 +3908,11 @@ def jobs_launch(
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
         job_id = job_id_handle[0]
-        ret_code = managed_jobs.tail_logs(name=None,
+        returncode = managed_jobs.tail_logs(name=None,
                                           job_id=job_id,
                                           follow=True,
                                           controller=False)
-        sys.exit(ret_code)
+        sys.exit(returncode)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4143,12 +4143,12 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
-            ret_code = managed_jobs.tail_logs(name=name,
+            returncode = managed_jobs.tail_logs(name=name,
                                               job_id=job_id,
                                               follow=follow,
                                               controller=controller,
                                               refresh=refresh)
-            sys.exit(ret_code)
+            sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise
