@@ -793,7 +793,7 @@ def stream_logs(job_id: Optional[int],
             if not follow:
                 # Assume that the log file hasn't been written yet. Since we
                 # aren't following, just return.
-                return '', job_lib.JobExitCode.SUCCESS
+                return '', job_lib.JobExitCode.SUCCEEDED
 
             job_status = managed_job_state.get_status(job_id)
             if job_status is None:
@@ -854,7 +854,7 @@ def stream_logs(job_id: Optional[int],
                 f'Job finished (status: {job_status}).'
             ), job_lib.JobExitCode.from_managed_job_status(job_status)
 
-        return '', job_lib.JobExitCode.SUCCESS
+        return '', job_lib.JobExitCode.SUCCEEDED
 
     if job_id is None:
         assert job_name is not None

@@ -198,7 +198,7 @@ class JobExitCode(enum.IntEnum):
     process exit codes to indicate job status.
     """
 
-    SUCCESS = 0
+    SUCCEEDED = 0
     """The job completed successfully"""
 
     FAILED = 100
@@ -223,7 +223,7 @@ class JobExitCode(enum.IntEnum):
             return cls.NOT_FINISHED
 
         if status == JobStatus.SUCCEEDED:
-            return cls.SUCCESS
+            return cls.SUCCEEDED
 
         if status == JobStatus.CANCELLED:
             return cls.CANCELLED
@@ -250,7 +250,7 @@ class JobExitCode(enum.IntEnum):
             return cls.NOT_FINISHED
 
         if status == ManagedJobStatus.SUCCEEDED:
-            return cls.SUCCESS
+            return cls.SUCCEEDED
 
         if status == ManagedJobStatus.CANCELLED:
             return cls.CANCELLED
