@@ -2276,9 +2276,8 @@ def check_cluster_available(
             raise exceptions.ClusterDoesNotExist(
                 f'{colorama.Fore.YELLOW}{error_msg}{reset}')
     assert cluster_status is not None, 'handle is not None but status is None'
-    backend = get_backend_from_handle(handle)
     if check_cloud_vm_ray_backend and not isinstance(
-            backend, backends.CloudVmRayBackend):
+            handle, backends.CloudVmRayResourceHandle):
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation.capitalize()}: skipped for '
@@ -2303,7 +2302,8 @@ def check_cluster_available(
                 cluster_status=cluster_status,
                 handle=handle)
 
-    if handle.head_ip is None:
+    if isinstance(handle,
+                  backends.CloudVmRayResourceHandle) and handle.head_ip is None:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ClusterNotUpError(
                 f'Cluster {cluster_name!r} has been stopped or not properly '
@@ -2381,6 +2381,7 @@ def is_controller_accessible(
             cluster_name,
             force_refresh_statuses=[status_lib.ClusterStatus.INIT],
             cluster_status_lock_timeout=0)
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     except exceptions.ClusterStatusFetchingError as e:
         # We do not catch the exceptions related to the cluster owner identity
         # mismatch, please refer to the comment in
@@ -2410,9 +2411,10 @@ def is_controller_accessible(
         error_msg = non_existent_message
     elif (controller_status == status_lib.ClusterStatus.INIT or
           need_connection_check):
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
-        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
+        # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
         # we can allow access to the controller.
         ssh_credentials = ssh_credential_from_yaml(handle.cluster_yaml,
                                                    handle.docker_user,
@@ -2434,8 +2436,8 @@ def is_controller_accessible(
             raise exceptions.ClusterNotUpError(error_msg,
                                                cluster_status=controller_status,
                                                handle=handle)
-    assert handle is not None and handle.head_ip is not None, (
-        handle, controller_status)
+    assert (isinstance(handle, backends.CloudVmRayResourceHandle) and
+            handle.head_ip is not None), (handle, controller_status)
     return handle
 
 

@@ -354,10 +354,10 @@ def _execute(
         if Stage.EXEC in stages:
             try:
                 global_user_state.update_last_use(handle.get_cluster_name())
-                job_id = backend.execute(handle,
-                                         task,
-                                         detach_run,
-                                         dryrun=dryrun)
+                job_id: Optional[int] = backend.execute(handle,
+                                                        task,
+                                                        detach_run,
+                                                        dryrun=dryrun)
             finally:
                 # Enables post_execute() to be run after KeyboardInterrupt.
                 backend.post_execute(handle, down)
