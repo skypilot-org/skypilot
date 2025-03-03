@@ -259,7 +259,7 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
 
-    # TODO: Our current launch process is broken down into three calls:
+    # TODO: Our current launch process is split into three calls:
     # validate, optimize, and launch. This requires us to apply the admin policy
     # in each step, which may be an expensive operation. We should consolidate
     # these into a single call or have a TTL cache for (task, admin_policy)
