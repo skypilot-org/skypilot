@@ -27,7 +27,6 @@ from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import subprocess_utils
 
-# Using TYPE_CHECKING to avoid circular imports
 if typing.TYPE_CHECKING:
     from sky.jobs.state import ManagedJobStatus
 
