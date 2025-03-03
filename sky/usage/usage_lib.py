@@ -3,7 +3,6 @@
 import contextlib
 import datetime
 import enum
-import inspect
 import json
 import os
 import time
@@ -11,20 +10,27 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import click
-import requests
-
 import sky
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.usage import constants
 from sky.utils import common_utils
 from sky.utils import env_options
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import inspect
+
+    import requests
+
     from sky import resources as resources_lib
-    from sky import status_lib
     from sky import task as task_lib
+    from sky.utils import status_lib
+else:
+    # requests and inspect cost ~100ms to load, which can be postponed to
+    # collection phase or skipped if user specifies no collection
+    requests = adaptors_common.LazyImport('requests')
+    inspect = adaptors_common.LazyImport('inspect')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -36,6 +42,7 @@ def _get_current_timestamp_ns() -> int:
 class MessageType(enum.Enum):
     """Types for messages to be sent to Loki."""
     USAGE = 'usage'
+    HEARTBEAT = 'heartbeat'
     # TODO(zhwu): Add more types, e.g., cluster_lifecycle.
 
 
@@ -59,8 +66,9 @@ class MessageToReport:
         properties = self.__dict__.copy()
         return {k: v for k, v in properties.items() if not k.startswith('_')}
 
-    def __repr__(self):
-        raise NotImplementedError
+    def __repr__(self) -> str:
+        d = self.get_properties()
+        return json.dumps(d)
 
 
 class UsageMessageToReport(MessageToReport):
@@ -75,7 +83,12 @@ class UsageMessageToReport(MessageToReport):
         self.sky_commit: str = sky.__commit__
 
         # Entry
-        self.cmd: str = common_utils.get_pretty_entry_point()
+        self.cmd: Optional[str] = common_utils.get_current_command()
+        # The entrypoint on the client side.
+        self.client_entrypoint: Optional[str] = None
+        # The entrypoint on the server side, where each request has a entrypoint
+        # and a single client_entrypoint can have multiple server-side
+        # entrypoints.
         self.entrypoint: Optional[str] = None  # entrypoint_context
         #: Whether entrypoint is called by sky internal code.
         self.internal: bool = False  # set_internal
@@ -152,11 +165,14 @@ class UsageMessageToReport(MessageToReport):
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
-    def __repr__(self) -> str:
-        d = self.get_properties()
-        return json.dumps(d)
+        # Whether API server is deployed remotely.
+        self.using_remote_api_server: bool = (
+            common_utils.get_using_remote_api_server())
 
     def update_entrypoint(self, msg: str):
+        if self.client_entrypoint is None:
+            self.client_entrypoint = common_utils.get_current_client_entrypoint(
+                msg)
         self.entrypoint = msg
 
     def set_internal(self):
@@ -201,9 +217,11 @@ class UsageMessageToReport(MessageToReport):
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
         if self.ray_yamls is None:
             self.ray_yamls = []
-        self.ray_yamls.extend(
-            prepare_json_from_yaml_config(yaml_config_or_path))
-        self.num_tried_regions = len(self.ray_yamls)
+        if self.num_tried_regions is None:
+            self.num_tried_regions = 0
+        # Only keep the latest ray yaml to reduce the size of the message.
+        self.ray_yamls = prepare_json_from_yaml_config(yaml_config_or_path)
+        self.num_tried_regions += 1
 
     def update_cluster_name(self, cluster_name: Union[List[str], str]):
         if isinstance(cluster_name, str):
@@ -267,15 +285,42 @@ class UsageMessageToReport(MessageToReport):
                                            name_or_fn)
 
 
+class HeartbeatMessageToReport(MessageToReport):
+    """Message to be reported to Grafana Loki for heartbeat on a cluster."""
+
+    def __init__(self, interval_seconds: int = 600):
+        super().__init__(constants.USAGE_MESSAGE_SCHEMA_VERSION)
+        # This interval_seconds is mainly for recording the heartbeat interval
+        # in the heartbeat message, so that the collector can use it.
+        self.interval_seconds = interval_seconds
+
+    def get_properties(self) -> Dict[str, Any]:
+        properties = super().get_properties()
+        # The run id is set by the skylet, which will always be the same for
+        # the entire lifetime of the run.
+        with open(os.path.expanduser(constants.USAGE_RUN_ID_FILE),
+                  'r',
+                  encoding='utf-8') as f:
+            properties['run_id'] = f.read().strip()
+        return properties
+
+
 class MessageCollection:
     """A collection of messages."""
 
     def __init__(self):
-        self._messages = {MessageType.USAGE: UsageMessageToReport()}
+        self._messages = {
+            MessageType.USAGE: UsageMessageToReport(),
+            MessageType.HEARTBEAT: HeartbeatMessageToReport()
+        }
 
     @property
-    def usage(self):
+    def usage(self) -> UsageMessageToReport:
         return self._messages[MessageType.USAGE]
+
+    @property
+    def heartbeat(self) -> HeartbeatMessageToReport:
+        return self._messages[MessageType.HEARTBEAT]
 
     def reset(self, message_type: MessageType):
         self._messages[message_type] = self._messages[message_type].__class__()
@@ -300,13 +345,25 @@ def _send_to_loki(message_type: MessageType):
 
     message = messages[message_type]
 
+    # In case the message has no start time, set it to the current time.
+    message.start()
     message.send_time = _get_current_timestamp_ns()
-    log_timestamp = message.start_time
+    # Use send time instead of start time to avoid the message being dropped
+    # by Loki, due to the timestamp being too old. We still have the start time
+    # in the message for dashboard.
+    log_timestamp = message.send_time
 
     environment = 'prod'
     if env_options.Options.IS_DEVELOPER.get():
         environment = 'dev'
-    prom_labels = {'type': message_type.value, 'environment': environment}
+    prom_labels = {
+        'type': message_type.value,
+        'environment': environment,
+        'schema_version': message.schema_version,
+    }
+    if message_type == MessageType.USAGE:
+        prom_labels['new_cluster'] = (message.original_cluster_status != 'UP'
+                                      and message.final_cluster_status == 'UP')
 
     headers = {'Content-type': 'application/json'}
     payload = {
@@ -384,7 +441,7 @@ def prepare_json_from_yaml_config(
 def _send_local_messages():
     """Send all messages not been uploaded to Loki."""
     for msg_type, message in messages.items():
-        if not message.message_sent:
+        if not message.message_sent and msg_type != MessageType.HEARTBEAT:
             # Avoid the fallback entrypoint to send the message again
             # in normal case.
             try:
@@ -392,6 +449,38 @@ def _send_local_messages():
             except (Exception, SystemExit) as e:  # pylint: disable=broad-except
                 logger.debug(f'Usage logging for {msg_type.value} '
                              f'exception caught: {type(e)}({e})')
+
+
+def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
+    with ux_utils.enable_traceback():
+        if hasattr(e, 'stacktrace') and e.stacktrace is not None:
+            messages.usage.stacktrace = e.stacktrace
+        else:
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+        if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
+            messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+        messages.usage.exception = common_utils.remove_color(
+            common_utils.format_exception(e))
+
+
+def send_heartbeat(interval_seconds: int = 600):
+    messages.heartbeat.interval_seconds = interval_seconds
+    _send_to_loki(MessageType.HEARTBEAT)
+
+
+def maybe_show_privacy_policy():
+    """Show the privacy policy if it is not already shown."""
+    # Show the policy message only when the entrypoint is used.
+    # An indicator for PRIVACY_POLICY has already been shown.
+    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
+    if not env_options.Options.DISABLE_LOGGING.get():
+        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
+        try:
+            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
+                logger.info(constants.USAGE_POLICY_MESSAGE)
+        except FileExistsError:
+            pass
 
 
 @contextlib.contextmanager
@@ -405,17 +494,6 @@ def entrypoint_context(name: str, fallback: bool = False):
     additional entrypoint_context with fallback=True can be used to wrap
     the global entrypoint to catch any exceptions that are not caught.
     """
-    # Show the policy message only when the entrypoint is used.
-    # An indicator for PRIVACY_POLICY has already been shown.
-    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
-    if not env_options.Options.DISABLE_LOGGING.get():
-        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
-        try:
-            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
-                click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
-        except FileExistsError:
-            pass
-
     is_entry = messages.usage.entrypoint is None
     if is_entry and not fallback:
         for message in messages.values():
@@ -429,13 +507,7 @@ def entrypoint_context(name: str, fallback: bool = False):
     try:
         yield
     except (Exception, SystemExit, KeyboardInterrupt) as e:
-        with ux_utils.enable_traceback():
-            trace = traceback.format_exc()
-            messages.usage.stacktrace = trace
-            if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
-            messages.usage.exception = common_utils.remove_color(
-                common_utils.format_exception(e))
+        store_exception(e)
         raise
     finally:
         if fallback:
@@ -443,7 +515,27 @@ def entrypoint_context(name: str, fallback: bool = False):
         _send_local_messages()
 
 
-def entrypoint(name_or_fn: Union[str, Callable], fallback: bool = False):
+T = typing.TypeVar('T')
+
+
+@typing.overload
+def entrypoint(
+        name_or_fn: str,
+        fallback: bool = False
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def entrypoint(name_or_fn: Callable[..., T],
+               fallback: bool = False) -> Callable[..., T]:
+    ...
+
+
+def entrypoint(
+    name_or_fn: Union[str, Callable[..., T]],
+    fallback: bool = False
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

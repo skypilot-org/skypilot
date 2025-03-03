@@ -20,9 +20,7 @@ with sky.Dag() as dag:
 
     task = sky.Task('setup', workdir=workdir, setup=setup)
     task.set_resources(sky.Resources(sky.AWS(), accelerators={'V100': 1}))
-# `detach_run` will only detach the `run` command. The provision and `setup` are
-# still blocking.
-sky.launch(dag, cluster_name='tb', detach_run=True)
+sky.stream_and_get(sky.launch(dag, cluster_name='tb'))
 
 # Run the training task.
 # The command to run.  Will be run under the working directory.
@@ -44,7 +42,7 @@ train = sky.Task(
 train.set_resources({
     sky.Resources(accelerators='V100'),
 })
-sky.exec(train, cluster_name='tb', detach_run=True)
+sky.exec(train, cluster_name='tb')
 
 # Run the tensorboard task.
 # Use 'ssh -L 4650:localhost:4650 <cluster_name>' to forward port to local.
@@ -58,4 +56,4 @@ tensorboard = sky.Task(
 )
 tensorboard.set_resources(sky.Resources())
 
-sky.exec(tensorboard, cluster_name='tb', detach_run=True)
+sky.exec(tensorboard, cluster_name='tb')

@@ -1,15 +1,16 @@
 """FluidStack instance provisioning."""
+import os
 import time
 from typing import Any, Dict, List, Optional
 
 from sky import authentication as auth
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 from sky.provision.fluidstack import fluidstack_utils as utils
 from sky.utils import command_runner
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -25,10 +26,11 @@ logger = sky_logging.init_logger(__name__)
 
 def get_internal_ip(node_info: Dict[str, Any]) -> None:
     node_info['internal_ip'] = node_info['ip_address']
+    private_key_path, _ = auth.get_or_generate_keys()
     runner = command_runner.SSHCommandRunner(
         (node_info['ip_address'], 22),
         ssh_user='ubuntu',
-        ssh_private_key=auth.PRIVATE_SSH_KEY_PATH)
+        ssh_private_key=os.path.expanduser(private_key_path))
     result = runner.run(_GET_INTERNAL_IP_CMD,
                         require_outputs=True,
                         stream_logs=False)
@@ -79,9 +81,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
     """Runs instances for the given cluster."""
 
-    pending_status = [
-        'pending',
-    ]
+    pending_status = ['pending', 'provisioning']
     while True:
         instances = _filter_instances(cluster_name_on_cloud, pending_status)
         if len(instances) > config.count:
@@ -298,7 +298,7 @@ def query_instances(
         'pending': status_lib.ClusterStatus.INIT,
         'stopped': status_lib.ClusterStatus.STOPPED,
         'running': status_lib.ClusterStatus.UP,
-        'unhealthy': status_lib.ClusterStatus.INIT,
+        'failed': status_lib.ClusterStatus.INIT,
         'terminated': None,
     }
     statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}

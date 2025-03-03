@@ -12,6 +12,8 @@ This guide will walk you through:
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
+.. _hello-skypilot:
+
 Hello, SkyPilot!
 ------------------
 
@@ -31,8 +33,8 @@ Copy the following YAML into a ``hello_sky.yaml`` file:
   resources:
     # Optional; if left out, automatically pick the cheapest cloud.
     cloud: aws
-    # 1x NVIDIA V100 GPU
-    accelerators: V100:1
+    # 8x NVIDIA A100 GPU
+    accelerators: A100:8
 
   # Working directory (optional) containing the project codebase.
   # Its contents are synced to ~/sky_workdir/ on the cluster.
@@ -106,7 +108,7 @@ Bash commands are also supported, such as:
 .. code-block:: console
 
   $ sky exec mycluster python train_cpu.py
-  $ sky exec mycluster --gpus=V100:1 python train_gpu.py
+  $ sky exec mycluster --gpus=A100:8 python train_gpu.py
 
 For interactive/monitoring commands, such as ``htop`` or ``gpustat -i``, use ``ssh`` instead (see below) to avoid job submission overheads.
 
@@ -124,9 +126,9 @@ This may show multiple clusters, if you have created several:
 
 .. code-block::
 
-  NAME       LAUNCHED     RESOURCES             COMMAND                            STATUS
-  mygcp      1 day ago    1x GCP(n1-highmem-8)  sky launch -c mygcp --cloud gcp    STOPPED
-  mycluster  4 mins ago   1x AWS(p3.2xlarge)    sky exec mycluster hello_sky.yaml  UP
+  NAME       LAUNCHED     RESOURCES                          COMMAND                            STATUS
+  mygcp      1 day ago    1x GCP(n1-highmem-8)               sky launch -c mygcp --cloud gcp    STOPPED
+  mycluster  4 mins ago   1x AWS(p4d.24xlarge, {'A100': 8})  sky exec mycluster hello_sky.yaml  UP
 
 See here for a list of all possible :ref:`cluster states <sky-status>`.
 
@@ -200,17 +202,40 @@ Scaling out
 =========================
 
 So far, we have used SkyPilot's CLI to submit work to and interact with a single cluster.
-When you are ready to scale out (e.g., run 10s or 100s of jobs), SkyPilot supports two options:
-
-- Queue many jobs on your cluster(s) with ``sky exec`` (see :ref:`Job Queue <job-queue>`);
-- Use :ref:`Managed Spot Jobs <spot-jobs>` to run on auto-managed spot instances
-  (users need not interact with the underlying clusters)
-
-Managed spot jobs run on much cheaper spot instances, with automatic preemption recovery. Try it out with:
+When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use** :ref:`managed jobs <managed-jobs>` **to run on auto-managed clusters**, or even spot instances.
 
 .. code-block:: console
 
-  $ sky jobs launch --use-spot hello_sky.yaml
+  $ for i in $(seq 100) # launch 100 jobs
+      do sky jobs launch --use-spot --detach-run --yes -n hello-$i hello_sky.yaml
+    done
+  ...
+  $ sky jobs dashboard # check the jobs status
+
+.. image:: ../images/managed-jobs-dashboard.png
+  :width: 800
+  :alt: Managed jobs dashboard
+
+SkyPilot can support :ref:`thousands of managed jobs <many-jobs>` running at once.
+
+Asynchronous execution
+======================
+
+All SkyPilot CLIs and APIs are asynchronous requests, i.e. you can interrupt them at
+any time and let them run in the background. For example, if you KeyInterrupt the ``sky launch`` command,
+the cluster will keep provisioning in the background:
+
+.. code-block:: console
+
+  $ sky launch -c mycluster hello_sky.yaml
+  ^C
+  ⚙︎ Request will continue running asynchronously.
+  ├── View logs: sky api logs 73d316ac
+  ├── Or, visit: http://127.0.0.1:46580/api/stream?request_id=73d316ac
+  └── To cancel the request, run: sky api cancel 73d316ac
+
+See more details in :ref:`async`.
+
 
 Next steps
 -----------
@@ -220,7 +245,7 @@ Congratulations!  In this quickstart, you have launched a cluster, run a task, a
 Next steps:
 
 - Adapt :ref:`Tutorial: AI Training <ai-training>` to start running your own project on SkyPilot!
-- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
-- To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
+- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
+- Set up SkyPilot for a multi-user team: :ref:`Team Deployment <sky-api-server>`.
 
 We invite you to explore SkyPilot's unique features in the rest of the documentation.

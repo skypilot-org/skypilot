@@ -20,6 +20,7 @@ from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
 
@@ -430,6 +431,7 @@ def _group_files_by_dir(
 def parallel_upload(source_path_list: List[str],
                     filesync_command_generator: Callable[[str, List[str]], str],
                     dirsync_command_generator: Callable[[str, str], str],
+                    log_path: str,
                     bucket_name: str,
                     access_denied_message: str,
                     create_dirs: bool = False,
@@ -445,6 +447,7 @@ def parallel_upload(source_path_list: List[str],
             for a list of files belonging to the same dir.
         dirsync_command_generator: Callable that generates rsync command
             for a directory.
+        log_path: Path to the log file.
         access_denied_message: Message to intercept from the underlying
             upload utility when permissions are insufficient. Used in
             exception handling.
@@ -477,7 +480,7 @@ def parallel_upload(source_path_list: List[str],
         p.starmap(
             run_upload_cli,
             zip(commands, [access_denied_message] * len(commands),
-                [bucket_name] * len(commands)))
+                [bucket_name] * len(commands), [log_path] * len(commands)))
 
 
 def get_gsutil_command() -> Tuple[str, str]:
@@ -518,37 +521,31 @@ def get_gsutil_command() -> Tuple[str, str]:
     return gsutil_alias, alias_gen
 
 
-def run_upload_cli(command: str, access_denied_message: str, bucket_name: str):
-    # TODO(zhwu): Use log_lib.run_with_log() and redirect the output
-    # to a log file.
-    with subprocess.Popen(command,
-                          stderr=subprocess.PIPE,
-                          stdout=subprocess.DEVNULL,
-                          shell=True) as process:
-        stderr = []
-        assert process.stderr is not None  # for mypy
-        while True:
-            line = process.stderr.readline()
-            if not line:
-                break
-            str_line = line.decode('utf-8')
-            stderr.append(str_line)
-            if access_denied_message in str_line:
-                process.kill()
-                with ux_utils.print_exception_no_traceback():
-                    raise PermissionError(
-                        'Failed to upload files to '
-                        'the remote bucket. The bucket does not have '
-                        'write permissions. It is possible that '
-                        'the bucket is public.')
-        returncode = process.wait()
-        if returncode != 0:
-            stderr_str = '\n'.join(stderr)
-            with ux_utils.print_exception_no_traceback():
-                logger.error(stderr_str)
-                raise exceptions.StorageUploadError(
-                    f'Upload to bucket failed for store {bucket_name}. '
-                    'Please check the logs.')
+def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
+                   log_path: str):
+    returncode, stdout, stderr = log_lib.run_with_log(
+        command,
+        log_path,
+        shell=True,
+        require_outputs=True,
+        # We need to use bash as some of the cloud commands uses bash syntax,
+        # such as [[ ... ]]
+        executable='/bin/bash')
+    if access_denied_message in stderr:
+        with ux_utils.print_exception_no_traceback():
+            raise PermissionError('Failed to upload files to '
+                                  'the remote bucket. The bucket does not have '
+                                  'write permissions. It is possible that '
+                                  'the bucket is public.')
+    if returncode != 0:
+        with ux_utils.print_exception_no_traceback():
+            logger.error(stderr)
+            raise exceptions.StorageUploadError(
+                f'Upload to bucket failed for store {bucket_name}. '
+                f'Please check the logs: {log_path}')
+    if not stdout:
+        logger.debug('No file uploaded. This could be due to an error or '
+                     'because all files already exist on the cloud.')
 
 
 def get_cos_regions() -> List[str]:
@@ -737,3 +734,14 @@ class Rclone():
                 lines_to_keep.append(line)
 
         return lines_to_keep
+
+
+def split_oci_path(oci_path: str) -> Tuple[str, str]:
+    """Splits OCI Path into Bucket name and Relative Path to Bucket
+    Args:
+      oci_path: str; OCI Path, e.g. oci://imagenet/train/
+    """
+    path_parts = oci_path.replace('oci://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key

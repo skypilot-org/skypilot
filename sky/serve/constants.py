@@ -12,6 +12,9 @@ PORT_SELECTION_FILE_LOCK_PATH = f'{SKYSERVE_METADATA_DIR}/port_selection.lock'
 # Signal file path for controller to handle signals.
 SIGNAL_FILE_PATH = '/tmp/sky_serve_controller_signal_{}'
 
+# Time to wait in seconds for controller to setup, this involves the time to run
+# cloud dependencies installation.
+CONTROLLER_SETUP_TIMEOUT_SECONDS = 300
 # Time to wait in seconds for service to register on the controller.
 SERVICE_REGISTER_TIMEOUT_SECONDS = 60
 
@@ -92,4 +95,11 @@ REPLICA_ID_ENV_VAR = 'SKYPILOT_SERVE_REPLICA_ID'
 # change for the serve_utils.ServeCodeGen, we need to bump this version, so that
 # the user can be notified to update their SkyPilot serve version on the remote
 # cluster.
-SERVE_VERSION = 1
+# Changelog:
+# v1.0 - Introduce rolling update.
+# v2.0 - Added template-replica feature.
+SERVE_VERSION = 2
+
+TERMINATE_REPLICA_VERSION_MISMATCH_ERROR = (
+    'The version of service is outdated and does not support manually '
+    'terminating replicas. Please terminate the service and spin up again.')

@@ -2,7 +2,7 @@
 <!-- $REMOVE -->
 # Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Vision Llama 3.2 (Meta) -->
+<!-- $UNCOMMENT# Vision Llama 3.2 -->
 
 
 [Llama 3.2](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/) family was released by Meta on Sep 25, 2024. It not only includes the latest improved (and smaller) LLM models for chat, but also includes multimodal vision-language models. Let's _point and launch_ it with SkyPilot.
@@ -26,7 +26,7 @@
 ## Prerequisites
 
 - Go to the [HuggingFace model page](https://huggingface.co/meta-llama/) and request access to the model [meta-llama/Llama-3.2-1B-Instruct](https://huggingface.co/meta-llama/Llama-3.2-1B-Instruct) and [meta-llama/Llama-3.2-11B-Vision](https://huggingface.co/meta-llama/Llama-3.2-11B-Vision).
-- Check that you have installed SkyPilot ([docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html)).
+- Check that you have installed SkyPilot ([docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
 ## SkyPilot YAML
@@ -346,9 +346,9 @@ To shut down all resources:
 sky serve down llama3
 ```
 
-See more details in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
+See more details in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
 
 
 ## Developing and Finetuning Llama 3 series
 
-SkyPilot also simplifies the development and finetuning of Llama 3 series. Check out the development and finetuning guides: [Develop](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_1/README.md) and [Finetune](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_1-finetuning/README.md).
+SkyPilot also simplifies the development and finetuning of Llama 3 series. Check out the development and finetuning guides: [Develop](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_1/README.md) and [Finetune](https://github.com/skypilot-org/skypilot/blob/master/llm/llama-3_1-finetuning/readme.md).

@@ -5,7 +5,7 @@ import hashlib
 import os
 import time
 import typing
-from typing import Callable, Dict, List, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, List, NamedTuple, Optional, Tuple, Union
 
 import filelock
 import requests
@@ -13,8 +13,9 @@ import requests
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
-from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
+from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -69,8 +70,7 @@ def is_catalog_modified(filename: str) -> bool:
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     md5_filepath = meta_path + '.md5'
     if os.path.exists(md5_filepath):
-        with open(catalog_path, 'rb') as f:
-            file_md5 = hashlib.md5(f.read()).hexdigest()
+        file_md5 = common_utils.hash_file(catalog_path, 'md5').hexdigest()
         with open(md5_filepath, 'r', encoding='utf-8') as f:
             last_md5 = f.read()
         return file_md5 != last_md5
@@ -171,7 +171,9 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
+    cloud = os.path.dirname(filename)
+    if cloud != 'common':
+        cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
 
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)
@@ -198,11 +200,13 @@ def read_catalog(filename: str,
                 if pull_frequency_hours is not None:
                     update_frequency_str = (
                         f' (every {pull_frequency_hours} hours)')
-                with rich_utils.safe_status((f'Updating {cloud} catalog: '
-                                             f'{filename}'
-                                             f'{update_frequency_str}')):
+                with rich_utils.safe_status(
+                        ux_utils.spinner_message(
+                            f'Updating {cloud} catalog: {filename}') +
+                        f'{update_frequency_str}'):
                     try:
-                        r = requests.get(url)
+                        r = requests.get(url=url,
+                                         headers={'User-Agent': 'SkyPilot/0.7'})
                         r.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         error_str = (f'Failed to fetch {cloud} catalog '
@@ -268,9 +272,10 @@ def validate_region_zone_impl(
         candidate_loc = difflib.get_close_matches(loc, all_loc, n=5, cutoff=0.9)
         candidate_loc = sorted(candidate_loc)
         candidate_strs = ''
-        if len(candidate_loc) > 0:
+        if candidate_loc:
             candidate_strs = ', '.join(candidate_loc)
             candidate_strs = f'\nDid you mean one of these: {candidate_strs!r}?'
+
         return candidate_strs
 
     def _get_all_supported_regions_str() -> str:
@@ -284,7 +289,7 @@ def validate_region_zone_impl(
     filter_df = df
     if region is not None:
         filter_df = _filter_region_zone(filter_df, region, zone=None)
-        if len(filter_df) == 0:
+        if filter_df.empty:
             with ux_utils.print_exception_no_traceback():
                 error_msg = (f'Invalid region {region!r}')
                 candidate_strs = _get_candidate_str(
@@ -294,7 +299,7 @@ def validate_region_zone_impl(
                         faq_msg = (
                             '\nIf a region is not included in the following '
                             'list, please check the FAQ docs for how to fetch '
-                            'its catalog info.\nhttps://skypilot.readthedocs.io'
+                            'its catalog info.\nhttps://docs.skypilot.co'
                             '/en/latest/reference/faq.html#advanced-how-to-'
                             'make-skypilot-use-all-global-regions')
                         error_msg += faq_msg + _get_all_supported_regions_str()
@@ -308,7 +313,7 @@ def validate_region_zone_impl(
     if zone is not None:
         maybe_region_df = filter_df
         filter_df = filter_df[filter_df['AvailabilityZone'] == zone]
-        if len(filter_df) == 0:
+        if filter_df.empty:
             region_str = f' for region {region!r}' if region else ''
             df = maybe_region_df if region else df
             with ux_utils.print_exception_no_traceback():
@@ -376,7 +381,7 @@ def get_vcpus_mem_from_instance_type_impl(
     instance_type: str,
 ) -> Tuple[Optional[float], Optional[float]]:
     df = _get_instance_type(df, instance_type, None)
-    if len(df) == 0:
+    if df.empty:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')
     assert len(set(df['vCPUs'])) == 1, ('Cannot determine the number of vCPUs '
@@ -480,22 +485,28 @@ def get_instance_type_for_cpus_mem_impl(
 def get_accelerators_from_instance_type_impl(
     df: 'pd.DataFrame',
     instance_type: str,
-) -> Optional[Dict[str, int]]:
+) -> Optional[Dict[str, Union[int, float]]]:
     df = _get_instance_type(df, instance_type, None)
-    if len(df) == 0:
+    if df.empty:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'No instance type {instance_type} found.')
     row = df.iloc[0]
     acc_name, acc_count = row['AcceleratorName'], row['AcceleratorCount']
     if pd.isnull(acc_name):
         return None
-    return {acc_name: int(acc_count)}
+
+    def _convert(value):
+        if int(value) == value:
+            return int(value)
+        return float(value)
+
+    return {acc_name: _convert(acc_count)}
 
 
 def get_instance_type_for_accelerator_impl(
     df: 'pd.DataFrame',
     acc_name: str,
-    acc_count: int,
+    acc_count: Union[int, float],
     cpus: Optional[str] = None,
     memory: Optional[str] = None,
     use_spot: bool = False,
@@ -508,9 +519,9 @@ def get_instance_type_for_accelerator_impl(
     accelerators with sorted prices and a list of candidates with fuzzy search.
     """
     result = df[(df['AcceleratorName'].str.fullmatch(acc_name, case=False)) &
-                (df['AcceleratorCount'] == acc_count)]
+                (abs(df['AcceleratorCount'] - acc_count) <= 0.01)]
     result = _filter_region_zone(result, region, zone)
-    if len(result) == 0:
+    if result.empty:
         fuzzy_result = df[
             (df['AcceleratorName'].str.contains(acc_name, case=False)) &
             (df['AcceleratorCount'] >= acc_count)]
@@ -519,16 +530,19 @@ def get_instance_type_for_accelerator_impl(
         fuzzy_result = fuzzy_result[['AcceleratorName',
                                      'AcceleratorCount']].drop_duplicates()
         fuzzy_candidate_list = []
-        if len(fuzzy_result) > 0:
+        if not fuzzy_result.empty:
             for _, row in fuzzy_result.iterrows():
+                acc_cnt = float(row['AcceleratorCount'])
+                acc_count_display = (int(acc_cnt) if acc_cnt.is_integer() else
+                                     f'{acc_cnt:.2f}')
                 fuzzy_candidate_list.append(f'{row["AcceleratorName"]}:'
-                                            f'{int(row["AcceleratorCount"])}')
+                                            f'{acc_count_display}')
         return (None, fuzzy_candidate_list)
 
     result = _filter_with_cpus(result, cpus)
     result = _filter_with_mem(result, memory)
     result = _filter_region_zone(result, region, zone)
-    if len(result) == 0:
+    if result.empty:
         return ([], [])
 
     # Current strategy: choose the cheapest instance
@@ -669,7 +683,7 @@ def get_image_id_from_tag_impl(df: 'pd.DataFrame', tag: str,
     df = _filter_region_zone(df, region, zone=None)
     assert len(df) <= 1, ('Multiple images found for tag '
                           f'{tag} in region {region}')
-    if len(df) == 0:
+    if df.empty:
         return None
     image_id = df['ImageId'].iloc[0]
     if pd.isna(image_id):
@@ -683,4 +697,4 @@ def is_image_tag_valid_impl(df: 'pd.DataFrame', tag: str,
     df = df[df['Tag'] == tag]
     df = _filter_region_zone(df, region, zone=None)
     df = df.dropna(subset=['ImageId'])
-    return len(df) > 0
+    return not df.empty

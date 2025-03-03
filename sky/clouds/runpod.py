@@ -1,11 +1,11 @@
 """ RunPod Cloud. """
 
-import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -16,7 +16,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class RunPod(clouds.Cloud):
     """ RunPod GPU Cloud
 
@@ -25,8 +25,6 @@ class RunPod(clouds.Cloud):
     _REPR = 'RunPod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
-        clouds.CloudImplementationFeatures.SPOT_INSTANCE:
-            ('Spot is not supported, as runpod API does not implement spot.'),
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
              'are non-trivial on RunPod.'),
@@ -71,11 +69,8 @@ class RunPod(clouds.Cloud):
                               zone: Optional[str]) -> List[clouds.Region]:
         assert zone is None, 'RunPod does not support zones.'
         del accelerators, zone  # unused
-        if use_spot:
-            return []
-        else:
-            regions = service_catalog.get_region_zones_for_instance_type(
-                instance_type, use_spot, 'runpod')
+        regions = service_catalog.get_region_zones_for_instance_type(
+            instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
@@ -147,7 +142,7 @@ class RunPod(clouds.Cloud):
 
     @classmethod
     def get_accelerators_from_instance_type(
-            cls, instance_type: str) -> Optional[Dict[str, int]]:
+            cls, instance_type: str) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='runpod')
 
@@ -161,15 +156,14 @@ class RunPod(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name  # unused
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         if r.image_id is None:
             image_id = 'runpod/base:0.0.2'
@@ -178,11 +172,25 @@ class RunPod(clouds.Cloud):
         else:
             image_id = r.image_id[r.region]
 
+        instance_type = resources.instance_type
+        use_spot = resources.use_spot
+
+        hourly_cost = self.instance_type_to_hourly_cost(
+            instance_type=instance_type, use_spot=use_spot)
+
+        # default to root
+        docker_username_for_runpod = (resources.docker_username_for_runpod
+                                      if resources.docker_username_for_runpod
+                                      is not None else 'root')
+
         return {
-            'instance_type': resources.instance_type,
+            'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
             'image_id': image_id,
+            'use_spot': use_spot,
+            'bid_per_gpu': str(hourly_cost),
+            'docker_username_for_runpod': docker_username_for_runpod,
         }
 
     def _get_feasible_launchable_resources(
@@ -252,7 +260,7 @@ class RunPod(clouds.Cloud):
                     '    Credentials can be set up by running: \n'
                     f'        $ pip install runpod \n'
                     f'        $ runpod config\n'
-                    '    For more information, see https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
+                    '    For more information, see https://docs.skypilot.co/en/latest/getting-started/installation.html#runpod'  # pylint: disable=line-too-long
                 )
 
             return True, None

@@ -14,9 +14,9 @@ import colorama
 
 import sky
 from sky import clouds
+from sky import exceptions
 from sky import provision
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import aws
 from sky.backends import backend_utils
 from sky.provision import common as provision_common
@@ -25,8 +25,12 @@ from sky.provision import logging as provision_logging
 from sky.provision import metadata_utils
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
+from sky.utils import subprocess_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 # Do not use __name__ as we do not want to propagate logs to sky.provision,
@@ -42,76 +46,50 @@ _TITLE = '\n\n' + '=' * 20 + ' {} ' + '=' * 20 + '\n'
 def _bulk_provision(
     cloud: clouds.Cloud,
     region: clouds.Region,
-    zones: Optional[List[clouds.Zone]],
     cluster_name: resources_utils.ClusterName,
     bootstrap_config: provision_common.ProvisionConfig,
 ) -> provision_common.ProvisionRecord:
     provider_name = repr(cloud)
     region_name = region.name
 
-    style = colorama.Style
-
-    if not zones:
-        # For Azure, zones is always an empty list.
-        zone_str = 'all zones'
-    else:
-        zone_str = ','.join(z.name for z in zones)
-
-    if isinstance(cloud, clouds.Kubernetes):
-        # Omit the region name for Kubernetes.
-        logger.info(f'{style.BRIGHT}Launching on {cloud}{style.RESET_ALL} '
-                    f'{cluster_name!r}.')
-    else:
-        logger.info(f'{style.BRIGHT}Launching on {cloud} '
-                    f'{region_name}{style.RESET_ALL} ({zone_str})')
-
     start = time.time()
-    with rich_utils.safe_status('[bold cyan]Launching[/]') as status:
+    # TODO(suquark): Should we cache the bootstrapped result?
+    #  Currently it is not necessary as bootstrapping takes
+    #  only ~3s, caching it seems over-engineering and could
+    #  cause other issues like the cache is not synced
+    #  with the cloud configuration.
+    config = provision.bootstrap_instances(provider_name, region_name,
+                                           cluster_name.name_on_cloud,
+                                           bootstrap_config)
+
+    provision_record = provision.run_instances(provider_name,
+                                               region_name,
+                                               cluster_name.name_on_cloud,
+                                               config=config)
+
+    backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
+    logger.debug(f'\nWaiting for instances of {cluster_name!r} to be ready...')
+    rich_utils.force_update_status(
+        ux_utils.spinner_message('Launching - Checking instance status',
+                                 str(provision_logging.config.log_path)))
+    # AWS would take a very short time (<<1s) updating the state of the
+    # instance.
+    time.sleep(1)
+    for retry_cnt in range(_MAX_RETRY):
         try:
-            # TODO(suquark): Should we cache the bootstrapped result?
-            #  Currently it is not necessary as bootstrapping takes
-            #  only ~3s, caching it seems over-engineering and could
-            #  cause other issues like the cache is not synced
-            #  with the cloud configuration.
-            config = provision.bootstrap_instances(provider_name, region_name,
-                                                   cluster_name.name_on_cloud,
-                                                   bootstrap_config)
-        except Exception as e:
-            logger.error(f'{colorama.Fore.YELLOW}Failed to configure '
-                         f'{cluster_name!r} on {cloud} {region} ({zone_str}) '
-                         'with the following error:'
-                         f'{colorama.Style.RESET_ALL}\n'
-                         f'{common_utils.format_exception(e)}')
-            raise
-
-        provision_record = provision.run_instances(provider_name,
-                                                   region_name,
-                                                   cluster_name.name_on_cloud,
-                                                   config=config)
-
-        backoff = common_utils.Backoff(initial_backoff=1, max_backoff_factor=3)
-        logger.debug(
-            f'\nWaiting for instances of {cluster_name!r} to be ready...')
-        status.update('[bold cyan]Launching - Checking instance status[/]')
-        # AWS would take a very short time (<<1s) updating the state of the
-        # instance.
-        time.sleep(1)
-        for retry_cnt in range(_MAX_RETRY):
-            try:
-                provision.wait_instances(provider_name,
-                                         region_name,
-                                         cluster_name.name_on_cloud,
-                                         state=status_lib.ClusterStatus.UP)
-                break
-            except (aws.botocore_exceptions().WaiterError, RuntimeError):
-                time.sleep(backoff.current_backoff())
-        else:
-            raise RuntimeError(
-                f'Failed to wait for instances of {cluster_name!r} to be '
-                f'ready on the cloud provider after max retries {_MAX_RETRY}.')
-        logger.debug(
-            f'Instances of {cluster_name!r} are ready after {retry_cnt} '
-            'retries.')
+            provision.wait_instances(provider_name,
+                                     region_name,
+                                     cluster_name.name_on_cloud,
+                                     state=status_lib.ClusterStatus.UP)
+            break
+        except (aws.botocore_exceptions().WaiterError, RuntimeError):
+            time.sleep(backoff.current_backoff())
+    else:
+        raise RuntimeError(
+            f'Failed to wait for instances of {cluster_name!r} to be '
+            f'ready on the cloud provider after max retries {_MAX_RETRY}.')
+    logger.debug(f'Instances of {cluster_name!r} are ready after {retry_cnt} '
+                 'retries.')
 
     logger.debug(
         f'\nProvisioning {cluster_name!r} took {time.time() - start:.2f} '
@@ -162,8 +140,11 @@ def bulk_provision(
             logger.debug(
                 'Provision config:\n'
                 f'{json.dumps(dataclasses.asdict(bootstrap_config), indent=2)}')
-            return _bulk_provision(cloud, region, zones, cluster_name,
+            return _bulk_provision(cloud, region, cluster_name,
                                    bootstrap_config)
+        except exceptions.NoClusterLaunchedError:
+            # Skip the teardown if the cluster was never launched.
+            raise
         except Exception:  # pylint: disable=broad-except
             zone_str = 'all zones'
             if zones:
@@ -364,6 +345,7 @@ def _wait_ssh_connection_indirect(ip: str,
     return True, ''
 
 
+@timeline.event
 def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
                  ssh_credentials: Dict[str, str]):
     """Wait until SSH is ready.
@@ -387,20 +369,27 @@ def wait_for_ssh(cluster_info: provision_common.ClusterInfo,
     # use a queue for SSH querying
     ips = collections.deque(ip_list)
     ssh_ports = collections.deque(port_list)
-    while ips:
-        ip = ips.popleft()
-        ssh_port = ssh_ports.popleft()
-        success, stderr = waiter(ip, ssh_port, **ssh_credentials)
-        if not success:
-            ips.append(ip)
-            ssh_ports.append(ssh_port)
-            if time.time() - start > timeout:
+
+    def _retry_ssh_thread(ip_ssh_port: Tuple[str, int]):
+        ip, ssh_port = ip_ssh_port
+        success = False
+        while not success:
+            success, stderr = waiter(ip, ssh_port, **ssh_credentials)
+            if not success and time.time() - start > timeout:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         f'Failed to SSH to {ip} after timeout {timeout}s, with '
                         f'{stderr}')
             logger.debug('Retrying in 1 second...')
             time.sleep(1)
+
+    # try one node and multiprocess the rest
+    if ips:
+        ip = ips.popleft()
+        ssh_port = ssh_ports.popleft()
+        _retry_ssh_thread((ip, ssh_port))
+    subprocess_utils.run_in_parallel(_retry_ssh_thread,
+                                     list(zip(ips, ssh_ports)))
 
 
 def _post_provision_setup(
@@ -427,7 +416,6 @@ def _post_provision_setup(
         f'{json.dumps(dataclasses.asdict(provision_record), indent=2)}\n'
         'Cluster info:\n'
         f'{json.dumps(dataclasses.asdict(cluster_info), indent=2)}')
-
     head_instance = cluster_info.get_head_instance()
     if head_instance is None:
         e = RuntimeError(f'Provision failed for cluster {cluster_name!r}. '
@@ -440,23 +428,41 @@ def _post_provision_setup(
     # We don't set docker_user here, as we are configuring the VM itself.
     ssh_credentials = backend_utils.ssh_credential_from_yaml(
         cluster_yaml, ssh_user=cluster_info.ssh_user)
+    docker_config = config_from_yaml.get('docker', {})
 
     with rich_utils.safe_status(
-            '[bold cyan]Launching - Waiting for SSH access[/]') as status:
-
-        logger.debug(
-            f'\nWaiting for SSH to be available for {cluster_name!r} ...')
-        wait_for_ssh(cluster_info, ssh_credentials)
-        logger.debug(f'SSH Conection ready for {cluster_name!r}')
+            ux_utils.spinner_message(
+                'Launching - Waiting for SSH access',
+                provision_logging.config.log_path)) as status:
+        # If on Kubernetes, skip SSH check since the pods are guaranteed to be
+        # ready by the provisioner, and we use kubectl instead of SSH to run the
+        # commands and rsync on the pods. SSH will still be ready after a while
+        # for the users to SSH into the pod.
+        if cloud_name.lower() != 'kubernetes':
+            logger.debug(
+                f'\nWaiting for SSH to be available for {cluster_name!r} ...')
+            wait_for_ssh(cluster_info, ssh_credentials)
+            logger.debug(f'SSH Connection ready for {cluster_name!r}')
+        vm_str = 'Instance' if cloud_name.lower() != 'kubernetes' else 'Pod'
         plural = '' if len(cluster_info.instances) == 1 else 's'
-        logger.info(f'{colorama.Fore.GREEN}Successfully provisioned '
-                    f'or found existing instance{plural}.'
-                    f'{colorama.Style.RESET_ALL}')
+        verb = 'is' if len(cluster_info.instances) == 1 else 'are'
+        indent_str = (ux_utils.INDENT_SYMBOL
+                      if docker_config else ux_utils.INDENT_LAST_SYMBOL)
+        logger.info(f'{indent_str}{colorama.Style.DIM}{vm_str}{plural} {verb} '
+                    f'up.{colorama.Style.RESET_ALL}')
 
-        docker_config = config_from_yaml.get('docker', {})
+        # It's promised by the cluster config that docker_config does not
+        # exist for docker-native clouds, i.e. they provide docker containers
+        # instead of full VMs, like Kubernetes and RunPod, as it requires some
+        # special handlings to run docker inside their docker virtualization.
+        # For their Docker image settings, we do them when provisioning the
+        # cluster. See provision/{cloud}/instance.py:get_cluster_info for more
+        # details.
         if docker_config:
             status.update(
-                '[bold cyan]Launching - Initializing docker container[/]')
+                ux_utils.spinner_message(
+                    'Launching - Initializing docker container',
+                    provision_logging.config.log_path))
             docker_user = instance_setup.initialize_docker(
                 cluster_name.name_on_cloud,
                 docker_config=docker_config,
@@ -470,6 +476,8 @@ def _post_provision_setup(
             cluster_info.docker_user = docker_user
             ssh_credentials['docker_user'] = docker_user
             logger.debug(f'Docker user: {docker_user}')
+            logger.info(f'{ux_utils.INDENT_LAST_SYMBOL}{colorama.Style.DIM}'
+                        f'Docker container is up.{colorama.Style.RESET_ALL}')
 
         # We mount the metadata with sky wheel for speedup.
         # NOTE: currently we mount all credentials for all nodes, because
@@ -482,8 +490,9 @@ def _post_provision_setup(
         # for later.
         file_mounts = config_from_yaml.get('file_mounts', {})
 
-        runtime_preparation_str = ('[bold cyan]Preparing SkyPilot '
-                                   'runtime ({step}/3 - {step_name})')
+        runtime_preparation_str = (ux_utils.spinner_message(
+            'Preparing SkyPilot runtime ({step}/3 - {step_name})',
+            provision_logging.config.log_path))
         status.update(
             runtime_preparation_str.format(step=1, step_name='initializing'))
         instance_setup.internal_file_mounts(cluster_name.name_on_cloud,
@@ -500,31 +509,94 @@ def _post_provision_setup(
                                                 **ssh_credentials)
         head_runner = runners[0]
 
-        status.update(
-            runtime_preparation_str.format(step=3, step_name='runtime'))
-        full_ray_setup = True
-        ray_port = constants.SKY_REMOTE_RAY_PORT
-        if not provision_record.is_instance_just_booted(
-                head_instance.instance_id):
+        def is_ray_cluster_healthy(ray_status_output: str,
+                                   expected_num_nodes: int) -> bool:
+            """Parse the output of `ray status` to get #active nodes.
+
+            The output of `ray status` looks like:
+            Node status
+            ---------------------------------------------------------------
+            Active:
+              1 node_291a8b849439ad6186387c35dc76dc43f9058108f09e8b68108cf9ec
+              1 node_0945fbaaa7f0b15a19d2fd3dc48f3a1e2d7c97e4a50ca965f67acbfd
+            Pending:
+            (no pending nodes)
+            Recent failures:
+            (no failures)
+            """
+            start = ray_status_output.find('Active:')
+            end = ray_status_output.find('Pending:', start)
+            if start == -1 or end == -1:
+                return False
+            num_active_nodes = 0
+            for line in ray_status_output[start:end].split('\n'):
+                if line.strip() and not line.startswith('Active:'):
+                    num_active_nodes += 1
+            return num_active_nodes == expected_num_nodes
+
+        def check_ray_port_and_cluster_healthy() -> Tuple[int, bool, bool]:
+            head_ray_needs_restart = True
+            ray_cluster_healthy = False
+            ray_port = constants.SKY_REMOTE_RAY_PORT
+
             # Check if head node Ray is alive
             returncode, stdout, _ = head_runner.run(
                 instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
                 stream_logs=False,
                 require_outputs=True)
-            if returncode:
-                logger.debug('Ray cluster on head is not up. Restarting...')
-            else:
-                logger.debug('Ray cluster on head is up.')
-                ray_port = common_utils.decode_payload(stdout)['ray_port']
-            full_ray_setup = bool(returncode)
+            if not returncode:
+                ray_port = message_utils.decode_payload(stdout)['ray_port']
+                logger.debug(f'Ray cluster on head is up with port {ray_port}.')
 
-        if full_ray_setup:
+            head_ray_needs_restart = bool(returncode)
+            # This is a best effort check to see if the ray cluster has expected
+            # number of nodes connected.
+            ray_cluster_healthy = (not head_ray_needs_restart and
+                                   is_ray_cluster_healthy(
+                                       stdout, cluster_info.num_instances))
+            return ray_port, ray_cluster_healthy, head_ray_needs_restart
+
+        status.update(
+            runtime_preparation_str.format(step=3, step_name='runtime'))
+
+        ray_port = constants.SKY_REMOTE_RAY_PORT
+        head_ray_needs_restart = True
+        ray_cluster_healthy = False
+        if (not provision_record.is_instance_just_booted(
+                head_instance.instance_id)):
+            # Check if head node Ray is alive
+            (ray_port, ray_cluster_healthy,
+             head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
+        elif cloud_name.lower() == 'kubernetes':
+            timeout = 90  # 1.5-min maximum timeout
+            start = time.time()
+            while True:
+                # Wait until Ray cluster is ready
+                (ray_port, ray_cluster_healthy,
+                 head_ray_needs_restart) = check_ray_port_and_cluster_healthy()
+                if ray_cluster_healthy:
+                    logger.debug('Ray cluster is ready. Skip head and worker '
+                                 'node ray cluster setup.')
+                    break
+                if time.time() - start > timeout:
+                    # In most cases, the ray cluster will be ready after a few
+                    # seconds. Trigger ray start on head or worker nodes to be
+                    # safe, if the ray cluster is not ready after timeout.
+                    break
+                logger.debug('Ray cluster is not ready yet, waiting for the '
+                             'async setup to complete...')
+                time.sleep(1)
+
+        if head_ray_needs_restart:
             logger.debug('Starting Ray on the entire cluster.')
             instance_setup.start_ray_on_head_node(
                 cluster_name.name_on_cloud,
                 custom_resource=custom_resource,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+        else:
+            logger.debug('Ray cluster on head is ready. Skip starting ray '
+                         'cluster on head node.')
 
         # NOTE: We have to check all worker nodes to make sure they are all
         #  healthy, otherwise we can only start Ray on newly started worker
@@ -535,10 +607,13 @@ def _post_provision_setup(
         #     if provision_record.is_instance_just_booted(inst.instance_id):
         #         worker_ips.append(inst.public_ip)
 
-        if cluster_info.num_instances > 1:
+        # We don't need to restart ray on worker nodes if the ray cluster is
+        # already healthy, i.e. the head node has expected number of nodes
+        # connected to the ray cluster.
+        if cluster_info.num_instances > 1 and not ray_cluster_healthy:
             instance_setup.start_ray_on_worker_nodes(
                 cluster_name.name_on_cloud,
-                no_restart=not full_ray_setup,
+                no_restart=not head_ray_needs_restart,
                 custom_resource=custom_resource,
                 # Pass the ray_port to worker nodes for backward compatibility
                 # as in some existing clusters the ray_port is not dumped with
@@ -547,15 +622,20 @@ def _post_provision_setup(
                 ray_port=ray_port,
                 cluster_info=cluster_info,
                 ssh_credentials=ssh_credentials)
+        elif ray_cluster_healthy:
+            logger.debug('Ray cluster is ready. Skip starting ray cluster on '
+                         'worker nodes.')
 
         instance_setup.start_skylet_on_head_node(cluster_name.name_on_cloud,
                                                  cluster_info, ssh_credentials)
 
-    logger.info(f'{colorama.Fore.GREEN}Successfully provisioned cluster: '
-                f'{cluster_name}{colorama.Style.RESET_ALL}')
+    logger.info(
+        ux_utils.finishing_message(f'Cluster launched: {cluster_name}.',
+                                   provision_logging.config.log_path))
     return cluster_info
 
 
+@timeline.event
 def post_provision_runtime_setup(
         cloud_name: str, cluster_name: resources_utils.ClusterName,
         cluster_yaml: str, provision_record: provision_common.ProvisionRecord,
@@ -582,7 +662,10 @@ def post_provision_runtime_setup(
                                          provision_record=provision_record,
                                          custom_resource=custom_resource)
         except Exception:  # pylint: disable=broad-except
-            logger.error('*** Failed setting up cluster. ***')
+            logger.error(
+                ux_utils.error_message(
+                    'Failed to set up SkyPilot runtime on cluster.',
+                    provision_logging.config.log_path))
             logger.debug(f'Stacktrace:\n{traceback.format_exc()}')
             with ux_utils.print_exception_no_traceback():
                 raise

@@ -1,6 +1,8 @@
+# Pushing Docker Image
+
 ## GCR
 
-1. Install skypilot package by following these [instructions](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html).
+1. Install skypilot package by following these [instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).
 
 2. Run `git clone https://github.com/skypilot-org/skypilot.git `.
 

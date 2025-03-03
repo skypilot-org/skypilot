@@ -1,13 +1,15 @@
 # We use the cuda runtime image instead of devel image to reduce size (1.3GB vs 3.6GB)
 FROM nvidia/cuda:12.1.1-runtime-ubuntu20.04
 
+# Detect architecture using ARG with default value
+ARG TARGETARCH
 ARG DEBIAN_FRONTEND=noninteractive
 
 # Install ssh and other local dependencies
 # We remove cuda lists to avoid conflicts with the cuda version installed by ray
 RUN rm -rf /etc/apt/sources.list.d/cuda* && \
     apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse unzip socat netcat-openbsd curl -y && \
     rm -rf /var/lib/apt/lists/*
 
 # Setup SSH and generate hostkeys
@@ -27,33 +29,44 @@ RUN sudo useradd -m -s /bin/bash sky && \
 USER sky
 
 # Set HOME environment variable for sky user
-ENV HOME /home/sky
+ENV HOME=/home/sky
 
 # Set current working directory
 WORKDIR /home/sky
 
 SHELL ["/bin/bash", "-c"]
 
-# Install conda and other dependencies
+# Install conda and other dependencies based on architecture
 # Keep the conda and Ray versions below in sync with the ones in skylet.constants
-RUN curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && \
-    bash Miniconda3-Linux-x86_64.sh -b && \
-    eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && conda config --set auto_activate_base true && conda activate base && \
-    grep "# >>> conda initialize >>>" ~/.bashrc || { conda init && source ~/.bashrc; } && \
-    rm Miniconda3-Linux-x86_64.sh && \
-    pip install wheel Click colorama cryptography jinja2 jsonschema networkx  \
-    oauth2client pandas pendulum PrettyTable rich tabulate filelock packaging  \
-    'protobuf<4.0.0' pulp pycryptodome==3.12.0 docker kubernetes==28.1.0  \
-    grpcio==1.51.3 python-dotenv==1.0.1 ray[default]==2.9.3 && \
-    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
-
-# Add /home/sky/.local/bin/ to PATH
-RUN echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
-
-# Copy SkyPilot code base. This is required for the ssh jump pod to find the
-# lifecycle management scripts
-COPY --chown=sky . /skypilot/sky/
+# Keep this section in sync with the custom image optimization recommendations in our docs (kubernetes-getting-started.rst)
+RUN ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)} && \
+    if [ "$ARCH" = "arm64" ]; then \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-aarch64.sh -o miniconda.sh; \
+    else \
+        curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o miniconda.sh; \
+    fi && \
+    bash miniconda.sh -b -p $HOME/miniconda3 && \
+    rm miniconda.sh && \
+    eval "$($HOME/miniconda3/bin/conda shell.bash hook)" && \
+    conda init && \
+    conda config --set auto_activate_base true && \
+    export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
+    source ~/skypilot-runtime/bin/activate && \
+    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
+    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
+    # Install kubectl to user's local bin instead of system path to avoid
+    # sudo-related issues during cross-architecture builds, especially on ARM
+    chmod +x kubectl && \
+    mkdir -p $HOME/.local/bin && \
+    mv kubectl $HOME/.local/bin/ && \
+    echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1

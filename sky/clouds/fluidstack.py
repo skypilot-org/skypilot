@@ -1,16 +1,16 @@
 """Fluidstack Cloud."""
-import json
 import os
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 import requests
 
 from sky import clouds
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils.resources_utils import DiskTier
 
 _CREDENTIAL_FILES = [
@@ -22,7 +22,7 @@ if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Fluidstack(clouds.Cloud):
     """FluidStack GPU Cloud."""
 
@@ -155,7 +155,7 @@ class Fluidstack(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='fluidstack')
 
@@ -177,6 +177,7 @@ class Fluidstack(clouds.Cloud):
         cluster_name: resources_utils.ClusterName,
         region: clouds.Region,
         zones: Optional[List[clouds.Zone]],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
 
@@ -184,10 +185,8 @@ class Fluidstack(clouds.Cloud):
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
         return {
             'instance_type': resources.instance_type,

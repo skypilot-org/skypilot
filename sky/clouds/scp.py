@@ -4,17 +4,17 @@ This module includes the set of functions
 to access the SCP catalog and check credentials for the SCP access.
 """
 
-import json
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple
+from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
-from sky import status_lib
 from sky.clouds import service_catalog
 from sky.clouds.utils import scp_utils
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
     # Renaming to avoid shadowing variables.
@@ -30,7 +30,7 @@ _SCP_MIN_DISK_SIZE_GB = 100
 _SCP_MAX_DISK_SIZE_GB = 300
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class SCP(clouds.Cloud):
     """SCP Cloud."""
 
@@ -146,10 +146,10 @@ class SCP(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
@@ -160,7 +160,7 @@ class SCP(clouds.Cloud):
     def get_accelerators_from_instance_type(
         cls,
         instance_type: str,
-    ) -> Optional[Dict[str, int]]:
+    ) -> Optional[Dict[str, Union[int, float]]]:
         return service_catalog.get_accelerators_from_instance_type(
             instance_type, clouds='scp')
 
@@ -179,20 +179,19 @@ class SCP(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
+            cluster_name: 'resources_utils.ClusterName',
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, dryrun  # Unused.
         assert zones is None, 'SCP does not support zones.'
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
 
-        if acc_dict is not None:
-            custom_resources = json.dumps(acc_dict, separators=(',', ':'))
-        else:
-            custom_resources = None
         image_id = self._get_image_id(r.image_id, region.name, r.instance_type)
         return {
             'instance_type': resources.instance_type,

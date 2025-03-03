@@ -232,7 +232,7 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
     # Look for keys containing the resource_name. For example,
     # the key 'nvidia.com/gpu' contains the key 'gpu'.
     matching_keys = [key for key in resources if resource_name in key.lower()]
-    if len(matching_keys) == 0:
+    if not matching_keys:
         return float('inf')
     if len(matching_keys) > 1:
         # Should have only one match -- mostly relevant for gpu.
@@ -247,7 +247,8 @@ def _get_resource(container_resources: Dict[str, Any], resource_name: str,
 
 
 def _configure_autoscaler_service_account(
-        namespace: str, context: str, provider_config: Dict[str, Any]) -> None:
+        namespace: str, context: Optional[str],
+        provider_config: Dict[str, Any]) -> None:
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
         logger.info('_configure_autoscaler_service_account: '
@@ -264,7 +265,7 @@ def _configure_autoscaler_service_account(
     field_selector = f'metadata.name={name}'
     accounts = (kubernetes.core_api(context).list_namespaced_service_account(
         namespace, field_selector=field_selector).items)
-    if len(accounts) > 0:
+    if accounts:
         assert len(accounts) == 1
         # Nothing to check for equality and patch here,
         # since the service_account.metadata.name is the only important
@@ -281,7 +282,7 @@ def _configure_autoscaler_service_account(
                 f'{created_msg(account_field, name)}')
 
 
-def _configure_autoscaler_role(namespace: str, context: str,
+def _configure_autoscaler_role(namespace: str, context: Optional[str],
                                provider_config: Dict[str, Any],
                                role_field: str) -> None:
     """ Reads the role from the provider config, creates if it does not exist.
@@ -307,7 +308,7 @@ def _configure_autoscaler_role(namespace: str, context: str,
     field_selector = f'metadata.name={name}'
     roles = (kubernetes.auth_api(context).list_namespaced_role(
         namespace, field_selector=field_selector).items)
-    if len(roles) > 0:
+    if roles:
         assert len(roles) == 1
         existing_role = roles[0]
         # Convert to k8s object to compare
@@ -330,7 +331,7 @@ def _configure_autoscaler_role(namespace: str, context: str,
 
 def _configure_autoscaler_role_binding(
         namespace: str,
-        context: str,
+        context: Optional[str],
         provider_config: Dict[str, Any],
         binding_field: str,
         override_name: Optional[str] = None,
@@ -373,7 +374,7 @@ def _configure_autoscaler_role_binding(
     field_selector = f'metadata.name={name}'
     role_bindings = (kubernetes.auth_api(context).list_namespaced_role_binding(
         rb_namespace, field_selector=field_selector).items)
-    if len(role_bindings) > 0:
+    if role_bindings:
         assert len(role_bindings) == 1
         existing_binding = role_bindings[0]
         new_rb = kubernetes_utils.dict_to_k8s_object(binding, 'V1RoleBinding')
@@ -414,7 +415,7 @@ def _configure_autoscaler_cluster_role(namespace, context,
     field_selector = f'metadata.name={name}'
     cluster_roles = (kubernetes.auth_api(context).list_cluster_role(
         field_selector=field_selector).items)
-    if len(cluster_roles) > 0:
+    if cluster_roles:
         assert len(cluster_roles) == 1
         existing_cr = cluster_roles[0]
         new_cr = kubernetes_utils.dict_to_k8s_object(role, 'V1ClusterRole')
@@ -459,7 +460,7 @@ def _configure_autoscaler_cluster_role_binding(
     field_selector = f'metadata.name={name}'
     cr_bindings = (kubernetes.auth_api(context).list_cluster_role_binding(
         field_selector=field_selector).items)
-    if len(cr_bindings) > 0:
+    if cr_bindings:
         assert len(cr_bindings) == 1
         existing_binding = cr_bindings[0]
         new_binding = kubernetes_utils.dict_to_k8s_object(
@@ -620,7 +621,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
                 f'in namespace {fuse_device_manager_namespace!r}')
 
 
-def _configure_services(namespace: str, context: str,
+def _configure_services(namespace: str, context: Optional[str],
                         provider_config: Dict[str, Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
@@ -638,7 +639,7 @@ def _configure_services(namespace: str, context: str,
         field_selector = f'metadata.name={name}'
         services = (kubernetes.core_api(context).list_namespaced_service(
             namespace, field_selector=field_selector).items)
-        if len(services) > 0:
+        if services:
             assert len(services) == 1
             existing_service = services[0]
             # Convert to k8s object to compare

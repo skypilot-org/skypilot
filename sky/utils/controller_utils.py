@@ -7,6 +7,7 @@ import os
 import tempfile
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set
+import uuid
 
 import colorama
 
@@ -22,12 +23,16 @@ from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
-from sky.jobs import utils as managed_job_utils
 from sky.serve import constants as serve_constants
-from sky.serve import serve_utils
+from sky.setup_files import dependencies
 from sky.skylet import constants
+from sky.skylet import log_lib
+from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import env_options
+from sky.utils import registry
+from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -57,9 +62,7 @@ class _ControllerSpec:
     """Spec for skypilot controllers."""
     controller_type: str
     name: str
-    # Use a list of strings to support fallback to old names. The list is in the
-    # fallback order.
-    candidate_cluster_names: List[str]
+    cluster_name: str
     in_progress_hint: str
     decline_cancel_hint: str
     _decline_down_when_failed_to_fetch_status_hint: str
@@ -68,15 +71,6 @@ class _ControllerSpec:
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
-
-    @property
-    def cluster_name(self) -> str:
-        """The name in candidate_cluster_names that exists, else the first."""
-        for candidate_name in self.candidate_cluster_names:
-            record = global_user_state.get_cluster_from_name(candidate_name)
-            if record is not None:
-                return candidate_name
-        return self.candidate_cluster_names[0]
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -89,6 +83,7 @@ class _ControllerSpec:
             cluster_name=self.cluster_name)
 
 
+# TODO: refactor controller class to not be an enum.
 class Controllers(enum.Enum):
     """Skypilot controllers."""
     # NOTE(dev): Keep this align with
@@ -96,10 +91,7 @@ class Controllers(enum.Enum):
     JOBS_CONTROLLER = _ControllerSpec(
         controller_type='jobs',
         name='managed jobs controller',
-        candidate_cluster_names=[
-            managed_job_utils.JOB_CONTROLLER_NAME,
-            managed_job_utils.LEGACY_JOB_CONTROLLER_NAME
-        ],
+        cluster_name=common.JOB_CONTROLLER_NAME,
         in_progress_hint=(
             '* {job_info}To see all managed jobs: '
             f'{colorama.Style.BRIGHT}sky jobs queue{colorama.Style.RESET_ALL}'),
@@ -129,10 +121,10 @@ class Controllers(enum.Enum):
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
-        candidate_cluster_names=[serve_utils.SKY_SERVE_CONTROLLER_NAME],
+        cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
         in_progress_hint=(
             f'* To see detailed service status: {colorama.Style.BRIGHT}'
-            f'sky serve status -a{colorama.Style.RESET_ALL}'),
+            f'sky serve status -v{colorama.Style.RESET_ALL}'),
         decline_cancel_hint=(
             'Cancelling the sky serve controller\'s jobs is not allowed.'),
         _decline_down_when_failed_to_fetch_status_hint=(
@@ -165,10 +157,23 @@ class Controllers(enum.Enum):
             The controller if the cluster name is a controller name.
             Otherwise, returns None.
         """
-        for controller in cls:
-            if name in controller.value.candidate_cluster_names:
-                return controller
-        return None
+        if name is None:
+            return None
+        controller = None
+        # The controller name is always the same. However, on the client-side,
+        # we may not know the exact name, because we are missing the server-side
+        # common.SERVER_ID. So, we will assume anything that matches the prefix
+        # is a controller.
+        if name.startswith(common.SKY_SERVE_CONTROLLER_PREFIX):
+            controller = cls.SKY_SERVE_CONTROLLER
+        elif name.startswith(common.JOB_CONTROLLER_PREFIX):
+            controller = cls.JOBS_CONTROLLER
+        if controller is not None and name != controller.value.cluster_name:
+            # The client-side cluster_name is not accurate. Assume that `name`
+            # is the actual cluster name, so need to set the controller's
+            # cluster name to the input name.
+            controller.value.cluster_name = name
+        return controller
 
     @classmethod
     def from_type(cls, controller_type: str) -> Optional['Controllers']:
@@ -186,106 +191,107 @@ class Controllers(enum.Enum):
 
 # Install cli dependencies. Not using SkyPilot wheels because the wheel
 # can be cleaned up by another process.
-# TODO(zhwu): Keep the dependencies align with the ones in setup.py
 def _get_cloud_dependencies_installation_commands(
         controller: Controllers) -> List[str]:
-    # TODO(tian): Make dependency installation command a method of cloud
-    # class and get all installation command for enabled clouds.
-    commands = []
-    prefix_str = 'Check & install cloud dependencies on controller: '
+    # We use <step>/<total> instead of strong formatting, as we need to update
+    # the <total> at the end of the for loop, and python does not support
+    # partial string formatting.
+    prefix_str = ('[<step>/<total>] Check & install cloud dependencies '
+                  'on controller: ')
+    commands: List[str] = []
     # This is to make sure the shorter checking message does not have junk
     # characters from the previous message.
-    empty_str = ' ' * 10
-    aws_dependencies_installation = (
-        'pip list | grep boto3 > /dev/null 2>&1 || pip install '
-        'botocore>=1.29.10 boto3>=1.26.1; '
-        # Need to separate the installation of awscli from above because some
-        # other clouds will install boto3 but not awscli.
-        'pip list | grep awscli> /dev/null 2>&1 || pip install "urllib3<2" '
-        'awscli>=1.27.10 "colorama<0.4.5" > /dev/null 2>&1')
+    empty_str = ' ' * 20
+
+    # All python dependencies will be accumulated and then installed in one
+    # command at the end. This is very fast if the packages are already
+    # installed, so we don't check that.
+    python_packages: Set[str] = set()
+
+    # add flask to the controller dependencies for dashboard
+    python_packages.add('flask')
+
+    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
+                    f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
+
     for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
-        if isinstance(
-                clouds,
-            (clouds.Lambda, clouds.SCP, clouds.Fluidstack, clouds.Paperspace)):
-            # no need to install any cloud dependencies for lambda, scp,
-            # fluidstack and paperspace
-            continue
-        if isinstance(cloud, clouds.AWS):
-            commands.append(f'echo -en "\\r{prefix_str}AWS{empty_str}" && ' +
-                            aws_dependencies_installation)
-        elif isinstance(cloud, clouds.Azure):
+        cloud_python_dependencies: List[str] = copy.deepcopy(
+            dependencies.extras_require[cloud.canonical_name()])
+
+        if isinstance(cloud, clouds.Azure):
+            # azure-cli cannot be normally installed by uv.
+            # See comments in sky/skylet/constants.py.
+            cloud_python_dependencies.remove(dependencies.AZURE_CLI)
+
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}Azure{empty_str}" && '
-                'pip list | grep azure-cli > /dev/null 2>&1 || '
-                'pip install "azure-cli>=2.31.0" azure-core '
-                '"azure-identity>=1.13.0" azure-mgmt-network > /dev/null 2>&1')
-            # Have to separate this installation of az blob storage from above
-            # because this is newly-introduced and not part of azure-cli. We
-            # need a separate installed check for this.
-            commands.append(
-                'pip list | grep azure-storage-blob > /dev/null 2>&1 || '
-                'pip install azure-storage-blob msgraph-sdk > /dev/null 2>&1')
+                f'echo -en "\\r{step_prefix}azure-cli{empty_str}" &&'
+                f'{constants.SKY_UV_PIP_CMD} install --prerelease=allow '
+                f'"{dependencies.AZURE_CLI}" > /dev/null 2>&1')
         elif isinstance(cloud, clouds.GCP):
-            commands.append(
-                f'echo -en "\\r{prefix_str}GCP{empty_str}" && '
-                'pip list | grep google-api-python-client > /dev/null 2>&1 || '
-                'pip install "google-api-python-client>=2.69.0" '
-                '> /dev/null 2>&1')
-            # Have to separate the installation of google-cloud-storage from
-            # above because for a VM launched on GCP, the VM may have
-            # google-api-python-client installed alone.
-            commands.append(
-                'pip list | grep google-cloud-storage > /dev/null 2>&1 || '
-                'pip install google-cloud-storage > /dev/null 2>&1')
-            commands.append(f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(f'echo -en "\\r{step_prefix}GCP SDK{empty_str}" &&'
+                            f'{gcp.GOOGLE_SDK_INSTALLATION_COMMAND}')
         elif isinstance(cloud, clouds.Kubernetes):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}Kubernetes{empty_str}" && '
-                'pip list | grep kubernetes > /dev/null 2>&1 || '
-                'pip install "kubernetes>=20.0.0" > /dev/null 2>&1 &&'
+                f'echo -en "\\r{step_prefix}Kubernetes{empty_str}" && '
                 # Install k8s + skypilot dependencies
                 'sudo bash -c "if '
                 '! command -v curl &> /dev/null || '
                 '! command -v socat &> /dev/null || '
                 '! command -v netcat &> /dev/null; '
-                'then apt update && apt install curl socat netcat -y '
-                '&> /dev/null; '
+                'then apt update &> /dev/null && '
+                'apt install curl socat netcat -y &> /dev/null; '
                 'fi" && '
                 # Install kubectl
+                'ARCH=$(uname -m) && '
+                'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                '  ARCH="arm64"; '
+                'else '
+                '  ARCH="amd64"; '
+                'fi && '
                 '(command -v kubectl &>/dev/null || '
-                '(curl -s -LO "https://dl.k8s.io/release/'
-                '$(curl -L -s https://dl.k8s.io/release/stable.txt)'
-                '/bin/linux/amd64/kubectl" && '
-                'sudo install -o root -g root -m 0755 '
+                '("https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" '
+                '&& sudo install -o root -g root -m 0755 '
                 'kubectl /usr/local/bin/kubectl))')
         elif isinstance(cloud, clouds.Cudo):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
             commands.append(
-                f'echo -en "\\r{prefix_str}Cudo{empty_str}" && '
-                'pip list | grep cudo-compute > /dev/null 2>&1 || '
-                'pip install "cudo-compute>=0.1.10" > /dev/null 2>&1 && '
+                f'echo -en "\\r{step_prefix}cudoctl{empty_str}" && '
                 'wget https://download.cudo.org/compute/cudoctl-0.3.2-amd64.deb -O ~/cudoctl.deb > /dev/null 2>&1 && '  # pylint: disable=line-too-long
                 'sudo dpkg -i ~/cudoctl.deb > /dev/null 2>&1')
-        elif isinstance(cloud, clouds.RunPod):
-            commands.append(f'echo -en "\\r{prefix_str}RunPod{empty_str}" && '
-                            'pip list | grep runpod > /dev/null 2>&1 || '
-                            'pip install "runpod>=1.5.1" > /dev/null 2>&1')
-        if controller == Controllers.JOBS_CONTROLLER:
-            if isinstance(cloud, clouds.IBM):
-                commands.append(
-                    f'echo -en "\\r{prefix_str}IBM{empty_str}" '
-                    '&& pip list | grep ibm-cloud-sdk-core > /dev/null 2>&1 || '
-                    'pip install ibm-cloud-sdk-core ibm-vpc '
-                    'ibm-platform-services ibm-cos-sdk > /dev/null 2>&1')
-            elif isinstance(cloud, clouds.OCI):
-                commands.append(f'echo -en "\\r{prefix_str}OCI{empty_str}" && '
-                                'pip list | grep oci > /dev/null 2>&1 || '
-                                'pip install oci > /dev/null 2>&1')
+        elif isinstance(cloud, clouds.IBM):
+            if controller != Controllers.JOBS_CONTROLLER:
+                # We only need IBM deps on the jobs controller.
+                cloud_python_dependencies = []
+        elif isinstance(cloud, clouds.Vast):
+            step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+            commands.append(f'echo -en "\\r{step_prefix}Vast{empty_str}" && '
+                            'pip list | grep vastai_sdk > /dev/null 2>&1 || '
+                            'pip install "vastai_sdk>=0.1.12" > /dev/null 2>&1')
+
+        python_packages.update(cloud_python_dependencies)
+
     if (cloudflare.NAME
             in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
-        commands.append(f'echo -en "\\r{prefix_str}Cloudflare{empty_str}" && ' +
-                        aws_dependencies_installation)
-    commands.append(f'echo -e "\\r{prefix_str}Done for {len(commands)} '
-                    'clouds."')
+        python_packages.update(dependencies.extras_require['cloudflare'])
+
+    packages_string = ' '.join([f'"{package}"' for package in python_packages])
+    step_prefix = prefix_str.replace('<step>', str(len(commands) + 1))
+    commands.append(
+        f'echo -en "\\r{step_prefix}cloud python packages{empty_str}" && '
+        f'{constants.SKY_UV_PIP_CMD} install {packages_string} > /dev/null 2>&1'
+    )
+
+    total_commands = len(commands)
+    finish_prefix = prefix_str.replace('[<step>/<total>] ', '  ')
+    commands.append(f'echo -e "\\r{finish_prefix}done.{empty_str}"')
+
+    commands = [
+        command.replace('<total>', str(total_commands)) for command in commands
+    ]
     return commands
 
 
@@ -319,8 +325,10 @@ def download_and_stream_latest_job_log(
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
+
+    If the log cannot be fetched for any reason, return None.
     """
-    os.makedirs(local_dir, exist_ok=True)
+    os.makedirs(os.path.expanduser(local_dir), exist_ok=True)
     log_file = None
     try:
         log_dirs = backend.sync_down_logs(
@@ -333,23 +341,47 @@ def download_and_stream_latest_job_log(
             # job_ids all represent the same logical managed job.
             job_ids=None,
             local_dir=local_dir)
-    except exceptions.CommandError as e:
-        logger.info(f'Failed to download the logs: '
-                    f'{common_utils.format_exception(e)}')
-    else:
-        if not log_dirs:
-            logger.error('Failed to find the logs for the user program.')
-        else:
-            log_dir = list(log_dirs.values())[0]
-            log_file = os.path.join(log_dir, 'run.log')
+    except Exception as e:  # pylint: disable=broad-except
+        # We want to avoid crashing the controller. sync_down_logs() is pretty
+        # complicated and could crash in various places (creating remote
+        # runners, executing remote code, decoding the payload, etc.). So, we
+        # use a broad except and just return None.
+        logger.info(
+            f'Failed to download the logs: '
+            f'{common_utils.format_exception(e)}',
+            exc_info=True)
+        return None
 
-            # Print the logs to the console.
-            try:
-                with open(log_file, 'r', encoding='utf-8') as f:
-                    print(f.read())
-            except FileNotFoundError:
-                logger.error('Failed to find the logs for the user '
-                             f'program at {log_file}.')
+    if not log_dirs:
+        logger.error('Failed to find the logs for the user program.')
+        return None
+
+    log_dir = list(log_dirs.values())[0]
+    log_file = os.path.join(log_dir, 'run.log')
+
+    # Print the logs to the console.
+    # TODO(zhwu): refactor this into log_utils, along with the refactoring for
+    # the log_lib.tail_logs.
+    try:
+        with open(log_file, 'r', encoding='utf-8') as f:
+            # Stream the logs to the console without reading the whole file into
+            # memory.
+            start_streaming = False
+            for line in f:
+                if log_lib.LOG_FILE_START_STREAMING_AT in line:
+                    start_streaming = True
+                if start_streaming:
+                    print(line, end='', flush=True)
+    except FileNotFoundError:
+        logger.error('Failed to find the logs for the user '
+                     f'program at {log_file}.')
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(
+            f'Failed to stream the logs for the user program at '
+            f'{log_file}: {common_utils.format_exception(e)}',
+            exc_info=True)
+        # Return the log_file anyway.
+
     return log_file
 
 
@@ -363,6 +395,14 @@ def shared_controller_vars_to_fill(
         # again on the controller. This is required since admin_policy is not
         # installed on the controller.
         local_user_config.pop('admin_policy', None)
+        # Remove allowed_contexts from local_user_config since the controller
+        # may be running in a Kubernetes cluster with in-cluster auth and may
+        # not have kubeconfig available to it. This is the typical case since
+        # remote_identity default for Kubernetes is SERVICE_ACCOUNT.
+        # TODO(romilb): We should check the cloud the controller is running on
+        # before popping allowed_contexts. If it is not on Kubernetes,
+        # we may be able to use allowed_contexts.
+        local_user_config.pop('allowed_contexts', None)
         with tempfile.NamedTemporaryFile(
                 delete=False,
                 suffix=_LOCAL_SKYPILOT_CONFIG_PATH_SUFFIX) as temp_file:
@@ -380,7 +420,7 @@ def shared_controller_vars_to_fill(
         'local_user_config_path': local_user_config_path,
     }
     env_vars: Dict[str, str] = {
-        env.value: '1' for env in env_options.Options if env.get()
+        env.env_key: str(int(env.get())) for env in env_options.Options
     }
     env_vars.update({
         # Should not use $USER here, as that env var can be empty when
@@ -388,7 +428,9 @@ def shared_controller_vars_to_fill(
         constants.USER_ENV_VAR: getpass.getuser(),
         constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
         # Skip cloud identity check to avoid the overhead.
-        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.value: '1',
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
+        # Disable minimize logging to get more details on the controller.
+        env_options.Options.MINIMIZE_LOGGING.env_key: '0',
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
@@ -421,10 +463,6 @@ def get_controller_resources(
         if custom_controller_resources_config is not None:
             controller_resources_config_copied.update(
                 custom_controller_resources_config)
-        elif controller == Controllers.JOBS_CONTROLLER:
-            controller_resources_config_copied.update(
-                skypilot_config.get_nested(('spot', 'controller', 'resources'),
-                                           {}))
 
     try:
         controller_resources = resources.Resources.from_yaml_config(
@@ -457,20 +495,17 @@ def get_controller_resources(
         if handle is not None:
             controller_resources_to_use = handle.launched_resources
 
-    if controller_resources_to_use.cloud is not None:
-        return {controller_resources_to_use}
+    # If the controller and replicas are from the same cloud (and region/zone),
+    # it should provide better connectivity. We will let the controller choose
+    # from the clouds (and regions/zones) of the resources if the user does not
+    # specify the cloud (and region/zone) for the controller.
 
-    # If the controller and replicas are from the same cloud, it should
-    # provide better connectivity. We will let the controller choose from
-    # the clouds of the resources if the controller does not exist.
-    # TODO(tian): Consider respecting the regions/zones specified for the
-    # resources as well.
-    requested_clouds: Set['clouds.Cloud'] = set()
+    requested_clouds_with_region_zone: Dict[str, Dict[Optional[str],
+                                                      Set[Optional[str]]]] = {}
     for resource in task_resources:
-        # cloud is an object and will not be able to be distinguished by set.
-        # Here we manually check if the cloud is in the set.
         if resource.cloud is not None:
-            if not clouds.cloud_in_iterable(resource.cloud, requested_clouds):
+            cloud_name = str(resource.cloud)
+            if cloud_name not in requested_clouds_with_region_zone:
                 try:
                     resource.cloud.check_features_are_supported(
                         resources.Resources(),
@@ -478,7 +513,26 @@ def get_controller_resources(
                 except exceptions.NotSupportedError:
                     # Skip the cloud if it does not support hosting controllers.
                     continue
-                requested_clouds.add(resource.cloud)
+                requested_clouds_with_region_zone[cloud_name] = {}
+            if resource.region is None:
+                # If one of the resource.region is None, this could represent
+                # that the user is unsure about which region the resource is
+                # hosted in. In this case, we allow any region for this cloud.
+                requested_clouds_with_region_zone[cloud_name] = {None: {None}}
+            elif None not in requested_clouds_with_region_zone[cloud_name]:
+                if resource.region not in requested_clouds_with_region_zone[
+                        cloud_name]:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region] = set()
+                # If one of the resource.zone is None, allow any zone in the
+                # region.
+                if resource.zone is None:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region] = {None}
+                elif None not in requested_clouds_with_region_zone[cloud_name][
+                        resource.region]:
+                    requested_clouds_with_region_zone[cloud_name][
+                        resource.region].add(resource.zone)
         else:
             # if one of the resource.cloud is None, this could represent user
             # does not know which cloud is best for the specified resources.
@@ -488,19 +542,54 @@ def get_controller_resources(
             #     - cloud: runpod
             #       accelerators: A40
             # In this case, we allow the controller to be launched on any cloud.
-            requested_clouds.clear()
+            requested_clouds_with_region_zone.clear()
             break
-    if not requested_clouds:
+
+    # Extract filtering criteria from the controller resources specified by the
+    # user.
+    controller_cloud = str(
+        controller_resources_to_use.cloud
+    ) if controller_resources_to_use.cloud is not None else None
+    controller_region = controller_resources_to_use.region
+    controller_zone = controller_resources_to_use.zone
+
+    # Filter clouds if controller_resources_to_use.cloud is specified.
+    filtered_clouds = ({controller_cloud} if controller_cloud is not None else
+                       requested_clouds_with_region_zone.keys())
+
+    # Filter regions and zones and construct the result.
+    result: Set[resources.Resources] = set()
+    for cloud_name in filtered_clouds:
+        regions = requested_clouds_with_region_zone.get(cloud_name,
+                                                        {None: {None}})
+
+        # Filter regions if controller_resources_to_use.region is specified.
+        filtered_regions = ({controller_region} if controller_region is not None
+                            else regions.keys())
+
+        for region in filtered_regions:
+            zones = regions.get(region, {None})
+
+            # Filter zones if controller_resources_to_use.zone is specified.
+            filtered_zones = ({controller_zone}
+                              if controller_zone is not None else zones)
+
+            # Create combinations of cloud, region, and zone.
+            for zone in filtered_zones:
+                resource_copy = controller_resources_to_use.copy(
+                    cloud=registry.CLOUD_REGISTRY.from_str(cloud_name),
+                    region=region,
+                    zone=zone)
+                result.add(resource_copy)
+
+    if not result:
         return {controller_resources_to_use}
-    return {
-        controller_resources_to_use.copy(cloud=controller_cloud)
-        for controller_cloud in requested_clouds
-    }
+    return result
 
 
 def _setup_proxy_command_on_controller(
         controller_launched_cloud: 'clouds.Cloud',
-        user_config: Dict[str, Any]) -> skypilot_config.Config:
+        user_config: Dict[str, Any]) -> config_utils.Config:
     """Sets up proxy command on the controller.
 
     This function should be called on the controller (remote cluster), which
@@ -534,7 +623,7 @@ def _setup_proxy_command_on_controller(
     # (or name). It may not be a sufficient check (as it's always
     # possible that peering is not set up), but it may catch some
     # obvious errors.
-    config = skypilot_config.Config.from_dict(user_config)
+    config = config_utils.Config.from_dict(user_config)
     proxy_command_key = (str(controller_launched_cloud).lower(),
                          'ssh_proxy_command')
     ssh_proxy_command = config.get_nested(proxy_command_key, None)
@@ -577,8 +666,68 @@ def replace_skypilot_config_path_in_file_mounts(
                      f'with the real path in file mounts: {file_mounts}')
 
 
+def _generate_run_uuid() -> str:
+    """Generates a unique run id for the job."""
+    return common_utils.base36_encode(uuid.uuid4().hex)[:8]
+
+
+def translate_local_file_mounts_to_two_hop(
+        task: 'task_lib.Task') -> Dict[str, str]:
+    """Translates local->VM mounts into two-hop file mounts.
+
+    This strategy will upload the local files to the controller first, using a
+    normal rsync as part of sky.launch() for the controller. Then, when the
+    controller launches the task, it will also use local file_mounts from the
+    destination path of the first hop.
+
+    Local machine/API server        Controller              Job cluster
+    ------------------------  -----------------------  --------------------
+    |      local path  ----|--|-> controller path --|--|-> job dst path   |
+    ------------------------  -----------------------  --------------------
+
+    Returns:
+        A dict mapping from controller file mount path to local file mount path
+          for the first hop. The task is updated in-place to do the second hop.
+    """
+    first_hop_file_mounts = {}
+    second_hop_file_mounts = {}
+
+    run_id = _generate_run_uuid()
+    base_tmp_dir = os.path.join(constants.FILE_MOUNTS_CONTROLLER_TMP_BASE_PATH,
+                                run_id)
+
+    # Use a simple counter to create unique paths within the base_tmp_dir for
+    # each mount.
+    file_mount_id = 0
+
+    file_mounts_to_translate = task.file_mounts or {}
+    if task.workdir is not None:
+        file_mounts_to_translate[constants.SKY_REMOTE_WORKDIR] = task.workdir
+        task.workdir = None
+
+    for job_cluster_path, local_path in file_mounts_to_translate.items():
+        if data_utils.is_cloud_store_url(
+                local_path) or data_utils.is_cloud_store_url(job_cluster_path):
+            raise exceptions.NotSupportedError(
+                'Cloud-based file_mounts are specified, but no cloud storage '
+                'is available. Please specify local file_mounts only.')
+
+        controller_path = os.path.join(base_tmp_dir, f'{file_mount_id}')
+        file_mount_id += 1
+        first_hop_file_mounts[controller_path] = local_path
+        second_hop_file_mounts[job_cluster_path] = controller_path
+
+    # Use set_file_mounts to override existing file mounts, if they exist.
+    task.set_file_mounts(second_hop_file_mounts)
+
+    # Return the first hop info so that it can be added to the jobs-controller
+    # YAML.
+    return first_hop_file_mounts
+
+
+# (maybe translate local file mounts) and (sync up)
 def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
-                                                  path: str) -> None:
+                                                  task_type: str) -> None:
     """Translates local->VM mounts into Storage->VM, then syncs up any Storage.
 
     Eagerly syncing up local->Storage ensures Storage->VM would work at task
@@ -587,11 +736,31 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     If there are no local source paths to be translated, this function would
     still sync up any storage mounts with local source paths (which do not
     undergo translation).
+
+    When jobs.bucket or serve.bucket is not specified, an intermediate storage
+    dedicated for the job is created for the workdir and local file mounts and
+    the storage is deleted when the job finishes. We don't share the storage
+    between jobs, because jobs might have different resources requirements, and
+    sharing storage between jobs may cause egress costs or slower transfer
+    speeds.
     """
+
     # ================================================================
     # Translate the workdir and local file mounts to cloud file mounts.
     # ================================================================
-    run_id = common_utils.get_usage_run_id()[:8]
+
+    def _sub_path_join(sub_path: Optional[str], path: str) -> str:
+        if sub_path is None:
+            return path
+        return os.path.join(sub_path, path).strip('/')
+
+    # We use uuid to generate a unique run id for the job, so that the bucket/
+    # subdirectory name is unique across different jobs/services.
+    # We should not use common_utils.get_usage_run_id() here, because when
+    # Python API is used, the run id will be the same across multiple
+    # jobs.launch/serve.up calls after the sky is imported.
+    run_id = _generate_run_uuid()
+    user_hash = common_utils.get_user_hash()
     original_file_mounts = task.file_mounts if task.file_mounts else {}
     original_storage_mounts = task.storage_mounts if task.storage_mounts else {}
 
@@ -610,14 +779,35 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     elif has_local_source_paths_workdir:
         msg = 'workdir'
     if msg:
-        logger.info(f'{colorama.Fore.YELLOW}Translating {msg} to SkyPilot '
-                    f'Storage...{colorama.Style.RESET_ALL}')
+        logger.info(
+            ux_utils.starting_message(f'Translating {msg} to '
+                                      'SkyPilot Storage...'))
+        rich_utils.force_update_status(
+            ux_utils.spinner_message(
+                f'Translating {msg} to SkyPilot Storage...'))
+
+    # Get the bucket name for the workdir and file mounts,
+    # we store all these files in same bucket from config.
+    bucket_wth_prefix = skypilot_config.get_nested((task_type, 'bucket'), None)
+    store_kwargs: Dict[str, Any] = {}
+    if bucket_wth_prefix is None:
+        store_type = sub_path = None
+        storage_account_name = region = None
+        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
+            username=common_utils.get_cleaned_username(),
+            user_hash=user_hash,
+            id=run_id)
+    else:
+        (store_type, bucket_name, sub_path, storage_account_name, region) = (
+            storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
+        if storage_account_name is not None:
+            store_kwargs['storage_account_name'] = storage_account_name
+        if region is not None:
+            store_kwargs['region'] = region
 
     # Step 1: Translate the workdir to SkyPilot storage.
     new_storage_mounts = {}
     if task.workdir is not None:
-        bucket_name = constants.WORKDIR_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(), id=run_id)
         workdir = task.workdir
         task.workdir = None
         if (constants.SKY_REMOTE_WORKDIR in original_file_mounts or
@@ -625,18 +815,29 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             raise ValueError(
                 f'Cannot mount {constants.SKY_REMOTE_WORKDIR} as both the '
                 'workdir and file_mounts contains it as the target.')
-        new_storage_mounts[
-            constants.
-            SKY_REMOTE_WORKDIR] = storage_lib.Storage.from_yaml_config({
-                'name': bucket_name,
-                'source': workdir,
-                'persistent': False,
-                'mode': 'COPY',
-            })
+        bucket_sub_path = _sub_path_join(
+            sub_path,
+            constants.FILE_MOUNTS_WORKDIR_SUBPATH.format(run_id=run_id))
+        stores = None
+        if store_type is not None:
+            stores = [store_type]
+
+        storage_obj = storage_lib.Storage(
+            name=bucket_name,
+            source=workdir,
+            persistent=False,
+            mode=storage_lib.StorageMode.COPY,
+            stores=stores,
+            # Set `_is_sky_managed` to False when `bucket_with_prefix` is
+            # specified, so that the storage is not deleted when job finishes,
+            # but only the sub path is deleted.
+            _is_sky_managed=bucket_wth_prefix is None,
+            _bucket_sub_path=bucket_sub_path)
+        new_storage_mounts[constants.SKY_REMOTE_WORKDIR] = storage_obj
         # Check of the existence of the workdir in file_mounts is done in
         # the task construction.
-        logger.info(f'Workdir {workdir!r} will be synced to cloud storage '
-                    f'{bucket_name!r}.')
+        logger.info(f'  {colorama.Style.DIM}Workdir: {workdir!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 2: Translate the local file mounts with folder in src to SkyPilot
     # storage.
@@ -650,88 +851,111 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if os.path.isfile(os.path.abspath(os.path.expanduser(src))):
             copy_mounts_with_file_in_src[dst] = src
             continue
-        bucket_name = constants.FILE_MOUNTS_BUCKET_NAME.format(
-            username=common_utils.get_cleaned_username(),
-            id=f'{run_id}-{i}',
-        )
-        new_storage_mounts[dst] = storage_lib.Storage.from_yaml_config({
-            'name': bucket_name,
-            'source': src,
-            'persistent': False,
-            'mode': 'COPY',
-        })
-        logger.info(
-            f'Folder in local file mount {src!r} will be synced to SkyPilot '
-            f'storage {bucket_name}.')
+        bucket_sub_path = _sub_path_join(
+            sub_path, constants.FILE_MOUNTS_SUBPATH.format(i=i, run_id=run_id))
+        stores = None
+        if store_type is not None:
+            stores = [store_type]
+        storage_obj = storage_lib.Storage(name=bucket_name,
+                                          source=src,
+                                          persistent=False,
+                                          mode=storage_lib.StorageMode.COPY,
+                                          stores=stores,
+                                          _is_sky_managed=not bucket_wth_prefix,
+                                          _bucket_sub_path=bucket_sub_path)
+        new_storage_mounts[dst] = storage_obj
+        logger.info(f'  {colorama.Style.DIM}Folder : {src!r} '
+                    f'-> storage: {bucket_name!r}.{colorama.Style.RESET_ALL}')
 
     # Step 3: Translate local file mounts with file in src to SkyPilot storage.
     # Hard link the files in src to a temporary directory, and upload folder.
-    local_fm_path = os.path.join(
-        tempfile.gettempdir(),
-        constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
-    os.makedirs(local_fm_path, exist_ok=True)
-    file_bucket_name = constants.FILE_MOUNTS_FILE_ONLY_BUCKET_NAME.format(
-        username=common_utils.get_cleaned_username(), id=run_id)
-    file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
-        path)
-    if copy_mounts_with_file_in_src:
-        src_to_file_id = {}
-        for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
-            src_to_file_id[src] = i
-            os.link(os.path.abspath(os.path.expanduser(src)),
-                    os.path.join(local_fm_path, f'file-{i}'))
+    file_mounts_tmp_subpath = _sub_path_join(
+        sub_path, constants.FILE_MOUNTS_TMP_SUBPATH.format(run_id=run_id))
+    base_tmp_dir = os.path.expanduser(constants.FILE_MOUNTS_LOCAL_TMP_BASE_PATH)
+    os.makedirs(base_tmp_dir, exist_ok=True)
+    with tempfile.TemporaryDirectory(dir=base_tmp_dir) as temp_path:
+        local_fm_path = os.path.join(
+            temp_path, constants.FILE_MOUNTS_LOCAL_TMP_DIR.format(id=run_id))
+        os.makedirs(local_fm_path, exist_ok=True)
+        file_mount_remote_tmp_dir = constants.FILE_MOUNTS_REMOTE_TMP_DIR.format(
+            task_type)
+        if copy_mounts_with_file_in_src:
+            src_to_file_id = {}
+            for i, src in enumerate(set(copy_mounts_with_file_in_src.values())):
+                src_to_file_id[src] = i
+                os.link(os.path.abspath(os.path.expanduser(src)),
+                        os.path.join(local_fm_path, f'file-{i}'))
+            stores = None
+            if store_type is not None:
+                stores = [store_type]
+            storage_obj = storage_lib.Storage(
+                name=bucket_name,
+                source=local_fm_path,
+                persistent=False,
+                mode=storage_lib.StorageMode.MOUNT,
+                stores=stores,
+                _is_sky_managed=not bucket_wth_prefix,
+                _bucket_sub_path=file_mounts_tmp_subpath)
 
-        new_storage_mounts[
-            file_mount_remote_tmp_dir] = storage_lib.Storage.from_yaml_config({
-                'name': file_bucket_name,
-                'source': local_fm_path,
-                'persistent': False,
-                'mode': 'MOUNT',
-            })
-        if file_mount_remote_tmp_dir in original_storage_mounts:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    'Failed to translate file mounts, due to the default '
-                    f'destination {file_mount_remote_tmp_dir} '
-                    'being taken.')
-        sources = list(src_to_file_id.keys())
-        sources_str = '\n\t'.join(sources)
-        logger.info('Source files in file_mounts will be synced to '
-                    f'cloud storage {file_bucket_name}:'
-                    f'\n\t{sources_str}')
-    task.update_storage_mounts(new_storage_mounts)
+            new_storage_mounts[file_mount_remote_tmp_dir] = storage_obj
+            if file_mount_remote_tmp_dir in original_storage_mounts:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'Failed to translate file mounts, due to the default '
+                        f'destination {file_mount_remote_tmp_dir} '
+                        'being taken.')
+            sources = list(src_to_file_id.keys())
+            sources_str = '\n    '.join(sources)
+            logger.info(f'  {colorama.Style.DIM}Files (listed below) '
+                        f' -> storage: {bucket_name}:'
+                        f'\n    {sources_str}{colorama.Style.RESET_ALL}')
 
-    # Step 4: Upload storage from sources
-    # Upload the local source to a bucket. The task will not be executed
-    # locally, so we need to upload the files/folders to the bucket manually
-    # here before sending the task to the remote jobs controller.
-    if task.storage_mounts:
-        # There may be existing (non-translated) storage mounts, so log this
-        # whenever task.storage_mounts is non-empty.
-        logger.info(f'{colorama.Fore.YELLOW}Uploading sources to cloud storage.'
-                    f'{colorama.Style.RESET_ALL} See: sky storage ls')
-    try:
-        task.sync_storage_mounts()
-    except ValueError as e:
-        if 'No enabled cloud for storage' in str(e):
-            data_src = None
-            if has_local_source_paths_file_mounts:
-                data_src = 'file_mounts'
-            if has_local_source_paths_workdir:
-                if data_src:
-                    data_src += ' and workdir'
-                else:
-                    data_src = 'workdir'
-            store_enabled_clouds = ', '.join(storage_lib.STORE_ENABLED_CLOUDS)
-            with ux_utils.print_exception_no_traceback():
-                raise exceptions.NotSupportedError(
-                    f'Unable to use {data_src} - no cloud with object store '
-                    'is enabled. Please enable at least one cloud with '
-                    f'object store support ({store_enabled_clouds}) by running '
-                    f'`sky check`, or remove {data_src} from your task.'
-                    '\nHint: If you do not have any cloud access, you may still'
-                    ' download data and code over the network using curl or '
-                    'other tools in the `setup` section of the task.') from None
+        rich_utils.force_update_status(
+            ux_utils.spinner_message(
+                'Uploading translated local files/folders'))
+        task.update_storage_mounts(new_storage_mounts)
+
+        # Step 4: Upload storage from sources
+        # Upload the local source to a bucket. The task will not be executed
+        # locally, so we need to upload the files/folders to the bucket manually
+        # here before sending the task to the remote jobs controller.  This will
+        # also upload any storage mounts that are not translated.  After
+        # sync_storage_mounts, we will also have file_mounts in the task, but
+        # these aren't used since the storage_mounts for the same paths take
+        # precedence.
+        if task.storage_mounts:
+            # There may be existing (non-translated) storage mounts, so log this
+            # whenever task.storage_mounts is non-empty.
+            rich_utils.force_update_status(
+                ux_utils.spinner_message(
+                    'Uploading local sources to storage[/]  '
+                    '[dim]View storages: sky storage ls'))
+        try:
+            task.sync_storage_mounts()
+        except (ValueError, exceptions.NoCloudAccessError) as e:
+            if 'No enabled cloud for storage' in str(e) or isinstance(
+                    e, exceptions.NoCloudAccessError):
+                data_src = None
+                if has_local_source_paths_file_mounts:
+                    data_src = 'file_mounts'
+                if has_local_source_paths_workdir:
+                    if data_src:
+                        data_src += ' and workdir'
+                    else:
+                        data_src = 'workdir'
+                store_enabled_clouds = ', '.join(
+                    storage_lib.STORE_ENABLED_CLOUDS)
+                with ux_utils.print_exception_no_traceback():
+                    raise exceptions.NotSupportedError(
+                        f'Unable to use {data_src} - no cloud with object '
+                        'store support is enabled. Please enable at least one '
+                        'cloud with object store support '
+                        f'({store_enabled_clouds}) by running `sky check`, or '
+                        f'remove {data_src} from your task.'
+                        '\nHint: If you do not have any cloud access, you may '
+                        'still download data and code over the network using '
+                        'curl or other tools in the `setup` section of the '
+                        'task.') from None
 
     # Step 5: Add the file download into the file mounts, such as
     #  /original-dst: s3://spot-fm-file-only-bucket-name/file-0
@@ -740,10 +964,14 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         # file_mount_remote_tmp_dir will only exist when there are files in
         # the src for copy mounts.
         storage_obj = task.storage_mounts[file_mount_remote_tmp_dir]
-        store_type = list(storage_obj.stores.keys())[0]
-        store_object = storage_obj.stores[store_type]
+        assert storage_obj.stores, (storage_obj.__dict__, task.to_yaml_config())
+        curr_store_type = list(storage_obj.stores.keys())[0]
+        store_object = storage_obj.stores[curr_store_type]
+        assert store_object is not None, (storage_obj.__dict__,
+                                          task.to_yaml_config())
         bucket_url = storage_lib.StoreType.get_endpoint_url(
-            store_object, file_bucket_name)
+            store_object, bucket_name)
+        bucket_url += f'/{file_mounts_tmp_subpath}'
         for dst, src in copy_mounts_with_file_in_src.items():
             file_id = src_to_file_id[src]
             new_file_mounts[dst] = bucket_url + f'/file-{file_id}'
@@ -755,13 +983,15 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         if (storage_obj.source is not None and
                 not data_utils.is_cloud_store_url(storage_obj.source)):
             # Need to replace the local path with bucket URI, and remove the
-            # name field, so that the storage mount can work on the spot
+            # name field, so that the storage mount can work on the jobs
             # controller.
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            store_object = storage_obj.stores[store_type]
+            curr_store_type = store_types[0]
+            store_object = storage_obj.stores[curr_store_type]
+            assert store_object is not None and storage_obj.name is not None, (
+                store_object, storage_obj.name)
             storage_obj.source = storage_lib.StoreType.get_endpoint_url(
                 store_object, storage_obj.name)
             storage_obj.force_delete = True
@@ -778,9 +1008,13 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             store_types = list(storage_obj.stores.keys())
             assert len(store_types) == 1, (
                 'We only support one store type for now.', storage_obj.stores)
-            store_type = store_types[0]
-            store_object = storage_obj.stores[store_type]
+            curr_store_type = store_types[0]
+            store_object = storage_obj.stores[curr_store_type]
+            assert store_object is not None and storage_obj.name is not None, (
+                store_object, storage_obj.name)
             source = storage_lib.StoreType.get_endpoint_url(
+                store_object, storage_obj.name)
+            assert store_object is not None and storage_obj.name is not None, (
                 store_object, storage_obj.name)
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
@@ -792,3 +1026,5 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             })
             updated_mount_storages[storage_path] = new_storage
     task.update_storage_mounts(updated_mount_storages)
+    if msg:
+        logger.info(ux_utils.finishing_message('Uploaded local files/folders.'))

@@ -13,7 +13,7 @@ This guide walks through how to serve Llama 3.1 models **completely on your infr
 
 - Local GPU workstation
 - Kubernetes cluster
-- Cloud accounts ([12 clouds supported](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html))
+- Cloud accounts ([15+ clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
 
 SkyPilot will be used as the unified framework to launch serving on any (or multiple) infra that you bring.
 
@@ -64,7 +64,7 @@ sky check kubernetes
 sky check
 ```
 
-See [docs](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html) for details.
+See [docs](https://docs.skypilot.co/en/latest/getting-started/installation.html) for details.
 
 ### Step 1: Get a GPU dev node (pod or VM)
 
@@ -155,7 +155,7 @@ Now that we verified the model is working, let's package it for hands-free deplo
 
 Whichever infra you use for GPUs, SkyPilot abstracts away the mundane infra tasks (e.g., setting up services on K8s, opening up ports for cloud VMs), making AI models super easy to deploy via one command.
 
-[Deploying via SkyPilot](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html) has several key benefits:
+[Deploying via SkyPilot](https://docs.skypilot.co/en/latest/serving/sky-serve.html) has several key benefits:
 - Control node & replicas completely stay in your infra
 - Automatic load-balancing across multiple replicas
 - Automatic recovery of replicas
@@ -296,7 +296,7 @@ curl -L http://$ENDPOINT/v1/chat/completions \
 🎉 **Congratulations!** You are now serving a Llama 3.1 8B model across two replicas. To recap, all model replicas **stay in your own private infrastructure** and SkyPilot ensures they are **healthy and available**.
 
 
-Details on autoscaling, rolling updates, and more in [SkyServe docs](https://skypilot.readthedocs.io/en/latest/serving/sky-serve.html).
+Details on autoscaling, rolling updates, and more in [SkyServe docs](https://docs.skypilot.co/en/latest/serving/sky-serve.html).
 
 When you are done, shut down all resources:
 

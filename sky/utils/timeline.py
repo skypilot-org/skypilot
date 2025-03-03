@@ -9,6 +9,7 @@ import json
 import os
 import threading
 import time
+import traceback
 from typing import Callable, Optional, Union
 
 import filelock
@@ -48,8 +49,9 @@ class Event:
             'ph': 'B',
             'ts': f'{time.time() * 10 ** 6: .3f}',
         })
+        event_begin['args'] = {'stack': '\n'.join(traceback.format_stack())}
         if self._message is not None:
-            event_begin['args'] = {'message': self._message}
+            event_begin['args']['message'] = self._message
         _events.append(event_begin)
 
     def end(self):
@@ -77,11 +79,11 @@ def event(name_or_fn: Union[str, Callable], message: Optional[str] = None):
 class FileLockEvent:
     """Serve both as a file lock and event for the lock."""
 
-    def __init__(self, lockfile: Union[str, os.PathLike]):
+    def __init__(self, lockfile: Union[str, os.PathLike], timeout: float = -1):
         self._lockfile = lockfile
-        # TODO(mraheja): remove pylint disabling when filelock version updated
-        # pylint: disable=abstract-class-instantiated
-        self._lock = filelock.FileLock(self._lockfile)
+        os.makedirs(os.path.dirname(os.path.abspath(self._lockfile)),
+                    exist_ok=True)
+        self._lock = filelock.FileLock(self._lockfile, timeout)
         self._hold_lock_event = Event(f'[FileLock.hold]:{self._lockfile}')
 
     def acquire(self):
@@ -116,7 +118,10 @@ class FileLockEvent:
         return wrapper
 
 
-def _save_timeline(file_path: str):
+def save_timeline():
+    file_path = os.environ.get('SKYPILOT_TIMELINE_FILE_PATH')
+    if not file_path:
+        return
     json_output = {
         'traceEvents': _events,
         'displayTimeUnit': 'ms',
@@ -130,4 +135,4 @@ def _save_timeline(file_path: str):
 
 
 if os.environ.get('SKYPILOT_TIMELINE_FILE_PATH'):
-    atexit.register(_save_timeline, os.environ['SKYPILOT_TIMELINE_FILE_PATH'])
+    atexit.register(save_timeline)

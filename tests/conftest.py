@@ -1,14 +1,29 @@
 from typing import List
 
-import common  # TODO(zongheng): for some reason isort places it here.
+# We need to import all the mock functions here, so that the smoke
+# tests can access them.
+from common_test_fixtures import aws_config_region
+from common_test_fixtures import enable_all_clouds
+from common_test_fixtures import mock_client_requests
+from common_test_fixtures import mock_controller_accessible
+from common_test_fixtures import mock_job_table_no_job
+from common_test_fixtures import mock_job_table_one_job
+from common_test_fixtures import mock_queue
+from common_test_fixtures import mock_redirect_log_file
+from common_test_fixtures import mock_services_no_service
+from common_test_fixtures import mock_services_one_service
+from common_test_fixtures import mock_stream_utils
+from common_test_fixtures import skyignore_dir
 import pytest
+
+from sky.server import common as server_common
 
 # Usage: use
 #   @pytest.mark.slow
 # to mark a test as slow and to skip by default.
 # https://docs.pytest.org/en/latest/example/simple.html#control-skipping-of-tests-according-to-command-line-option
 
-# By default, only run generic tests and cloud-specific tests for GCP and Azure,
+# By default, only run generic tests and cloud-specific tests for AWS and Azure,
 # due to the cloud credit limit for the development account.
 #
 # A "generic test" tests a generic functionality (e.g., autostop) that
@@ -21,10 +36,11 @@ import pytest
 # To only run tests for managed jobs (without generic tests), use
 # --managed-jobs.
 all_clouds_in_smoke_tests = [
-    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci',
-    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace'
+    'aws', 'gcp', 'azure', 'lambda', 'cloudflare', 'ibm', 'scp', 'oci', 'do',
+    'kubernetes', 'vsphere', 'cudo', 'fluidstack', 'paperspace', 'runpod',
+    'vast', 'nebius'
 ]
-default_clouds_to_run = ['gcp', 'azure']
+default_clouds_to_run = ['aws', 'azure']
 
 # Translate cloud name to pytest keyword. We need this because
 # @pytest.mark.lambda is not allowed, so we use @pytest.mark.lambda_cloud
@@ -40,9 +56,14 @@ cloud_to_pytest_keyword = {
     'oci': 'oci',
     'kubernetes': 'kubernetes',
     'vsphere': 'vsphere',
+    'runpod': 'runpod',
     'fluidstack': 'fluidstack',
     'cudo': 'cudo',
     'paperspace': 'paperspace',
+    'do': 'do',
+    'vast': 'vast',
+    'runpod': 'runpod',
+    'nebius': 'nebius'
 }
 
 
@@ -72,7 +93,6 @@ def pytest_addoption(parser):
     parser.addoption(
         '--generic-cloud',
         type=str,
-        default='gcp',
         choices=all_clouds_in_smoke_tests,
         help='Cloud to use for generic tests. If the generic cloud is '
         'not within the clouds to be run, it will be reset to the first '
@@ -91,6 +111,8 @@ def pytest_addoption(parser):
 
 def pytest_configure(config):
     config.addinivalue_line('markers', 'slow: mark test as slow to run')
+    config.addinivalue_line('markers',
+                            'local: mark test to run only on local API server')
     for cloud in all_clouds_in_smoke_tests:
         cloud_keyword = cloud_to_pytest_keyword[cloud]
         config.addinivalue_line(
@@ -101,14 +123,21 @@ def pytest_configure(config):
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []
+
     for cloud in all_clouds_in_smoke_tests:
         if config.getoption(f'--{cloud}'):
             if cloud == 'cloudflare':
                 cloud_to_run.append(default_clouds_to_run[0])
             else:
                 cloud_to_run.append(cloud)
-    if not cloud_to_run:
+
+    generic_cloud_option = config.getoption('--generic-cloud')
+    if generic_cloud_option is not None and generic_cloud_option not in cloud_to_run:
+        cloud_to_run.append(generic_cloud_option)
+
+    if len(cloud_to_run) == 0:
         cloud_to_run = default_clouds_to_run
+
     return cloud_to_run
 
 
@@ -121,6 +150,8 @@ def pytest_collection_modifyitems(config, items):
         reason='skipped, because --serve option is set')
     skip_marks['tpu'] = pytest.mark.skip(
         reason='skipped, because --tpu option is set')
+    skip_marks['local'] = pytest.mark.skip(
+        reason='test requires local API server')
     for cloud in all_clouds_in_smoke_tests:
         skip_marks[cloud] = pytest.mark.skip(
             reason=f'tests for {cloud} is skipped, try setting --{cloud}')
@@ -132,14 +163,16 @@ def pytest_collection_modifyitems(config, items):
     for item in items:
         if 'slow' in item.keywords and not config.getoption('--runslow'):
             item.add_marker(skip_marks['slow'])
+        if 'local' in item.keywords and not server_common.is_api_server_local():
+            item.add_marker(skip_marks['local'])
         if _is_generic_test(
                 item) and f'no_{generic_cloud_keyword}' in item.keywords:
             item.add_marker(skip_marks[generic_cloud])
         for cloud in all_clouds_in_smoke_tests:
             cloud_keyword = cloud_to_pytest_keyword[cloud]
             if (cloud_keyword in item.keywords and cloud not in cloud_to_run):
-                # Need to check both conditions as 'gcp' is added to cloud_to_run
-                # when tested for cloudflare
+                # Need to check both conditions as the first default cloud is
+                # added to cloud_to_run when tested for cloudflare
                 if config.getoption('--cloudflare') and cloud == 'cloudflare':
                     continue
                 item.add_marker(skip_marks[cloud])
@@ -177,6 +210,12 @@ def pytest_collection_modifyitems(config, items):
                 item.add_marker(serial_mark)
                 item._nodeid = f'{item.nodeid}@serial_{generic_cloud_keyword}'  # See comment on item.nodeid above
 
+    if config.option.collectonly:
+        for item in items:
+            full_name = item.nodeid
+            marks = [mark.name for mark in item.iter_markers()]
+            print(f"Collected {full_name} with marks: {marks}")
+
 
 def _is_generic_test(item) -> bool:
     for cloud in all_clouds_in_smoke_tests:
@@ -186,30 +225,12 @@ def _is_generic_test(item) -> bool:
 
 
 def _generic_cloud(config) -> str:
-    c = config.getoption('--generic-cloud')
-    cloud_to_run = _get_cloud_to_run(config)
-    if c not in cloud_to_run:
-        c = cloud_to_run[0]
-    return c
+    generic_cloud_option = config.getoption('--generic-cloud')
+    if generic_cloud_option is not None:
+        return generic_cloud_option
+    return _get_cloud_to_run(config)[0]
 
 
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
-
-
-@pytest.fixture
-def enable_all_clouds(monkeypatch: pytest.MonkeyPatch) -> None:
-    common.enable_all_clouds_in_monkeypatch(monkeypatch)
-
-
-@pytest.fixture
-def aws_config_region(monkeypatch: pytest.MonkeyPatch) -> str:
-    from sky import skypilot_config
-    region = 'us-west-2'
-    if skypilot_config.loaded():
-        ssh_proxy_command = skypilot_config.get_nested(
-            ('aws', 'ssh_proxy_command'), None)
-        if isinstance(ssh_proxy_command, dict) and ssh_proxy_command:
-            region = list(ssh_proxy_command.keys())[0]
-    return region

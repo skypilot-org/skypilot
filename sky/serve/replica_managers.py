@@ -19,9 +19,9 @@ import sky
 from sky import backends
 from sky import core
 from sky import exceptions
+from sky import execution
 from sky import global_user_state
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.serve import constants as serve_constants
 from sky.serve import serve_state
@@ -33,9 +33,11 @@ from sky.usage import usage_lib
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import env_options
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    from sky import resources
     from sky.serve import service_spec
 
 logger = sky_logging.init_logger(__name__)
@@ -94,12 +96,10 @@ def launch_cluster(replica_id: int,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
-            sky.launch(task,
-                       cluster_name,
-                       detach_setup=True,
-                       detach_run=True,
-                       retry_until_up=True,
-                       _is_launched_by_sky_serve_controller=True)
+            execution.launch(task,
+                             cluster_name,
+                             retry_until_up=True,
+                             _is_launched_by_sky_serve_controller=True)
             logger.info(f'Replica cluster {cluster_name} launched.')
         except (exceptions.InvalidClusterNameError,
                 exceptions.NoCloudAccessError,
@@ -147,7 +147,7 @@ def terminate_cluster(cluster_name: str,
         retry_cnt += 1
         try:
             usage_lib.messages.usage.set_internal()
-            sky.down(cluster_name)
+            core.down(cluster_name)
             return
         except ValueError:
             # The cluster is already terminated.
@@ -170,12 +170,11 @@ def terminate_cluster(cluster_name: str,
 def _get_resources_ports(task_yaml: str) -> str:
     """Get the resources ports used by the task."""
     task = sky.Task.from_yaml(task_yaml)
-    # Already checked all ports are the same in sky.serve.core.up
-    assert len(task.resources) >= 1, task
-    task_resources = list(task.resources)[0]
-    # Already checked the resources have and only have one port
-    # before upload the task yaml.
-    return task_resources.ports[0]
+    # Already checked all ports are valid in sky.serve.core.up
+    assert task.resources, task
+    assert task.service is not None, task
+    assert task.service.ports is not None, task
+    return task.service.ports
 
 
 def _should_use_spot(task_yaml: str,
@@ -245,6 +244,8 @@ class ReplicaStatusProperty:
     is_scale_down: bool = False
     # The replica's spot instance was preempted.
     preempted: bool = False
+    # Whether the replica is purged.
+    purged: bool = False
 
     def remove_terminated_replica(self) -> bool:
         """Whether to remove the replica record from the replica table.
@@ -304,6 +305,8 @@ class ReplicaStatusProperty:
         if self.user_app_failed:
             return False
         if self.preempted:
+            return False
+        if self.purged:
             return False
         return True
 
@@ -588,7 +591,7 @@ class ReplicaManager:
         """
         raise NotImplementedError
 
-    def scale_down(self, replica_id: int) -> None:
+    def scale_down(self, replica_id: int, purge: bool = False) -> None:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
@@ -677,7 +680,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                            replica_id: int,
                            sync_down_logs: bool,
                            replica_drain_delay_seconds: int,
-                           is_scale_down: bool = False) -> None:
+                           is_scale_down: bool = False,
+                           purge: bool = False) -> None:
 
         if replica_id in self._launch_process_pool:
             info = serve_state.get_replica_info_from_id(self._service_name,
@@ -734,7 +738,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 logger.info(f'\n== End of logs (Replica: {replica_id}) ==')
                 with open(log_file_name, 'a',
                           encoding='utf-8') as replica_log_file, open(
-                              job_log_file_name, 'r',
+                              os.path.expanduser(job_log_file_name),
+                              'r',
                               encoding='utf-8') as job_file:
                     replica_log_file.write(job_file.read())
             else:
@@ -761,16 +766,18 @@ class SkyPilotReplicaManager(ReplicaManager):
         )
         info.status_property.sky_down_status = ProcessStatus.RUNNING
         info.status_property.is_scale_down = is_scale_down
+        info.status_property.purged = purge
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_id: int) -> None:
+    def scale_down(self, replica_id: int, purge: bool = False) -> None:
         self._terminate_replica(
             replica_id,
             sync_down_logs=False,
             replica_drain_delay_seconds=_DEFAULT_DRAIN_SECONDS,
-            is_scale_down=True)
+            is_scale_down=True,
+            purge=purge)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.
@@ -909,6 +916,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # since user should fixed the error before update.
                 elif info.version != self.latest_version:
                     removal_reason = 'for version outdated'
+                elif info.status_property.purged:
+                    removal_reason = 'for purge'
                 else:
                     logger.info(f'Termination of replica {replica_id} '
                                 'finished. Replica info is kept since some '
@@ -969,7 +978,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             if not info.status_property.should_track_service_status():
                 continue
             # We use backend API to avoid usage collection in the
-            # core.job_status.
+            # sdk.job_status.
             backend = backends.CloudVmRayBackend()
             handle = info.handle()
             assert handle is not None, info
@@ -987,9 +996,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Re-raise the exception if it is not preempted.
                 raise
             job_status = list(job_statuses.values())[0]
-            if job_status in [
-                    job_lib.JobStatus.FAILED, job_lib.JobStatus.FAILED_SETUP
-            ]:
+            if job_status in job_lib.JobStatus.user_code_failure_states():
                 info.status_property.user_app_failed = True
                 serve_state.add_or_update_replica(self._service_name,
                                                   info.replica_id, info)

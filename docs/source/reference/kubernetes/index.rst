@@ -39,7 +39,7 @@ Why use SkyPilot on Kubernetes?
             .. grid-item-card::  🖼 Run popular models on Kubernetes
                 :text-align: center
 
-                Train and serve `Llama-3 <https://skypilot.readthedocs.io/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://skypilot.readthedocs.io/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`AI gallery <ai-gallery>`.
+                Train and serve `Llama-3 <https://docs.skypilot.co/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://docs.skypilot.co/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`Examples <examples>`.
 
 
     .. tab-item:: For Infrastructure Admins
@@ -103,17 +103,5 @@ Table of Contents
    Getting Started <kubernetes-getting-started>
    kubernetes-setup
    kubernetes-troubleshooting
-
-
-Features and Roadmap
---------------------
-
-Kubernetes support is under active development. Some features are in progress and will be released soon:
-
-* CPU and GPU Tasks - ✅ Available
-* Auto-down - ✅ Available
-* Storage mounting - ✅ Available on x86_64 clusters
-* Multi-node tasks - ✅ Available
-* Custom images - ✅ Available
-* Opening ports and exposing services - ✅ Available
-* Multiple Kubernetes Clusters - 🚧 In progress
+   multi-kubernetes
+   SkyPilot vs. Vanilla Kubernetes <skypilot-and-vanilla-k8s>

@@ -46,11 +46,7 @@ VMs.  The task is invoked under that working directory (so that it can call
 scripts, access checkpoints, etc.).
 
 .. note::
-
-    For large, multi-gigabyte workdirs, uploading may be slow because they
-    are synced to the remote VM(s) with :code:`rsync`. To exclude large files in
-    your workdir from being uploaded, add them to the :code:`.gitignore` file
-    (or a ``.git/info/exclude`` file) under the workdir.
+  To exclude large files from being uploaded, see :ref:`exclude-uploading-files`.
 
 .. note::
 
@@ -101,9 +97,8 @@ pass the ``--no-setup`` flag to ``sky launch``. For example, ``sky launch --no-s
 
 .. note::
 
-    Items listed in a :code:`.gitignore` file (or a ``.git/info/exclude`` file)
-    under a local file_mount source are also ignored (the same behavior as
-    handling ``workdir``).
+    Items listed in a :code:`.skyignore` file under the local file_mount source 
+    are also ignored (the same behavior as handling ``workdir``).
 
 .. note::
 
@@ -120,6 +115,33 @@ For large files (e.g., 10s or 100s of GBs), putting them into the workdir or a
 file_mount may be slow because they are processed by ``rsync``.  Use
 :ref:`SkyPilot bucket mounting <sky-storage>` to efficiently handle
 large files.
+
+.. _exclude-uploading-files:
+
+Exclude uploading files
+--------------------------------------
+By default, SkyPilot uses your existing :code:`.gitignore` and :code:`.git/info/exclude` to exclude files from syncing.
+
+Alternatively, you can use :code:`.skyignore` if you want to separate SkyPilot's syncing behavior from Git's.
+If you use a :code:`.skyignore` file, SkyPilot will only exclude files based on that file without using the default Git files.
+
+Any :code:`.skyignore` file under either your workdir or source paths of file_mounts is respected.
+
+:code:`.skyignore` follows RSYNC filter rules, e.g.
+
+.. code-block::
+
+  # Files that match pattern under CURRENT directory
+  /file.txt
+  /dir
+  /*.jar
+  /dir/*.jar
+
+  # Files that match pattern under ALL directories
+  *.jar
+  file.txt
+
+Do _not_ use ``.`` to indicate local directory (e.g., instead of ``./file``, write ``/file``).
 
 .. _downloading-files-and-artifacts:
 
