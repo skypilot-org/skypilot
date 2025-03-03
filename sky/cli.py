@@ -2128,10 +2128,11 @@ def logs(
     2. If ``--status`` is specified, print the status of the job and exit with
     returncode 0 if the job succeeded. At most one job_id can
     be specified. Other possible return codes:
-      - 100: job failed.
-      - 101: job not finished.
-      - 102: job not found.
-      - 103: job was cancelled by the user.
+
+    - 100: job failed.
+    - 101: job not finished.
+    - 102: job not found.
+    - 103: job was cancelled by the user.
 
     3. If ``--sync-down`` is specified, the logs of the job will be downloaded
     from the cluster and saved to the local machine under
