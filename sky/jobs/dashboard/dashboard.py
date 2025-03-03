@@ -61,6 +61,7 @@ class JobTableColumns(enum.IntEnum):
     - FAILOVER (13): Job failover history
     - DETAILS (14): Job details
     - ACTIONS (15): Available actions column
+    - LOG_CONTENT (16): Log content column
     """
     DROPDOWN = 0
     ID = 1
@@ -78,13 +79,14 @@ class JobTableColumns(enum.IntEnum):
     DETAILS = 13
     FAILOVER = 14
     ACTIONS = 15
+    LOG_CONTENT = 16
 
 
 # Column headers matching the indices above
 JOB_TABLE_COLUMNS = [
     '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
     'Job Duration', 'Status', 'Started', 'Cluster', 'Region', 'Failover',
-    'Recoveries', 'Details', 'Actions'
+    'Recoveries', 'Details', 'Actions', 'Log Content'
 ]
 
 # This column is given by format_job_table but should be ignored.
@@ -149,15 +151,7 @@ def home():
         if not task['status'].is_terminal():
             status_counts[task['status'].value] += 1
 
-    # Add an empty column for the dropdown button and actions column
-    # Exclude SCHED. STATE column
-    rows = [
-        [''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
-        # Add empty cell for failover and actions column
-        [''] + [''] for row in rows
-    ]
-
-    # Add log content as failover history for each job
+    # Add log content as a regular column for each job
     for row in rows:
         job_id = str(row[JobTableColumns.ID]).strip().replace(' ⤳', '')
         if job_id and job_id != '-':
@@ -171,24 +165,21 @@ def home():
                         log_content = f.read()
                         row[JobTableColumns.FAILOVER] = _extract_launch_history(
                             log_content)
-                        
-                        # Store full log content for direct display
-                        row.append(log_content)  # Add log content as the last element
+                        row[JobTableColumns.LOG_CONTENT] = log_content
                 else:
                     row[JobTableColumns.FAILOVER] = 'Log file not found'
-                    row.append('Log file not found')  # Add placeholder for log content
+                    row[JobTableColumns.LOG_CONTENT] = 'Log file not found'
             except (IOError, OSError) as e:
-                row[JobTableColumns.FAILOVER] = f'Error reading log: {str(e)}'
-                row.append(f'Error reading log: {str(e)}')  # Add error message for log content
+                error_msg = f'Error reading log: {str(e)}'
+                row[JobTableColumns.FAILOVER] = error_msg
+                row[JobTableColumns.LOG_CONTENT] = error_msg
         else:
-            row.append('')  # Add empty log content for rows without a job ID
-    app.logger.error('All managed jobs:')
+            row[JobTableColumns.LOG_CONTENT] = ''
 
-    # Validate column count - Updated to account for the extra log content column
-    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS) + 1:  # +1 for log content
+    if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
         raise RuntimeError(
             f'Dashboard code and managed job queue code are out of sync. '
-            f'Expected {len(JOB_TABLE_COLUMNS)} columns plus log content, got {len(rows[0])} total')
+            f'Expected {JOB_TABLE_COLUMNS} columns, got {rows[0]}')
 
     # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
     for row in rows:
