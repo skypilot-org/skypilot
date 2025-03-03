@@ -237,3 +237,23 @@ We suggest setting the :code:`SKYPILOT_DOCKER_PASSWORD` environment variable thr
   $ export SKYPILOT_DOCKER_PASSWORD=$(aws ecr get-login-password --region us-east-1)
   $ # Pass --env:
   $ sky launch task.yaml --env SKYPILOT_DOCKER_PASSWORD
+
+You can also directly specify shell commands in any Docker login environment variables in your YAML file, which will be executed to get the actual value:
+
+.. code-block:: yaml
+
+  envs:
+    SKYPILOT_DOCKER_USERNAME: AWS
+    SKYPILOT_DOCKER_PASSWORD: "$(aws ecr get-login-password --region us-west-2)"
+    SKYPILOT_DOCKER_SERVER: <your-user-id>.dkr.ecr.us-west-2.amazonaws.com
+
+SkyPilot will execute any value enclosed in :code:`$(...)` syntax and use the command's output as the actual value for the environment variable. This is especially useful for cloud provider registries where authentication tokens might need to be fetched dynamically.
+
+If you need to use a literal string that starts with :code:`$(` and ends with :code:`)` as your password or other Docker login value, you can escape it with a backslash:
+
+.. code-block:: yaml
+
+  envs:
+    SKYPILOT_DOCKER_PASSWORD: "\\$(not-a-real-command)"
+
+This will be interpreted as the literal string :code:`$(not-a-real-command)` without attempting to execute it as a command.
