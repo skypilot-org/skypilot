@@ -2411,6 +2411,7 @@ def is_controller_accessible(
         error_msg = non_existent_message
     elif (controller_status == status_lib.ClusterStatus.INIT or
           need_connection_check):
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
         # Check ssh connection if (1) controller is in INIT state, or (2) we failed to fetch the
         # status, both of which can happen when controller's status lock is held by another `sky jobs launch` or
         # `sky serve up`. If we have controller's head_ip available and it is ssh-reachable,
@@ -2435,8 +2436,8 @@ def is_controller_accessible(
             raise exceptions.ClusterNotUpError(error_msg,
                                                cluster_status=controller_status,
                                                handle=handle)
-    assert handle is not None and handle.head_ip is not None, (
-        handle, controller_status)
+    assert (isinstance(handle, backends.CloudVmRayResourceHandle) and
+            handle.head_ip is not None), (handle, controller_status)
     return handle
 
 

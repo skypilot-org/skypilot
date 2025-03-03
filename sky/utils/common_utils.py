@@ -14,8 +14,8 @@ import socket
 import sys
 import time
 import typing
-from typing import (Any, Callable, Dict, List, Optional, Protocol, Type,
-                    TypeVar, Union, Generic)
+from typing import (Any, Callable, Dict, Generic, List, Optional, Protocol,
+                    Type, TypeVar, Union)
 import uuid
 
 import jinja2
@@ -432,13 +432,14 @@ class ContextManager(Protocol[T]):
 
 @typing.overload
 def make_decorator(
-        cls: Type[ContextManager[Any]], name_or_fn: str,
-        **ctx_kwargs: Any) -> Callable[[Callable[..., R_co]], Callable[..., R_co]]:
+        cls: Type[ContextManager[Any]], name_or_fn: str, **ctx_kwargs: Any
+) -> Callable[[Callable[..., R_co]], Callable[..., R_co]]:
     ...
 
 
 @typing.overload
-def make_decorator(cls: Type[ContextManager[Any]], name_or_fn: Callable[..., R_co],
+def make_decorator(cls: Type[ContextManager[Any]], name_or_fn: Callable[...,
+                                                                        R_co],
                    **ctx_kwargs: Any) -> Callable[..., R_co]:
     ...
 
@@ -446,7 +447,8 @@ def make_decorator(cls: Type[ContextManager[Any]], name_or_fn: Callable[..., R_c
 def make_decorator(
     cls: Type[ContextManager[Any]], name_or_fn: Union[str, Callable[..., R_co]],
     **ctx_kwargs: Any
-) -> Union[Callable[..., R_co], Callable[[Callable[..., R_co]], Callable[..., R_co]]]:
+) -> Union[Callable[..., R_co], Callable[[Callable[..., R_co]], Callable[
+        ..., R_co]]]:
     """Make the cls a decorator.
 
     class cls:

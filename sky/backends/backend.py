@@ -26,6 +26,10 @@ class ResourceHandle:
     def get_cluster_name(self) -> str:
         raise NotImplementedError
 
+    @property
+    def head_ip(self) -> Optional[str]:
+        raise NotImplementedError
+
 
 class Backend(Generic[_ResourceHandleType]):
     """Backend interface: handles provisioning, setup, and scheduling."""

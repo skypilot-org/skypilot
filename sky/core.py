@@ -297,6 +297,7 @@ def _start(
         raise exceptions.ClusterDoesNotExist(
             f'Cluster {cluster_name!r} does not exist.')
     if not force and cluster_status == status_lib.ClusterStatus.UP:
+        assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
         sky_logging.print(f'Cluster {cluster_name!r} is already up.')
         return handle
     assert force or cluster_status in (
@@ -325,6 +326,7 @@ def _start(
 
     usage_lib.record_cluster_name_for_current_operation(cluster_name)
 
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     with dag.Dag():
         dummy_task = task.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
