@@ -197,6 +197,9 @@ def _get_yaml_path_from_cluster_name(cluster_name: str,
     return str(output_path)
 
 
+# Add retry for the file mounts optimization, as the underlying cp command may
+# experience transient errors, #4758.
+@common_utils.retry
 def _optimize_file_mounts(yaml_path: str) -> None:
     """Optimize file mounts in the given ray yaml file.
 
@@ -206,6 +209,10 @@ def _optimize_file_mounts(yaml_path: str) -> None:
       - wheel
       - credentials
     Format is {dst: src}.
+
+    Raises:
+        subprocess.CalledProcessError: If the file mounts are failed to be
+            copied.
     """
     yaml_config = common_utils.read_yaml(yaml_path)
 
@@ -1273,12 +1280,17 @@ def parallel_data_transfer_to_nodes(
                                             stream_logs=stream_logs,
                                             require_outputs=True,
                                             source_bashrc=source_bashrc)
-            err_msg = ('Failed to run command before rsync '
+            err_msg = (f'{colorama.Style.RESET_ALL}{colorama.Style.DIM}'
+                       f'----- CMD -----\n'
+                       f'{cmd}\n'
+                       f'----- CMD END -----\n'
+                       f'{colorama.Style.RESET_ALL}'
+                       f'{colorama.Fore.RED}'
+                       f'Failed to run command before rsync '
                        f'{origin_source} -> {target}. '
-                       'Ensure that the network is stable, then retry. '
-                       f'{cmd}')
+                       f'{colorama.Style.RESET_ALL}')
             if log_path != os.devnull:
-                err_msg += f' See logs in {log_path}'
+                err_msg += ux_utils.log_path_hint(log_path)
             subprocess_utils.handle_returncode(rc,
                                                cmd,
                                                err_msg,

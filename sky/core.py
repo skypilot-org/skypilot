@@ -374,8 +374,7 @@ def start(
             many minute of idleness, i.e., no running or pending jobs in the
             cluster's job queue. Idleness gets reset whenever setting-up/
             running/pending jobs are found in the job queue. Setting this
-            flag is equivalent to running
-            ``sky.launch(..., detach_run=True, ...)`` and then
+            flag is equivalent to running ``sky.launch()`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
             cluster will not be autostopped.
         retry_until_up: whether to retry launching the cluster until it is
@@ -1009,8 +1008,12 @@ def realtime_kubernetes_gpu_availability(
 # = Local Cluster =
 # =================
 @usage_lib.entrypoint
-def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool) -> None:
+def local_up(gpus: bool,
+             ips: Optional[List[str]],
+             ssh_user: Optional[str],
+             ssh_key: Optional[str],
+             cleanup: bool,
+             context_name: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key, cleanup):
@@ -1036,7 +1039,7 @@ def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
     if ips:
         assert ssh_user is not None and ssh_key is not None
         kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup)
+                                                      cleanup, context_name)
     else:
         # Run local deployment (kind) if no remote args are specified
         kubernetes_deploy_utils.deploy_local_cluster(gpus)

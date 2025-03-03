@@ -37,7 +37,7 @@ def request_body_env_vars() -> dict:
     env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
                                                  getpass.getuser())
     env_vars[
-        usage_constants.USAGE_RUN_ID_ENV_VAR] = common_utils.get_usage_run_id()
+        usage_constants.USAGE_RUN_ID_ENV_VAR] = usage_lib.messages.usage.run_id
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
@@ -70,6 +70,7 @@ class RequestBody(pydantic.BaseModel):
     env_vars: Dict[str, str] = {}
     entrypoint: str = ''
     entrypoint_command: str = ''
+    using_remote_api_server: bool = False
     override_skypilot_config: Optional[Dict[str, Any]] = {}
 
     def __init__(self, **data):
@@ -80,6 +81,8 @@ class RequestBody(pydantic.BaseModel):
         data['entrypoint'] = data.get('entrypoint', usage_lib_entrypoint)
         data['entrypoint_command'] = data.get(
             'entrypoint_command', common_utils.get_pretty_entrypoint_cmd())
+        data['using_remote_api_server'] = data.get(
+            'using_remote_api_server', not common.is_api_server_local())
         data['override_skypilot_config'] = data.get(
             'override_skypilot_config',
             get_override_skypilot_config_from_client())
@@ -95,6 +98,7 @@ class RequestBody(pydantic.BaseModel):
         kwargs.pop('env_vars')
         kwargs.pop('entrypoint')
         kwargs.pop('entrypoint_command')
+        kwargs.pop('using_remote_api_server')
         kwargs.pop('override_skypilot_config')
         return kwargs
 
@@ -318,6 +322,7 @@ class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False
+    all_users: bool = False
 
 
 class JobsCancelBody(RequestBody):
@@ -325,6 +330,7 @@ class JobsCancelBody(RequestBody):
     name: Optional[str]
     job_ids: Optional[List[int]]
     all: bool = False
+    all_users: bool = False
 
 
 class JobsLogsBody(RequestBody):
@@ -444,6 +450,7 @@ class LocalUpBody(RequestBody):
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None
     cleanup: bool = False
+    context_name: Optional[str] = None
 
 
 class ServeTerminateReplicaBody(RequestBody):

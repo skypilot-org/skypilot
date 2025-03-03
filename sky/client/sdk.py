@@ -321,8 +321,7 @@ def launch(
           many minute of idleness, i.e., no running or pending jobs in the
           cluster's job queue. Idleness gets reset whenever setting-up/
           running/pending jobs are found in the job queue. Setting this
-          flag is equivalent to running
-          ``sky.launch(..., detach_run=True, ...)`` and then
+          flag is equivalent to running ``sky.launch()`` and then
           ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
           will not be autostopped.
         dryrun: if True, do not actually launch the cluster.
@@ -677,8 +676,7 @@ def start(
             many minute of idleness, i.e., no running or pending jobs in the
             cluster's job queue. Idleness gets reset whenever setting-up/
             running/pending jobs are found in the job queue. Setting this
-            flag is equivalent to running
-            ``sky.launch(..., detach_run=True, ...)`` and then
+            flag is equivalent to running ``sky.launch()`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the
             cluster will not be autostopped.
         retry_until_up: whether to retry launching the cluster until it is
@@ -889,7 +887,7 @@ def autostop(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def queue(cluster_name: List[str],
+def queue(cluster_name: str,
           skip_finished: bool = False,
           all_users: bool = False) -> server_common.RequestId:
     """Gets the job queue of a cluster.
@@ -1265,8 +1263,12 @@ def storage_delete(name: str) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool) -> server_common.RequestId:
+def local_up(gpus: bool,
+             ips: Optional[List[str]],
+             ssh_user: Optional[str],
+             ssh_key: Optional[str],
+             cleanup: bool,
+             context_name: Optional[str] = None) -> server_common.RequestId:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1284,7 +1286,8 @@ def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
                                 ips=ips,
                                 ssh_user=ssh_user,
                                 ssh_key=ssh_key,
-                                cleanup=cleanup)
+                                cleanup=cleanup,
+                                context_name=context_name)
     response = requests.post(f'{server_common.get_server_url()}/local_up',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1503,14 +1506,14 @@ def stream_and_get(
 
 @usage_lib.entrypoint
 @annotations.client_api
-def api_cancel(request_ids: Optional[List[str]] = None,
+def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
                all_users: bool = False,
                silent: bool = False) -> server_common.RequestId:
     """Aborts a request or all requests.
 
     Args:
-        request_id: The prefix of the request ID of the request to abort.
-        all: Whether to abort all requests.
+        request_ids: The request ID(s) to abort. Can be a single string or a
+            list of strings.
         all_users: Whether to abort all requests from all users.
         silent: Whether to suppress the output.
 
@@ -1528,6 +1531,11 @@ def api_cancel(request_ids: Optional[List[str]] = None,
     user_id = None
     if not all_users:
         user_id = common_utils.get_user_hash()
+
+    # Convert single request ID to list if needed
+    if isinstance(request_ids, str):
+        request_ids = [request_ids]
+
     body = payloads.RequestCancelBody(request_ids=request_ids, user_id=user_id)
     if all_users:
         echo('Cancelling all users\' requests...')
@@ -1608,6 +1616,7 @@ def api_start(
     *,
     deploy: bool = False,
     host: str = '127.0.0.1',
+    foreground: bool = False,
 ) -> None:
     """Starts the API server.
 
@@ -1619,7 +1628,8 @@ def api_start(
             resources of the machine.
         host: The host to deploy the API server. It will be set to 0.0.0.0
             if deploy is True, to allow remote access.
-
+        foreground: Whether to run the API server in the foreground (run in
+            the current process).
     Returns:
         None
     """
@@ -1638,7 +1648,10 @@ def api_start(
                              'from the config file and/or unset the '
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
-    server_common.check_server_healthy_or_start_fn(deploy, host)
+    server_common.check_server_healthy_or_start_fn(deploy, host, foreground)
+    if foreground:
+        # Explain why current process exited
+        logger.info('API server is already running:')
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
                 f'{server_common.get_server_url(host)}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
