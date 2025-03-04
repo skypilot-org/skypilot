@@ -1227,11 +1227,15 @@ def launch(
             clusters=[handle.get_cluster_name()])
         # job_id will be None if no job was submitted (e.g. no entrypoint
         # provided)
+        returncode = 0
         if not detach_run and job_id is not None:
-            sdk.tail_logs(handle.get_cluster_name(), job_id, follow=True)
+            returncode = sdk.tail_logs(handle.get_cluster_name(),
+                                       job_id,
+                                       follow=True)
         click.secho(
             ux_utils.command_hint_messages(ux_utils.CommandHintType.CLUSTER_JOB,
                                            job_id, handle.get_cluster_name()))
+        sys.exit(returncode)
 
 
 @cli.command(cls=_DocumentedCodeCommand)
@@ -1377,7 +1381,8 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.exec')
     if not async_call and not detach_run:
         job_id, _ = job_id_handle
-        sdk.tail_logs(cluster, job_id, follow=True)
+        returncode = sdk.tail_logs(cluster, job_id, follow=True)
+        sys.exit(returncode)
 
 
 def _handle_jobs_queue_request(
@@ -2121,12 +2126,20 @@ def logs(
     one job_id can be provided.
 
     2. If ``--status`` is specified, print the status of the job and exit with
-    returncode 0 if the job succeeded, or 1 otherwise. At most one job_id can
-    be specified.
+    returncode 0 if the job succeeded. At most one job_id can
+    be specified. Other possible return codes:
+
+    - 100: job failed.
+    - 101: job not finished.
+    - 102: job not found.
+    - 103: job was cancelled by the user.
 
     3. If ``--sync-down`` is specified, the logs of the job will be downloaded
     from the cluster and saved to the local machine under
-    ``~/sky_logs``. Mulitple job_ids can be specified.
+    ``~/sky_logs``. Multiple job_ids can be specified.
+
+    4. If the job fails or fetching the logs fails, the command will exit with
+    a non-zero return code.
     """
     if sync_down and status:
         raise click.UsageError(
@@ -2174,17 +2187,18 @@ def logs(
         # it will return {None: None}.
         if job_id is None:
             click.secho(f'No job found on cluster {cluster!r}.', fg='red')
-            sys.exit(1)
+            sys.exit(exceptions.JobExitCode.NOT_FOUND)
         job_status = list(job_statuses.values())[0]
         job_status_str = job_status.value if job_status is not None else 'None'
         click.echo(f'Job {job_id}: {job_status_str}')
         if job_status == job_lib.JobStatus.SUCCEEDED:
             return
         else:
+            returncode = exceptions.JobExitCode.from_job_status(job_status)
             if job_status is None:
                 id_str = '' if job_id is None else f'{job_id} '
                 click.secho(f'Job {id_str}not found', fg='red')
-            sys.exit(1)
+            sys.exit(returncode)
 
     job_str = f'job {job_id}'
     if job_id is None:
@@ -2194,7 +2208,8 @@ def logs(
                 f'{colorama.Style.RESET_ALL}')
 
     # Stream logs from the server.
-    sdk.tail_logs(cluster, job_id, follow, tail=tail)
+    returncode = sdk.tail_logs(cluster, job_id, follow, tail=tail)
+    sys.exit(returncode)
 
 
 @cli.command()
@@ -3729,6 +3744,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         if not storages:
             click.echo('No storage(s) to delete.')
             return
+        names = [storage['name'] for storage in storages]
     else:
         names = _get_glob_storages(names)
     if names:
@@ -3893,10 +3909,11 @@ def jobs_launch(
                                         'sky.jobs.launch')
     if not async_call and not detach_run:
         job_id = job_id_handle[0]
-        managed_jobs.tail_logs(name=None,
-                               job_id=job_id,
-                               follow=True,
-                               controller=False)
+        returncode = managed_jobs.tail_logs(name=None,
+                                            job_id=job_id,
+                                            follow=True,
+                                            controller=False)
+        sys.exit(returncode)
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
@@ -4127,11 +4144,12 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
                 logger.info(f'{fore.CYAN}Job {job} logs{controller_str}: '
                             f'{log_local_path}{style.RESET_ALL}')
         else:
-            managed_jobs.tail_logs(name=name,
-                                   job_id=job_id,
-                                   follow=follow,
-                                   controller=controller,
-                                   refresh=refresh)
+            returncode = managed_jobs.tail_logs(name=name,
+                                                job_id=job_id,
+                                                follow=follow,
+                                                controller=controller,
+                                                refresh=refresh)
+            sys.exit(returncode)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():
             raise

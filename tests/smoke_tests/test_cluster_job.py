@@ -636,9 +636,9 @@ def test_multi_node_failure(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'multi_node_failure',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml || [ $? -eq 100 ]',
             f'sky logs {name} 1 --status | grep FAILED_SETUP',  # Ensure the job setup failed.
-            f'sky exec {name} tests/test_yamls/failed_worker_run.yaml',
+            f'sky exec {name} tests/test_yamls/failed_worker_run.yaml || [ $? -eq 100 ]',
             f'sky logs {name} 2 --status | grep FAILED',  # Ensure the job failed.
             f'sky logs {name} 2 | grep "My hostname:" | wc -l | grep 2',  # Ensure there 2 of the hosts printed their hostname.
         ],

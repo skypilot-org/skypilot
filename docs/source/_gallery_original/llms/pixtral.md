@@ -1,1 +1,0 @@
-../../../../llm/pixtral/README.md
