@@ -7,6 +7,8 @@ Frequently Asked Questions
 .. contents::
     :local:
     :depth: 2
+    :backlinks: none
+
 
 Git and GitHub
 --------------
