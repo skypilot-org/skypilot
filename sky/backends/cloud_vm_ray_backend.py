@@ -4609,6 +4609,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # become None and the cluster_ever_up should be considered as False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
         prev_config_hash = record['config_hash'] if record is not None else None
+        logger.info(f'prev_config_hash: {prev_config_hash}')
         logger.debug(f'cluster_ever_up: {cluster_ever_up}')
         logger.debug(f'record: {record}')
 
