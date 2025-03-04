@@ -4580,6 +4580,7 @@ class NebiusStore(AbstractStore):
     """
 
     _ACCESS_DENIED_MESSAGE = 'Access Denied'
+    _TIMEOUT_TO_PROPAGATES = 20
 
     def __init__(self,
                  name: str,
@@ -4590,7 +4591,7 @@ class NebiusStore(AbstractStore):
                  _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
-        self.region = region or nebius.DEFAULT_REGION
+        self.region = region if region is not None else nebius.DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
 
@@ -4645,12 +4646,12 @@ class NebiusStore(AbstractStore):
         # Check if the storage is enabled
         if not _is_storage_cloud_enabled(str(clouds.Nebius())):
             with ux_utils.print_exception_no_traceback():
-                raise exceptions.ResourcesUnavailableError(
-                    'Storage \'store: s3\' specified, but ' \
-                    'Nebius access is disabled. To fix, enable '\
-                    'Nebius by running `sky check`. More info: '\
-                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.' # pylint: disable=line-too-long
-                    )
+                raise exceptions.ResourcesUnavailableError((
+                    'Storage \'store: s3\' specified, but '
+                    'Nebius access is disabled. To fix, enable '
+                    'Nebius by running `sky check`. More info: '
+                    'https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
+                ))
 
     def initialize(self):
         """Initializes the Nebius Object Storage on the cloud.
@@ -4711,8 +4712,8 @@ class NebiusStore(AbstractStore):
         if deleted_by_skypilot:
             msg_str = f'Deleted Nebius bucket {self.name}.'
         else:
-            msg_str = f'Nebius bucket {self.name} may have been deleted ' \
-                      f'externally. Removing from local state.'
+            msg_str = (f'Nebius bucket {self.name} may have been deleted '
+                       f'externally. Removing from local state.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -4721,11 +4722,11 @@ class NebiusStore(AbstractStore):
         deleted_by_skypilot = self._delete_nebius_bucket_sub_path(
             self.name, self._bucket_sub_path)
         if deleted_by_skypilot:
-            msg_str = f'Removed objects from S3 bucket ' \
-                      f'{self.name}/{self._bucket_sub_path}.'
+            msg_str = (f'Removed objects from S3 bucket '
+                       f'{self.name}/{self._bucket_sub_path}.')
         else:
-            msg_str = f'Failed to remove objects from S3 bucket ' \
-                      f'{self.name}/{self._bucket_sub_path}.'
+            msg_str = (f'Failed to remove objects from S3 bucket '
+                       f'{self.name}/{self._bucket_sub_path}.')
         logger.info(f'{colorama.Fore.GREEN}{msg_str}'
                     f'{colorama.Style.RESET_ALL}')
 
@@ -4947,13 +4948,11 @@ class NebiusStore(AbstractStore):
     def _execute_nebius_remove_command(self, command: str, bucket_name: str,
                                        hint_operating: str,
                                        hint_failed: str) -> bool:
-        print('command::::', command)
         try:
             with rich_utils.safe_status(
                     ux_utils.spinner_message(hint_operating)):
                 a = subprocess.check_output(command.split(' '),
                                             stderr=subprocess.STDOUT)
-                print('aaaaaa', a, command)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
@@ -4998,8 +4997,11 @@ class NebiusStore(AbstractStore):
         if not success:
             return False
 
-        # Wait until bucket deletion propagates on AWS servers
+        # Wait until bucket deletion propagates on Nebius servers
+        start_time = time.time()
         while data_utils.verify_nebius_bucket(bucket_name):
+            if time.time() - start_time > _TIMEOUT_TO_PROPAGATES:
+                raise TimeoutError("Timeout while verifying Nebius bucket.")
             time.sleep(0.1)
         return True
 
