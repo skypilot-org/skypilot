@@ -596,6 +596,8 @@ class NebiusCloudStorage(CloudStorage):
     def make_sync_file_command(self, source: str, destination: str) -> str:
         """Downloads a file using AWS CLI."""
         endpoint_url = nebius.create_endpoint()
+        if 'nebius://' in source:
+            source = source.replace('nebius://', 's3://')
         download_via_awscli = (f'{constants.SKY_REMOTE_PYTHON_ENV}/bin/aws s3 '
                                f'cp {source} {destination} '
                                f'--endpoint {endpoint_url} '
