@@ -170,4 +170,4 @@ class ClusterStartCompletePrecondition(Precondition):
         if len(tasks) == 0:
             # No runnning or pending tasks, the start process is done.
             return True, None
-        return False, f'Waiting for cluster {self.cluster_name} to be started.'
+        return False, f'Waiting for cluster {self.cluster_name} to be UP.'

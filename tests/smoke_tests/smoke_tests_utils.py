@@ -349,7 +349,7 @@ def run_one_test(test: Test) -> None:
 
     style = colorama.Style
     fore = colorama.Fore
-    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {return_code})'
+    outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {returncode})'
                if return_code else f'{fore.GREEN}Passed{style.RESET_ALL}')
     reason = f'\nReason: {command}' if return_code else ''
     msg = (f'{outcome}.'
