@@ -4951,8 +4951,8 @@ class NebiusStore(AbstractStore):
         try:
             with rich_utils.safe_status(
                     ux_utils.spinner_message(hint_operating)):
-                a = subprocess.check_output(command.split(' '),
-                                            stderr=subprocess.STDOUT)
+                subprocess.check_output(command.split(' '),
+                                        stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as e:
             if 'NoSuchBucket' in e.output.decode('utf-8'):
                 logger.debug(
@@ -5000,8 +5000,9 @@ class NebiusStore(AbstractStore):
         # Wait until bucket deletion propagates on Nebius servers
         start_time = time.time()
         while data_utils.verify_nebius_bucket(bucket_name):
-            if time.time() - start_time > _TIMEOUT_TO_PROPAGATES:
-                raise TimeoutError("Timeout while verifying Nebius bucket.")
+            if time.time() - start_time > self._TIMEOUT_TO_PROPAGATES:
+                raise TimeoutError(
+                    f'Timeout while verifying {bucket_name} Nebius bucket.')
             time.sleep(0.1)
         return True
 
