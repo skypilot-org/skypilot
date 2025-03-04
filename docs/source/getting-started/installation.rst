@@ -562,8 +562,9 @@ To use *Service Account* authentication, follow these steps:
    openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
 
 3.  **Generate and Save the Credentials File**:
-   * Save the file as `~/.nebius/credentials.json`.
-   * Ensure the file matches the expected format below:
+
+* Save the file as `~/.nebius/credentials.json`.
+* Ensure the file matches the expected format below:
 
 .. code-block:: json
 
