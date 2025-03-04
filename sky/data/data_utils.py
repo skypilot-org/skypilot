@@ -556,7 +556,6 @@ def get_gsutil_command() -> Tuple[str, str]:
 
 def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
                    log_path: str):
-    print(f'Running command: {command}')
     returncode, stdout, stderr = log_lib.run_with_log(
         command,
         log_path,
