@@ -1,11 +1,13 @@
+import contextlib
 import enum
 import inspect
 import os
+import re
 import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence, Set
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 import uuid
 
 import colorama
@@ -499,3 +501,40 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def _increase_initial_delay_seconds(original_cmd: str,
+                                    factor: float = 2) -> Tuple[str, str]:
+    yaml_file = re.search(r'\s([^ ]+\.yaml)', original_cmd).group(1)
+    with open(yaml_file, 'r') as f:
+        yaml_content = f.read()
+    original_initial_delay_seconds = re.search(r'initial_delay_seconds: (\d+)',
+                                               yaml_content).group(1)
+    new_initial_delay_seconds = int(original_initial_delay_seconds) * factor
+    yaml_content = re.sub(
+        r'initial_delay_seconds: \d+',
+        f'initial_delay_seconds: {new_initial_delay_seconds}', yaml_content)
+    f = tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False)
+    f.write(yaml_content)
+    f.flush()
+    return f.name, original_cmd.replace(yaml_file, f.name)
+
+
+@contextlib.contextmanager
+def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
+    """Increase initial delay seconds for slow clouds to reduce flakiness and failure during setup."""
+
+    def _context_func(original_cmd: str, factor: float = 2):
+        if cloud != 'kubernetes':
+            return original_cmd
+        file_name, new_cmd = _increase_initial_delay_seconds(
+            original_cmd, factor)
+        files.append(file_name)
+        return new_cmd
+
+    files = []
+    try:
+        yield _context_func
+    finally:
+        for file in files:
+            os.unlink(file)
