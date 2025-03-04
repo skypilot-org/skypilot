@@ -521,7 +521,7 @@ class EntrypointContext(common_utils.ContextManager[None]):
                         exist_ok=True)
             try:
                 with open(privacy_policy_indicator, 'x', encoding='utf-8'):
-                    click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
+                    logger.info(constants.USAGE_POLICY_MESSAGE)
             except FileExistsError:
                 pass
 
