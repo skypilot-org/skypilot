@@ -267,6 +267,9 @@ available_node_types:
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
+            {% if high_availability %}
+            app: {{cluster_name_on_cloud}}
+            {% endif %}
         {% if k8s_fuse_device_required %}
         annotations:
             # Required for FUSE mounting to access /dev/fuse
@@ -276,7 +279,7 @@ available_node_types:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
         automountServiceAccountToken: {{k8s_automount_sa_token}}
-        restartPolicy: Never
+        restartPolicy: {{ "Always" if high_availability else "Never" }}
 
         # Add node selector if GPU/TPUs are requested:
         {% if (k8s_acc_label_key is not none and k8s_acc_label_value is not none) or (k8s_spot_label_key is not none) %}
@@ -313,6 +316,11 @@ available_node_types:
         - name: dev-fuse    # Required for fuse mounting
           hostPath:
             path: /dev/fuse
+        {% if high_availability %}
+        - name: {{k8s_high_availability_deployment_volume_mount_name}}
+          persistentVolumeClaim:
+            claimName: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -415,6 +423,7 @@ available_node_types:
                 done
                 {{ conda_installation_commands }}
                 {{ ray_installation_commands }}
+
                 VIRTUAL_ENV=~/skypilot-runtime ~/.local/bin/uv pip install skypilot[kubernetes,remote]
                 touch /tmp/ray_skypilot_installation_complete
                 echo "=== Ray and skypilot installation completed ==="
@@ -518,6 +527,28 @@ available_node_types:
                   sleep 0.1
                 done
               }
+
+              {% if high_availability %}
+              mkdir -p {{k8s_high_availability_deployment_run_script_dir}}
+              if [ -f ~/.sky/k8s_container_ready ]; then
+                # ! Keep this aligned with `CloudVmRayBackend._setup()`
+                # Suppose all `task.setup` are the same for skyserve controller task.
+                # So be careful for compatibility issue once you change it.
+                chmod +x {{k8s_high_availability_deployment_setup_script_path}}
+                /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && {{k8s_high_availability_deployment_setup_script_path}} > /tmp/controller_recovery_setup_commands.log 2>&1"
+                echo "=== Controller setup commands completed for recovery ==="
+
+                for file in {{k8s_high_availability_deployment_run_script_dir}}/*; do
+                  # ! Keep this aligned with `CloudVmRayBackend._execute()`
+                  chmod +x $file
+                  /bin/bash --login -c "true && export OMP_NUM_THREADS=1 PYTHONWARNINGS='ignore' && $file > /tmp/task_run_$(basename $file).log 2>&1"
+                  echo "=== Controller task run for service (file: $file) completed for recovery ==="
+                done
+              fi
+
+              touch ~/.sky/k8s_container_ready
+              {% endif %}
+
               trap : TERM INT; log_tail || sleep infinity & wait
 
           ports:
@@ -538,6 +569,10 @@ available_node_types:
           # /tmp which cause slowdowns if is not a shared memory volume.
           - mountPath: /dev/shm
             name: dshm
+          {% if high_availability %}
+          - name: {{k8s_high_availability_deployment_volume_mount_name}}
+            mountPath: {{k8s_high_availability_deployment_volume_mount_path}}
+          {% endif %}
           {% if k8s_fuse_device_required %}
           securityContext:
             capabilities:
@@ -571,7 +606,49 @@ available_node_types:
               smarter-devices/fuse: "1"
               {% endif %}
             {% endif %}
-            
+      
+      {% if high_availability %}
+      pvc_spec:
+        apiVersion: v1
+        kind: PersistentVolumeClaim
+        metadata:
+          name: {{cluster_name_on_cloud}}-{{k8s_high_availability_deployment_volume_mount_name}}
+          namespace: {{k8s_namespace}}
+        spec:
+          accessModes:
+            - ReadWriteOnce # Our controller pod is singleton
+          resources:
+            requests:
+              storage: {{disk_size}}
+
+      deployment_spec:
+        apiVersion: apps/v1
+        kind: Deployment
+        metadata:
+          name: {{cluster_name_on_cloud}}-deployment
+          namespace: {{k8s_namespace}}
+        spec:
+          replicas: 1
+          selector:
+            matchLabels:
+              app: {{cluster_name_on_cloud}}
+          template:
+            # The only difference between the pod spec and this section is the initContainers
+            metadata:
+              # should be replaced by pod metadata
+            spec:
+              # To prevent the home dir provided by the docker image from being overriden by pvc mounting,
+              # we use initContainers to copy it first to /mnt/home, which will later be mounted to home dir.
+              initContainers:
+                - name: init-copy-home
+                  image: {{image_id}}
+                  command: ["/bin/sh", "-c"]
+                  args: ["echo 'Copying home directory to /mnt/home'; rsync -a {{k8s_high_availability_deployment_volume_mount_path}}/ /mnt/home && echo 'Copy completed.'; ls -la /mnt/home"]
+                  volumeMounts:
+                    - name: {{k8s_high_availability_deployment_volume_mount_name}}
+                      mountPath: /mnt/home
+              # should be replaced by pod spec
+      {% endif %}
 setup_commands:
   # Disable `unattended-upgrades` to prevent apt-get from hanging. It should be called at the beginning before the process started to avoid being blocked. (This is a temporary fix.)
   # Add ~/.ssh/sky-cluster-key to SSH config to allow nodes within a cluster to connect to each other

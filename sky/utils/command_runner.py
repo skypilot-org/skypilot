@@ -286,6 +286,8 @@ class CommandRunner:
             resolved_target = target
             if target.startswith('~'):
                 remote_home_dir = _get_remote_home_dir_with_retry()
+                assert remote_home_dir is not None, ('remote_home_dir '
+                                                     'returns None')
                 resolved_target = target.replace('~', remote_home_dir)
             full_source_str = str(resolved_source)
             if resolved_source.is_dir():
@@ -298,6 +300,8 @@ class CommandRunner:
             resolved_source = source
             if source.startswith('~'):
                 remote_home_dir = _get_remote_home_dir_with_retry()
+                assert remote_home_dir is not None, ('remote_home_dir '
+                                                     'returns None')
                 resolved_source = source.replace('~', remote_home_dir)
             rsync_command.extend([
                 f'{node_destination}:{resolved_source!r}',
@@ -308,6 +312,7 @@ class CommandRunner:
 
         backoff = common_utils.Backoff(initial_backoff=5, max_backoff_factor=5)
         assert max_retry > 0, f'max_retry {max_retry} must be positive.'
+        stdout, stderr = '', ''
         while max_retry >= 0:
             returncode, stdout, stderr = log_lib.run_with_log(
                 command,
@@ -323,6 +328,7 @@ class CommandRunner:
         direction = 'up' if up else 'down'
         error_msg = (f'Failed to rsync {direction}: {source} -> {target}. '
                      'Ensure that the network is stable, then retry.')
+
         subprocess_utils.handle_returncode(returncode,
                                            command,
                                            error_msg,
@@ -716,6 +722,7 @@ class KubernetesCommandRunner(CommandRunner):
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
+        deployment: Optional[str] = None,
         **kwargs,
     ):
         """Initialize KubernetesCommandRunner.
@@ -731,10 +738,18 @@ class KubernetesCommandRunner(CommandRunner):
         del kwargs
         super().__init__(node)
         (self.namespace, self.context), self.pod_name = node
+        self.deployment = deployment
 
     @property
     def node_id(self) -> str:
         return f'{self.context}-{self.namespace}-{self.pod_name}'
+
+    @property
+    def kube_identifier(self) -> str:
+        if self.deployment is not None:
+            return f'deployment/{self.deployment}'
+        else:
+            return f'pod/{self.pod_name}'
 
     def port_forward_command(self,
                              port_forward: List[Tuple[int, int]],
@@ -756,11 +771,12 @@ class KubernetesCommandRunner(CommandRunner):
             kubectl_args += ['--context', self.context]
         local_port, remote_port = port_forward[0]
         local_port_str = f'{local_port}' if local_port is not None else ''
+
         kubectl_cmd = [
             'kubectl',
             *kubectl_args,
             'port-forward',
-            f'pod/{self.pod_name}',
+            self.kube_identifier,
             f'{local_port_str}:{remote_port}',
         ]
         return kubectl_cmd
@@ -783,7 +799,8 @@ class KubernetesCommandRunner(CommandRunner):
             source_bashrc: bool = False,
             skip_num_lines: int = 0,
             **kwargs) -> Union[int, Tuple[int, str, str]]:
-        """Uses 'kubectl exec' to run 'cmd' on a pod by its name and namespace.
+        """Uses 'kubectl exec' to run 'cmd' on a pod or deployment by its
+        name and namespace.
 
         Args:
             cmd: The command to run.
@@ -826,7 +843,9 @@ class KubernetesCommandRunner(CommandRunner):
         # case, need to set KUBECONFIG to /dev/null to avoid using kubeconfig.
         if self.context is None:
             kubectl_args += ['--kubeconfig', '/dev/null']
-        kubectl_args += [self.pod_name]
+
+        kubectl_args += [self.kube_identifier]
+
         if ssh_mode == SshMode.LOGIN:
             assert isinstance(cmd, list), 'cmd must be a list for login mode.'
             base_cmd = ['kubectl', 'exec', '-it', *kubectl_args, '--']
