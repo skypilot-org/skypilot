@@ -117,9 +117,11 @@ def encode_serve_status(
         service_statuses: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     for service_status in service_statuses:
         service_status['status'] = service_status['status'].value
-        for replica_info in service_status.get('replica_info', []):
-            replica_info['status'] = replica_info['status'].value
-            replica_info['handle'] = pickle_and_encode(replica_info['handle'])
+        for replica_key in ['replica_info', 'external_lb_info']:
+            for replica_info in service_status.get(replica_key, []):
+                replica_info['status'] = replica_info['status'].value
+                replica_info['handle'] = pickle_and_encode(
+                    replica_info['handle'])
     return service_statuses
 
 
