@@ -1,5 +1,4 @@
 """Nebius cloud adaptor."""
-# pylint: disable=import-outside-toplevel
 
 import os
 import threading
@@ -39,8 +38,7 @@ _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Nebius AI Cloud.'
 
 nebius = common.LazyImport(
     'nebius',
-    import_error_message='Failed to import dependencies for Nebius AI Cloud. '
-    'Try running: pip install "skypilot[nebius]"',
+    import_error_message=_IMPORT_ERROR_MESSAGE,
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
     set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
@@ -136,8 +134,7 @@ def get_nebius_credentials(boto3_session):
             raise ValueError('Nebius credentials not found. Run '
                              '`sky check` to verify credentials are '
                              'correctly set up.')
-    else:
-        return nebius_credentials.get_frozen_credentials()
+    return nebius_credentials.get_frozen_credentials()
 
 
 # lru_cache() is thread-safe and it will return the same session object
@@ -209,10 +206,11 @@ def client(service_name: str, region):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
+    # pylint: disable=import-outside-toplevel
     from botocore import exceptions
     return exceptions
 
 
-def create_endpoint(region: Optional[str] = DEFAULT_REGION):
-    """Reads accountid necessary to interact with R2"""
+def create_endpoint(region: Optional[str] = DEFAULT_REGION) -> str:
+    """Reads accountid necessary to interact with Nebius Object Storage"""
     return f'https://storage.{region}.nebius.cloud:443'
