@@ -151,6 +151,14 @@ def home():
         if not task['status'].is_terminal():
             status_counts[task['status'].value] += 1
 
+    # Add an empty column for the dropdown button and actions column
+    # Exclude SCHED. STATE and LOG_CONTENT columns
+    rows = [
+        [''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
+        # Add empty cell for failover and actions column
+        [''] + [''] + [''] for row in rows
+    ]
+
     # Add log content as a regular column for each job
     for row in rows:
         job_id = str(row[JobTableColumns.ID]).strip().replace(' ⤳', '')
