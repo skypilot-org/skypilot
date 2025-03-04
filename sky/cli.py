@@ -3744,6 +3744,7 @@ def storage_delete(names: List[str], all: bool, yes: bool, async_call: bool):  #
         if not storages:
             click.echo('No storage(s) to delete.')
             return
+        names = [storage['name'] for storage in storages]
     else:
         names = _get_glob_storages(names)
     if names:
