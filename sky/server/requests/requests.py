@@ -520,7 +520,7 @@ def get_request_tasks(
     cluster_names: Optional[List[str]] = None,
     exclude_request_names: Optional[List[str]] = None,
     user_id: Optional[str] = None,
-    request_names: Optional[List[str]] = None,
+    include_request_names: Optional[List[str]] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.
 
@@ -528,10 +528,21 @@ def get_request_tasks(
         status: a list of statuses of the requests to filter on.
         cluster_names: a list of cluster names to filter requests on.
         exclude_request_names: a list of request names to exclude from results.
+            Mutually exclusive with include_request_names.
         user_id: the user ID to filter requests on.
             If None, all users are included.
-        request_names: a list of request names to filter on.
+        include_request_names: a list of request names to filter on.
+            Mutually exclusive with exclude_request_names.
+
+    Raises:
+        ValueError: If both exclude_request_names and include_request_names are
+            provided.
     """
+    if exclude_request_names is not None and include_request_names is not None:
+        raise ValueError(
+            'Only one of exclude_request_names or include_request_names can be '
+            'provided, not both.')
+
     filters = []
     filter_params = []
     if status is not None:
@@ -547,8 +558,9 @@ def get_request_tasks(
     if user_id is not None:
         filters.append(f'{COL_USER_ID} = ?')
         filter_params.append(user_id)
-    if request_names is not None:
-        request_names_str = ','.join(repr(name) for name in request_names)
+    if include_request_names is not None:
+        request_names_str = ','.join(
+            repr(name) for name in include_request_names)
         filters.append(f'name IN ({request_names_str})')
     assert _DB is not None
     with _DB.conn:

@@ -64,6 +64,14 @@ class Precondition(abc.ABC):
     async def check(self) -> Tuple[bool, Optional[str]]:
         """Check if the precondition is met.
 
+        Note that compared to _request_execution_wrapper, the env vars and
+        skypilot config here are not overridden since the lack of process
+        isolation, which may cause issues if the check accidentally depends on
+        these. Make sure the check function is independent of the request
+        environment.
+        TODO(aylei): a new request context isolation mechanism is needed to
+        enable more tasks/sub-tasks to be processed in coroutines or threads.
+
         Returns:
             A tuple of (bool, Optional[str]).
             The bool indicates if the precondition is met.
@@ -99,13 +107,6 @@ class Precondition(abc.ABC):
                 return False
 
             try:
-                # TODO(aylei): compared to _request_execution_wrapper, the env
-                # vars and skypilot config here are not overridden since the
-                # lack of process isolation, which may cause issues if the check
-                # accidentally depends on these. Test coverage is a mitigation
-                # but a new request context isolation mechanism is needed to
-                # enable more tasks/sub-tasks to be processed in coroutines or
-                # threads.
                 met, status_msg = await self.check()
                 if met:
                     return True
@@ -144,10 +145,10 @@ class ClusterStartCompletePrecondition(Precondition):
         self.cluster_name = cluster_name
 
     async def check(self) -> Tuple[bool, Optional[str]]:
-        cluster_info = global_user_state.get_cluster_from_name(
+        cluster_record = global_user_state.get_cluster_from_name(
             self.cluster_name)
-        if (cluster_info and
-                cluster_info['status'] is status_lib.ClusterStatus.UP):
+        if (cluster_record and
+                cluster_record['status'] is status_lib.ClusterStatus.UP):
             # Shortcut for started clusters, ignore cluster not found
             # since the cluster record might not yet be created by the
             # launch task.
@@ -160,14 +161,14 @@ class ClusterStartCompletePrecondition(Precondition):
         # We unify these situations into a single state: the process of starting
         # the cluster is done (either normally or abnormally) but cluster is not
         # in UP status.
-        tasks = api_requests.get_request_tasks(
+        requests = api_requests.get_request_tasks(
             status=[
                 api_requests.RequestStatus.RUNNING,
                 api_requests.RequestStatus.PENDING
             ],
-            request_names=['sky.launch', 'sky.start'],
+            include_request_names=['sky.launch', 'sky.start'],
             cluster_names=[self.cluster_name])
-        if len(tasks) == 0:
+        if len(requests) == 0:
             # No runnning or pending tasks, the start process is done.
             return True, None
         return False, f'Waiting for cluster {self.cluster_name} to be UP.'

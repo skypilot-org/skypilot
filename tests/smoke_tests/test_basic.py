@@ -662,7 +662,6 @@ def test_kubernetes_context_failover():
 def test_launch_and_exec_async(generic_cloud: str):
     """Test if the launch and exec commands work correctly with --async."""
     name = smoke_tests_utils.get_cluster_name()
-    to_down = smoke_tests_utils.get_cluster_name() + '-down'
     test = smoke_tests_utils.Test(
         'launch_and_exec_async',
         [
@@ -676,26 +675,26 @@ def test_launch_and_exec_async(generic_cloud: str):
              'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
              'echo "Extracted cancel command: $cancel_cmd" && '
              '$cancel_cmd'),
-            # Sync exec.
-            f'sky exec {name} echo',
+            # Sync exec must succeed after command end.
+            (
+                f's=$(sky exec {name} echo) && echo "$s" && '
+                'echo "===check exec output===" && '
+                'job_id=$(echo "$s" | grep "Job submitted, ID:" | '
+                'sed -E "s/.*Job submitted, ID: ([0-9]+).*/\\1/") && '
+                f'sky logs {name} $job_id --status | grep "SUCCEEDED" && '
+                # If job_id is 1, async_job_id will be 2, and vice versa.
+                'async_job_id=$((3-job_id)) && '
+                f'echo "===check async job===" && echo "Job ID: $async_job_id" && '
+                # Wait async job to succeed.
+                f'{smoke_tests_utils.get_cmd_wait_until_job_status_succeeded(name, "$async_job_id")}'
+            ),
             # Cluster must be UP since the sync exec has been completed.
             f'sky status {name} | grep "UP"',
-            # The async one might be scheduled later and the job ID is
-            # non-deterministic, so we wait for both jobs asynchronously.
-            smoke_tests_utils.RetriableCommand(
-                f'sky logs {name} 1 --status | grep "SUCCEEDED"',
-                retry_interval=5,
-                max_attempts=5,
-            ),
-            smoke_tests_utils.RetriableCommand(
-                f'sky logs {name} 2 --status | grep "SUCCEEDED"',
-                retry_interval=5,
-                max_attempts=5,
-            ),
-            # The cancelled job should not be scheduled.
+            # The cancelled job should not be scheduled, the job ID 3 is just
+            # not exist.
             f'! sky logs {name} 3 --status | grep "SUCCEEDED"',
         ],
-        teardown=f'sky down -y {name} {to_down}',
+        teardown=f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud))
     smoke_tests_utils.run_one_test(test)
 

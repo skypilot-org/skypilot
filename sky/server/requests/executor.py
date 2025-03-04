@@ -40,8 +40,8 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
+from sky.server.requests import precond
 from sky.server.requests import requests as api_requests
-from sky.server.requests.precond import Precondition
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
@@ -277,21 +277,36 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
 
 
-def schedule_request(request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     request_cluster_name: Optional[str] = None,
-                     ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = (
-                         api_requests.ScheduleType.LONG),
-                     is_skypilot_system: bool = False,
-                     precondition: Optional[Precondition] = None) -> None:
+def schedule_request(
+        request_id: str,
+        request_name: str,
+        request_body: payloads.RequestBody,
+        func: Callable[P, Any],
+        request_cluster_name: Optional[str] = None,
+        ignore_return_value: bool = False,
+        schedule_type: api_requests.ScheduleType = (
+            api_requests.ScheduleType.LONG),
+        is_skypilot_system: bool = False,
+        precondition: Optional[precond.Precondition] = None) -> None:
     """Enqueue a request to the request queue.
 
-    If a precondition is provided, the request will only be scheduled for
-    execution when the precondition is met (returns True). The precondition
-    is waited asynchronously and does not block the caller.
+    Args:
+        request_id: ID of the request.
+        request_name: Name of the request type, e.g. "sky.launch".
+        request_body: The request body containing parameters and environment
+            variables.
+        func: The function to execute when the request is processed.
+        request_cluster_name: The name of the cluster associated with this
+            request, if any.
+        ignore_return_value: If True, the return value of the function will be
+            ignored.
+        schedule_type: The type of scheduling to use for this request, refer to
+            `api_requests.ScheduleType` for more details.
+        is_skypilot_system: Denote whether the request is from SkyPilot system.
+        precondition: If a precondition is provided, the request will only be
+            scheduled for execution when the precondition is met (returns True).
+            The precondition is waited asynchronously and does not block the
+            caller.
     """
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
