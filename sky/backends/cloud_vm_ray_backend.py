@@ -1465,6 +1465,10 @@ class RetryingVmProvisioner(object):
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
 
+            logger.info(
+                f'skip_if_config_hash_matches: {skip_if_config_hash_matches}, '
+                f'config_dict["config_hash"]: {config_dict["config_hash"]}, '
+                f'config_dict: {config_dict}')
             if ('config_hash' in config_dict and
                     skip_if_config_hash_matches == config_dict['config_hash']):
                 logger.debug('Skipping provisioning of cluster with matching '
@@ -2008,6 +2012,8 @@ class RetryingVmProvisioner(object):
                                        self._optimize_target is None)
         skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
                                        skip_unnecessary_provisioning else None)
+        logger.info(
+            f'skip_if_config_hash_matches: {skip_if_config_hash_matches}')
 
         failover_history: List[Exception] = list()
         resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
