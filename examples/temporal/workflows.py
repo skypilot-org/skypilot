@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from datetime import timedelta
 from textwrap import dedent
+from typing import Optional, Dict, Any
 
 from temporalio import activity, workflow
 from temporalio.common import RetryPolicy
@@ -8,6 +9,7 @@ from temporalio.common import RetryPolicy
 with workflow.unsafe.imports_passed_through():
     from activities import (
         GitCloneInput,
+        GitCloneOutput,
         SkyDownCommand,
         SkyExecCommand,
         SkyLaunchCommand,
@@ -20,10 +22,11 @@ with workflow.unsafe.imports_passed_through():
 
 @dataclass
 class SkyPilotWorkflowInput:
-    cloud: str
     cluster_prefix: str
     repo_url: str
-    data_bucket_url: str | None = None
+    envs_override: Optional[Dict[str, str]] = None
+    branch: Optional[str] = None
+    api_server_endpoint: Optional[str] = None
 
 
 @activity.defn
@@ -38,10 +41,13 @@ class SkyPilotWorkflow:
     async def run(self, input: SkyPilotWorkflowInput) -> str:
         cluster_prefix = input.cluster_prefix
         repo_url = input.repo_url
-        data_bucket_url = input.data_bucket_url
-        data_bucket_flag = (
-            "--env DATA_BUCKET_URL=" + data_bucket_url if data_bucket_url else ""
-        )
+        api_server_endpoint = input.api_server_endpoint
+        branch = input.branch
+        
+        # Configure launch/exec kwargs
+        launch_kwargs = {}
+        
+        exec_kwargs = {}
 
         retry_policy = RetryPolicy(
             maximum_attempts=3,
@@ -56,28 +62,53 @@ class SkyPilotWorkflow:
         workflow.logger.info(f"Matching workflow to worker {unique_worker_task_queue}")
 
         workflow.logger.info(
-            f"Running SkyPilot workflow with cluster prefix: {cluster_prefix} "
+            f"Running SkyPilot workflow with cluster prefix: {cluster_prefix}"
         )
+        
+        if api_server_endpoint:
+            workflow.logger.info(f"Using SkyPilot API server at: {api_server_endpoint}")
+            
+        if input.envs_override:
+            workflow.logger.info(f"Using environment overrides: {input.envs_override}")
+            
+        if branch:
+            workflow.logger.info(f"Using branch: {branch}")
 
-        # 1. Clone the repository
+        # 1. Clone the repository and retrieve YAML contents
         clone_path = "/tmp/skypilot_repo"
+        yaml_paths = ["data_preprocessing.yaml", "train.yaml", "eval.yaml"]
+        
         clone_result = await workflow.execute_activity(
             run_git_clone,
-            GitCloneInput(repo_url, clone_path),
+            GitCloneInput(
+                repo_url=repo_url, 
+                clone_path=clone_path, 
+                yaml_file_paths=yaml_paths,
+                branch=branch,
+                api_server_endpoint=api_server_endpoint
+            ),
             start_to_close_timeout=timedelta(minutes=5),
             retry_policy=retry_policy,
             task_queue=unique_worker_task_queue,
         )
-        workflow.logger.info(f"Clone result: {clone_result}")
-
+        
+        if not clone_result.success:
+            raise Exception(f"Failed to clone repository: {clone_result.message}")
+            
+        workflow.logger.info(f"Cloned repository and retrieved {len(clone_result.yaml_contents)} YAML files")
+        
         # 2. Launch data preprocessing
+        preprocess_yaml = clone_result.yaml_contents["data_preprocessing.yaml"]
         cluster_name = f"{cluster_prefix}-preprocess"
+        
         preprocess_result = await workflow.execute_activity(
             run_sky_launch,
             SkyLaunchCommand(
-                cluster_name,
-                f"{clone_path}/data_preprocessing.yaml",
-                f"--cloud {input.cloud} {data_bucket_flag}",
+                cluster_name=cluster_name,
+                yaml_content=preprocess_yaml,
+                launch_kwargs=launch_kwargs,
+                envs_override=input.envs_override,
+                api_server_endpoint=api_server_endpoint
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
@@ -88,7 +119,10 @@ class SkyPilotWorkflow:
         # 3. Down the cluster
         down_result = await workflow.execute_activity(
             run_sky_down,
-            SkyDownCommand(cluster_name),
+            SkyDownCommand(
+                cluster_name=cluster_name,
+                api_server_endpoint=api_server_endpoint
+            ),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=retry_policy,
             task_queue=unique_worker_task_queue,
@@ -96,13 +130,17 @@ class SkyPilotWorkflow:
         workflow.logger.info(f"Down result: {down_result}")
 
         # 4. Launch training
+        train_yaml = clone_result.yaml_contents["train.yaml"]
         cluster_name = f"{cluster_prefix}-train"
+        
         train_result = await workflow.execute_activity(
             run_sky_launch,
             SkyLaunchCommand(
-                cluster_name,
-                f"{clone_path}/train.yaml",
-                f"--cloud {input.cloud} {data_bucket_flag}",
+                cluster_name=cluster_name,
+                yaml_content=train_yaml,
+                launch_kwargs=launch_kwargs,
+                envs_override=input.envs_override,
+                api_server_endpoint=api_server_endpoint
             ),
             start_to_close_timeout=timedelta(minutes=60),
             retry_policy=retry_policy,
@@ -110,11 +148,17 @@ class SkyPilotWorkflow:
         )
         workflow.logger.info(f"Training result: {train_result}")
 
-        # 5. Execute evaluation on the same
+        # 5. Execute evaluation on the same cluster
+        eval_yaml = clone_result.yaml_contents["eval.yaml"]
+        
         eval_result = await workflow.execute_activity(
             run_sky_exec,
             SkyExecCommand(
-                cluster_name, f"{clone_path}/eval.yaml", f"{data_bucket_flag}"
+                cluster_name=cluster_name,
+                yaml_content=eval_yaml,
+                exec_kwargs=exec_kwargs,
+                envs_override=input.envs_override,
+                api_server_endpoint=api_server_endpoint
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
@@ -125,7 +169,10 @@ class SkyPilotWorkflow:
         # 6. Down the cluster
         down_result = await workflow.execute_activity(
             run_sky_down,
-            SkyDownCommand(cluster_name),
+            SkyDownCommand(
+                cluster_name=cluster_name,
+                api_server_endpoint=api_server_endpoint
+            ),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=retry_policy,
             task_queue=unique_worker_task_queue,

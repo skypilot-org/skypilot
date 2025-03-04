@@ -13,13 +13,14 @@ from workflows import SkyPilotWorkflow
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
+    # Generate a unique queue name for this worker
     skypilot_specific_queue = (
         f"skypilot_specific_queue-host-{UUID(int=random.getrandbits(128))}"
     )
 
     @activity.defn(name="get_available_task_queue")
     async def select_task_queue() -> str:
-        """Randomly assign the job to a queue"""
+        """Return this worker's task queue for SkyPilot activities."""
         return skypilot_specific_queue
 
     # Start client
@@ -27,6 +28,8 @@ async def main() -> None:
 
     # Run a worker to distribute the workflows
     run_futures = []
+    
+    # This worker handles the workflow and task queue distribution
     handle = Worker(
         client,
         task_queue="skypilot-distribution-queue",
@@ -36,7 +39,7 @@ async def main() -> None:
     run_futures.append(handle.run())
     print("Base worker started")
 
-    # Run unique task queue for this particular host
+    # This worker handles SkyPilot activities
     handle = Worker(
         client,
         task_queue=skypilot_specific_queue,
@@ -45,10 +48,9 @@ async def main() -> None:
             run_sky_down,
             run_sky_exec,
             run_git_clone,
-        ],  # Register all Sky activities to the same worker
+        ],
     )
     run_futures.append(handle.run())
-    # Wait until interrupted
     print(f"Worker {skypilot_specific_queue} started")
 
     print("All workers started, ctrl+c to exit")
