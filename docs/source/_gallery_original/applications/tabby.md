@@ -1,1 +1,0 @@
-../../../../llm/tabby/README.md

@@ -695,7 +695,6 @@ def test_launch_and_exec_async(generic_cloud: str):
             # The cancelled job should not be scheduled.
             f'! sky logs {name} 3 --status | grep "SUCCEEDED"',
         ],
-        # Teardown: clean up the cluster
         teardown=f'sky down -y {name} {to_down}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud))
     smoke_tests_utils.run_one_test(test)
@@ -719,4 +718,29 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
                                   teardown=f'sky down -y {name}',
                                   timeout=smoke_tests_utils.get_timeout(
                                       generic_cloud))
+    smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Exit Codes for CLI commands ----------
+def test_cli_exit_codes(generic_cloud: str):
+    """Test that CLI commands properly return exit codes based on job success/failure."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cli_exit_codes',
+        [
+            # Test successful job exit code (0)
+            f'sky launch -y -c {name} --cloud {generic_cloud} "echo success" && echo "Exit code: $?"',
+            f'sky logs {name} 1 --status | grep SUCCEEDED',
+
+            # Test that sky logs with successful job returns 0
+            f'sky logs {name} 1 && echo "Exit code: $?"',
+
+            # Test failed job exit code (100)
+            f'sky exec {name} "exit 1" || echo "Command failed with code: $?" | grep "Command failed with code: 100"',
+            f'sky logs {name} 2 --status | grep FAILED',
+            f'sky logs {name} 2 || echo "Job logs exit code: $?" | grep "Job logs exit code: 100"',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
     smoke_tests_utils.run_one_test(test)

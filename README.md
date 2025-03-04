@@ -84,13 +84,13 @@ pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidst
 </p>
 
 
-## Getting Started
+## Getting started
 You can find our documentation [here](https://docs.skypilot.co/).
 - [Installation](https://docs.skypilot.co/en/latest/getting-started/installation.html)
 - [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html)
 - [CLI reference](https://docs.skypilot.co/en/latest/reference/cli.html)
 
-## SkyPilot in 1 Minute
+## SkyPilot in 1 minute
 
 A SkyPilot task specifies: resource requirements, data to be synced, setup commands, and the task commands.
 
@@ -142,59 +142,46 @@ SkyPilot then performs the heavy-lifting for you, including:
 </p>
 
 
-Refer to [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
+See [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
 
-## More Information
+## Runnable examples
+
+See [**SkyPilot examples**](https://docs.skypilot.co/en/docs-examples/examples/index.html) that cover: development, training, serving, LLM models, AI apps, and common frameworks.
+
+Latest featured examples:
+
+| Task | Examples |
+|----------|----------|
+| Training | [PyTorch](https://docs.skypilot.co/en/latest/getting-started/tutorial.html), [DeepSpeed](https://docs.skypilot.co/en/latest/examples/training/deepspeed.html), [Finetune Llama 3](https://docs.skypilot.co/en/latest/examples/training/llama-3_1-finetuning.html), [NeMo](https://docs.skypilot.co/en/latest/examples/training/nemo.html), [Ray](https://docs.skypilot.co/en/latest/examples/training/ray.html), [Unsloth](https://docs.skypilot.co/en/latest/examples/training/unsloth.html), [Jax/TPU](https://docs.skypilot.co/en/latest/examples/training/tpu.html) |
+| Serving | [vLLM](https://docs.skypilot.co/en/latest/examples/serving/vllm.html), [SGLang](https://docs.skypilot.co/en/latest/examples/serving/sglang.html), [Ollama](https://docs.skypilot.co/en/latest/examples/serving/ollama.html) |
+| Models | [DeepSeek-R1](https://docs.skypilot.co/en/latest/examples/models/deepseek-r1.html), [Llama 3](https://docs.skypilot.co/en/latest/examples/models/llama-3.html), [CodeLlama](https://docs.skypilot.co/en/latest/examples/models/codellama.html), [Qwen](https://docs.skypilot.co/en/latest/examples/models/qwen.html), [Mixtral](https://docs.skypilot.co/en/latest/examples/models/mixtral.html) |
+| AI apps | [RAG](https://docs.skypilot.co/en/latest/examples/applications/rag.html), [vector databases](https://docs.skypilot.co/en/latest/examples/applications/vector_database.html) (ChromaDB, CLIP) |
+| Common frameworks | [Airflow](https://docs.skypilot.co/en/latest/examples/frameworks/airflow.html), [Jupyter](https://docs.skypilot.co/en/latest/examples/frameworks/jupyter.html) |
+
+Source files and more examples can be found in [`llm/`](https://github.com/skypilot-org/skypilot/tree/master/llm) and [`examples/`](https://github.com/skypilot-org/skypilot/tree/master/examples).
+
+## More information
 To learn more, see [SkyPilot Overview](https://docs.skypilot.co/en/latest/overview.html), [SkyPilot docs](https://docs.skypilot.co/en/latest/), and [SkyPilot blog](https://blog.skypilot.co/).
 
-<!-- Keep this section in sync with index.rst in SkyPilot Docs -->
-Runnable examples:
-- [**AI Gallery**](https://docs.skypilot.co/en/latest/gallery/index.html)
-- LLMs on SkyPilot
-  - [DeepSeek-R1](./llm/deepseek-r1/)
-  - [DeepSeek-Janus](./llm/deepseek-janus/)
-  - [Llama 3.2: lightweight and vision models](./llm/llama-3_2/)
-  - [Pixtral](./llm/pixtral/)
-  - [Llama 3.1 finetuning](./llm/llama-3_1-finetuning/) and [serving](./llm/llama-3_1/)
-  - [GPT-2 via `llm.c`](./llm/gpt-2/)
-  - [Llama 3](./llm/llama-3/)
-  - [Qwen](./llm/qwen/)
-  - [Databricks DBRX](./llm/dbrx/)
-  - [Gemma](./llm/gemma/)
-  - [Mixtral 8x7B](./llm/mixtral/); [Mistral 7B](https://docs.mistral.ai/self-deployment/skypilot/) (from official Mistral team)
-  - [Code Llama](./llm/codellama/)
-  - [vLLM: Serving LLM 24x Faster On the Cloud](./llm/vllm/) (from official vLLM team)
-  - [SGLang: Fast and Expressive LLM Serving On the Cloud](./llm/sglang/) (from official SGLang team)
-  - [Vicuna chatbots: Training & Serving](./llm/vicuna/) (from official Vicuna team)
-  - [Train your own Vicuna on Llama-2](./llm/vicuna-llama-2/)
-  - [Self-Hosted Llama-2 Chatbot](./llm/llama-2/)
-  - [Ollama: Quantized LLMs on CPUs](./llm/ollama/)
-  - [LoRAX](./llm/lorax/)
-  - [QLoRA](https://github.com/artidoro/qlora/pull/132)
-  - [LLaMA-LoRA-Tuner](https://github.com/zetavg/LLaMA-LoRA-Tuner#run-on-a-cloud-service-via-skypilot)
-  - [Tabby: Self-hosted AI coding assistant](https://github.com/TabbyML/tabby/blob/bed723fcedb44a6b867ce22a7b1f03d2f3531c1e/experimental/eval/skypilot.yaml)
-  - [LocalGPT](./llm/localgpt)
-  - [Falcon](./llm/falcon)
-  - Add yours here & see more in [`llm/`](./llm)!
-- Framework examples: [Vector Database](./examples/vector_database/), [PyTorch DDP](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_torch.yaml), [DeepSpeed](./examples/deepspeed-multinode/sky.yaml), [JAX/Flax on TPU](https://github.com/skypilot-org/skypilot/blob/master/examples/tpu/tpuvm_mnist.yaml), [Stable Diffusion](https://github.com/skypilot-org/skypilot/tree/master/examples/stable_diffusion), [Detectron2](https://github.com/skypilot-org/skypilot/blob/master/examples/detectron2_docker.yaml), [Distributed](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_distributed_tf_app.py) [TensorFlow](https://github.com/skypilot-org/skypilot/blob/master/examples/resnet_app_storage.yaml), [Ray Train](examples/distributed_ray_train/ray_train.yaml), [NeMo](https://github.com/skypilot-org/skypilot/blob/master/examples/nemo/), [programmatic grid search](https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_grid_search_app.py), [Docker](https://github.com/skypilot-org/skypilot/blob/master/examples/docker/echo_app.yaml), [Cog](https://github.com/skypilot-org/skypilot/blob/master/examples/cog/), [Unsloth](https://github.com/skypilot-org/skypilot/blob/master/examples/unsloth/unsloth.yaml), [Ollama](https://github.com/skypilot-org/skypilot/blob/master/llm/ollama), [llm.c](https://github.com/skypilot-org/skypilot/tree/master/llm/gpt-2), [Airflow](./examples/airflow/training_workflow) and [many more (`examples/`)](./examples).
-
-Case Studies and Integrations: [Community Spotlights](https://blog.skypilot.co/community/)
+Case studies and integrations: [Community Spotlights](https://blog.skypilot.co/community/)
 
 Follow updates:
-- [Twitter](https://twitter.com/skypilot_org)
 - [Slack](http://slack.skypilot.co)
+- [X / Twitter](https://twitter.com/skypilot_org)
+- [LinkedIn](https://www.linkedin.com/company/skypilot-oss/)
 - [SkyPilot Blog](https://blog.skypilot.co/) ([Introductory blog post](https://blog.skypilot.co/introducing-skypilot/))
 
 Read the research:
 - [SkyPilot paper](https://www.usenix.org/system/files/nsdi23-yang-zongheng.pdf) and [talk](https://www.usenix.org/conference/nsdi23/presentation/yang-zongheng) (NSDI 2023)
 - [Sky Computing whitepaper](https://arxiv.org/abs/2205.07147)
 - [Sky Computing vision paper](https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf) (HotOS 2021)
-- [Policy for Managed Spot Jobs](https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao)  (NSDI 2024)
+- [SkyServe: AI serving across regions and clouds](https://arxiv.org/pdf/2411.01438) (EuroSys 2025)
+- [Managed jobs spot instance policy](https://www.usenix.org/conference/nsdi24/presentation/wu-zhanghao)  (NSDI 2024)
 
 SkyPilot was initially started at the [Sky Computing Lab](https://sky.cs.berkeley.edu) at UC Berkeley and has since gained many industry contributors. To read about the project's origin and vision, see [Concept: Sky Computing](https://docs.skypilot.co/en/latest/sky-computing.html).
 
-## Support and Questions
-We are excited to hear your feedback!
+## Questions and feedback
+We are excited to hear your feedback:
 * For issues and feature requests, please [open a GitHub issue](https://github.com/skypilot-org/skypilot/issues/new).
 * For questions, please use [GitHub Discussions](https://github.com/skypilot-org/skypilot/discussions).
 

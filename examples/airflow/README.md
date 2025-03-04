@@ -90,7 +90,7 @@ Once we have developed the tasks, we can seamlessly run them in Airflow.
 2. **Airflow native logging** - SkyPilot logs are written to container stdout, which is captured as task logs in Airflow and displayed in the UI.
 3. **Easy debugging** - If a task fails, you can independently run the task using `sky launch` to debug the issue. SkyPilot will recreate the environment in which the task failed. 
 
-Here's a snippet of the DAG declaration in [sky_k8s_train_pipeline.py](sky_k8s_train_pipeline.py):
+Here's a snippet of the DAG declaration in [sky_k8s_train_pipeline.py](https://github.com/skypilot-org/skypilot/blob/master/examples/airflow/sky_k8s_train_pipeline.py):
 ```python
 with DAG(dag_id='sky_k8s_train_pipeline',
          default_args=default_args,
