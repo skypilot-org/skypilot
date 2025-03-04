@@ -85,7 +85,8 @@ def launch(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def queue(refresh: bool,
-          skip_finished: bool = False) -> server_common.RequestId:
+          skip_finished: bool = False,
+          all_users: bool = False) -> server_common.RequestId:
     """Gets statuses of managed jobs.
 
     Please refer to sky.cli.job_queue for documentation.
@@ -93,6 +94,7 @@ def queue(refresh: bool,
     Args:
         refresh: Whether to restart the jobs controller if it is stopped.
         skip_finished: Whether to skip finished jobs.
+        all_users: Whether to show all users' jobs.
 
     Returns:
         The request ID of the queue request.
@@ -126,6 +128,7 @@ def queue(refresh: bool,
     body = payloads.JobsQueueBody(
         refresh=refresh,
         skip_finished=skip_finished,
+        all_users=all_users,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/queue',
@@ -138,9 +141,10 @@ def queue(refresh: bool,
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 def cancel(
-        name: Optional[str] = None,
-        job_ids: Optional[List[int]] = None,
-        all: bool = False,  # pylint: disable=redefined-builtin
+    name: Optional[str] = None,
+    job_ids: Optional[List[int]] = None,
+    all: bool = False,  # pylint: disable=redefined-builtin
+    all_users: bool = False,
 ) -> server_common.RequestId:
     """Cancels managed jobs.
 
@@ -150,6 +154,7 @@ def cancel(
         name: Name of the managed job to cancel.
         job_ids: IDs of the managed jobs to cancel.
         all: Whether to cancel all managed jobs.
+        all_users: Whether to cancel all managed jobs from all users.
 
     Returns:
         The request ID of the cancel request.
@@ -162,6 +167,7 @@ def cancel(
         name=name,
         job_ids=job_ids,
         all=all,
+        all_users=all_users,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/jobs/cancel',
@@ -178,7 +184,7 @@ def tail_logs(name: Optional[str] = None,
               follow: bool = True,
               controller: bool = False,
               refresh: bool = False,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails logs of managed jobs.
 
     You can provide either a job name or a job ID to tail logs. If both are not
@@ -192,6 +198,11 @@ def tail_logs(name: Optional[str] = None,
         refresh: Whether to restart the jobs controller if it is stopped.
         output_stream: The stream to write the logs to. If None, print to the
             console.
+
+    Returns:
+        Exit code based on success or failure of the job. 0 if success,
+        100 if the job failed. See exceptions.JobExitCode for possible exit
+        codes.
 
     Request Raises:
         ValueError: invalid arguments.
@@ -211,7 +222,7 @@ def tail_logs(name: Optional[str] = None,
         timeout=(5, None),
     )
     request_id = server_common.get_request_id(response)
-    sdk.stream_response(request_id, response, output_stream)
+    return sdk.stream_response(request_id, response, output_stream)
 
 
 @usage_lib.entrypoint

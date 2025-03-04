@@ -25,6 +25,7 @@ import filelock
 import psutil
 import requests
 
+from sky import admin_policy
 from sky import backends
 from sky import exceptions
 from sky import sky_logging
@@ -212,13 +213,17 @@ def list_accelerator_counts(
 @annotations.client_api
 def optimize(
     dag: 'sky.Dag',
-    minimize: common.OptimizeTarget = common.OptimizeTarget.COST
+    minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
 ) -> server_common.RequestId:
     """Finds the best execution plan for the given DAG.
 
     Args:
         dag: the DAG to optimize.
         minimize: whether to minimize cost or time.
+        admin_policy_request_options: Request options used for admin policy
+            validation. This is only required when a admin policy is in use,
+            see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
 
     Returns:
         The request ID of the optimize request.
@@ -233,7 +238,9 @@ def optimize(
     """
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-    body = payloads.OptimizeBody(dag=dag_str, minimize=minimize)
+    body = payloads.OptimizeBody(dag=dag_str,
+                                 minimize=minimize,
+                                 request_options=admin_policy_request_options)
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -242,7 +249,11 @@ def optimize(
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def validate(dag: 'sky.Dag', workdir_only: bool = False) -> None:
+def validate(
+    dag: 'sky.Dag',
+    workdir_only: bool = False,
+    admin_policy_request_options: Optional[admin_policy.RequestOptions] = None
+) -> None:
     """Validates the tasks.
 
     The file paths (workdir and file_mounts) are validated on the client side
@@ -254,13 +265,17 @@ def validate(dag: 'sky.Dag', workdir_only: bool = False) -> None:
         dag: the DAG to validate.
         workdir_only: whether to only validate the workdir. This is used for
             `exec` as it does not need other files/folders in file_mounts.
+        admin_policy_request_options: Request options used for admin policy
+            validation. This is only required when a admin policy is in use,
+            see: https://docs.skypilot.co/en/latest/cloud-setup/policy.html
     """
     for task in dag.tasks:
         task.expand_and_validate_workdir()
         if not workdir_only:
             task.expand_and_validate_file_mounts()
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
-    body = payloads.ValidateBody(dag=dag_str)
+    body = payloads.ValidateBody(dag=dag_str,
+                                 request_options=admin_policy_request_options)
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()))
     if response.status_code == 400:
@@ -386,7 +401,12 @@ def launch(
                                       'Please contact the SkyPilot team if you '
                                       'need this feature at slack.skypilot.co.')
     dag = dag_utils.convert_entrypoint_to_dag(task)
-    validate(dag)
+    request_options = admin_policy.RequestOptions(
+        cluster_name=cluster_name,
+        idle_minutes_to_autostop=idle_minutes_to_autostop,
+        down=down,
+        dryrun=dryrun)
+    validate(dag, admin_policy_request_options=request_options)
 
     confirm_shown = False
     if _need_confirmation:
@@ -400,7 +420,8 @@ def launch(
         if not clusters:
             # Show the optimize log before the prompt if the cluster does not
             # exist.
-            request_id = optimize(dag)
+            request_id = optimize(dag,
+                                  admin_policy_request_options=request_options)
             stream_and_get(request_id)
         else:
             cluster_record = clusters[0]
@@ -562,7 +583,7 @@ def tail_logs(cluster_name: str,
               job_id: Optional[int],
               follow: bool,
               tail: int = 0,
-              output_stream: Optional['io.TextIOBase'] = None) -> None:
+              output_stream: Optional['io.TextIOBase'] = None) -> int:
     """Tails the logs of a job.
 
     Args:
@@ -575,7 +596,9 @@ def tail_logs(cluster_name: str,
             console.
 
     Returns:
-        None
+        Exit code based on success or failure of the job. 0 if success,
+        100 if the job failed. See exceptions.JobExitCode for possible exit
+        codes.
 
     Request Raises:
         ValueError: if arguments are invalid or the cluster is not supported.
@@ -601,7 +624,7 @@ def tail_logs(cluster_name: str,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None))
     request_id = server_common.get_request_id(response)
-    stream_response(request_id, response, output_stream)
+    return stream_response(request_id, response, output_stream)
 
 
 @usage_lib.entrypoint
@@ -1263,8 +1286,12 @@ def storage_delete(name: str) -> server_common.RequestId:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
-             ssh_key: Optional[str], cleanup: bool) -> server_common.RequestId:
+def local_up(gpus: bool,
+             ips: Optional[List[str]],
+             ssh_user: Optional[str],
+             ssh_key: Optional[str],
+             cleanup: bool,
+             context_name: Optional[str] = None) -> server_common.RequestId:
     """Launches a Kubernetes cluster on local machines.
 
     Returns:
@@ -1282,7 +1309,8 @@ def local_up(gpus: bool, ips: Optional[List[str]], ssh_user: Optional[str],
                                 ips=ips,
                                 ssh_user=ssh_user,
                                 ssh_key=ssh_key,
-                                cleanup=cleanup)
+                                cleanup=cleanup,
+                                context_name=context_name)
     response = requests.post(f'{server_common.get_server_url()}/local_up',
                              json=json.loads(body.model_dump_json()))
     return server_common.get_request_id(response)
@@ -1611,6 +1639,7 @@ def api_start(
     *,
     deploy: bool = False,
     host: str = '127.0.0.1',
+    foreground: bool = False,
 ) -> None:
     """Starts the API server.
 
@@ -1622,7 +1651,8 @@ def api_start(
             resources of the machine.
         host: The host to deploy the API server. It will be set to 0.0.0.0
             if deploy is True, to allow remote access.
-
+        foreground: Whether to run the API server in the foreground (run in
+            the current process).
     Returns:
         None
     """
@@ -1641,7 +1671,10 @@ def api_start(
                              'from the config file and/or unset the '
                              'SKYPILOT_API_SERVER_ENDPOINT environment '
                              'variable.')
-    server_common.check_server_healthy_or_start_fn(deploy, host)
+    server_common.check_server_healthy_or_start_fn(deploy, host, foreground)
+    if foreground:
+        # Explain why current process exited
+        logger.info('API server is already running:')
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
                 f'{server_common.get_server_url(host)}\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
