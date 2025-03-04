@@ -266,7 +266,7 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
 def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
-    log_to_stdout = os.environ.get('LOG_TO_STDOUT', None)
+    log_to_stdout = False  # os.environ.get('LOG_TO_STDOUT', None)
     if log_to_stdout:
         write = test.echo
         flush = lambda: None
