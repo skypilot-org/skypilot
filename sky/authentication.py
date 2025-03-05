@@ -30,6 +30,7 @@ from typing import Any, Dict, Tuple
 import uuid
 
 import colorama
+import filelock
 
 from sky import clouds
 from sky import sky_logging
@@ -65,10 +66,8 @@ MAX_TRIALS = 64
 _SSH_KEY_PATH_PREFIX = '~/.sky/clients/{user_hash}/ssh'
 
 if typing.TYPE_CHECKING:
-    import filelock
     import yaml
 else:
-    filelock = adaptors_common.LazyImport('filelock')
     yaml = adaptors_common.LazyImport('yaml')
 
 

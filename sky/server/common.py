@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 import uuid
 
 import colorama
+import filelock
 
 from sky import exceptions
 from sky import sky_logging
@@ -29,13 +30,11 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import filelock
     import pydantic
     import requests
 
     from sky import dag as dag_lib
 else:
-    filelock = adaptors_common.LazyImport('filelock')
     pydantic = adaptors_common.LazyImport('pydantic')
     requests = adaptors_common.LazyImport('requests')
 
