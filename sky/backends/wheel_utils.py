@@ -167,10 +167,10 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                     mtime = os.path.getmtime(entry_path)
                     if mtime > max_time:
                         max_time = mtime
-                except FileNotFoundError:
+                except OSError:
                     # Handle cases where file might have been deleted after
                     # listing
-                    continue
+                    return -1.
         return max_time
 
     # This lock prevents that the wheel is updated while being copied.
@@ -186,7 +186,8 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # Only build wheels if the wheel is outdated or wheel does not exist
         # for the requested version.
         if (last_wheel_modification_time < last_modification_time) or not any(
-                WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')):
+                WHEEL_DIR.glob(
+                    f'**/{_WHEEL_PATTERN}')) or last_modification_time == -1.:
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             latest_wheel = _build_sky_wheel()
