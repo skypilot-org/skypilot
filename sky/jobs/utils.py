@@ -1051,7 +1051,7 @@ def format_job_table(
     def get_user_column_values(task: Dict[str, Any]) -> List[str]:
         user_values: List[str] = []
         if show_user:
-            user_name = '-' # default value
+            user_name = '-'  # default value
 
             task_user_name = task.get('user_name', None)
             task_user_hash = task.get('user_hash', None)
@@ -1064,7 +1064,8 @@ def format_job_table(
             user_values = [user_name]
 
             if show_all:
-                user_values.append(task_user_hash if task_user_hash is not None else '-')
+                user_values.append(
+                    task_user_hash if task_user_hash is not None else '-')
 
         return user_values
 
