@@ -8,6 +8,7 @@ from typing import Dict, Iterator, Optional, Tuple, Union
 
 from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
+from sky.utils import console_utils
 from sky.utils import message_utils
 
 if typing.TYPE_CHECKING:
@@ -16,19 +17,6 @@ if typing.TYPE_CHECKING:
 else:
     requests = adaptors_common.LazyImport('requests')
     rich_console = adaptors_common.LazyImport('rich.console')
-
-_console = None  # Lazy initialized console
-
-
-# Move global console to a function to avoid
-# importing rich console if not used
-def get_console():
-    """Get or create the rich console."""
-    global _console
-    if _console is None:
-        _console = rich_console.Console(soft_wrap=True)
-    return _console
-
 
 _statuses: Dict[str, Optional[Union['EncodedStatus',
                                     'rich_console.Status']]] = {
@@ -234,7 +222,7 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _statuses['client'] is None:
-            _statuses['client'] = get_console().status(msg)
+            _statuses['client'] = console_utils.get_console().status(msg)
         return _RevertibleStatus(msg, 'client')
     return _NoOpConsoleStatus()
 

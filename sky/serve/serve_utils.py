@@ -17,6 +17,7 @@ from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
 import uuid
 
 import colorama
+import filelock
 
 from sky import backends
 from sky import exceptions
@@ -36,14 +37,11 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
-    import filelock
     import psutil
     import requests
 
     from sky.serve import replica_managers
 else:
-    fastapi = adaptors_common.LazyImport('fastapi')
-    filelock = adaptors_common.LazyImport('filelock')
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
 

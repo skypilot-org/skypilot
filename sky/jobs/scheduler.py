@@ -43,6 +43,8 @@ import os
 import time
 import typing
 
+import filelock
+
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.jobs import constants as managed_job_constants
@@ -52,10 +54,8 @@ from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 if typing.TYPE_CHECKING:
-    import filelock
     import psutil
 else:
-    filelock = adaptors_common.LazyImport('filelock')
     psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger('sky.jobs.controller')

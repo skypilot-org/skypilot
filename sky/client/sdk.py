@@ -21,6 +21,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import click
 import colorama
+import filelock
 
 from sky import admin_policy
 from sky import backends
@@ -48,13 +49,11 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     import io
 
-    import filelock
     import psutil
     import requests
 
     import sky
 else:
-    filelock = adaptors_common.LazyImport('filelock')
     psutil = adaptors_common.LazyImport('psutil')
     requests = adaptors_common.LazyImport('requests')
 

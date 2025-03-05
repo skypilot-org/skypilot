@@ -10,29 +10,12 @@ from typing import Callable, Optional, Union
 import colorama
 
 from sky import sky_logging
-from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import console_utils
 
 if typing.TYPE_CHECKING:
     import pathlib
-
-    import rich.console as rich_console
-else:
-    rich_console = adaptors_common.LazyImport('rich.console')
-
-_console = None  # Lazy initialized console
-
-
-# Move global console to a function to avoid
-# importing rich console if not used
-def get_console():
-    """Get or create the rich console."""
-    global _console
-    if _console is None:
-        _console = rich_console.Console()
-    return _console
-
 
 INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
 INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
@@ -55,7 +38,7 @@ def console_newline():
 
     Useful when catching exceptions inside console.status()
     """
-    get_console().print()
+    console_utils.get_console().print()
 
 
 @contextlib.contextmanager
