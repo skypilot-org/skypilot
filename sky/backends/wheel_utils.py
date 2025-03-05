@@ -151,37 +151,14 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
 
     def _get_latest_modification_time(path: pathlib.Path) -> float:
         if not path.exists():
-            return -1.0
-        max_time = -1.0
-        latest_file = None
-        for root, dirs, files in os.walk(path):
-            # Process directories in the current root
-            for d in dirs:
-                full_path = os.path.join(root, d)
-                mtime = os.path.getmtime(full_path)
-                if mtime > max_time:
-                    max_time = mtime
-                    latest_file = full_path
-            # Process files in the current root
-            for f in files:
-                full_path = os.path.join(root, f)
-                mtime = os.path.getmtime(full_path)
-                if mtime > max_time:
-                    max_time = mtime
-                    latest_file = full_path
-        if latest_file is not None:
-            logger.info(
-                f'Latest modification: {latest_file} (mtime: {max_time})')
-            if os.path.isdir(latest_file):
-                for root, dirs, files in os.walk(latest_file):
-                    for f in files:
-                        file_path = os.path.join(root, f)
-                        file_mtime = os.path.getmtime(file_path)
-                        logger.info(f'File in latest dir: {file_path} '
-                                    f'(mtime: {file_mtime})')
-            return max_time
-        else:
-            return -1.0
+            return -1.
+        try:
+            return max(
+                os.path.getmtime(os.path.join(root, f))
+                for root, dirs, files in os.walk(path)
+                for f in (*dirs, *files))
+        except ValueError:
+            return -1.
 
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
@@ -192,11 +169,6 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
-        logger.info(f'last_modification_time: {last_modification_time}')
-        logger.info(
-            f'last_wheel_modification_time: {last_wheel_modification_time}')
-        logger.info(f'SKY_PACKAGE_PATH: {SKY_PACKAGE_PATH}')
-        logger.info(f'WHEEL_DIR: {WHEEL_DIR}')
 
         # Only build wheels if the wheel is outdated or wheel does not exist
         # for the requested version.
@@ -204,16 +176,8 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                 WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
-            logger.info(
-                f'Building wheel last_wheel_modification_time: '
-                f'{last_wheel_modification_time} < last_modification_time: '
-                f'{last_modification_time}')
             latest_wheel = _build_sky_wheel()
         else:
-            logger.info(
-                f'Using cached wheel last_wheel_modification_time: '
-                f'{last_wheel_modification_time} >= last_modification_time: '
-                f'{last_modification_time}')
             latest_wheel = _get_latest_wheel()
 
         # We remove all wheels except the latest one for garbage collection.

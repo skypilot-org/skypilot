@@ -1011,9 +1011,6 @@ def _deterministic_cluster_yaml_hash(yaml_path: str) -> str:
 
     yaml_hash = hashlib.sha256(
         common_utils.dump_yaml_str(yaml_config).encode('utf-8'))
-    logger.info(f'yaml_path: {yaml_path}')
-    logger.info(f'yaml_config: {yaml_config}')
-    logger.info(f'yaml_hash: {yaml_hash.hexdigest()}')
     config_hash.update(yaml_hash.digest())
 
     file_mounts = yaml_config.get('file_mounts', {})

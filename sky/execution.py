@@ -489,8 +489,6 @@ def launch(
     if fast and cluster_name is not None:
         cluster_status, maybe_handle = (
             backend_utils.refresh_cluster_status_handle(cluster_name))
-        logger.info(
-            f'cluster_status: {cluster_status}, maybe_handle: {maybe_handle}')
         if cluster_status == status_lib.ClusterStatus.INIT:
             # If the cluster is INIT, it may be provisioning. We want to prevent
             # concurrent calls from queueing up many sequential reprovision
@@ -530,8 +528,6 @@ def launch(
                 Stage.DOWN,
             ]
             skip_unnecessary_provisioning = True
-    logger.info(
-        f'skip_unnecessary_provisioning: {skip_unnecessary_provisioning}')
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,

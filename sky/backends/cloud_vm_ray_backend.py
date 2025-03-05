@@ -1465,10 +1465,6 @@ class RetryingVmProvisioner(object):
                     f'Failed to provision on cloud {to_provision.cloud} due to '
                     f'invalid cloud config: {common_utils.format_exception(e)}')
 
-            logger.info(
-                f'skip_if_config_hash_matches: {skip_if_config_hash_matches}, '
-                f'config_dict["config_hash"]: {config_dict["config_hash"]}, '
-                f'config_dict: {config_dict}')
             if ('config_hash' in config_dict and
                     skip_if_config_hash_matches == config_dict['config_hash']):
                 logger.debug('Skipping provisioning of cluster with matching '
@@ -2012,8 +2008,6 @@ class RetryingVmProvisioner(object):
                                        self._optimize_target is None)
         skip_if_config_hash_matches = (to_provision_config.prev_config_hash if
                                        skip_unnecessary_provisioning else None)
-        logger.info(
-            f'skip_if_config_hash_matches: {skip_if_config_hash_matches}')
 
         failover_history: List[Exception] = list()
         resource_exceptions: Dict[resources_lib.Resources, Exception] = dict()
@@ -4615,7 +4609,6 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # become None and the cluster_ever_up should be considered as False.
         cluster_ever_up = record is not None and record['cluster_ever_up']
         prev_config_hash = record['config_hash'] if record is not None else None
-        logger.info(f'prev_config_hash: {prev_config_hash}')
         logger.debug(f'cluster_ever_up: {cluster_ever_up}')
         logger.debug(f'record: {record}')
 
