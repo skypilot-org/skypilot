@@ -216,23 +216,29 @@ def _create_template_for_docker_login(
     container_registry_auth_name = f'{cluster_name}-registry-auth'
     container_template_name = _construct_docker_login_template_name(
         cluster_name)
-    # The `name` argument is only for display purpose and the registry server
-    # will be splitted from the docker image name (Tested with AWS ECR).
-    # Here we only need the username and password to create the registry auth.
-    # TODO(tian): Now we create a template and a registry auth for each cluster.
-    # Consider create one for each server and reuse them. Challenges including
-    # calculate the reference count and delete them when no longer needed.
-    create_auth_resp = runpod.runpod.create_container_registry_auth(
-        name=container_registry_auth_name,
-        username=login_config.username,
-        password=login_config.password,
-    )
-    registry_auth_id = create_auth_resp['id']
+
+    if login_config.runpod_registry_auth_id is not None:
+        registry_auth_id = login_config.runpod_registry_auth_id
+    else:
+        # The `name` argument is only for display purpose and the registry server
+        # will be splitted from the docker image name (Tested with AWS ECR).
+        # Here we only need the username and password to create the registry auth.
+        # TODO(tian): Now we create a template and a registry auth for each cluster.
+        # Consider create one for each server and reuse them. Challenges including
+        # calculate the reference count and delete them when no longer needed.
+        create_auth_resp = runpod.runpod.create_container_registry_auth(
+            name=container_registry_auth_name,
+            username=login_config.username,
+            password=login_config.password,
+        )
+        registry_auth_id = create_auth_resp['id']
+
     create_template_resp = runpod.runpod.create_template(
         name=container_template_name,
         image_name=None,
         registry_auth_id=registry_auth_id,
     )
+
     return login_config.format_image(image_name), create_template_resp['id']
 
 

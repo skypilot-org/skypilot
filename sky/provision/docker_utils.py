@@ -38,6 +38,10 @@ class DockerLoginConfig:
     password: str
     server: str
 
+    # [Toffee AI] That was the easiest way to provide RunPod Container
+    #             Registry Auth ID from an environment variable.
+    runpod_registry_auth_id: Optional[str] = None
+
     def format_image(self, image: str) -> str:
         """Format the image name with the server prefix."""
         server_prefix = f'{self.server}/'
@@ -51,6 +55,7 @@ class DockerLoginConfig:
             username=d[constants.DOCKER_USERNAME_ENV_VAR],
             password=d[constants.DOCKER_PASSWORD_ENV_VAR],
             server=d[constants.DOCKER_SERVER_ENV_VAR],
+            runpod_registry_auth_id=d[constants.DOCKER_RUNPOD_REGISTRY_AUTH_ID_ENV_VAR],
         )
 
 
