@@ -68,11 +68,15 @@ def test_sky_import():
     assert 'requests.adapters' in sys.modules
     assert 'requests' in sys.modules
 
-    from sky.authentication import _generate_rsa_key_pair
-    _generate_rsa_key_pair()
-    assert 'cryptography.hazmat.backends' in sys.modules
-    assert 'cryptography.hazmat.primitives' in sys.modules
-    assert 'cryptography.hazmat.primitives.asymmetric' in sys.modules
+    # Skip cryptography tests with Python < 3.9 for the error:
+    # ImportError: PyO3 modules compiled for CPython 3.8 or older
+    # may only be initialized once per interpreter process
+    if sys.version_info >= (3, 9):
+        from sky.authentication import _generate_rsa_key_pair
+        _generate_rsa_key_pair()
+        assert 'cryptography.hazmat.backends' in sys.modules
+        assert 'cryptography.hazmat.primitives' in sys.modules
+        assert 'cryptography.hazmat.primitives.asymmetric' in sys.modules
 
     from sky.optimizer import _is_dag_resources_ordered
     _is_dag_resources_ordered(sky.Dag())
