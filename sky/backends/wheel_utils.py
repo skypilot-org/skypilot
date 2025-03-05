@@ -169,6 +169,11 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         # race conditions.
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
+        logger.info(f'last_modification_time: {last_modification_time}')
+        logger.info(
+            f'last_wheel_modification_time: {last_wheel_modification_time}')
+        logger.info(f'SKY_PACKAGE_PATH: {SKY_PACKAGE_PATH}')
+        logger.info(f'WHEEL_DIR: {WHEEL_DIR}')
 
         # Only build wheels if the wheel is outdated or wheel does not exist
         # for the requested version.
@@ -176,8 +181,16 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                 WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
+            logger.info(
+                f'Building wheel last_wheel_modification_time: '
+                f'{last_wheel_modification_time} < last_modification_time: '
+                f'{last_modification_time}')
             latest_wheel = _build_sky_wheel()
         else:
+            logger.info(
+                f'Using cached wheel last_wheel_modification_time: '
+                f'{last_wheel_modification_time} >= last_modification_time: '
+                f'{last_modification_time}')
             latest_wheel = _get_latest_wheel()
 
         # We remove all wheels except the latest one for garbage collection.
