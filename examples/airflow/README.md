@@ -145,7 +145,7 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
    ```bash
    cp sky_train_dag.py /path/to/airflow/dags                                               
    # If your Airflow is running on Kubernetes, you may use kubectl cp to copy the file to the pod
-   # kubectl cp sky_k8s_example.py <airflow-pod-name>:/opt/airflow/dags 
+   # kubectl cp sky_train_dag.py <airflow-pod-name>:/opt/airflow/dags 
    ```
 2. Run `airflow dags list` to confirm that the DAG is loaded. 
 3. Find the DAG in the Airflow UI (typically http://localhost:8080) and enable it. The UI may take a couple of minutes to reflect the changes. Force unpause the DAG if it is paused with `airflow dags unpause sky_train_dag`
