@@ -93,7 +93,6 @@ def test_multi_tenant(generic_cloud: str):
                 ]),
         ],
         f'sky down -y {name}-1 {name}-2',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
