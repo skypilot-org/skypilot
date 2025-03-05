@@ -153,10 +153,17 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         if not path.exists():
             return -1.
         try:
-            return max(
-                os.path.getmtime(os.path.join(root, f))
-                for root, dirs, files in os.walk(path)
-                for f in (*dirs, *files))
+            max_mtime = -1.0
+            max_file = None
+            for root, dirs, files in os.walk(path):
+                for f in (*dirs, *files):
+                    file_path = os.path.join(root, f)
+                    mtime = os.path.getmtime(file_path)
+                    if mtime > max_mtime:
+                        max_mtime = mtime
+                        max_file = file_path
+            logger.info(f'File with max mtime: {max_file} ({max_mtime})')
+            return max_mtime
         except ValueError:
             return -1.
 
