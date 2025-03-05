@@ -1,5 +1,6 @@
 from typing import List
 
+import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
