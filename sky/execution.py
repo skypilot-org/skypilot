@@ -528,6 +528,7 @@ def launch(
                 Stage.DOWN,
             ]
             skip_unnecessary_provisioning = True
+
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
