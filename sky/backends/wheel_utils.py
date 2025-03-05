@@ -151,21 +151,37 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
 
     def _get_latest_modification_time(path: pathlib.Path) -> float:
         if not path.exists():
-            return -1.
-        try:
-            max_mtime = -1.0
-            max_file = None
-            for root, dirs, files in os.walk(path):
-                for f in (*dirs, *files):
-                    file_path = os.path.join(root, f)
-                    mtime = os.path.getmtime(file_path)
-                    if mtime > max_mtime:
-                        max_mtime = mtime
-                        max_file = file_path
-            logger.info(f'File with max mtime: {max_file} ({max_mtime})')
-            return max_mtime
-        except ValueError:
-            return -1.
+            return -1.0
+        max_time = -1.0
+        latest_file = None
+        for root, dirs, files in os.walk(path):
+            # Process directories in the current root
+            for d in dirs:
+                full_path = os.path.join(root, d)
+                mtime = os.path.getmtime(full_path)
+                if mtime > max_time:
+                    max_time = mtime
+                    latest_file = full_path
+            # Process files in the current root
+            for f in files:
+                full_path = os.path.join(root, f)
+                mtime = os.path.getmtime(full_path)
+                if mtime > max_time:
+                    max_time = mtime
+                    latest_file = full_path
+        if latest_file is not None:
+            logger.info(
+                f'Latest modification: {latest_file} (mtime: {max_time})')
+            if os.path.isdir(latest_file):
+                for root, dirs, files in os.walk(latest_file):
+                    for f in files:
+                        file_path = os.path.join(root, f)
+                        file_mtime = os.path.getmtime(file_path)
+                        logger.info(f'File in latest dir: {file_path} '
+                                    f'(mtime: {file_mtime})')
+            return max_time
+        else:
+            return -1.0
 
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
