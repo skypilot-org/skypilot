@@ -9,8 +9,8 @@ import collections
 import csv
 import json
 import math
+import os
 import re
-import sys
 from typing import Any, Dict, List
 
 from sky.adaptors import vast
@@ -38,6 +38,10 @@ def dot_get(d: dict, key: str) -> Any:
 
 if __name__ == '__main__':
     seen = set()
+    # InstanceList is the buffered list to emit to
+    # the CSV
+    csvList = []
+
     # InstanceType and gpuInfo are basically just stubs
     # so that the dictwriter is happy without weird
     # code.
@@ -47,8 +51,6 @@ if __name__ == '__main__':
                    ('cpu_ram', 'MemoryGiB'), ('gpu_name', 'GpuInfo'),
                    ('search.totalHour', 'Price'), ('min_bid', 'SpotPrice'),
                    ('geolocation', 'Region'))
-    writer = csv.DictWriter(sys.stdout, fieldnames=[x[1] for x in mapped_keys])
-    writer.writeheader()
 
     # Vast has a wide variety of machines, some of
     # which will have less diskspace and network
@@ -141,7 +143,15 @@ if __name__ == '__main__':
                 printstub = f'{stub}#print'
                 if printstub not in seen:
                     instance['SpotPrice'] = f'{maxBid:.2f}'
-                    writer.writerow(instance)
+                    csvList.append(instance)
                     seen.add(printstub)
             else:
                 seen.add(stub)
+
+    os.makedirs('vast', exist_ok=True)
+    with open('vast/vms.csv', 'w', newline='', encoding='utf-8') as csvfile:
+        writer = csv.DictWriter(csvfile, fieldnames=[x[1] for x in mapped_keys])
+        writer.writeheader()
+
+        for instance in csvList:
+            writer.writerow(instance)
