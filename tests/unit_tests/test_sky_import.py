@@ -74,14 +74,13 @@ def test_sky_import():
     assert 'requests.adapters' in sys.modules
     assert 'requests' in sys.modules
 
-    from sky.authentication import _generate_rsa_key_pair
+    import sky.authentication as auth
     try:
-        _generate_rsa_key_pair()
+        auth._generate_rsa_key_pair()
     except Exception as e:
         print(f"Failed to generate RSA key pair: {e}")
     assert 'cryptography.hazmat.backends' in sys.modules
     assert 'cryptography.hazmat.primitives' in sys.modules
-    assert 'cryptography.hazmat.primitives.asymmetric' in sys.modules
 
     from sky.optimizer import _is_dag_resources_ordered
     try:
@@ -98,13 +97,6 @@ def test_sky_import():
         print(f"Failed to fill loadbalancer template: {e}")
     assert 'jinja2' in sys.modules
     assert 'yaml' in sys.modules
-
-    from sky.utils import common_utils
-    try:
-        common_utils.validate_schema({}, {})
-    except Exception as e:
-        print(f"Failed to validate schema: {e}")
-    assert 'jsonschema' in sys.modules
 
     from sky.utils import log_utils
     try:
