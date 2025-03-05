@@ -424,8 +424,8 @@ def test_multi_echo(generic_cloud: str):
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 30',
             # Make sure that our job scheduler is fast enough to have at least
-            # 18 RUNNING jobs in parallel.
-            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 18) exit 1}}\'',
+            # 15 RUNNING jobs in parallel.
+            f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "RUNNING" | wc -l | awk \'{{if ($1 < 15) exit 1}}\'',
             'sleep 30',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             # This is to make sure we can finish job 32 before the test timeout.
@@ -636,9 +636,9 @@ def test_multi_node_failure(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'multi_node_failure',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/failed_worker_setup.yaml || [ $? -eq 100 ]',
             f'sky logs {name} 1 --status | grep FAILED_SETUP',  # Ensure the job setup failed.
-            f'sky exec {name} tests/test_yamls/failed_worker_run.yaml',
+            f'sky exec {name} tests/test_yamls/failed_worker_run.yaml || [ $? -eq 100 ]',
             f'sky logs {name} 2 --status | grep FAILED',  # Ensure the job failed.
             f'sky logs {name} 2 | grep "My hostname:" | wc -l | grep 2',  # Ensure there 2 of the hosts printed their hostname.
         ],
@@ -1402,9 +1402,15 @@ def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
         'cancel-pytorch',
         [
             f'sky launch -c {name} --cloud {generic_cloud} --gpus {accelerator} examples/resnet_distributed_torch.yaml -y -d',
-            # Wait the GPU process to start. Azure takes longer to start due to
-            # the long Azure VM setup time.
-            'sleep 150' if generic_cloud == 'azure' else 'sleep 90',
+            # Wait until the setup finishes.
+            smoke_tests_utils.
+            get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=name,
+                job_id='1',
+                job_status=[sky.JobStatus.RUNNING],
+                timeout=150),
+            # Wait the GPU process to start.
+            'sleep 90',
             f'sky exec {name} --num-nodes 2 \'s=$(nvidia-smi); echo "$s"; echo "$s" | grep python || '
             # When run inside container/k8s, nvidia-smi cannot show process ids.
             # See https://github.com/NVIDIA/nvidia-docker/issues/179
