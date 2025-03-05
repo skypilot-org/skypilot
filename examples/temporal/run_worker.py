@@ -2,7 +2,10 @@ import asyncio
 import logging
 from uuid import UUID
 
-from activities import run_git_clone, run_sky_down, run_sky_exec, run_sky_launch
+from activities import run_git_clone
+from activities import run_sky_down
+from activities import run_sky_exec
+from activities import run_sky_launch
 from temporalio.client import Client
 from temporalio.worker import Worker
 from workflows import SkyPilotWorkflow
@@ -26,9 +29,9 @@ async def main() -> None:
             run_git_clone,
         ],
     )
-    
+
     print("Worker started on queue 'skypilot-workflow-queue'")
-    
+
     # Run the worker
     await handle.run()
 

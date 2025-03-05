@@ -1,11 +1,12 @@
 import asyncio
-import os
-from dataclasses import dataclass, field
-from typing import Dict, Any, Optional
+from dataclasses import dataclass
+from dataclasses import field
 import io
+import os
+from typing import Any, Dict, Optional
 
-import yaml
 from temporalio import activity
+import yaml
 
 
 async def run_subprocess_with_streams(command) -> tuple[int, str, str]:
@@ -84,17 +85,17 @@ class SkyExecCommand:
 
 @activity.defn
 async def run_sky_launch(input: SkyLaunchCommand) -> str:
-    activity.logger.info(
-        f"Running Sky Launch on cluster: {input.cluster_name} "
-        f"with kwargs: {input.launch_kwargs}"
-    )
-    
+    activity.logger.info(f"Running Sky Launch on cluster: {input.cluster_name} "
+                         f"with kwargs: {input.launch_kwargs}")
+
     if input.envs_override:
-        activity.logger.info(f"With environment overrides: {input.envs_override}")
+        activity.logger.info(
+            f"With environment overrides: {input.envs_override}")
 
     # Set API server endpoint if provided
     if input.api_server_endpoint:
-        activity.logger.info(f"Using SkyPilot API server at: {input.api_server_endpoint}")
+        activity.logger.info(
+            f"Using SkyPilot API server at: {input.api_server_endpoint}")
         os.environ["SKYPILOT_API_SERVER_ENDPOINT"] = input.api_server_endpoint
 
     # Import sky after setting environment variables
@@ -102,7 +103,7 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
 
     # Parse the YAML content into a task config
     task_config = yaml.safe_load(input.yaml_content)
-        
+
     # Update the envs with the override values
     # task.update_envs() is not used here, see https://github.com/skypilot-org/skypilot/issues/4363
     if input.envs_override:
@@ -112,24 +113,31 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
 
     # Create task from config
     task = sky.Task.from_yaml_config(task_config)
-    
+
     # Prepare launch kwargs
     launch_kwargs = {}
     if input.launch_kwargs:
         launch_kwargs = input.launch_kwargs.copy()
-    
+
     # Launch the task, passing kwargs directly to sky.launch
-    launch_request_id = sky.launch(task, cluster_name=input.cluster_name, **launch_kwargs)
-    
+    launch_request_id = sky.launch(task,
+                                   cluster_name=input.cluster_name,
+                                   **launch_kwargs)
+
     # Run the blocking stream_and_get in a separate thread
-    job_id, status = await asyncio.to_thread(sky.stream_and_get, launch_request_id)
-    
+    job_id, status = await asyncio.to_thread(sky.stream_and_get,
+                                             launch_request_id)
+
     # Stream the logs
     buffer = io.StringIO()
-    await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True, output_stream=buffer)
+    await asyncio.to_thread(sky.tail_logs,
+                            cluster_name=input.cluster_name,
+                            job_id=job_id,
+                            follow=True,
+                            output_stream=buffer)
     log_output = buffer.getvalue()
     buffer.close()
-    
+
     return f"Launched cluster {input.cluster_name} with job ID {job_id}. Status: {status}\n{log_output}"
 
 
@@ -139,31 +147,32 @@ async def run_sky_down(input: SkyDownCommand) -> str:
 
     # Set API server endpoint if provided
     if input.api_server_endpoint:
-        activity.logger.info(f"Using SkyPilot API server at: {input.api_server_endpoint}")
+        activity.logger.info(
+            f"Using SkyPilot API server at: {input.api_server_endpoint}")
         os.environ["SKYPILOT_API_SERVER_ENDPOINT"] = input.api_server_endpoint
 
     # Import sky after setting environment variables
     import sky
-    
+
     down_request_id = sky.down(cluster_name=input.cluster_name)
     await asyncio.to_thread(sky.stream_and_get, down_request_id)
-    
+
     return f"Terminated cluster {input.cluster_name}."
 
 
 @activity.defn
 async def run_sky_exec(input: SkyExecCommand) -> str:
-    activity.logger.info(
-        f"Running Sky exec on cluster: {input.cluster_name} "
-        f"with kwargs: {input.exec_kwargs}"
-    )
-    
+    activity.logger.info(f"Running Sky exec on cluster: {input.cluster_name} "
+                         f"with kwargs: {input.exec_kwargs}")
+
     if input.envs_override:
-        activity.logger.info(f"With environment overrides: {input.envs_override}")
+        activity.logger.info(
+            f"With environment overrides: {input.envs_override}")
 
     # Set API server endpoint if provided
     if input.api_server_endpoint:
-        activity.logger.info(f"Using SkyPilot API server at: {input.api_server_endpoint}")
+        activity.logger.info(
+            f"Using SkyPilot API server at: {input.api_server_endpoint}")
         os.environ["SKYPILOT_API_SERVER_ENDPOINT"] = input.api_server_endpoint
 
     # Import sky after setting environment variables
@@ -171,7 +180,7 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
 
     # Parse the YAML content into a task config
     task_config = yaml.safe_load(input.yaml_content)
-        
+
     # Update the envs with the override values
     # task.update_envs() is not used here, see https://github.com/skypilot-org/skypilot/issues/4363
     if input.envs_override:
@@ -181,24 +190,31 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
 
     # Create task from config
     task = sky.Task.from_yaml_config(task_config)
-    
+
     # Prepare exec kwargs
     exec_kwargs = {}
     if input.exec_kwargs:
         exec_kwargs = input.exec_kwargs.copy()
-    
+
     # Execute the task on the existing cluster, passing kwargs directly to sky.exec
-    exec_request_id = sky.exec(task, cluster_name=input.cluster_name, **exec_kwargs)
-    
+    exec_request_id = sky.exec(task,
+                               cluster_name=input.cluster_name,
+                               **exec_kwargs)
+
     # Run the blocking stream_and_get in a separate thread
-    job_id, handle = await asyncio.to_thread(sky.stream_and_get, exec_request_id)
-    
+    job_id, handle = await asyncio.to_thread(sky.stream_and_get,
+                                             exec_request_id)
+
     # Stream the logs
     buffer = io.StringIO()
-    await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True, output_stream=buffer)
+    await asyncio.to_thread(sky.tail_logs,
+                            cluster_name=input.cluster_name,
+                            job_id=job_id,
+                            follow=True,
+                            output_stream=buffer)
     log_output = buffer.getvalue()
     buffer.close()
-    
+
     return f"Executed task on cluster {input.cluster_name} with job ID {job_id}.\n{log_output}"
 
 
@@ -221,9 +237,8 @@ class GitCloneOutput:
 @activity.defn
 async def run_git_clone(input: GitCloneInput) -> GitCloneOutput:
     activity.logger.info(
-        f"Cloning git repository: {input.repo_url} to {input.clone_path}"
-    )
-    
+        f"Cloning git repository: {input.repo_url} to {input.clone_path}")
+
     if input.branch:
         activity.logger.info(f"Will check out branch: {input.branch}")
 
@@ -239,19 +254,21 @@ async def run_git_clone(input: GitCloneInput) -> GitCloneOutput:
         # If it exists, pull the latest changes
         command = f"git -C {input.clone_path} pull"
         returncode, stdout, stderr = await run_subprocess_with_streams(command)
-        
+
         # If a branch is specified, check it out
         if input.branch:
             command = f"git -C {input.clone_path} checkout {input.branch}"
-            returncode, branch_stdout, branch_stderr = await run_subprocess_with_streams(command)
+            returncode, branch_stdout, branch_stderr = await run_subprocess_with_streams(
+                command)
             stdout += f"\n{branch_stdout}"
     else:
         # If it doesn't exist, clone the repository
         clone_cmd = f"git clone {input.repo_url} {input.clone_path}"
         if input.branch:
             clone_cmd = f"git clone -b {input.branch} {input.repo_url} {input.clone_path}"
-        
-        returncode, stdout, stderr = await run_subprocess_with_streams(clone_cmd)
+
+        returncode, stdout, stderr = await run_subprocess_with_streams(clone_cmd
+                                                                      )
 
     # Now read the YAML files and return their contents
     yaml_contents = {}
@@ -262,15 +279,13 @@ async def run_git_clone(input: GitCloneInput) -> GitCloneOutput:
                 yaml_contents[yaml_path] = file.read()
             activity.logger.info(f"Successfully read YAML file: {yaml_path}")
         except Exception as e:
-            activity.logger.error(f"Failed to read YAML file {yaml_path}: {str(e)}")
+            activity.logger.error(
+                f"Failed to read YAML file {yaml_path}: {str(e)}")
             return GitCloneOutput(
-                success=False, 
+                success=False,
                 message=f"Failed to read YAML file {yaml_path}: {str(e)}",
-                yaml_contents={}
-            )
-    
-    return GitCloneOutput(
-        success=True,
-        message=stdout,
-        yaml_contents=yaml_contents
-    )
+                yaml_contents={})
+
+    return GitCloneOutput(success=True,
+                          message=stdout,
+                          yaml_contents=yaml_contents)
