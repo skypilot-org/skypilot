@@ -813,6 +813,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.managed_jobs
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
+    timeout = 215
     low_resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
     name = smoke_tests_utils.get_cluster_name()
     yaml_str = pathlib.Path(
@@ -918,6 +919,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
                 f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || true'))
+        timeout *= 2
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)
     yaml_str = yaml_str.replace('sky-output-bucket', output_storage_name)
@@ -939,7 +941,7 @@ def test_managed_jobs_storage(generic_cloud: str):
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=215),
+                    timeout=timeout),
                 # Wait for the job to be cleaned up.
                 'sleep 50',
                 # Check if file was written to the mounted output bucket
