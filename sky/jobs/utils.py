@@ -740,8 +740,8 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
         # simply return with succeeded exit code.
         return '', 0
     logger.info(
-            ux_utils.finishing_message(f'Managed job finished: {job_id} '
-                                       f'(status: {managed_job_status.value}).'))
+        ux_utils.finishing_message(f'Managed job finished: {job_id} '
+                                   f'(status: {managed_job_status.value}).'))
     return '', exceptions.JobExitCode.from_managed_job_status(
         managed_job_status)
 
