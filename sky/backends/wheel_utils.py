@@ -150,15 +150,28 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
     """
 
     def _get_latest_modification_time(path: pathlib.Path) -> float:
+        max_time = -1.
         if not path.exists():
-            return -1.
-        try:
-            return max(
-                os.path.getmtime(os.path.join(root, f))
-                for root, dirs, files in os.walk(path)
-                for f in (*dirs, *files))
-        except ValueError:
-            return -1.
+            return max_time
+        for root, dirs, files in os.walk(path):
+            # Prune __pycache__ directories to prevent walking into them and
+            # exclude them from processing
+            if '__pycache__' in dirs:
+                dirs.remove('__pycache__')
+            # Filter out .pyc files
+            filtered_files = [f for f in files if not f.endswith('.pyc')]
+            # Process remaining directories and files
+            for entry in (*dirs, *filtered_files):
+                entry_path = os.path.join(root, entry)
+                try:
+                    mtime = os.path.getmtime(entry_path)
+                    if mtime > max_time:
+                        max_time = mtime
+                except OSError:
+                    # Handle cases where file might have been deleted after
+                    # listing
+                    continue
+        return max_time
 
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
