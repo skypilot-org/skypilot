@@ -157,6 +157,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
+            'dashboard_user_id': common.SERVER_ID,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
