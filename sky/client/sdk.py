@@ -1702,9 +1702,14 @@ def api_stop() -> None:
     found = False
     for process in psutil.process_iter(attrs=['pid', 'cmdline']):
         cmdline = process.info['cmdline']
-        if cmdline and server_common.API_SERVER_CMD in ' '.join(cmdline):
-            subprocess_utils.kill_children_processes(parent_pids=[process.pid],
-                                                     force=True)
+        if cmdline:
+            cmd_str = ' '.join(cmdline)
+            if (server_common.API_SERVER_CMD in cmd_str or
+                    # Backward compatible with the legacy command
+                    # TODO(aylei): remove in 0.11.0
+                    server_common.LEGACY_API_SERVER_CMD in cmd_str):
+                subprocess_utils.kill_children_processes(
+                    parent_pids=[process.pid], force=True)
             found = True
 
     # Remove the database for requests including any files starting with

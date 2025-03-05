@@ -168,7 +168,11 @@ setuptools.setup(
     install_requires=dependencies['install_requires'],
     extras_require=dependencies['extras_require'],
     entry_points={
-        'console_scripts': ['sky = sky.cli:cli'],
+        'console_scripts': [
+            # Install skyserver to venv to pin the module used, refer to #4801
+            'sky = sky.cli:cli',
+            'skyserver = sky.server.server:main'
+        ],
     },
     include_package_data=True,
     classifiers=[
