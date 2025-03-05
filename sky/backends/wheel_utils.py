@@ -167,7 +167,7 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
                     mtime = os.path.getmtime(entry_path)
                     if mtime > max_time:
                         max_time = mtime
-                except OSError:
+                except FileNotFoundError:
                     # Handle cases where file might have been deleted after
                     # listing
                     continue
