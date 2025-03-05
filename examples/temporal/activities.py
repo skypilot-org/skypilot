@@ -118,10 +118,12 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
     
     # Launch the task, passing kwargs directly to sky.launch
     launch_request_id = sky.launch(task, cluster_name=input.cluster_name, **launch_kwargs)
-    job_id, status = sky.stream_and_get(launch_request_id)
+    
+    # Run the blocking stream_and_get in a separate thread
+    job_id, status = await asyncio.to_thread(sky.stream_and_get, launch_request_id)
     
     # Stream the logs
-    log_output = sky.tail_logs(cluster_name=input.cluster_name, job_id=job_id, follow=True)
+    log_output = await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True)
     
     return f"Launched cluster {input.cluster_name} with job ID {job_id}. Status: {status}\n{log_output}"
 
@@ -139,7 +141,7 @@ async def run_sky_down(input: SkyDownCommand) -> str:
     import sky
     
     down_request_id = sky.down(cluster_name=input.cluster_name)
-    sky.stream_and_get(down_request_id)
+    await asyncio.to_thread(sky.stream_and_get, down_request_id)
     
     return f"Terminated cluster {input.cluster_name}."
 
@@ -181,10 +183,12 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
     
     # Execute the task on the existing cluster, passing kwargs directly to sky.exec
     exec_request_id = sky.exec(task, cluster_name=input.cluster_name, **exec_kwargs)
-    job_id, handle = sky.stream_and_get(exec_request_id)
+    
+    # Run the blocking stream_and_get in a separate thread
+    job_id, handle = await asyncio.to_thread(sky.stream_and_get, exec_request_id)
     
     # Stream the logs
-    log_output = sky.tail_logs(cluster_name=input.cluster_name, job_id=job_id, follow=True)
+    log_output = await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True)
     
     return f"Executed task on cluster {input.cluster_name} with job ID {job_id}.\n{log_output}"
 
