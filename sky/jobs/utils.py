@@ -16,6 +16,7 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
+import filelock
 from typing_extensions import Literal
 
 from sky import backends
@@ -39,13 +40,11 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
-    import filelock
     import psutil
 
     import sky
     from sky import dag as dag_lib
 else:
-    filelock = adaptors_common.LazyImport('filelock')
     psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)

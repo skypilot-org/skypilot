@@ -10,16 +10,11 @@ import os
 import threading
 import time
 import traceback
-import typing
 from typing import Callable, Optional, Union
 
-from sky.adaptors import common as adaptors_common
-from sky.utils import common_utils
+import filelock
 
-if typing.TYPE_CHECKING:
-    import filelock
-else:
-    filelock = adaptors_common.LazyImport('filelock')
+from sky.utils import common_utils
 
 _events = []
 
