@@ -735,9 +735,13 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
+    if not follow and not managed_job_status.is_terminal():
+        # The job is not in terminal state and the log is not following,
+        # simply return with succeeded exit code.
+        return '', 0
     logger.info(
-        ux_utils.finishing_message(f'Managed job finished: {job_id} '
-                                   f'(status: {managed_job_status.value}).'))
+            ux_utils.finishing_message(f'Managed job finished: {job_id} '
+                                       f'(status: {managed_job_status.value}).'))
     return '', exceptions.JobExitCode.from_managed_job_status(
         managed_job_status)
 
