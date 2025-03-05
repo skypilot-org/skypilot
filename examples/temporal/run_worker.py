@@ -1,10 +1,8 @@
 import asyncio
 import logging
-import random
 from uuid import UUID
 
 from activities import run_git_clone, run_sky_down, run_sky_exec, run_sky_launch
-from temporalio import activity
 from temporalio.client import Client
 from temporalio.worker import Worker
 from workflows import SkyPilotWorkflow
@@ -13,36 +11,14 @@ from workflows import SkyPilotWorkflow
 async def main() -> None:
     logging.basicConfig(level=logging.INFO)
 
-    # Generate a unique queue name for this worker
-    skypilot_specific_queue = (
-        f"skypilot_specific_queue-host-{UUID(int=random.getrandbits(128))}"
-    )
-
-    @activity.defn(name="get_available_task_queue")
-    async def select_task_queue() -> str:
-        """Return this worker's task queue for SkyPilot activities."""
-        return skypilot_specific_queue
-
     # Start client
     client = await Client.connect("localhost:7233", namespace="default")
 
-    # Run a worker to distribute the workflows
-    run_futures = []
-    
-    # This worker handles the workflow and task queue distribution
+    # Create a single worker that handles all workflows and activities
     handle = Worker(
         client,
-        task_queue="skypilot-distribution-queue",
+        task_queue="skypilot-workflow-queue",
         workflows=[SkyPilotWorkflow],
-        activities=[select_task_queue],
-    )
-    run_futures.append(handle.run())
-    print("Base worker started")
-
-    # This worker handles SkyPilot activities
-    handle = Worker(
-        client,
-        task_queue=skypilot_specific_queue,
         activities=[
             run_sky_launch,
             run_sky_down,
@@ -50,11 +26,11 @@ async def main() -> None:
             run_git_clone,
         ],
     )
-    run_futures.append(handle.run())
-    print(f"Worker {skypilot_specific_queue} started")
-
-    print("All workers started, ctrl+c to exit")
-    await asyncio.gather(*run_futures)
+    
+    print("Worker started on queue 'skypilot-workflow-queue'")
+    
+    # Run the worker
+    await handle.run()
 
 
 if __name__ == "__main__":

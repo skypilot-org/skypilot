@@ -22,15 +22,15 @@ async def main():
         print("SKYPILOT_API_SERVER_ENDPOINT not set. SkyPilot will use local state.")
         
     # Get environment variables for tasks
-    data_bucket_url = os.getenv("SKYPILOT_BUCKET_URL", "")
+    data_bucket = os.getenv("SKYPILOT_BUCKET_NAME", "")
     
     # Create environment overrides dictionary
     envs_override = {}
-    if data_bucket_url:
-        print(f"Using DATA_BUCKET_URL: {data_bucket_url}")
-        envs_override["DATA_BUCKET_NAME"] = data_bucket_url
+    if data_bucket:
+        print(f"Using DATA_BUCKET_NAME: {data_bucket}")
+        envs_override["DATA_BUCKET_NAME"] = data_bucket
     else:
-        raise ValueError("SKYPILOT_BUCKET_URL not set. Please set it in your environment or .env file.")
+        raise ValueError("SKYPILOT_BUCKET_NAME not set. Please set it in your environment or .env file.")
 
     try:
         # Execute the workflow with cluster name and config path
@@ -44,7 +44,7 @@ async def main():
                 api_server_endpoint=api_server_endpoint,  # Add the API server endpoint
             ),
             id="skypilot-workflow-id",
-            task_queue="skypilot-distribution-queue",
+            task_queue="skypilot-workflow-queue",
         )
         print(f"SkyPilot Workflow Result: {result}")
     except WorkflowFailureError:

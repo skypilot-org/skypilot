@@ -2,6 +2,7 @@ import asyncio
 import os
 from dataclasses import dataclass, field
 from typing import Dict, Any, Optional
+import io
 
 import yaml
 from temporalio import activity
@@ -102,7 +103,8 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
     # Parse the YAML content into a task config
     task_config = yaml.safe_load(input.yaml_content)
         
-    # Add environment variables if provided
+    # Update the envs with the override values
+    # task.update_envs() is not used here, see https://github.com/skypilot-org/skypilot/issues/4363
     if input.envs_override:
         if 'envs' not in task_config:
             task_config['envs'] = {}
@@ -123,7 +125,10 @@ async def run_sky_launch(input: SkyLaunchCommand) -> str:
     job_id, status = await asyncio.to_thread(sky.stream_and_get, launch_request_id)
     
     # Stream the logs
-    log_output = await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True)
+    buffer = io.StringIO()
+    await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True, output_stream=buffer)
+    log_output = buffer.getvalue()
+    buffer.close()
     
     return f"Launched cluster {input.cluster_name} with job ID {job_id}. Status: {status}\n{log_output}"
 
@@ -167,7 +172,8 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
     # Parse the YAML content into a task config
     task_config = yaml.safe_load(input.yaml_content)
         
-    # Add environment variables if provided
+    # Update the envs with the override values
+    # task.update_envs() is not used here, see https://github.com/skypilot-org/skypilot/issues/4363
     if input.envs_override:
         if 'envs' not in task_config:
             task_config['envs'] = {}
@@ -188,7 +194,10 @@ async def run_sky_exec(input: SkyExecCommand) -> str:
     job_id, handle = await asyncio.to_thread(sky.stream_and_get, exec_request_id)
     
     # Stream the logs
-    log_output = await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True)
+    buffer = io.StringIO()
+    await asyncio.to_thread(sky.tail_logs, cluster_name=input.cluster_name, job_id=job_id, follow=True, output_stream=buffer)
+    log_output = buffer.getvalue()
+    buffer.close()
     
     return f"Executed task on cluster {input.cluster_name} with job ID {job_id}.\n{log_output}"
 

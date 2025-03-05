@@ -29,10 +29,8 @@ class SkyPilotWorkflowInput:
     api_server_endpoint: Optional[str] = None
 
 
-@activity.defn
-async def get_available_task_queue() -> str:
-    """Just a stub for typedworkflow invocation."""
-    raise NotImplementedError
+# Define the fixed worker queue name
+WORKER_TASK_QUEUE = "skypilot-workflow-queue"
 
 
 @workflow.defn
@@ -54,12 +52,7 @@ class SkyPilotWorkflow:
             maximum_interval=timedelta(seconds=2),
         )
 
-        workflow.logger.info("Searching for available worker")
-        unique_worker_task_queue = await workflow.execute_activity(
-            activity=get_available_task_queue,
-            start_to_close_timeout=timedelta(seconds=10),
-        )
-        workflow.logger.info(f"Matching workflow to worker {unique_worker_task_queue}")
+        workflow.logger.info(f"Using worker task queue: {WORKER_TASK_QUEUE}")
 
         workflow.logger.info(
             f"Running SkyPilot workflow with cluster prefix: {cluster_prefix}"
@@ -89,7 +82,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=5),
             retry_policy=retry_policy,
-            task_queue=unique_worker_task_queue,
+            task_queue=WORKER_TASK_QUEUE,
         )
         
         if not clone_result.success:
@@ -112,7 +105,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
-            task_queue=unique_worker_task_queue,
+            task_queue=WORKER_TASK_QUEUE,
         )
         workflow.logger.info(f"Preprocessing result: {preprocess_result}")
 
@@ -125,7 +118,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=retry_policy,
-            task_queue=unique_worker_task_queue,
+            task_queue=WORKER_TASK_QUEUE,
         )
         workflow.logger.info(f"Down result: {down_result}")
 
@@ -144,7 +137,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=60),
             retry_policy=retry_policy,
-            task_queue=unique_worker_task_queue,
+            task_queue=WORKER_TASK_QUEUE,
         )
         workflow.logger.info(f"Training result: {train_result}")
 
@@ -162,7 +155,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=30),
             retry_policy=retry_policy,
-            task_queue=unique_worker_task_queue,
+            task_queue=WORKER_TASK_QUEUE,
         )
         workflow.logger.info(f"Evaluation result: {eval_result}")
 
@@ -175,7 +168,7 @@ class SkyPilotWorkflow:
             ),
             start_to_close_timeout=timedelta(minutes=10),
             retry_policy=retry_policy,
-            task_queue=unique_worker_task_queue,
+            task_queue=WORKER_TASK_QUEUE,
         )
         workflow.logger.info(f"Down result: {down_result}")
 
