@@ -129,7 +129,7 @@ def generate_bucket_uuid(**context):
     return bucket_uuid
 
 
-with DAG(dag_id='sky_k8s_train_pipeline',
+with DAG(dag_id='sky_train_dag',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
