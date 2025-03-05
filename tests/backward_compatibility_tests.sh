@@ -39,8 +39,8 @@ ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && p
 rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
-start_from=7
-base_branch="fix-backward-compability-test"
+start_from=${2:-0}
+base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$(whoami)"
 # Test managed jobs to make sure existing jobs and new job can run correctly,
