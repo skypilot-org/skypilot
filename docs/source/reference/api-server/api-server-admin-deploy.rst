@@ -39,7 +39,6 @@ Next, add the SkyPilot Helm repository:
 .. code-block:: console
 
     $ helm repo add skypilot https://helm.skypilot.co
-    $ helm repo update
 
 Step 2: Configure cloud accounts
 --------------------------------
@@ -67,11 +66,11 @@ Following tabs describe how to configure credentials for different clouds on the
             $   --from-file=config=~/.kube/config
 
 
-        Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig file for authentication:
+        To use the kubeconfig secret in the API server, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in :ref:`step 3 <sky-api-server-deploy-helm>`:
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            $ # helm upgrade --install ... \
             $   --set kubernetesCredentials.useKubeconfig=true \
             $   --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
             $   --set kubernetesCredentials.useApiServerCluster=true
@@ -112,11 +111,12 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Replace ``YOUR_ACCESS_KEY_ID`` and ``YOUR_SECRET_ACCESS_KEY`` with your actual AWS credentials.
 
-        When installing or upgrading the Helm chart, enable AWS credentials by setting ``awsCredentials.enabled=true``.
+        When installing or upgrading the Helm chart, enable AWS credentials by setting ``awsCredentials.enabled=true`` in :ref:`step 3 <sky-api-server-deploy-helm>`:
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
+            $ # helm upgrade --install ... \
+            $   --set awsCredentials.enabled=true
     
     .. tab-item:: GCP
         :sync: gcp-creds-tab
@@ -132,11 +132,11 @@ Following tabs describe how to configure credentials for different clouds on the
             $   -n $NAMESPACE \
             $   --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
 
-        When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` to your project ID:
+        When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` in :ref:`step 3 <sky-api-server-deploy-helm>`:
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            $ # helm upgrade --install ... \
             $   --set gcpCredentials.enabled=true \
             $   --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
@@ -151,6 +151,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Support for configuring other clouds through secrets is coming soon!
 
+
+.. _sky-api-server-deploy-helm:
 
 Step 3: Deploy the API Server Helm Chart
 ----------------------------------------
@@ -167,16 +169,17 @@ Install the SkyPilot Helm chart with the following command:
     $ WEB_USERNAME=skypilot
     $ WEB_PASSWORD=yourpassword
     $ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+    $ helm repo update
     $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
     $   --namespace $NAMESPACE \
     $   --create-namespace \
     $   --set ingress.authCredentials=$AUTH_STRING
 
+If you configured any cloud credentials in the previous step, make sure to enable them by adding the relevant flags (e.g., ``--set awsCredentials.enabled=true``) to the command.
+
 The ``--namespace`` flag specifies which namespace to deploy the API server in, and ``--create-namespace`` will create the namespace if it doesn't exist.
 
 To install a specific version, pass the ``--version`` flag to the ``helm upgrade`` command (e.g., ``--version 0.1.0``).
-
-If you configured any cloud credentials in the previous step, make sure to enable them by adding the relevant flags (e.g., ``--set awsCredentials.enabled=true``) to the command.
 
 .. tip::
 
@@ -184,13 +187,11 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 
 .. tip::
 
-    If you already have a Kubernetes secret containing basic auth credentials, you can use it directly by setting ``ingress.authSecret`` instead of ``ingress.authCredentials``:
+    If you already have a Kubernetes secret containing basic auth credentials for the nginx ingress, you can use it directly by setting ``ingress.authSecret`` instead of ``ingress.authCredentials``:
 
     .. code-block:: console
 
-        $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-        $   --namespace $NAMESPACE \
-        $   --create-namespace \
+        $ # helm upgrade --install ... \
         $   --set ingress.authSecret=my-existing-auth-secret
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
@@ -238,11 +239,11 @@ Our default of using a NodePort service is the recommended way to expose the API
             Using LoadBalancer service type may not support SSH access to SkyPilot clusters. Only use this option if you do not need SSH access.
 
 
-        1. Deploy the API server with LoadBalancer configuration:
+        1. Deploy the API server with LoadBalancer configuration by setting ``ingress-nginx.controller.service.type=LoadBalancer``:
 
         .. code-block:: console
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+            $ # helm upgrade --install ... \
             $   --set ingress.httpNodePort=null \
             $   --set ingress.httpsNodePort=null \
             $   --set ingress-nginx.controller.service.type=LoadBalancer
