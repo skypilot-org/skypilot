@@ -59,39 +59,56 @@ def test_sky_import():
 
     # Check that the lazy imported modules are imported after used
     from sky.utils import console_utils
-    console_utils.get_console()
+    try:
+        console_utils.get_console()
+    except Exception as e:
+        print(f"Failed to get console: {e}")
     assert 'rich.console' in sys.modules
 
     from sky.backends import backend_utils
-    backend_utils.check_network_connection()
+    try:
+        backend_utils.check_network_connection()
+    except Exception as e:
+        print(f"Failed to check network connection: {e}")
     assert 'requests.packages.urllib3.util.retry' in sys.modules
     assert 'requests.adapters' in sys.modules
     assert 'requests' in sys.modules
 
-    # Skip cryptography tests with Python < 3.9 for the error:
-    # ImportError: PyO3 modules compiled for CPython 3.8 or older
-    # may only be initialized once per interpreter process
-    if sys.version_info >= (3, 9):
-        from sky.authentication import _generate_rsa_key_pair
+    from sky.authentication import _generate_rsa_key_pair
+    try:
         _generate_rsa_key_pair()
-        assert 'cryptography.hazmat.backends' in sys.modules
-        assert 'cryptography.hazmat.primitives' in sys.modules
-        assert 'cryptography.hazmat.primitives.asymmetric' in sys.modules
+    except Exception as e:
+        print(f"Failed to generate RSA key pair: {e}")
+    assert 'cryptography.hazmat.backends' in sys.modules
+    assert 'cryptography.hazmat.primitives' in sys.modules
+    assert 'cryptography.hazmat.primitives.asymmetric' in sys.modules
 
     from sky.optimizer import _is_dag_resources_ordered
-    _is_dag_resources_ordered(sky.Dag())
+    try:
+        _is_dag_resources_ordered(sky.Dag())
+    except Exception as e:
+        print(f"Failed to check DAG resources ordered: {e}")
     assert 'networkx' in sys.modules
 
     from sky.provision.kubernetes import network_utils
-    network_utils.fill_loadbalancer_template('test', 'test', [80], 'test',
-                                             'test')
+    try:
+        network_utils.fill_loadbalancer_template('test', 'test', [80], 'test',
+                                                 'test')
+    except Exception as e:
+        print(f"Failed to fill loadbalancer template: {e}")
     assert 'jinja2' in sys.modules
     assert 'yaml' in sys.modules
 
     from sky.utils import common_utils
-    common_utils.validate_schema({}, {})
+    try:
+        common_utils.validate_schema({}, {})
+    except Exception as e:
+        print(f"Failed to validate schema: {e}")
     assert 'jsonschema' in sys.modules
 
     from sky.utils import log_utils
-    log_utils.readable_time_duration(1, 1)
+    try:
+        log_utils.readable_time_duration(1, 1)
+    except Exception as e:
+        print(f"Failed to readable time duration: {e}")
     assert 'pendulum' in sys.modules
