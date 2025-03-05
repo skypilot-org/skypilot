@@ -97,7 +97,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
         'managed_jobs_exit_codes',
         [
             # Test jobs launch with successful job
-            f'sky jobs launch -y -n jobs-{name} --cloud {generic_cloud} "echo jobs success" && echo "Jobs launch exit code: $?"',
+            f'sky jobs launch -y -n jobs-{name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo jobs success" && echo "Jobs launch exit code: $?"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'jobs-{name}',
@@ -112,7 +112,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
             f'sky jobs logs $JOB_ID && echo "Jobs logs exit code: $?"',
 
             # Test jobs launch with failing job
-            f'sky jobs launch -y -n jobs-fail-{name} --cloud {generic_cloud} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
+            f'sky jobs launch -y -n jobs-fail-{name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "exit 1" || echo "Jobs launch failed exit code: $?" | grep "Jobs launch failed exit code: 100"',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'jobs-fail-{name}',
@@ -127,6 +127,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
             f'sky jobs logs $JOB_ID || echo "Failed jobs logs exit code: $?" | grep "Failed jobs logs exit code: 100"',
         ],
         f'sky jobs cancel -y -n jobs-{name}; sky jobs cancel -y -n jobs-fail-{name}',
+        env=smoke_tests_utils.LOW_RESOURCE_ENV,
         timeout=20 * 60,  # Consistent with other managed jobs tests
     )
     smoke_tests_utils.run_one_test(test)
