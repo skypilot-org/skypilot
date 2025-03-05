@@ -39,9 +39,7 @@ setup: |
   After=network.target
 
   [Service]
-  Environment="PATH={{ sky_python_env_path }}:\$PATH"
-  Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
-  Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
+  Environment="SKYPILOT_USER_ID={{ dashboard_user_id }}"
   Restart=always
   StandardOutput=append:/home/$USER/.sky/job-dashboard.log
   StandardError=append:/home/$USER/.sky/job-dashboard.log
