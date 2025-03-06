@@ -918,6 +918,10 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
+        if 'user_hash' in job and job['user_hash'] is not None:
+            # Skip jobs that do not have user_hash info.
+            # TODO(cooperc): Remove check before 0.12.0.
+            job['user_name'] = global_user_state.get_user(job['user_hash']).name
     return jobs
 
 
@@ -1047,16 +1051,21 @@ def format_job_table(
     def get_user_column_values(task: Dict[str, Any]) -> List[str]:
         user_values: List[str] = []
         if show_user:
+            user_name = '-'  # default value
 
-            user_name = '-'
-            user_hash = task.get('user_hash', None)
-            if user_hash:
-                user = global_user_state.get_user(user_hash)
-                user_name = user.name if user.name else '-'
+            task_user_name = task.get('user_name', None)
+            task_user_hash = task.get('user_hash', None)
+            if task_user_name is not None:
+                user_name = task_user_name
+            elif task_user_hash is not None:
+                # Fallback to the user hash if we are somehow missing the name.
+                user_name = task_user_hash
+
             user_values = [user_name]
 
             if show_all:
-                user_values.append(user_hash if user_hash is not None else '-')
+                user_values.append(
+                    task_user_hash if task_user_hash is not None else '-')
 
         return user_values
 
