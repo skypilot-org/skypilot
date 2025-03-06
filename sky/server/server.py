@@ -1083,6 +1083,9 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 
 if __name__ == '__main__':
     import uvicorn
+
+    from sky.server import uvicorn as skyuvicorn
+
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
@@ -1104,10 +1107,11 @@ if __name__ == '__main__':
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
-        uvicorn.run('sky.server.server:app',
-                    host=cmd_args.host,
-                    port=cmd_args.port,
-                    workers=num_workers)
+        config = uvicorn.Config('sky.server.server:app',
+                                host=cmd_args.host,
+                                port=cmd_args.port,
+                                workers=num_workers)
+        skyuvicorn.run(config)
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')
@@ -1115,5 +1119,7 @@ if __name__ == '__main__':
     finally:
         logger.info('Shutting down SkyPilot API server...')
         for sub_proc in sub_procs:
-            sub_proc.terminate()
-            sub_proc.join()
+            # Ignore dead or not started processes.
+            if sub_proc.is_alive():
+                sub_proc.terminate()
+                sub_proc.join()
