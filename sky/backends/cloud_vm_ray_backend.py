@@ -2035,7 +2035,6 @@ class RetryingVmProvisioner(object):
                 # change the cloud assignment.
                 common_utils.check_cluster_name_is_valid(cluster_name)
 
-                assert to_provision.cloud is not None
                 if dryrun:
                     cloud_user = None
                 else:
@@ -2425,7 +2424,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             self.cluster_yaml, self.docker_user, self.ssh_user)
         if avoid_ssh_control:
             ssh_credentials.pop('ssh_control_name', None)
-        assert self.launched_resources.cloud is not None, self
         updated_to_skypilot_provisioner_after_provisioned = (
             self.launched_resources.cloud.PROVISIONER_VERSION >=
             clouds.ProvisionerVersion.SKYPILOT and
