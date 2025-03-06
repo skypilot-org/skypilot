@@ -1,7 +1,7 @@
 document.addEventListener('DOMContentLoaded', function () {
     var script = document.createElement('script');
     script.src = 'https://widget.runllm.com';
-    script.setAttribute("crossorigin", "true")
+    script.setAttribute("crossorigin", "true");
     script.setAttribute('id', 'runllm-widget-script');
     script.setAttribute('type', 'module');
     script.setAttribute('runllm-assistant-id', '9');
