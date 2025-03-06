@@ -677,7 +677,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
-            # with even id will sleep 60 seconds before being ready, so we
+            # with even id will sleep 120 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
