@@ -341,7 +341,7 @@ def queue(refresh: bool,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
-                'user_name': (str) job creator's user name,
+                'user_name': (Optional[str]) job creator's user name,
                 'user_hash': (str) job creator's user hash,
             }
         ]
