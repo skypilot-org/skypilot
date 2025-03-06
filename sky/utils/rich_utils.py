@@ -230,15 +230,37 @@ def decode_rich_status(
     decoding_status = None
     try:
         last_line = ''
+        # Buffer to store incomplete UTF-8 bytes between chunks
+        undecoded_buffer = b''
+        
         # Iterate over the response content in chunks. We do not use iter_lines
         # because it will strip the trailing newline characters, causing the
         # progress bar ending with `\r` becomes a pyramid.
-        for encoded_msg in response.iter_content(chunk_size=None):
-            if encoded_msg is None:
+        for chunk in response.iter_content(chunk_size=None):
+            if chunk is None:
                 return
-            encoded_msg = encoded_msg.decode('utf-8')
+            
+            # Append the new chunk to any leftover bytes from previous iteration
+            current_bytes = undecoded_buffer + chunk
+            undecoded_buffer = b''
+            
+            # Try to decode the combined bytes
+            try:
+                encoded_msg = current_bytes.decode('utf-8')
+            except UnicodeDecodeError as e:
+                # If decoding fails due to incomplete byte sequence at the end,
+                # save those bytes for the next chunk and decode the valid part
+                valid_byte_count = e.start
+                encoded_msg = current_bytes[:valid_byte_count].decode('utf-8')
+                undecoded_buffer = current_bytes[valid_byte_count:]
+                
             lines = encoded_msg.splitlines(keepends=True)
-
+            
+            # Skip processing if lines is empty to avoid IndexError
+            if not lines:
+                continue
+                
+            # Append any leftover text from previous chunk to first line
             lines[0] = last_line + lines[0]
             last_line = lines[-1]
             # If the last line is not ended with `\r` or `\n` (with ending
