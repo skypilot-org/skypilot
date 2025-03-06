@@ -183,6 +183,8 @@ Supported bucket types:
 
 Configure resources for the managed jobs controller.
 
+For more details about tuning the jobs controller resources, see :ref:`jobs-controller-sizing`.
+
 Example:
 
 .. code-block:: yaml
@@ -190,10 +192,13 @@ Example:
   jobs:
     controller:
       resources:  # same spec as 'resources' in a task YAML
+        # optionally set specific cloud/region
         cloud: gcp
         region: us-central1
-        cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
-        disk_size: 100
+        # default resources:
+        cpus: 4+
+        memory: 8x
+        disk_size: 50
 
 .. _config-yaml-allowed-clouds:
 
