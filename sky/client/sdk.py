@@ -73,7 +73,8 @@ def stream_response(request_id: Optional[str],
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 print(line, flush=True, end='', file=output_stream)
-        return get(request_id)
+        if request_id:
+            return get(request_id)
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -1746,7 +1747,7 @@ def api_server_logs(follow: bool = True, tail: Optional[int] = None) -> None:
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
         subprocess.run(['tail', *tail_args, f'{log_path}'], check=False)
     else:
-        stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail)
+        stream_and_get(log_path=constants.API_SERVER_LOGS, tail=tail, follow=follow)
 
 
 @usage_lib.entrypoint
