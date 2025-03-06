@@ -45,6 +45,7 @@ from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import status_lib
 
 # pylint: disable=ungrouped-imports
@@ -65,6 +66,10 @@ def _add_timestamp_prefix_for_server_logs() -> None:
     # Add date prefix to the log message printed by loggers under
     # server.
     stream_handler = logging.StreamHandler(sys.stdout)
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.INFO)
     stream_handler.flush = sys.stdout.flush  # type: ignore
     stream_handler.setFormatter(sky_logging.FORMATTER)
     server_logger.addHandler(stream_handler)
