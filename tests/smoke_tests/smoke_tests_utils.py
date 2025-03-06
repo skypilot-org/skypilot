@@ -310,6 +310,27 @@ def run_one_test(test: Test) -> None:
         if proc.returncode:
             break
 
+    if proc.returncode:
+        server_logs_cmd = 'sky api logs --server-logs --no-follow'
+        write(f'api server logs ({server_logs_cmd}):\n')
+        write('=========================================================\n')
+        flush()
+        logs_proc = subprocess.Popen(
+            server_logs_cmd,
+            stdout=subprocess_out,
+            stderr=subprocess.STDOUT,
+            shell=True,
+            executable='/bin/bash',
+            env=env_dict,
+        )
+        try:
+            # shortened timeout for sky api logs
+            logs_proc.wait(timeout=15)
+        except subprocess.TimeoutExpired as e:
+            flush()
+            write(f'API server logs timeout after 15 seconds.\n')
+        flush()
+
     style = colorama.Style
     fore = colorama.Fore
     outcome = (f'{fore.RED}Failed{style.RESET_ALL} (returned {proc.returncode})'
