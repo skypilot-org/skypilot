@@ -1,7 +1,9 @@
 document.addEventListener('DOMContentLoaded', function () {
     var script = document.createElement('script');
     script.src = 'https://widget.runllm.com';
-    script.setAttribute('id', 'runllm-widget');
+    script.setAttribute("crossorigin", "true")
+    script.setAttribute('id', 'runllm-widget-script');
+    script.setAttribute('type', 'module');
     script.setAttribute('runllm-assistant-id', '9');
     script.setAttribute('runllm-name', 'SkyPilot');
     script.setAttribute('runllm-theme-color', '#4C4C4D');
