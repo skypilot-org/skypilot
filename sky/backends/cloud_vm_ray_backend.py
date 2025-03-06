@@ -3458,6 +3458,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+
         # Should also be ealier than _is_command_length_over_limit
         # Same reason as in _setup
         if self._dump_final_script:
