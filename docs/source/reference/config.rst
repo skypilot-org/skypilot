@@ -901,13 +901,13 @@ Default: ``10``.
 
 Autoscaler type (optional).
 
-Type of autoscaler to use.
+Type of autoscaler used by the underlying Kubernetes cluster. Used to configure the GPU labels used by the pods submitted by SkyPilot.
 
 Can be one of:
 
-- ``gke``: Google Kubernetes Engine Autopilot
-- ``eks``: Amazon EKS
-- ``aks``: Azure Kubernetes Service
+- ``gke``: Google Kubernetes Engine
+- ``karpenter``: Karpenter
+- ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
 
 .. _config-yaml-kubernetes-pod-config:
 

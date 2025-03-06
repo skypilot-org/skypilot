@@ -348,9 +348,9 @@ FAQs
 
 * **Can I use multiple Kubernetes clusters with SkyPilot?**
 
-  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+  SkyPilot can work with multiple Kubernetes contexts in your kubeconfig file by setting the ``allowed_contexts`` key in :code:`~/.sky/config.yaml`. See :ref:`multi-kubernetes`.
 
-  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+  If ``allowed_contexts`` is not set, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
 
 * **Are autoscaling Kubernetes clusters supported?**
 
