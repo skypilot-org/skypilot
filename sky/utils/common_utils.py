@@ -263,7 +263,12 @@ def set_client_status(client_entrypoint: Optional[str],
     global _using_remote_api_server
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
-    _using_remote_api_server = using_remote_api_server
+    if os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR) is not None:
+        _using_remote_api_server = os.getenv(
+            constants.USING_REMOTE_API_SERVER_ENV_VAR,
+            '').lower() in ('true', '1')
+    else:
+        _using_remote_api_server = using_remote_api_server
 
 
 def get_current_command() -> str:
