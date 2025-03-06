@@ -6,8 +6,8 @@ import functools
 import json
 import os
 import pathlib
+import shutil
 import subprocess
-import sys
 import time
 import typing
 from typing import Any, Dict, Optional
@@ -39,7 +39,9 @@ AVAILABLE_LOCAL_API_SERVER_URLS = [
     f'http://{host}:46580' for host in AVAILBLE_LOCAL_API_SERVER_HOSTS
 ]
 
-API_SERVER_CMD = '-m sky.server.server'
+# TODO(aylei): remove in 0.11.0
+LEGACY_API_SERVER_CMD = '-m sky.server.server'
+API_SERVER_CMD = 'skyserver'
 # The client dir on the API server for storing user-specific data, such as file
 # mounts, logs, etc. This dir is empheral and will be cleaned up when the API
 # server is restarted.
@@ -193,7 +195,16 @@ def _start_api_server(deploy: bool = False,
                 'recommended to support higher load with better performance.'
                 f'{colorama.Style.RESET_ALL}')
 
-        args = [sys.executable, *API_SERVER_CMD.split()]
+        # If user is on master branch and does not run `pip install -e .`
+        # after update the code, skyserver will not be available in PATH.
+        if shutil.which(API_SERVER_CMD) is None:
+            raise RuntimeError(
+                f'{colorama.Fore.YELLOW}SkyPilot API server command '
+                f'{API_SERVER_CMD} is not available in PATH. '
+                f'Rerun `pip install -e .` to install the command.'
+                f'{colorama.Style.RESET_ALL}')
+        args = [API_SERVER_CMD]
+
         if deploy:
             args += ['--deploy']
         if host is not None:

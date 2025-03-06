@@ -1086,8 +1086,10 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
 
-if __name__ == '__main__':
+def main():
+    # pylint: disable=import-outside-toplevel
     import uvicorn
+
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
@@ -1122,3 +1124,7 @@ if __name__ == '__main__':
         for sub_proc in sub_procs:
             sub_proc.terminate()
             sub_proc.join()
+
+
+if __name__ == '__main__':
+    main()
