@@ -141,6 +141,30 @@ _WAIT_PROVISION_REPR = (
     'echo "Provisioning complete. PROVISIONING: $num_provisioning, vCPU=2: $num_vcpu_in_provision"'
 )
 
+# Shell script snippet to monitor and wait for resolution of NOT_READY replicas:
+# 1. Runs for max 5 minutes
+# 2. Specifically checks 10th column (STATUS) for "NOT_READY"
+# 3. Ignores other states like SHUTTING_DOWN/STARTING
+# 4. Exits successfully when zero NOT_READY replicas remain
+# 5. Fails immediately if timeout reached
+_WAIT_NO_NOT_READY = (
+    'start_time=$(date +%s); '
+    'timeout=300; '
+    'while true; do '
+    '    not_ready_count=$(sky serve status {name} | '
+    '        awk \'/{name}/ && $10 == "NOT_READY" {{print}}\' | '
+    '        wc -l); '
+    '    [ "$not_ready_count" -eq 0 ] && break; '
+    '    current_time=$(date +%s); '
+    '    elapsed=$((current_time - start_time)); '
+    '    if [ "$elapsed" -ge "$timeout" ]; then '
+    '        echo "Timeout: $not_ready_count replica(s) stuck in NOT_READY"; '
+    '        exit 1; '
+    '    fi; '
+    '    echo "Waiting for $not_ready_count NOT_READY replicas..."; '
+    '    sleep 10; '
+    'done')
+
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
     return (f'ip{replica_id}=$(echo "$s" | '
@@ -190,6 +214,7 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             f'{_WAIT_PROVISION_REPR.format(name=name)}; '
+            f'{_WAIT_NO_NOT_READY.format(name=name)}; '
             f'echo "$s"; {check_cmd}')
 
 
