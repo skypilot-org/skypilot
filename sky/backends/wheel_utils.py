@@ -183,8 +183,8 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
-        # Only build wheels if the wheel is outdated or wheel does not exist
-        # for the requested version.
+        # Only build wheels if the wheel is outdated, wheel does not exist
+        # for the requested version, or files were deleted during checking.
         if ((last_modification_time is None or
              last_wheel_modification_time is None) or
             (last_wheel_modification_time < last_modification_time) or
