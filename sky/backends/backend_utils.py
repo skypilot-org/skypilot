@@ -694,6 +694,10 @@ def write_cluster_config(
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
 
+    # Here, if users specify the controller to be high availability, we will
+    # provision a high availability controller. Whether the cloud supports
+    # this feature has been checked by
+    # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
     high_availability_specified = controller_utils.high_availability_specified(
         cluster_name_on_cloud)
 
