@@ -157,6 +157,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
+            'dashboard_user_id': common.SERVER_ID,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -305,10 +306,9 @@ def _maybe_restart_controller(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Starting dashboard...')):
         runner = handle.get_command_runners()[0]
-        user_hash = common_utils.get_user_hash()
         runner.run(
             f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={user_hash!r}; '
+            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
             f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
             stream_logs=True,
         )
