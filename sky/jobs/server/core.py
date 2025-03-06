@@ -306,10 +306,9 @@ def _maybe_restart_controller(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Starting dashboard...')):
         runner = handle.get_command_runners()[0]
-        user_hash = common_utils.get_user_hash()
         runner.run(
             f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={user_hash!r}; '
+            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
             f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
             stream_logs=True,
         )

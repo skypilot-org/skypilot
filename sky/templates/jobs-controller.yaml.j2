@@ -49,6 +49,7 @@ setup: |
   WantedBy=default.target
   EOF
 
+  export SKYPILOT_USER_ID="{{ dashboard_user_id }}"
   {{ dashboard_setup_cmd }}
 
 run: |
