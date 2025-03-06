@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pydantic
 
+from sky import admin_policy
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
@@ -113,15 +114,9 @@ class CheckBody(RequestBody):
     verbose: bool
 
 
-class ValidateBody(RequestBody):
-    """The request body for the validate endpoint."""
+class DagRequestBody(RequestBody):
+    """Request body base class for endpoints with a dag."""
     dag: str
-
-
-class OptimizeBody(RequestBody):
-    """The request body for the optimize endpoint."""
-    dag: str
-    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
 
     def to_kwargs(self) -> Dict[str, Any]:
         # Import here to avoid requirement of the whole SkyPilot dependency on
@@ -137,6 +132,19 @@ class OptimizeBody(RequestBody):
         # optimization to make sure the resources are available.
         kwargs['dag'] = dag
         return kwargs
+
+
+class ValidateBody(DagRequestBody):
+    """The request body for the validate endpoint."""
+    dag: str
+    request_options: Optional[admin_policy.RequestOptions]
+
+
+class OptimizeBody(DagRequestBody):
+    """The request body for the optimize endpoint."""
+    dag: str
+    minimize: common_lib.OptimizeTarget = common_lib.OptimizeTarget.COST
+    request_options: Optional[admin_policy.RequestOptions]
 
 
 class LaunchBody(RequestBody):
@@ -322,6 +330,7 @@ class JobsQueueBody(RequestBody):
     """The request body for the jobs queue endpoint."""
     refresh: bool = False
     skip_finished: bool = False
+    all_users: bool = False
 
 
 class JobsCancelBody(RequestBody):
@@ -329,6 +338,7 @@ class JobsCancelBody(RequestBody):
     name: Optional[str]
     job_ids: Optional[List[int]]
     all: bool = False
+    all_users: bool = False
 
 
 class JobsLogsBody(RequestBody):
@@ -448,6 +458,7 @@ class LocalUpBody(RequestBody):
     ssh_user: Optional[str] = None
     ssh_key: Optional[str] = None
     cleanup: bool = False
+    context_name: Optional[str] = None
 
 
 class ServeTerminateReplicaBody(RequestBody):

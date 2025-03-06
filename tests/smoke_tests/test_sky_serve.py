@@ -69,12 +69,21 @@ _SERVE_WAIT_UNTIL_READY = (
 _IP_REGEX = r'([0-9]{1,3}\.){3}[0-9]{1,3}'
 _AWK_ALL_LINES_BELOW_REPLICAS = '/Replicas/{flag=1; next} flag'
 _SERVICE_LAUNCHING_STATUS_REGEX = r'PROVISIONING\|STARTING'
+
+_SHOW_SERVE_STATUS = (
+    'echo "+ sky serve status {name}"; '
+    'sky serve status {name}; '
+    'echo "+ sky serve logs --controller {name} --no-follow"; '
+    'sky serve logs --controller {name} --no-follow; '
+    'echo "+ sky serve logs --load-balancer {name} --no-follow"; '
+    'sky serve logs --load-balancer {name} --no-follow; ')
+
 # Since we don't allow terminate the service if the controller is INIT,
 # which is common for simultaneous pytest, we need to wait until the
 # controller is UP before we can terminate the service.
 # The teardown command has a 10-mins timeout, so we don't need to do
 # the timeout here. See implementation of run_one_test() for details.
-_TEARDOWN_SERVICE = (
+_TEARDOWN_SERVICE = _SHOW_SERVE_STATUS + (
     '(for i in `seq 1 20`; do'
     '     s=$(sky serve down -y {name});'
     '     echo "Trying to terminate {name}";'
