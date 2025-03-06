@@ -3458,6 +3458,15 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                   target=script_path,
                                   up=True,
                                   stream_logs=False)
+        # Should also be ealier than _is_command_length_over_limit
+        # Same reason as in _setup
+        if self._dump_final_script:
+            _dump_code_to_file(job_submit_cmd,
+                               constants.PERSISTENT_RUN_SCRIPT_DIR)
+
+        if _is_command_length_over_limit(job_submit_cmd):
+            _dump_code_to_file(codegen)
+            job_submit_cmd = f'{mkdir_code} && {code}'
 
         if managed_job_dag is not None:
             # Add the managed job to job queue database.
@@ -3470,15 +3479,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # We cannot set the managed job to PENDING state in the job template
             # (jobs-controller.yaml.j2), as it may need to wait for the run
             # commands to be scheduled on the job controller in high-load cases.
-            code += ' && ' + managed_job_code
-
-        if self._dump_final_script:
-            _dump_code_to_file(job_submit_cmd,
-                               constants.PERSISTENT_RUN_SCRIPT_DIR)
-
-        if _is_command_length_over_limit(job_submit_cmd):
-            _dump_code_to_file(codegen)
-            job_submit_cmd = f'{mkdir_code} && {code}'
+            job_submit_cmd += ' && ' + managed_job_code
 
         returncode, stdout, stderr = self.run_on_head(handle,
                                                       job_submit_cmd,
