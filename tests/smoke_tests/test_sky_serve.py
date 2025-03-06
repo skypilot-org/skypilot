@@ -440,7 +440,7 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
                 f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
                 f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
                 increase_initial_delay_seconds(
-                    'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml'
+                    f'sky serve update {name} --cloud {generic_cloud} -y tests/skyserve/auto_restart.yaml'
                 ),
                 f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
                 'until curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"; do sleep 1; done; sleep 2; '
