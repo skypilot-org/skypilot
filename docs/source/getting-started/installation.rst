@@ -23,6 +23,7 @@ Install SkyPilot using pip:
 
           # Choose your cloud:
 
+          pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
@@ -35,7 +36,6 @@ Install SkyPilot using pip:
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          pip install "skypilot[kubernetes]"
           pip install "skypilot[nebius]"
           pip install "skypilot[all]"
 
@@ -52,6 +52,7 @@ Install SkyPilot using pip:
 
           # Choose your cloud:
 
+          pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
@@ -65,7 +66,6 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
@@ -85,6 +85,7 @@ Install SkyPilot using pip:
 
           # Choose your cloud:
 
+          pip install -e ".[kubernetes]"
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
@@ -97,7 +98,6 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
-          pip install -e ".[kubernetes]"
           pip install -e ".[nebius]"
           pip install -e ".[all]"
 
@@ -231,7 +231,7 @@ See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
 
 .. _aws-installation:
 
-Amazon Web Services (AWS)
+AWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -251,7 +251,7 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 
 .. _installation-gcp:
 
-Google Cloud Platform (GCP)
+GCP
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: shell
@@ -292,7 +292,7 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
-Oracle Cloud Infrastructure (OCI)
+OCI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
@@ -440,10 +440,10 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 
 
 
-Samsung Cloud Platform (SCP)
+SCP (Samsung Cloud Platform)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
+Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
 To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
 
