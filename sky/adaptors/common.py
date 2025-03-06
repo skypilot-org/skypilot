@@ -6,12 +6,15 @@ from typing import Any, Callable, Optional, Tuple
 
 
 class LazyImport:
-    """Lazy importer for heavy modules or cloud modules only when enabled.
+    """Lazy importer for heavy 3rd party modules or cloud modules
+       only when enabled.
 
-    We use this for pandas and networkx, as they can be time-consuming to import
-    (0.1-0.2 seconds). With this class, we can avoid the unnecessary import time
-    when the module is not used (e.g., `networkx` should not be imported for
-    `sky status and `pandas` should not be imported for `sky exec`).
+    We use this for heavy 3rd party modules as they can be time-consuming to
+    import, for example, numpy(700+ms), pendulum(500+ms), cryptography(500+ms),
+    pandas(200+ms), and networkx(100+ms), etc. With this class, we can avoid the
+    unnecessary import time when the module is not used (e.g., `networkx` should
+    not be imported for `sky status` and `pandas` should not be imported for
+    `sky exec`).
 
     We also use this for cloud adaptors, because we do not want to import the
     cloud dependencies when it is not enabled.
