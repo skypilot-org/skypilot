@@ -947,9 +947,7 @@ def test_managed_jobs_storage(generic_cloud: str):
              f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} || true'),
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
             timeout=20 * 60,
-            env={
-                'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml'
-            })
+        )
         smoke_tests_utils.run_one_test(test)
 
 
