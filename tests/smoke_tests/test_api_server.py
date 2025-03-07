@@ -142,6 +142,6 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
             ]),
         ],
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2; sky jobs cancel -y -n {name}-3',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)

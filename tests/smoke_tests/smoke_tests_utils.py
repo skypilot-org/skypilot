@@ -45,11 +45,19 @@ LOW_RESOURCE_PARAM = {
     'cpus': '2+',
     'memory': '4+',
 }
-LOW_RESOURCE_ENV = {
+LOW_CONTROLLER_RESOURCE_ENV = {
     'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
 }
-LOW_RESOURCE_OVERRIDE_CONFIG = {
+LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    },
+    'serve': {
         'controller': {
             'resources': {
                 'cpus': '2+',
@@ -102,6 +110,17 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
     'sleep 10; '
     'done')
+
+
+def get_low_resource_args_and_controller_env(generic_cloud: str):
+    # EKS requires more resources to reduce the likelihood of flakiness.
+    if generic_cloud == 'kubernetes':
+        resource_arg = ""
+        env = None
+    else:
+        resource_arg = LOW_RESOURCE_ARG
+        env = LOW_CONTROLLER_RESOURCE_ENV
+    return resource_arg, env
 
 
 def get_cmd_wait_until_cluster_status_contains(

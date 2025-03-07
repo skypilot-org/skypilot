@@ -98,7 +98,7 @@ def test_aws_with_ssh_proxy_command():
                     timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
-            env=smoke_tests_utils.LOW_RESOURCE_ENV,
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 

@@ -160,7 +160,7 @@ def _get_skyserve_http_test(name: str, cloud: str,
             'curl $endpoint | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=timeout_minutes * 60,
     )
     return test
@@ -281,7 +281,7 @@ def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
             ],
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=40 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -309,7 +309,7 @@ def test_skyserve_spot_recovery():
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
         f'{_TEARDOWN_SERVICE.format(name=name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -332,7 +332,7 @@ def test_skyserve_base_ondemand_fallback(generic_cloud: str):
                                             (1, False, 'READY')]),
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -382,7 +382,7 @@ def test_skyserve_dynamic_ondemand_fallback():
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
         f'{_TEARDOWN_SERVICE.format(name=name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -398,12 +398,8 @@ def test_skyserve_dynamic_ondemand_fallback():
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
-    if generic_cloud == 'kubernetes':
-        resource_arg = ""
-        env = None
-    else:
-        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+        generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-user-bug-restart',
@@ -455,7 +451,7 @@ def test_skyserve_load_balancer(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -503,7 +499,7 @@ def test_skyserve_auto_restart():
         ],
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)}; '
         f'{_TEARDOWN_SERVICE.format(name=name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -532,7 +528,7 @@ def test_skyserve_cancel(generic_cloud: str):
             'echo "$s"; echo "$s" | grep "Client disconnected, stopping computation"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -544,12 +540,8 @@ def test_skyserve_cancel(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
-    if generic_cloud == 'kubernetes':
-        resource_arg = ""
-        env = None
-    else:
-        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+        generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-streaming',
@@ -588,7 +580,7 @@ def test_skyserve_readiness_timeout_fail(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -609,7 +601,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
             'request_output=$(curl $endpoint); echo "$request_output"; echo "$request_output" | grep "Hi, SkyPilot here"',
         ],
         _TEARDOWN_SERVICE.format(name=name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -624,13 +616,8 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
-    if generic_cloud == 'kubernetes':
-        # EKS requires more resources to reduce the likelihood of flakiness.
-        resource_arg = ""
-        env = None
-    else:
-        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+        generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update',
@@ -666,12 +653,8 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
-    if generic_cloud == 'kubernetes':
-        resource_arg = ""
-        env = None
-    else:
-        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+        generic_cloud)
     name = _get_service_name()
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
@@ -747,7 +730,7 @@ def test_skyserve_fast_update(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=30 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -758,12 +741,8 @@ def test_skyserve_fast_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
-    if generic_cloud == 'kubernetes':
-        resource_arg = ""
-        env = None
-    else:
-        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+        generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
         f'test-skyserve-update-autoscale',
@@ -861,7 +840,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -875,12 +854,8 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
-    if generic_cloud == 'kubernetes':
-        resource_arg = ""
-        env = None
-    else:
-        resource_arg = smoke_tests_utils.LOW_RESOURCE_ARG
-        env = smoke_tests_utils.LOW_RESOURCE_ENV
+    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+        generic_cloud)
     name = _get_service_name()
 
     test = smoke_tests_utils.Test(
@@ -961,7 +936,7 @@ def test_skyserve_https(generic_cloud: str):
             ],
             _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
-            env=smoke_tests_utils.LOW_RESOURCE_ENV,
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -986,7 +961,7 @@ def test_skyserve_multi_ports(generic_cloud: str):
         ],
         _TEARDOWN_SERVICE.format(name=name),
         timeout=20 * 60,
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
 
@@ -1016,6 +991,6 @@ def test_user_dependencies(generic_cloud: str):
             f'sky logs {name} 5 --status',
         ],
         f'sky down -y {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)

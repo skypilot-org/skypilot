@@ -392,7 +392,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 def test_jobs_launch_and_logs(generic_cloud: str):
     # Use the context manager
     with sky.skypilot_config.override_skypilot_config(
-            smoke_tests_utils.LOW_RESOURCE_OVERRIDE_CONFIG):
+            smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
         name = smoke_tests_utils.get_cluster_name()
         task = sky.Task(run="echo start job; sleep 30; echo end job")
         cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)

@@ -81,7 +81,7 @@ def test_managed_jobs_basic(generic_cloud: str):
         # TODO(zhwu): Change to f'sky jobs cancel -y -n {name}-1 -n {name}-2' when
         # canceling multiple job names is supported.
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -127,7 +127,7 @@ def test_managed_jobs_cli_exit_codes(generic_cloud: str):
             f'sky jobs logs $JOB_ID || echo "Failed jobs logs exit code: $?" | grep "Failed jobs logs exit code: 100"',
         ],
         f'sky jobs cancel -y -n jobs-{name}; sky jobs cancel -y -n jobs-fail-{name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,  # Consistent with other managed jobs tests
     )
     smoke_tests_utils.run_one_test(test)
@@ -172,7 +172,7 @@ def test_job_pipeline(generic_cloud: str):
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
@@ -203,7 +203,7 @@ def test_managed_jobs_failed_setup(generic_cloud: str):
                 timeout=365),
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -243,7 +243,7 @@ def test_managed_jobs_pipeline_failed_setup(generic_cloud: str):
             f'{smoke_tests_utils.GET_JOB_QUEUE} | grep -A 4 {name}| sed -n 5p | grep "CANCELLED"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=30 * 60,
     )
@@ -291,7 +291,7 @@ def test_managed_jobs_recovery_aws(aws_config_region):
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -335,7 +335,7 @@ def test_managed_jobs_recovery_gcp():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo "$RUN_ID"; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID: | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -394,7 +394,7 @@ def test_managed_jobs_pipeline_recovery_aws(aws_config_region):
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
         f'sky jobs cancel -y -n {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -446,7 +446,7 @@ def test_managed_jobs_pipeline_recovery_gcp():
             f'cat /tmp/{name}-run-ids | sed -n 2p | grep `cat /tmp/{name}-run-id`',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -479,7 +479,7 @@ def test_managed_jobs_recovery_default_resources(generic_cloud: str):
                 timeout=360),
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -524,7 +524,7 @@ def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=30 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -568,7 +568,7 @@ def test_managed_jobs_recovery_multi_node_gcp():
             f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
         ],
         f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60,
     )
     smoke_tests_utils.run_one_test(test)
@@ -672,7 +672,7 @@ def test_managed_jobs_cancellation_aws(aws_config_region):
                 )),
         ],
         smoke_tests_utils.down_cluster_for_cloud_cmd(name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60)
     smoke_tests_utils.run_one_test(test)
 
@@ -753,7 +753,7 @@ def test_managed_jobs_cancellation_gcp():
                 )),
         ],
         smoke_tests_utils.down_cluster_for_cloud_cmd(name),
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=25 * 60)
     smoke_tests_utils.run_one_test(test)
 
@@ -796,7 +796,7 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
                     f'! cat {log_file.name} | grep "Job 2"',
                 ],
                 f'sky jobs cancel -y -n {name}',
-                env=smoke_tests_utils.LOW_RESOURCE_ENV,
+                env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
                 timeout=timeout)
             smoke_tests_utils.run_one_test(test)
 
@@ -951,7 +951,7 @@ def test_managed_jobs_storage(generic_cloud: str):
             (f'sky jobs cancel -y -n {name}; '
              f'sky storage delete {output_storage_name} -y; '
              f'{smoke_tests_utils.down_cluster_for_cloud_cmd(name)} || true'),
-            env=smoke_tests_utils.LOW_RESOURCE_ENV,
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
             # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
             timeout=20 * 60,
         )
@@ -1061,7 +1061,7 @@ def test_managed_jobs_tpu():
                 timeout=935),
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1094,7 +1094,7 @@ def test_managed_jobs_inline_env(generic_cloud: str):
             'echo "$s" | head -n1 | grep "Waiting for"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         # Increase timeout since sky jobs queue -r can be blocked by other spot tests.
         timeout=20 * 60,
     )
@@ -1144,7 +1144,7 @@ def test_managed_jobs_logs_sync_down(generic_cloud: str):
             'cat $(echo "$log_path")/run.log | grep "start counting"',
         ],
         f'sky jobs cancel -y -n {name}',
-        env=smoke_tests_utils.LOW_RESOURCE_ENV,
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         timeout=20 * 60,
     )
     smoke_tests_utils.run_one_test(test)
