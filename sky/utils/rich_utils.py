@@ -252,8 +252,8 @@ def decode_rich_status(
                 if e.start > 0:
                     # Decode the valid part
                     encoded_msg = current_bytes[:e.start].decode('utf-8')
-                    
-                    # Check if the remaining bytes are likely a partial character
+
+                    # Check if the remaining bytes are likely a partial char
                     # or actually invalid UTF-8
                     remaining_bytes = current_bytes[e.start:]
                     if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
@@ -261,11 +261,13 @@ def decode_rich_status(
                         undecoded_buffer = remaining_bytes
                     else:
                         # Likely invalid - replace with replacement character
-                        encoded_msg += remaining_bytes.decode('utf-8', errors='replace')
+                        encoded_msg += remaining_bytes.decode('utf-8',
+                                                              errors='replace')
                         undecoded_buffer = b''
                 else:
-                    # Error at the very beginning of the buffer - this is invalid UTF-8
-                    encoded_msg = current_bytes.decode('utf-8', errors='replace')
+                    # Error at the very beginning of the buffer - invalid UTF-8
+                    encoded_msg = current_bytes.decode('utf-8',
+                                                       errors='replace')
                     undecoded_buffer = b''
 
             lines = encoded_msg.splitlines(keepends=True)
