@@ -85,6 +85,8 @@ def get_ssh_key_and_lock_path() -> Tuple[str, str, str]:
 
 
 def _generate_rsa_key_pair() -> Tuple[str, str]:
+    # Keep the import of the cryptography local to avoid expensive
+    # third-party imports when not needed.
     # pylint: disable=import-outside-toplevel
     from cryptography.hazmat.backends import default_backend
     from cryptography.hazmat.primitives import serialization
