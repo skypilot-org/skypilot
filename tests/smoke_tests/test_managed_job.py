@@ -797,7 +797,6 @@ def test_managed_jobs_retry_logs(generic_cloud: str):
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support spot instances
 @pytest.mark.managed_jobs
-@pytest.mark.resource_heavy
 def test_managed_jobs_storage(generic_cloud: str):
     """Test storage with managed job"""
     name = smoke_tests_utils.get_cluster_name()
