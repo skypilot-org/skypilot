@@ -11,7 +11,7 @@ class TestBackwardCompatibility:
     MANAGED_JOB_PREFIX = 'test-back-compat'
     SERVE_PREFIX = 'test-back-compat'
     TEST_TIMEOUT = 1800  # 30 minutes
-    GCLOUD_INSTALL_CMD = '''
+    GCLOUD_INSTALL_CMD = """
     wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-424.0.0-linux-x86_64.tar.gz &&
     tar xzf google-cloud-sdk-424.0.0-linux-x86_64.tar.gz &&
     rm -rf ~/google-cloud-sdk &&
@@ -19,7 +19,7 @@ class TestBackwardCompatibility:
     ~/google-cloud-sdk/install.sh -q &&
     echo "source ~/google-cloud-sdk/path.bash.inc" >> ~/.bashrc &&
     . ~/google-cloud-sdk/path.bash.inc
-    '''
+    """
     UV_INSTALL_CMD = 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
     # Environment paths
@@ -34,10 +34,15 @@ class TestBackwardCompatibility:
     DEACTIVATE = 'deactivate'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
 
+    @pytest.fixture(scope="session")
+    def session_cloud(self, request):
+        """Session-scoped cloud fixture using command-line argument."""
+        return request.config.getoption("--generic-cloud")
+
     @pytest.fixture(scope='session', autouse=True)
-    def class_setup(self, generic_cloud):
-        '''Class-wide setup fixture for environment preparation'''
-        self.generic_cloud = generic_cloud
+    def class_setup(self, session_cloud):
+        """Class-wide setup fixture for environment preparation"""
+        self.generic_cloud = session_cloud
 
         # Install gcloud if missing
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
@@ -70,7 +75,7 @@ class TestBackwardCompatibility:
         # Install dependencies in base environment
         subprocess.run(
             f'{self.ACTIVATE_BASE} && '
-            '~/.local/bin/uv pip uninstall -y skypilot && '
+            '~/.local/bin/uv pip uninstall skypilot && '
             '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
             '~/.local/bin/uv pip install -e .[all]',
             shell=True,
@@ -80,16 +85,24 @@ class TestBackwardCompatibility:
         # Install current version in current environment
         subprocess.run(
             f'{self.ACTIVATE_CURRENT} && '
-            '~/.local/bin/uv pip uninstall -y skypilot && '
+            '~/.local/bin/uv pip uninstall skypilot && '
             '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
             '~/.local/bin/uv pip install -e .[all]',
             shell=True,
             check=True,
         )
 
+        # Teardown function to stop sky api at the end of the session
+        yield
+        subprocess.run(
+            f'cd {self.CURRENT_SKY_DIR} && sky api stop',
+            shell=True,
+            check=True,
+        )
+
     def run_compatibility_test(self, test_name: str, commands: list,
                                teardown: str):
-        '''Helper method to create and run tests with proper cleanup'''
+        """Helper method to create and run tests with proper cleanup"""
         test = smoke_tests_utils.Test(
             test_name,
             commands,
@@ -99,7 +112,7 @@ class TestBackwardCompatibility:
         smoke_tests_utils.run_one_test(test)
 
     def test_cluster_launch_and_exec(self, generic_cloud: str):
-        '''Test basic cluster launch and execution across versions'''
+        """Test basic cluster launch and execution across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -118,7 +131,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_cluster_stop_start(self, generic_cloud: str):
-        '''Test cluster stop/start functionality across versions'''
+        """Test cluster stop/start functionality across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -132,7 +145,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_autostop_functionality(self, generic_cloud: str):
-        '''Test autostop functionality across versions'''
+        """Test autostop functionality across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -146,7 +159,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_single_node_operations(self, generic_cloud: str):
-        '''Test single node operations (launch, stop, restart, logs)'''
+        """Test single node operations (launch, stop, restart, logs)"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -162,7 +175,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_restarted_cluster_operations(self, generic_cloud: str):
-        '''Test operations on restarted clusters'''
+        """Test operations on restarted clusters"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -180,7 +193,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_multi_node_operations(self, generic_cloud: str):
-        '''Test multi-node cluster operations'''
+        """Test multi-node cluster operations"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -198,7 +211,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_managed_jobs(self, generic_cloud: str):
-        '''Test managed jobs functionality across versions'''
+        """Test managed jobs functionality across versions"""
         managed_job_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
@@ -218,7 +231,7 @@ class TestBackwardCompatibility:
         self.run_compatibility_test(managed_job_name, commands, teardown)
 
     def test_serve_deployment(self, generic_cloud: str):
-        '''Test serve deployment functionality across versions'''
+        """Test serve deployment functionality across versions"""
         serve_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
