@@ -25,10 +25,11 @@ file_mounts:
     # Change this to your own globally unique bucket name.
     name: sky-output-bucket
     mode: MOUNT
+    store: azure
 
   /public-bucket:
     source: s3://fah-public-data-covid19-cryptic-pockets
-  
+
   # File mounts for folder
   /tmp/workdir: ~/tmp-workdir
 
@@ -50,7 +51,7 @@ run: |
   ls ~/sky_workdir/managed_job_with_storage.yaml
   ls ~/bucket_workdir/managed_job_with_storage.yaml
   ls -l /public-bucket
-  
+
 
   mkdir -p /data/logs
   touch /data/logs/test.log
@@ -61,6 +62,6 @@ run: |
 
   cat ~/tmpfile
   cat ~/a/b/c/tmpfile
-  
+
   # Write to a file in the mounted bucket
   echo "hello world!" > /output_path/output.txt
