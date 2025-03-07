@@ -27,9 +27,3 @@ def get_schema_validator():
     return jsonschema.validators.extend(
         jsonschema.Draft7Validator,
         validators={'case_insensitive_enum': case_insensitive_enum})
-
-
-# Remove the global initialization
-# SchemaValidator = jsonschema.validators.extend(
-#     jsonschema.Draft7Validator,
-#     validators={'case_insensitive_enum': case_insensitive_enum})
