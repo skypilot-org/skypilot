@@ -218,8 +218,6 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        # Set cwd to sky.__root_dir__ to ensure the API server is launched with
-        # the same code with sky CLI.
         subprocess.Popen(cmd,
                          shell=True,
                          start_new_session=True,
