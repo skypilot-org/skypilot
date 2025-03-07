@@ -1,4 +1,4 @@
-"""Utility functions for RichConsole."""
+"""Utility functions for rich console."""
 import typing
 
 from sky.adaptors import common as adaptors_common
