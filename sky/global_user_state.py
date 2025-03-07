@@ -12,6 +12,7 @@ import pathlib
 import pickle
 import sqlite3
 import time
+import traceback
 import typing
 from typing import Any, Dict, List, Optional, Set, Tuple
 import uuid
@@ -202,6 +203,9 @@ def add_or_update_cluster(cluster_name: str,
         is_launch: if the cluster is firstly launched. If True, the launched_at
             and last_use will be updated. Otherwise, use the old value.
     """
+    if not ready:
+        logger.debug('Setting cluster to INIT:')
+        logger.debug(''.join(traceback.format_stack()))
     # FIXME: launched_at will be changed when `sky launch -c` is called.
     handle = pickle.dumps(cluster_handle)
     cluster_launched_at = int(time.time()) if is_launch else None
