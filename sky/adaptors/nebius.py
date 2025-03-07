@@ -6,9 +6,11 @@ from sky.adaptors import common
 NEBIUS_TENANT_ID_FILENAME = 'NEBIUS_TENANT_ID.txt'
 NEBIUS_IAM_TOKEN_FILENAME = 'NEBIUS_IAM_TOKEN.txt'
 NEBIUS_PROJECT_ID_FILENAME = 'NEBIUS_PROJECT_ID.txt'
+NEBIUS_CREDENTIALS_FILENAME = 'credentials.json'
 NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
 NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
 NEBIUS_PROJECT_ID_PATH = '~/.nebius/' + NEBIUS_PROJECT_ID_FILENAME
+NEBIUS_CREDENTIALS_PATH = '~/.nebius/' + NEBIUS_CREDENTIALS_FILENAME
 
 MAX_RETRIES_TO_DISK_CREATE = 120
 MAX_RETRIES_TO_INSTANCE_STOP = 120
@@ -72,6 +74,11 @@ def get_iam_token():
     return _iam_token
 
 
+def is_token_or_cred_file_exist():
+    return (os.path.exists(os.path.expanduser(NEBIUS_IAM_TOKEN_PATH)) or
+            os.path.exists(os.path.expanduser(NEBIUS_CREDENTIALS_PATH)))
+
+
 def get_project_id():
     global _project_id
     if _project_id is None:
@@ -97,4 +104,7 @@ def get_tenant_id():
 
 
 def sdk():
-    return nebius.sdk.SDK(credentials=get_iam_token())
+    if get_iam_token() is not None:
+        return nebius.sdk.SDK(credentials=get_iam_token())
+    return nebius.sdk.SDK(
+        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
