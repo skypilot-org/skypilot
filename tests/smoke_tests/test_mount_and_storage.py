@@ -302,7 +302,6 @@ def test_kubernetes_storage_mounts():
             f, name, storage_name, ls_hello_command, 'kubernetes', False)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
-            'kubernetes_storage_mounts',
             test_commands,
             clean_command,
             timeout=20 * 60,  # 20 mins
