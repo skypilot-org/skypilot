@@ -125,7 +125,8 @@ Deploying SkyPilot
 
    .. tip::
 
-     You can also use ``kubectl`` to interact and perform administrative operations on the cluster.
+      This is good for your personal usage. To grant teammates access to these machines, SkyPilot you can further deploy a :ref:`SkyPilot API server <sky-api-server>` and
+      share the endpoint.
 
 What happens behind the scenes?
 -------------------------------
@@ -196,3 +197,4 @@ You can view the available clusters and GPUs using:
 
     # List GPUs on cluster2
     sky show-gpus --cloud k8s --region cluster2
+
