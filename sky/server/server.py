@@ -1119,6 +1119,10 @@ if __name__ == '__main__':
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for sub_proc in sub_procs:
+        # Terminate processes in reverse order in case dependency, especially
+        # queue server. Terminate queue server first does not affect the
+        # correctness of cleanup but introduce redundant error messages.
+        for sub_proc in reversed(sub_procs):
+            logger.debug(f'Terminating process: {sub_proc.pid}')
             sub_proc.terminate()
             sub_proc.join()
