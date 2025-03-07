@@ -287,8 +287,10 @@ def test_kubernetes_storage_mounts():
 
     # For Azure, we need to check if the output is empty list, as it returns []
     # instead of a non-zero exit code when the file doesn't exist
-    azure_check_cmd = (f'output=$({azure_ls_cmd}) && '
-                       f'[ "$output" != "[]" ]')
+    azure_check_cmd = (f'output=$({azure_ls_cmd}); '
+                       f'exit_code=$?; '
+                       f'[ "$output" != "[]" ] && '
+                       f'[ $exit_code -eq 0 ]')
 
     ls_hello_command = (f'{s3_ls_cmd} || {{ '
                         f'{gcs_ls_cmd}; }} || {{ '
@@ -301,7 +303,6 @@ def test_kubernetes_storage_mounts():
         test_commands, clean_command = _storage_mounts_commands_generator(
             f, name, storage_name, ls_hello_command, 'kubernetes', False)
         test = smoke_tests_utils.Test(
-            'kubernetes_storage_mounts',
             'kubernetes_storage_mounts',
             test_commands,
             clean_command,
