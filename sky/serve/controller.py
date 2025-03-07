@@ -41,7 +41,9 @@ class SuppressSuccessGetAccessLogsFilter(logging.Filter):
 
 
 def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
-                    lb_policy: str, meta_lb_policy: str) -> Dict[str, Any]:
+                    lb_policy: str, meta_lb_policy: str,
+                    max_concurrent_requests: int,
+                    max_queue_size: int) -> Dict[str, Any]:
     return {
         'load_balancer_port': lb_port,
         'controller_addr': controller_addr,
@@ -51,6 +53,8 @@ def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
         'region': lb_region,
         'load_balancing_policy': lb_policy,
         'meta_lb_policy': meta_lb_policy,
+        'max_concurrent_requests': max_concurrent_requests,
+        'max_queue_size': max_queue_size,
     }
 
 
@@ -106,11 +110,15 @@ class SkyServeController:
                 spec=lb_service_spec,
                 task_yaml_path=constants.EXTERNAL_LB_TEMPLATE)
             for lb_config in service_spec.external_load_balancers:
-                j2_vars = _get_lb_j2_vars(controller_addr,
-                                          constants.EXTERNAL_LB_PORT,
-                                          lb_config['resources']['region'],
-                                          lb_config['load_balancing_policy'],
-                                          service_spec.load_balancing_policy)
+                j2_vars = _get_lb_j2_vars(
+                    controller_addr,
+                    constants.EXTERNAL_LB_PORT,
+                    lb_config['resources']['region'],
+                    lb_config['load_balancing_policy'],
+                    service_spec.load_balancing_policy,
+                    # TODO(tian): Constant for default.
+                    service_spec.max_concurrent_requests or 10,
+                    service_spec.max_queue_size or 1000)
                 rc = copy.deepcopy(lb_config['resources'])
                 if 'cloud' in rc:
                     rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])

@@ -96,6 +96,32 @@ class LoadBalancingPolicy:
                           request: 'fastapi.Request') -> None:
         pass
 
+    def select_replica_from_subset(
+            self, request: 'fastapi.Request',
+            available_replicas: List[str]) -> Optional[str]:
+        """Select a replica from a subset of available replicas.
+
+        This is used when we want to select only from replicas that have
+        capacity. Default implementation filters the ready_replicas to the
+        available ones, selects a replica, then restores the original.
+        """
+        if not available_replicas:
+            return None
+
+        # Save original replicas
+        original_replicas = self.ready_replicas.copy()
+
+        # Temporarily set ready_replicas to only available ones
+        self.ready_replicas = available_replicas
+
+        # Select using the existing policy logic
+        replica = self._select_replica(request)
+
+        # Restore original replicas
+        self.ready_replicas = original_replicas
+
+        return replica
+
 
 class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
     """Round-robin load balancing policy."""
@@ -118,7 +144,8 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
+        ready_replica_url = self.ready_replicas[self.index %
+                                                len(self.ready_replicas)]
         self.index = (self.index + 1) % len(self.ready_replicas)
         return ready_replica_url
 
@@ -187,7 +214,6 @@ class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
     def __init__(self) -> None:
         super().__init__()
         self.replica2latency: Dict[str, float] = {}
-        self.max_load_threshold = 3
 
     async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
@@ -204,24 +230,12 @@ class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
         if not self.ready_replicas:
             return None
 
-        min_load = min(self.load_map.values())
-        available_replicas = [
-            replica for replica in self.ready_replicas
-            if self.load_map.get(replica, 0) -
-            min_load < self.max_load_threshold
-        ]
-
-        if not available_replicas:
-            logger.error('All replicas exceed max load threshold of '
-                         f'{self.max_load_threshold}. THIS SHOULD NOT HAPPEN.')
-            available_replicas = self.ready_replicas
-
         return min(
-            available_replicas,
+            self.ready_replicas,
             key=lambda replica: self.replica2latency.get(replica, float('inf')))
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(order=True)
 class RingEntry:
     hash_val: int
     replica: str
@@ -246,7 +260,6 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
         self.hash_key = 'x-hash-key'
         # Ring of hash values to replica URLs
         self.hash_ring: List[RingEntry] = []
-        self.max_load_threshold = 3
 
     def _hash_function(self, key: str) -> int:
         return xxhash.xxh64(key, seed=0).intdigest()
@@ -261,7 +274,7 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
             min_normalized_weight, self.DEFAULT_MAX_RING_HASH_SIZE)
         current_hashes = 0.0
         target_hashes = 0.0
-        self.hash_ring = []
+        hash_ring: List[RingEntry] = []
         for replica, weight in zip(self.ready_replicas,
                                    normalized_host_weights):
             target_hashes += scale * weight
@@ -269,11 +282,32 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
             while current_hashes < target_hashes:
                 hash_key = f'{replica}{i}'
                 hash_val = self._hash_function(hash_key)
-                self.hash_ring.append(RingEntry(hash_val, replica))
+                hash_ring.append(RingEntry(hash_val, replica))
                 current_hashes += 1
                 i += 1
-        self.hash_ring.sort(key=lambda x: x.hash_val)
-        logger.info(f'Hash ring: {self.hash_ring}')
+        hash_ring.sort(key=lambda x: x.hash_val)
+        logger.info(f'Hash ring: {hash_ring}')
+        self.hash_ring = hash_ring
+
+    def _bisect_ready(self, target_hash: int) -> Optional[int]:
+        """Find the first entry >= target_hash that belongs to a ready replica.
+
+        O(log N) bisection."""
+        # Binary search using bisect_left
+        idx = bisect.bisect_left(self.hash_ring, RingEntry(target_hash, ''))
+
+        # Scan forward for the first valid entry
+        n = len(self.hash_ring)
+        for i in range(idx, n):
+            if self.hash_ring[i].replica in self.ready_replicas:
+                return i  # Found valid index
+
+        # If nothing was found, wrap around to the beginning
+        for i in range(0, idx):
+            if self.hash_ring[i].replica in self.ready_replicas:
+                return i  # Found valid index
+
+        return None
 
     def _select_replica_from_key(self, key: str) -> Optional[str]:
         if not self.hash_ring:
@@ -281,20 +315,9 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
         key_hash = self._hash_function(key)
         logger.info(f'Key hash to find: {key_hash}')
         # TODO(tian): Avoid this O(n) scan on every request.
-        min_load = min(self.load_map.values())
-        hashes_in_ring = [
-            entry.hash_val
-            for entry in self.hash_ring
-            if self.load_map.get(entry.replica, 0) -
-            min_load < self.max_load_threshold
-        ]
-        if not hashes_in_ring:
-            logger.error('All replicas exceed max load threshold of '
-                         f'{self.max_load_threshold}. THIS SHOULD NOT HAPPEN.')
-            hashes_in_ring = [entry.hash_val for entry in self.hash_ring]
-        idx = bisect.bisect_right(hashes_in_ring, key_hash)
-        if idx >= len(self.hash_ring):
-            idx = 0
+        idx = self._bisect_ready(key_hash)
+        if idx is None:
+            return None
         logger.info(f'Selected replica {idx}: {self.hash_ring[idx]}')
         return self.hash_ring[idx].replica
 

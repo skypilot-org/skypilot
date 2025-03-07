@@ -425,6 +425,14 @@ def get_service_schema():
                     }
                 }
             },
+            'max_concurrent_requests': {
+                'type': 'integer',
+                'minimum': 1,
+            },
+            'max_queue_size': {
+                'type': 'integer',
+                'minimum': 0,
+            },
         }
     }
 

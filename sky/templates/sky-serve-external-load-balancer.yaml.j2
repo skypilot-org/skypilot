@@ -23,6 +23,8 @@ run: |
     --load-balancer-port {{load_balancer_port}} \
     --load-balancing-policy {{load_balancing_policy}} \
     --meta-load-balancing-policy {{meta_lb_policy}} \
+    --max-concurrent-requests {{max_concurrent_requests}} \
+    --max-queue-size {{max_queue_size}} \
     --region {{region}}
 envs:
 {%- for env_name, env_value in lb_envs.items() %}
