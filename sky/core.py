@@ -165,6 +165,9 @@ def status(
         cluster. If a cluster is found to be terminated or not found, it will
         be omitted from the returned list.
     """
+    print(cluster_names)
+    print(refresh)
+    print(all_users)
     clusters = backend_utils.get_clusters(refresh=refresh,
                                           cluster_names=cluster_names,
                                           all_users=all_users)
