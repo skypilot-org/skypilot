@@ -252,9 +252,9 @@ def test_skyserve_oci_http():
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.serve
 @pytest.mark.resource_heavy
-def test_skyserve_llm(generic_cloud: str, accelerator_dict: Dict[str, str]):
+def test_skyserve_llm(generic_cloud: str, accelerator: Dict[str, str]):
     """Test skyserve with real LLM usecase"""
-    accelerator = accelerator_dict.get(generic_cloud, 'T4')
+    accelerator = accelerator.get(generic_cloud, 'T4')
     name = _get_service_name()
 
     def generate_llm_test_command(prompt: str, expected_output: str) -> str:
