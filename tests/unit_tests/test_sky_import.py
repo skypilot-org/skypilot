@@ -21,7 +21,7 @@ def lazy_import_modules():
     ]
 
 
-@pytest.fixture(autouse=True)
+@pytest.fixture
 def mock_delete_modules(request, monkeypatch):
     """Fixture to mock delete modules."""
     # Get the lazy_import_modules fixture
@@ -43,7 +43,7 @@ def mock_delete_modules(request, monkeypatch):
     # monkeypatch automatically restores sys.modules after the test
 
 
-def test_sky_import(lazy_import_modules):
+def test_sky_import(lazy_import_modules, mock_delete_modules):
     # Import sky
     try:
         import sky
