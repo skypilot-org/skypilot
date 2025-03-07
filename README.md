@@ -48,11 +48,11 @@
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-SkyPilot **abstracts away infra burdens**:
+SkyPilot **abstracts away AI infra burden**:
 - Launch [clusters](https://docs.skypilot.co/en/latest/examples/interactive-development.html), [jobs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html), and [serving](https://docs.skypilot.co/en/latest/serving/sky-serve.html) on any infra
 - Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **supports multiple clusters, clouds, and hardware** ([the Sky](https://arxiv.org/abs/2205.07147)):
+SkyPilot **supports multiple infra** --- clusters, clouds, and hardware:
 - Bring your reserved GPUs, Kubernetes clusters, or 12+ clouds
 - [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with auto-retry
 
