@@ -387,10 +387,6 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
             initargs=(proc_group,))
         while True:
             process_request(executor)
-    except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-        # Should not happen, but just in case.
-        logger.error(f'[{worker}] Error in request worker: '
-                     f'{common_utils.format_exception(e, use_bracket=True)}')
     except KeyboardInterrupt:
         pass
     finally:
