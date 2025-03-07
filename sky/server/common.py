@@ -220,8 +220,10 @@ def _start_api_server(deploy: bool = False,
         # the API server.
         # Set cwd to sky.__root_dir__ to ensure the API server is launched with
         # the same code with sky CLI.
-        subprocess.Popen(
-            cmd, shell=True, start_new_session=True, cwd=working_dir)
+        subprocess.Popen(cmd,
+                         shell=True,
+                         start_new_session=True,
+                         cwd=working_dir)
 
         # Wait for the server to start until timeout.
         # Conservative upper time bound for starting the server based on
