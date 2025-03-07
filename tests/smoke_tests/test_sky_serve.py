@@ -398,7 +398,7 @@ def test_skyserve_dynamic_ondemand_fallback():
 def test_skyserve_user_bug_restart(generic_cloud: str):
     """Tests that we restart the service after user bug."""
     # TODO(zhwu): this behavior needs some rethinking.
-    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -540,7 +540,7 @@ def test_skyserve_cancel(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_streaming(generic_cloud: str):
     """Test skyserve with streaming"""
-    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -616,7 +616,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
     """Test skyserve with update"""
-    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -653,7 +653,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
     """Test skyserve with rolling update"""
-    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
     single_new_replica = _check_replica_in_status(
@@ -741,7 +741,7 @@ def test_skyserve_fast_update(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_update_autoscale(generic_cloud: str):
     """Test skyserve update with autoscale"""
-    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
     test = smoke_tests_utils.Test(
@@ -854,7 +854,7 @@ def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_skyserve_failures(generic_cloud: str):
     """Test replica failure statuses"""
-    resource_arg, env = smoke_tests_utils.get_low_resource_args_and_controller_env(
+    resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
 

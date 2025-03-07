@@ -112,8 +112,11 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 
-def get_low_resource_args_and_controller_env(generic_cloud: str):
-    # EKS requires more resources to reduce the likelihood of flakiness.
+def get_cloud_specific_resource_config(generic_cloud: str):
+    # Kubernetes (EKS) requires more resources to avoid flakiness.
+    # Only some EKS tests use this function - specifically those that previously
+    # failed with low resources. Other EKS tests that work fine with low resources
+    # don't need to call this function.
     if generic_cloud == 'kubernetes':
         resource_arg = ""
         env = None
