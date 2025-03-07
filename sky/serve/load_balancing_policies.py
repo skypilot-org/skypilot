@@ -1,15 +1,26 @@
 """LoadBalancingPolicy: Policy to select endpoint."""
+import asyncio
+import bisect
 import collections
+import dataclasses
+import math
 import random
 import threading
+import time
 import typing
 from typing import Dict, List, Optional
+from urllib import parse
+
+import aiohttp
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
+from sky.serve import constants
 
 if typing.TYPE_CHECKING:
     import fastapi
 
+xxhash = adaptors_common.LazyImport('xxhash')
 logger = sky_logging.init_logger(__name__)
 
 # Define a registry for load balancing policies
@@ -59,7 +70,7 @@ class LoadBalancingPolicy:
             raise ValueError(f'Unknown load balancing policy: {policy_name}')
         return LB_POLICIES[policy_name]()
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+    async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
     def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
@@ -85,6 +96,32 @@ class LoadBalancingPolicy:
                           request: 'fastapi.Request') -> None:
         pass
 
+    def select_replica_from_subset(
+            self, request: 'fastapi.Request',
+            available_replicas: List[str]) -> Optional[str]:
+        """Select a replica from a subset of available replicas.
+
+        This is used when we want to select only from replicas that have
+        capacity. Default implementation filters the ready_replicas to the
+        available ones, selects a replica, then restores the original.
+        """
+        if not available_replicas:
+            return None
+
+        # Save original replicas
+        original_replicas = self.ready_replicas.copy()
+
+        # Temporarily set ready_replicas to only available ones
+        self.ready_replicas = available_replicas
+
+        # Select using the existing policy logic
+        replica = self._select_replica(request)
+
+        # Restore original replicas
+        self.ready_replicas = original_replicas
+
+        return replica
+
 
 class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
     """Round-robin load balancing policy."""
@@ -93,7 +130,7 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         super().__init__()
         self.index = 0
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+    async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
             return
         # If the autoscaler keeps scaling up and down the replicas,
@@ -107,7 +144,8 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
+        ready_replica_url = self.ready_replicas[self.index %
+                                                len(self.ready_replicas)]
         self.index = (self.index + 1) % len(self.ready_replicas)
         return ready_replica_url
 
@@ -120,7 +158,7 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         self.load_map: Dict[str, int] = collections.defaultdict(int)
         self.lock = threading.Lock()
 
-    def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+    async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         if set(self.ready_replicas) == set(ready_replicas):
             return
         with self.lock:
@@ -150,3 +188,155 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
         del request  # Unused.
         with self.lock:
             self.load_map[replica_url] -= 1
+
+
+async def _check_lb_latency(url: str) -> float:
+    # TODO(tian): This only works for meta policy that applies to LB.
+    # Not works for replica LB policy.
+    path = constants.LB_HEALTH_ENDPOINT
+    url = parse.urljoin(url, path)
+    # TODO(tian): Hack. Dont use infinite loop.
+    while True:
+        start_time = time.perf_counter()
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url) as response:
+                    await response.text()
+            return time.perf_counter() - start_time
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error checking LB latency: {e}')
+        await asyncio.sleep(1)
+
+
+class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
+    """Proximate first load balancing policy."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.replica2latency: Dict[str, float] = {}
+
+    async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        await super().set_ready_replicas(ready_replicas)
+        self.replica2latency = {}
+        # TODO(tian): Parallel this.
+        for url in self.ready_replicas:
+            self.replica2latency[url] = await _check_lb_latency(url)
+        logger.info(f'Updated latencies: {self.replica2latency}')
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        del request  # Unused.
+        if not self.ready_replicas:
+            return None
+
+        return min(
+            self.ready_replicas,
+            key=lambda replica: self.replica2latency.get(replica, float('inf')))
+
+
+@dataclasses.dataclass(order=True)
+class RingEntry:
+    hash_val: int
+    replica: str
+
+
+class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
+    """Consistent hashing load balancing policy.
+
+    Uses consistent hashing to map requests to replicas. This ensures that
+    when replicas are added or removed, only a minimal portion of keys get
+    remapped to different replicas.
+
+    This class is ported from Envoy. Reference:
+    source/extensions/load_balancing_policies/ring_hash/ring_hash_lb.cc
+    """
+    DEFAULT_MIN_RING_HASH_SIZE = 1024
+    DEFAULT_MAX_RING_HASH_SIZE = 1024 * 1024 * 8
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Default hash key is 'x-hash-key' header
+        self.hash_key = 'x-hash-key'
+        # Ring of hash values to replica URLs
+        self.hash_ring: List[RingEntry] = []
+
+    def _hash_function(self, key: str) -> int:
+        return xxhash.xxh64(key, seed=0).intdigest()
+
+    def _build_ring(self) -> None:
+        # TODO(tian): Support different weights for different replicas.
+        normalized_host_weights = [1 / len(self.ready_replicas)] * len(
+            self.ready_replicas)
+        min_normalized_weight = min(normalized_host_weights)
+        scale = min(
+            math.ceil(min_normalized_weight * self.DEFAULT_MIN_RING_HASH_SIZE) /
+            min_normalized_weight, self.DEFAULT_MAX_RING_HASH_SIZE)
+        current_hashes = 0.0
+        target_hashes = 0.0
+        hash_ring: List[RingEntry] = []
+        for replica, weight in zip(self.ready_replicas,
+                                   normalized_host_weights):
+            target_hashes += scale * weight
+            i = 0
+            while current_hashes < target_hashes:
+                hash_key = f'{replica}{i}'
+                hash_val = self._hash_function(hash_key)
+                hash_ring.append(RingEntry(hash_val, replica))
+                current_hashes += 1
+                i += 1
+        hash_ring.sort(key=lambda x: x.hash_val)
+        logger.info(f'Hash ring: {hash_ring}')
+        self.hash_ring = hash_ring
+
+    def _bisect_ready(self, target_hash: int) -> Optional[int]:
+        """Find the first entry >= target_hash that belongs to a ready replica.
+
+        O(log N) bisection."""
+        # Binary search using bisect_left
+        idx = bisect.bisect_left(self.hash_ring, RingEntry(target_hash, ''))
+
+        # Scan forward for the first valid entry
+        n = len(self.hash_ring)
+        for i in range(idx, n):
+            if self.hash_ring[i].replica in self.ready_replicas:
+                return i  # Found valid index
+
+        # If nothing was found, wrap around to the beginning
+        for i in range(0, idx):
+            if self.hash_ring[i].replica in self.ready_replicas:
+                return i  # Found valid index
+
+        return None
+
+    def _select_replica_from_key(self, key: str) -> Optional[str]:
+        if not self.hash_ring:
+            return None
+        key_hash = self._hash_function(key)
+        logger.info(f'Key hash to find: {key_hash}')
+        # TODO(tian): Avoid this O(n) scan on every request.
+        idx = self._bisect_ready(key_hash)
+        if idx is None:
+            return None
+        logger.info(f'Selected replica {idx}: {self.hash_ring[idx]}')
+        return self.hash_ring[idx].replica
+
+    async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        """Update hash ring when replicas change."""
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        await super().set_ready_replicas(ready_replicas)
+        self._build_ring()
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        if not self.ready_replicas:
+            return None
+
+        key = request.headers.get(self.hash_key)
+        if not key:
+            logger.error(
+                f'No {self.hash_key} header found in request '
+                f'{_request_repr(request)}. Falling back to least load.')
+            return super()._select_replica(request)
+
+        return self._select_replica_from_key(key)

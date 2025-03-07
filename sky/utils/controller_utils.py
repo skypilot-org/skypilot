@@ -385,6 +385,24 @@ def download_and_stream_latest_job_log(
     return log_file
 
 
+# TODO(tian): Maybe move this to other places?
+def sky_managed_cluster_envs() -> Dict[str, str]:
+    env_vars: Dict[str, str] = {
+        env.env_key: str(int(env.get())) for env in env_options.Options
+    }
+    env_vars.update({
+        # Should not use $USER here, as that env var can be empty when
+        # running in a container.
+        constants.USER_ENV_VAR: getpass.getuser(),
+        constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
+        # Skip cloud identity check to avoid the overhead.
+        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
+        # Disable minimize logging to get more details on the controller.
+        env_options.Options.MINIMIZE_LOGGING.env_key: '0',
+    })
+    return env_vars
+
+
 def shared_controller_vars_to_fill(
         controller: Controllers, remote_user_config_path: str,
         local_user_config: Dict[str, Any]) -> Dict[str, str]:
@@ -419,19 +437,7 @@ def shared_controller_vars_to_fill(
         'sky_python_cmd': constants.SKY_PYTHON_CMD,
         'local_user_config_path': local_user_config_path,
     }
-    env_vars: Dict[str, str] = {
-        env.env_key: str(int(env.get())) for env in env_options.Options
-    }
-    env_vars.update({
-        # Should not use $USER here, as that env var can be empty when
-        # running in a container.
-        constants.USER_ENV_VAR: getpass.getuser(),
-        constants.USER_ID_ENV_VAR: common_utils.get_user_hash(),
-        # Skip cloud identity check to avoid the overhead.
-        env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
-        # Disable minimize logging to get more details on the controller.
-        env_options.Options.MINIMIZE_LOGGING.env_key: '0',
-    })
+    env_vars = sky_managed_cluster_envs()
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
         env_vars[
