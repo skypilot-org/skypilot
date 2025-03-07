@@ -17,17 +17,20 @@ class TestBackwardCompatibility:
     rm -rf ~/google-cloud-sdk &&
     mv google-cloud-sdk ~/ &&
     ~/google-cloud-sdk/install.sh -q &&
-    echo "source ~/google-cloud-sdk/path.bash.inc" >> ~/.bashrc
+    echo "source ~/google-cloud-sdk/path.bash.inc" >> ~/.bashrc &&
+    . ~/google-cloud-sdk/path.bash.inc
     '''
+    UV_INSTALL_CMD = 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
     # Environment paths
     BASE_ENV_DIR = Path('~/sky-back-compat-base').expanduser()
     CURRENT_ENV_DIR = Path('~/sky-back-compat-current').expanduser()
     BASE_SKY_DIR = Path('~/sky-base').expanduser()
+    CURRENT_SKY_DIR = Path('./').expanduser()
 
     # Command templates
     ACTIVATE_BASE = f'source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
-    ACTIVATE_CURRENT = f'source {CURRENT_ENV_DIR}/bin/activate && cd {smoke_tests_utils.CURRENT_DIR}'
+    ACTIVATE_CURRENT = f'source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     DEACTIVATE = 'deactivate'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
 
@@ -40,6 +43,11 @@ class TestBackwardCompatibility:
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
             subprocess.run(self.GCLOUD_INSTALL_CMD, shell=True, check=True)
 
+        # Install uv if missing
+        if subprocess.run('~/.local/bin/uv --version', shell=True,
+                          check=False).returncode != 0:
+            subprocess.run(self.UV_INSTALL_CMD, shell=True, check=True)
+
         # Clone base SkyPilot version
         if not self.BASE_SKY_DIR.exists():
             self.BASE_SKY_DIR.mkdir(parents=True, exist_ok=True)
@@ -50,18 +58,21 @@ class TestBackwardCompatibility:
                 check=True,
             )
 
-        # Create and set up virtual environments
+        # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
             if not env_dir.exists():
-                subprocess.run(f'python -m venv {env_dir}',
-                               shell=True,
-                               check=True)
+                subprocess.run(
+                    f'~/.local/bin/uv venv --seed --python=3.9 {env_dir}',
+                    shell=True,
+                    check=True,
+                )
 
         # Install dependencies in base environment
         subprocess.run(
             f'{self.ACTIVATE_BASE} && '
-            'pip install -e .[all] && '
-            'pip install --prerelease=allow azure-cli',
+            '~/.local/bin/uv pip uninstall -y skypilot && '
+            '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
+            '~/.local/bin/uv pip install -e .[all]',
             shell=True,
             check=True,
         )
@@ -69,8 +80,9 @@ class TestBackwardCompatibility:
         # Install current version in current environment
         subprocess.run(
             f'{self.ACTIVATE_CURRENT} && '
-            'pip install -e .[all] && '
-            'pip install --prerelease=allow azure-cli',
+            '~/.local/bin/uv pip uninstall -y skypilot && '
+            '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
+            '~/.local/bin/uv pip install -e .[all]',
             shell=True,
             check=True,
         )
@@ -96,6 +108,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 100',
             self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky status {cluster_name} | grep UP',
+            f'{self.ACTIVATE_CURRENT} && sky status -r {cluster_name} | grep UP',
             f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
             f'{self.ACTIVATE_CURRENT} && sky queue -u {cluster_name} | grep RUNNING | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml',
@@ -210,6 +223,7 @@ class TestBackwardCompatibility:
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky serve up --cloud {generic_cloud} -y -n {serve_name}-0 examples/serve/http_server/task.yaml',
+            f'{self.ACTIVATE_BASE} && sky serve status {serve_name}-0',
             self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky serve status {serve_name}-0',
             f'{self.ACTIVATE_CURRENT} && sky serve logs {serve_name}-0 2 --no-follow',
