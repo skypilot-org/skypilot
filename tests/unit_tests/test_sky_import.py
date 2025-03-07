@@ -2,30 +2,48 @@
 
 This test ensures that the lazy import of modules is not reverted.
 """
+import copy
 import gc
 import sys
 
 import pytest
 
-lazy_import_modules = [
-    'requests.packages.urllib3.util.retry',
-    'requests.adapters',
-    'numpy',
-    'pendulum',
-    'requests',
-    'jsonschema',
-    'psutil',
-    'jinja2',
-    'yaml',
-    'rich.console',
-    'rich.progress',
-    'networkx',
-    'httpx',
-    'pydantic',
-]
+from sky.adaptors.common import LazyImport
 
 
-def test_sky_import():
+@pytest.fixture
+def lazy_import_modules():
+    """Get list of lazy-imported module names."""
+    return [
+        obj._module_name
+        for obj in gc.get_objects()
+        if isinstance(obj, LazyImport) and hasattr(obj, '_module_name')
+    ]
+
+
+@pytest.fixture(autouse=True)
+def mock_delete_modules(request, monkeypatch):
+    """Fixture to mock delete modules."""
+    # Get the lazy_import_modules fixture
+    lazy_modules = request.getfixturevalue('lazy_import_modules')
+
+    # Create a copy of sys.modules for this test
+    test_modules = copy.copy(sys.modules)
+
+    # Clean modules in the copy
+    for module in lazy_modules:
+        if module in test_modules:
+            del test_modules[module]
+
+    # Use monkeypatch to temporarily replace sys.modules for this test only
+    monkeypatch.setattr(sys, 'modules', test_modules)
+
+    yield
+
+    # monkeypatch automatically restores sys.modules after the test
+
+
+def test_sky_import(lazy_import_modules):
     # Import sky
     try:
         import sky
@@ -33,13 +51,5 @@ def test_sky_import():
         print(f"Failed to import sky: {e}")
         raise
 
-    # Get the lazy imported modules
-    lazy_module_names = [
-        obj._module_name if hasattr(obj, '_module_name') else None
-        for obj in gc.get_objects()
-        if isinstance(obj, sky.adaptors.common.LazyImport)
-    ]
-
-    # Check that the lazy imported modules are in the list
     for module in lazy_import_modules:
-        assert module in lazy_module_names, f"Module {module} is not lazy imported"
+        assert module not in sys.modules, f"Module {module} is not lazy imported"
