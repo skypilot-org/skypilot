@@ -451,6 +451,349 @@ def test_managed_jobs_pipeline_recovery_gcp():
 @pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_paperspace  # Paperspace does not support spot instances
 @pytest.mark.no_kubernetes  # Kubernetes does not have a notion of spot instances
+@pytest.mark.no_do  # DO does not have spot instances
+@pytest.mark.no_vast  # Uses other clouds
+@pytest.mark.no_nebius  # Nebius does not support spot instances
+@pytest.mark.managed_jobs
+def test_managed_jobs_recovery_default_resources(generic_cloud: str):
+    """Test managed job recovery for default resources."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'managed-spot-recovery-default-resources',
+        [
+            f'sky jobs launch -n {name} --cloud {generic_cloud} --use-spot "sleep 30 && sudo shutdown now && sleep 1000" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.RUNNING,
+                    sky.ManagedJobStatus.RECOVERING
+                ],
+                timeout=360),
+        ],
+        f'sky jobs cancel -y -n {name}',
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+@pytest.mark.managed_jobs
+def test_managed_jobs_recovery_multi_node_aws(aws_config_region):
+    """Test managed job recovery."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    region = aws_config_region
+    test = smoke_tests_utils.Test(
+        'managed_jobs_recovery_multi_node_aws',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
+            rf'sky jobs launch --cloud aws --region {region} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=450),
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            # Terminate the worker manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                 f'aws ec2 describe-instances --region {region} '
+                 f'--filters Name=tag:ray-cluster-name,Values={name_on_cloud}* '
+                 'Name=tag:ray-node-type,Values=worker '
+                 f'--query Reservations[].Instances[].InstanceId '
+                 '--output text)')),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=560),
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
+        ],
+        f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=30 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.managed_jobs
+def test_managed_jobs_recovery_multi_node_gcp():
+    """Test managed job recovery."""
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    zone = 'us-west2-a'
+    # Use ':' to match as the cluster name will contain the suffix with job id
+    query_cmd = (
+        f'gcloud compute instances list --filter='
+        f'"(labels.ray-cluster-name:{name_on_cloud} AND '
+        f'labels.ray-node-type=worker)" --zones={zone} --format="value(name)"')
+    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
+                     f' --quiet $({query_cmd})')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_recovery_multi_node_gcp',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+            rf'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot --num-nodes 2 "echo SKYPILOT_TASK_ID: \$SKYPILOT_TASK_ID; sleep 1800" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=400),
+            f'RUN_ID=$(sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2); echo "$RUN_ID" | tee /tmp/{name}-run-id',
+            # Terminate the worker manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=terminate_cmd),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name),
+            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name} | head -n1 | grep "RECOVERING"',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=560),
+            f'RUN_ID=$(cat /tmp/{name}-run-id); echo $RUN_ID; sky jobs logs -n {name} --no-follow | grep SKYPILOT_TASK_ID | cut -d: -f2 | grep "$RUN_ID"',
+        ],
+        f'sky jobs cancel -y -n {name}; {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
+        timeout=25 * 60,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.aws
+@pytest.mark.managed_jobs
+def test_managed_jobs_cancellation_aws(aws_config_region):
+    name = smoke_tests_utils.get_cluster_name()
+    name_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_2_on_cloud = common_utils.make_cluster_name_on_cloud(
+        f'{name}-2', jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
+        f'{name}-3', jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+
+    region = aws_config_region
+    test = smoke_tests_utils.Test(
+        'managed_jobs_cancellation_aws',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
+            # Test cancellation during spot cluster being launched.
+            f'sky jobs launch --cloud aws --region {region} -n {name} --use-spot "sleep 1000" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[
+                    sky.ManagedJobStatus.STARTING, sky.ManagedJobStatus.RUNNING
+                ],
+                timeout=95),
+            f'sky jobs cancel -y -n {name}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=155),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f's=$(aws ec2 describe-instances --region {region} '
+                 f'--filters "Name=tag:ray-cluster-name,Values={name_on_cloud}-*" '
+                 '--query "Reservations[].Instances[].State[].Name" '
+                 '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+                )),
+            # Test cancelling the spot cluster during spot job being setup.
+            f'sky jobs launch --cloud aws --region {region} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
+            # The job is set up in the cluster, will shown as RUNNING.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=335),
+            f'sky jobs cancel -y -n {name}-2',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=155),
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f's=$(aws ec2 describe-instances --region {region} '
+                 f'--filters "Name=tag:ray-cluster-name,Values={name_2_on_cloud}-*" '
+                 '--query "Reservations[].Instances[].State[].Name" '
+                 '--output text) && echo "$s" && echo; [[ -z "$s" ]] || [[ "$s" = "terminated" ]] || [[ "$s" = "shutting-down" ]]'
+                )),
+            # Test cancellation during spot job is recovering.
+            f'sky jobs launch --cloud aws --region {region} -n {name}-3 --use-spot "sleep 1000" -y -d',
+            # The job is running in the cluster, will shown as RUNNING.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-3',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=335),
+            # Terminate the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f'aws ec2 terminate-instances --region {region} --instance-ids $('
+                 f'aws ec2 describe-instances --region {region} '
+                 f'--filters "Name=tag:ray-cluster-name,Values={name_3_on_cloud}-*" '
+                 f'--query "Reservations[].Instances[].InstanceId" '
+                 '--output text)')),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=f'{name}-3'),
+            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name}-3 | head -n1 | grep "RECOVERING"',
+            f'sky jobs cancel -y -n {name}-3',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-3',
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=155),
+            # The cluster should be terminated (shutting-down) after cancellation. We don't use the `=` operator here because
+            # there can be multiple VM with the same name due to the recovery.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f's=$(aws ec2 describe-instances --region {region} '
+                 f'--filters "Name=tag:ray-cluster-name,Values={name_3_on_cloud}-*" '
+                 '--query "Reservations[].Instances[].State[].Name" '
+                 '--output text) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "pending|running|stopped|stopping"'
+                )),
+        ],
+        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        timeout=25 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.gcp
+@pytest.mark.managed_jobs
+def test_managed_jobs_cancellation_gcp():
+    name = smoke_tests_utils.get_cluster_name()
+    # Reduce the name length further to avoid cluster name to be truncated twice
+    # after adding the suffix '-3'.
+    name_3 = name.replace('-jobs', '-j') + '-3'
+    name_3_on_cloud = common_utils.make_cluster_name_on_cloud(
+        name_3, jobs.JOBS_CLUSTER_NAME_PREFIX_LENGTH, add_user_hash=False)
+    zone = 'us-west3-b'
+    query_state_cmd = (
+        'gcloud compute instances list '
+        f'--filter="(labels.ray-cluster-name:{name_3_on_cloud})" '
+        '--format="value(status)"')
+    query_cmd = (f'gcloud compute instances list --filter='
+                 f'"(labels.ray-cluster-name:{name_3_on_cloud})" '
+                 f'--zones={zone} --format="value(name)"')
+    terminate_cmd = (f'gcloud compute instances delete --zone={zone}'
+                     f' --quiet $({query_cmd})')
+    test = smoke_tests_utils.Test(
+        'managed_jobs_cancellation_gcp',
+        [
+            smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
+            # Test cancellation during spot cluster being launched.
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name} --use-spot "sleep 1000" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.STARTING],
+                timeout=95),
+            f'sky jobs cancel -y -n {name}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name,
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=155),
+            # Test cancelling the spot cluster during spot job being setup.
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name}-2 --use-spot tests/test_yamls/test_long_setup.yaml -y -d',
+            # The job is set up in the cluster, will shown as RUNNING.
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=335),
+            f'sky jobs cancel -y -n {name}-2',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{name}-2',
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=155),
+            # Test cancellation during spot job is recovering.
+            f'sky jobs launch --cloud gcp --zone {zone} -n {name_3} --use-spot "sleep 1000" -y -d',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name_3,
+                job_status=[sky.ManagedJobStatus.RUNNING],
+                timeout=335),
+            # Terminate the cluster manually.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=terminate_cmd),
+            smoke_tests_utils.JOB_WAIT_NOT_RUNNING.format(job_name=name_3),
+            f'{smoke_tests_utils.GET_JOB_QUEUE} | grep {name_3} | head -n1 | grep "RECOVERING"',
+            f'sky jobs cancel -y -n {name_3}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=name_3,
+                job_status=[sky.ManagedJobStatus.CANCELLED],
+                timeout=155),
+            # The cluster should be terminated (STOPPING) after cancellation. We don't use the `=` operator here because
+            # there can be multiple VM with the same name due to the recovery.
+            smoke_tests_utils.run_cloud_cmd_on_cluster(
+                name,
+                cmd=
+                (f's=$({query_state_cmd}) && echo "$s" && echo; [[ -z "$s" ]] || echo "$s" | grep -v -E "PROVISIONING|STAGING|RUNNING|REPAIRING|TERMINATED|SUSPENDING|SUSPENDED|SUSPENDED"'
+                )),
+        ],
+        smoke_tests_utils.down_cluster_for_cloud_cmd(name),
+        timeout=25 * 60)
+    smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.no_vast  # Uses other clouds
+@pytest.mark.managed_jobs
+@pytest.mark.no_nebius  # Autodown and Autostop not supported.
+def test_managed_jobs_retry_logs(generic_cloud: str):
+    """Test managed job retry logs are properly displayed when a task fails."""
+    timeout = 7 * 60  # 7 mins
+    if generic_cloud == 'azure':
+        timeout *= 2
+    name = smoke_tests_utils.get_cluster_name()
+    yaml_path = 'tests/test_yamls/test_managed_jobs_retry.yaml'
+    yaml_config = common_utils.read_yaml_all(yaml_path)
+    for task_config in yaml_config:
+        task_config['resources'] = task_config.get('resources', {})
+        task_config['resources']['cloud'] = generic_cloud
+
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as yaml_file:
+        common_utils.dump_yaml(yaml_file.name, yaml_config)
+        yaml_path = yaml_file.name
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.log') as log_file:
+            test = smoke_tests_utils.Test(
+                'managed_jobs_retry_logs',
+                [
+                    # TODO(zhwu): we should make the override for generic_cloud
+                    # work with multiple stages in pipeline.
+                    f'sky jobs launch -n {name} {yaml_path} -y -d',
+                    # TODO(zhwu): Check why the logs does not return immediately
+                    # after job status FAILED.
+                    f'sky jobs logs -n {name} | tee {log_file.name} ',
+                    # First attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..."',
+                    f'cat {log_file.name} | grep "Job 1 failed"',
+                    # Second attempt
+                    f'cat {log_file.name} | grep "Job started. Streaming logs..." | wc -l | grep 2',
+                    f'cat {log_file.name} | grep "Job 1 failed" | wc -l | grep 2',
+                    # Task 2 is not reached
+                    f'! cat {log_file.name} | grep "Job 2"',
+                ],
+                f'sky jobs cancel -y -n {name}',
+                timeout=timeout)
+            smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing storage for managed job ----------
+@pytest.mark.no_fluidstack  # Fluidstack does not support spot instances
+@pytest.mark.no_lambda_cloud  # Lambda Cloud does not support spot instances
+@pytest.mark.no_ibm  # IBM Cloud does not support spot instances
+@pytest.mark.no_paperspace  # Paperspace does not support spot instances
+@pytest.mark.no_scp  # SCP does not support spot instances
 @pytest.mark.no_do  # DO does not support spot instances
 @pytest.mark.no_vast  # Uses other clouds
 @pytest.mark.no_nebius  # Nebius does not support spot instances
