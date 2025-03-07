@@ -69,12 +69,12 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig file for authentication:
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            $   --set kubernetesCredentials.useKubeconfig=true \
-            $   --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
-            $   --set kubernetesCredentials.useApiServerCluster=true
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --set kubernetesCredentials.useKubeconfig=true \
+              --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
+              --set kubernetesCredentials.useApiServerCluster=true
 
 
         .. tip::
@@ -82,9 +82,9 @@ Following tabs describe how to configure credentials for different clouds on the
             If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
             You can use the ``exec_kubeconfig_converter.py`` script to do this.
 
-            .. code-block:: console
+            .. code-block:: bash
 
-                $ python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
+                python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
 
             Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
 
