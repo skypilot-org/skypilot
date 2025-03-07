@@ -18,6 +18,7 @@ import filelock
 import pydantic
 import requests
 
+import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
@@ -199,8 +200,14 @@ def _start_api_server(deploy: bool = False,
         if host is not None:
             args += [f'--host={host}']
 
+        # Change working directory to the parent directory of the sky package.
+        # This ensures Python will find and import the sky.server.server module
+        # from the same location as the current running code, preventing
+        # potential import path inconsistencies.
+        working_dir = os.path.dirname(sky.__root_dir__)
         if foreground:
             # Replaces the current process with the API server
+            os.chdir(working_dir)
             os.execvp(args[0], args)
 
         log_path = os.path.expanduser(constants.API_SERVER_LOGS)
@@ -211,7 +218,10 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        subprocess.Popen(cmd, shell=True, start_new_session=True)
+        # Set cwd to sky.__root_dir__ to ensure the API server is launched with
+        # the same code with sky CLI.
+        subprocess.Popen(
+            cmd, shell=True, start_new_session=True, cwd=working_dir)
 
         # Wait for the server to start until timeout.
         # Conservative upper time bound for starting the server based on
