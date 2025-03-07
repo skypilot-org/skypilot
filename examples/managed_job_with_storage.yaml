@@ -20,6 +20,7 @@ file_mounts:
     source: ./examples
     persistent: false
     mode: COPY
+    store: azure
 
   /output_path:
     # Change this to your own globally unique bucket name.
