@@ -248,11 +248,25 @@ def decode_rich_status(
             try:
                 encoded_msg = current_bytes.decode('utf-8')
             except UnicodeDecodeError as e:
-                # If decoding fails due to incomplete byte sequence at the end,
-                # save those bytes for the next chunk and decode the valid part
-                valid_byte_count = e.start
-                encoded_msg = current_bytes[:valid_byte_count].decode('utf-8')
-                undecoded_buffer = current_bytes[valid_byte_count:]
+                # Check if this is potentially an incomplete sequence at the end
+                if e.start > 0:
+                    # Decode the valid part
+                    encoded_msg = current_bytes[:e.start].decode('utf-8')
+                    
+                    # Check if the remaining bytes are likely a partial character
+                    # or actually invalid UTF-8
+                    remaining_bytes = current_bytes[e.start:]
+                    if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
+                        # Likely incomplete - save for next chunk
+                        undecoded_buffer = remaining_bytes
+                    else:
+                        # Likely invalid - replace with replacement character
+                        encoded_msg += remaining_bytes.decode('utf-8', errors='replace')
+                        undecoded_buffer = b''
+                else:
+                    # Error at the very beginning of the buffer - this is invalid UTF-8
+                    encoded_msg = current_bytes.decode('utf-8', errors='replace')
+                    undecoded_buffer = b''
 
             lines = encoded_msg.splitlines(keepends=True)
 
