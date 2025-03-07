@@ -35,9 +35,9 @@ SkyPilot **abstracts away AI infra burden**:
 - Launch clusters, jobs, and serving on any infra
 - Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **supports multiple infra** --- clusters, clouds, and hardware:
+SkyPilot **supports multiple clusters, clouds, and hardware**:
 
-- Bring your reserved GPUs, Kubernetes clusters, or 12+ clouds
+- Bring reserved GPUs, Kubernetes clusters, or 15+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with auto-retry
 
 SkyPilot **cuts your cloud costs & maximizes GPU availability**:
@@ -49,7 +49,9 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 
-:ref:`Current supported infra <installation>` (Kubernetes; AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack, RunPod, Cudo, Paperspace, Digital Ocean, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere):
+Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
+RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
+VMware vSphere, Nebius.
 
 .. raw:: html
 
