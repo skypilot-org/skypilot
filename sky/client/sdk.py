@@ -63,7 +63,7 @@ def stream_response(request_id: Optional[str],
     """Streams the response to the console.
 
     Args:
-        request_id: The request ID.
+        request_id: The request ID. If set, wait for and return its value.
         response: The HTTP response.
         output_stream: The output stream to write to. If None, print to the
             console.
@@ -1525,6 +1525,10 @@ def stream_and_get(
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         return get(request_id)
+    # Don't pass request_id if follow is False, since passing it will cause
+    # stream_response to wait for the request to complete.
+    if not follow:
+        request_id = None
     return stream_response(request_id, response, output_stream)
 
 
