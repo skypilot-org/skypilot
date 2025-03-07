@@ -552,6 +552,24 @@ You can specify a preferable project ID, which will be used if a project ID is r
 
   echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
 
+Nebius offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
+
+.. code-block:: shell
+
+  # Install boto
+  pip install boto3
+  # Configure your Nebius Object Storage credentials
+  aws configure --profile nebius
+
+In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
+
+.. code-block:: bash
+
+  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
+  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
+  aws configure set region eu-west1 --profile nebius
+  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
 
 Request quotas for first time users
 --------------------------------------
