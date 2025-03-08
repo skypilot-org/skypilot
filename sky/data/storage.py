@@ -218,8 +218,8 @@ class StoreType(enum.Enum):
         for store_type in StoreType:
             if store_url.startswith(store_type.store_prefix()):
                 if store_type == StoreType.AZURE:
-                    storage_account_name, bucket_name, sub_path = \
-                        data_utils.split_az_path(store_url)
+                    storage_account_name, bucket_name, sub_path = (
+                        data_utils.split_az_path(store_url))
                 elif store_type == StoreType.IBM:
                     bucket_name, sub_path, region = data_utils.split_cos_path(
                         store_url)
@@ -229,8 +229,12 @@ class StoreType(enum.Enum):
                     bucket_name, sub_path = data_utils.split_gcs_path(store_url)
                 elif store_type == StoreType.S3:
                     bucket_name, sub_path = data_utils.split_s3_path(store_url)
-                return store_type, bucket_name, \
-                    sub_path, storage_account_name, region
+                elif store_type == StoreType.OCI:
+                    bucket_name, sub_path = data_utils.split_oci_path(store_url)
+                else:
+                    raise ValueError(f'Unknown store type: {store_type}')
+                return (store_type, bucket_name, sub_path, storage_account_name,
+                        region)
         raise ValueError(f'Unknown store URL: {store_url}')
 
 
@@ -3726,14 +3730,14 @@ class IBMCosStore(AbstractStore):
                     # cos bucket used as a dest, can't be used as source.
                     pass
                 elif self.source.startswith('s3://'):
-                    raise Exception('IBM COS currently not supporting'
-                                    'data transfers between COS and S3')
+                    raise RuntimeError('IBM COS currently not supporting'
+                                       'data transfers between COS and S3')
                 elif self.source.startswith('gs://'):
-                    raise Exception('IBM COS currently not supporting'
-                                    'data transfers between COS and GS')
+                    raise RuntimeError('IBM COS currently not supporting'
+                                       'data transfers between COS and GS')
                 elif self.source.startswith('r2://'):
-                    raise Exception('IBM COS currently not supporting'
-                                    'data transfers between COS and r2')
+                    raise RuntimeError('IBM COS currently not supporting'
+                                       'data transfers between COS and r2')
                 else:
                     self.batch_ibm_rsync([self.source])
 

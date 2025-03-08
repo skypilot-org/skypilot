@@ -60,7 +60,7 @@ def get_project_by_region(region: str) -> str:
     for project in projects.items:
         if project.metadata.id[8:11] == region_ids[region]:
             return project.metadata.id
-    raise Exception(f'No project found for region "{region}".')
+    raise RuntimeError(f'No project found for region "{region}".')
 
 
 def get_or_create_gpu_cluster(name: str, region: str) -> str:

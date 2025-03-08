@@ -97,9 +97,10 @@ def check(clouds: Optional[Tuple[str]],
         None
     """
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
-    response = requests.post(f'{server_common.get_server_url()}/check',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
+    response = requests.post(
+        f'{server_common.get_server_url()}/check',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -116,7 +117,7 @@ def enabled_clouds() -> server_common.RequestId:
         A list of enabled clouds in string format.
     """
     response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
-                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
+                            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -207,7 +208,8 @@ def list_accelerator_counts(
     )
     response = requests.post(
         f'{server_common.get_server_url()}/list_accelerator_counts',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -244,8 +246,10 @@ def optimize(
     body = payloads.OptimizeBody(dag=dag_str,
                                  minimize=minimize,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/optimize',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/optimize',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -279,8 +283,10 @@ def validate(
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
     body = payloads.ValidateBody(dag=dag_str,
                                  request_options=admin_policy_request_options)
-    response = requests.post(f'{server_common.get_server_url()}/validate',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/validate',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     if response.status_code == 400:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
@@ -661,8 +667,10 @@ def download_logs(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/download_logs',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/download_logs',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     job_id_remote_path_dict = stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(
@@ -964,8 +972,10 @@ def queue(cluster_name: str,
         skip_finished=skip_finished,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/queue',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/queue',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1005,8 +1015,10 @@ def job_status(cluster_name: str,
         cluster_name=cluster_name,
         job_ids=job_ids,
     )
-    response = requests.post(f'{server_common.get_server_url()}/job_status',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/job_status',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1058,8 +1070,10 @@ def cancel(
         job_ids=job_ids,
         try_cancel_if_cluster_is_init=_try_cancel_if_cluster_is_init,
     )
-    response = requests.post(f'{server_common.get_server_url()}/cancel',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/cancel',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1153,8 +1167,10 @@ def status(
         refresh=refresh,
         all_users=all_users,
     )
-    response = requests.post(f'{server_common.get_server_url()}/status',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/status',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1187,8 +1203,10 @@ def endpoints(
         cluster=cluster,
         port=port,
     )
-    response = requests.post(f'{server_common.get_server_url()}/endpoints',
-                             json=json.loads(body.model_dump_json()))
+    response = requests.post(
+        f'{server_common.get_server_url()}/endpoints',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1280,9 +1298,10 @@ def storage_delete(name: str) -> server_common.RequestId:
         ValueError: If the storage does not exist.
     """
     body = payloads.StorageBody(name=name)
-    response = requests.post(f'{server_common.get_server_url()}/storage/delete',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
+    response = requests.post(
+        f'{server_common.get_server_url()}/storage/delete',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1317,9 +1336,10 @@ def local_up(gpus: bool,
                                 ssh_key=ssh_key,
                                 cleanup=cleanup,
                                 context_name=context_name)
-    response = requests.post(f'{server_common.get_server_url()}/local_up',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
+    response = requests.post(
+        f'{server_common.get_server_url()}/local_up',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1335,8 +1355,9 @@ def local_down() -> server_common.RequestId:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('sky local down is only supported when running '
                              'SkyPilot locally.')
-    response = requests.post(f'{server_common.get_server_url()}/local_down',
-                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
+    response = requests.post(
+        f'{server_common.get_server_url()}/local_down',
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1582,9 +1603,10 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
         echo(f'Cancelling {len(request_ids)} request{plural}: '
              f'{request_id_str}...')
 
-    response = requests.post(f'{server_common.get_server_url()}/api/cancel',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
+    response = requests.post(
+        f'{server_common.get_server_url()}/api/cancel',
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 

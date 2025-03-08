@@ -3,6 +3,7 @@
 # pylint: disable=import-outside-toplevel
 import json
 from typing import Optional
+
 from sky.adaptors import common
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '

@@ -11,6 +11,7 @@ import yaml
 
 from sky import sky_logging
 from sky.adaptors import common
+from sky.utils import common as sky_common
 
 CREDENTIAL_FILE = '~/.ibm/credentials.yaml'
 logger = sky_logging.init_logger(__name__)
@@ -27,6 +28,9 @@ ibm_boto3 = common.LazyImport('ibm_boto3',
                               import_error_message=_IMPORT_ERROR_MESSAGE)
 ibm_botocore = common.LazyImport('ibm_botocore',
                                  import_error_message=_IMPORT_ERROR_MESSAGE)
+
+# Global lock to be initialized lazily
+global_process_lock = None
 
 
 def read_credential_file():
@@ -62,6 +66,7 @@ def get_oauth_token():
         headers={'Content-Type': 'application/x-www-form-urlencoded'},
         data=
         f'grant_type=urn:ibm:params:oauth:grant-type:apikey&apikey={get_api_key()}',
+        timeout=sky_common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
     )
     return json.loads(res.text)['access_token']
 
@@ -152,9 +157,9 @@ def _get_global_process_lock():
       already initialized.
     Necessary when process are spawned without a shared lock.
     """
-    global global_process_lock  # pylint: disable=global-variable-undefined
+    global global_process_lock
 
-    if 'global_process_lock' not in globals():
+    if global_process_lock is None:
         global_process_lock = multiprocessing.Lock()
 
     return global_process_lock
