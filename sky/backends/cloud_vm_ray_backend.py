@@ -820,32 +820,6 @@ class FailoverCloudErrorHandlerV1:
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
 
-    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-    @staticmethod
-    def _oci_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        known_service_errors = [
-            'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
-            'LimitExceeded', 'NotAuthenticated'
-        ]
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
-            ('oci.exceptions.ServiceError' in x.strip() and any(
-                known_err in x.strip() for known_err in known_service_errors)))
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-
-        if zones is not None:
-            for zone in zones:
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
-
     @staticmethod
     def update_blocklist_on_error(
             blocked_resources: Set['resources_lib.Resources'],
