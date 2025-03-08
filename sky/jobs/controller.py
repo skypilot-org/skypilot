@@ -544,7 +544,6 @@ def start(job_id: int, dag_yaml: str) -> None:
         assert task_id is not None, job_id
         logger.info(
             f'Cancelling managed job, job_id: {job_id}, task_id: {task_id}')
-        assert task_id is not None
         managed_job_state.set_cancelling(
             job_id=job_id,
             callback_func=managed_job_utils.event_callback_func(
@@ -573,7 +572,6 @@ def start(job_id: int, dag_yaml: str) -> None:
         _cleanup(job_id, dag_yaml=dag_yaml)
         logger.info(f'Cluster of managed job {job_id} has been cleaned up.')
 
-        assert task_id is not None
         if cancelling:
             assert task_id is not None, job_id  # Since it's set with cancelling
             managed_job_state.set_cancelled(
