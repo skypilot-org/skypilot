@@ -9,7 +9,6 @@ service:
 workdir: tests/skyserve/readiness_timeout
 
 resources:
-  cpus: 2+
   ports: 8081
 
 setup: pip install fastapi uvicorn
