@@ -97,6 +97,6 @@ These are suggestions, not strict rules to follow. When in doubt, follow the [st
   * Use python typing. But you should not import external objects just for typing. Instead, import typing-only external objects under `if typing.TYPE_CHECKING:`.
 
 ### Environment variables for developers
-- `export SKYPILOT_NO_USAGE_STATS=1` to disable usage logging.
+- `export SKYPILOT_DISABLE_USAGE_COLLECTION=1` to disable usage logging.
 - `export SKYPILOT_DEBUG=1` to show debugging logs (use logging.DEBUG level).
 - `export SKYPILOT_MINIMIZE_LOGGING=1` to minimize logging. Useful when trying to avoid multiple lines of output, such as for demos.
