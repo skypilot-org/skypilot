@@ -5,6 +5,8 @@ overloaded type hints for SSHCommandRunner.run(), as we need to
 determine the return type based on the value of require_outputs.
 """
 # pylint: disable=unused-argument
+# pylint: disable=super-init-not-called
+# pylint: missing-class-docstring
 # These warnings don't make sense for stub files.
 # See https://github.com/pylint-dev/pylint/issues/9417
 import enum
@@ -35,9 +37,9 @@ def ssh_options_list(
 
 
 class SshMode(enum.Enum):
-    NON_INTERACTIVE: int
-    INTERACTIVE: int
-    LOGIN: int
+    NON_INTERACTIVE = 0
+    INTERACTIVE = 1
+    LOGIN = 2
 
 
 class CommandRunner:
@@ -106,9 +108,9 @@ class CommandRunner:
         ...
 
     @classmethod
-    def make_runner_list(cls: typing.Type[CommandRunner],
+    def make_runner_list(cls: typing.Type['CommandRunner'],
                          node_list: Iterable[Tuple[Any, ...]],
-                         **kwargs) -> List[CommandRunner]:
+                         **kwargs) -> List['CommandRunner']:
         ...
 
     def check_connection(self) -> bool:
