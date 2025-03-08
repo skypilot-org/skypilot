@@ -213,16 +213,16 @@ def show_cost_report_table(cluster_records: List[_ClusterCostReportRecord],
 # Some of these lambdas are invoked on both _ClusterRecord and
 # _ClusterCostReportRecord, which is okay as we guarantee the queried fields
 # exist in those cases.
-_get_name = (lambda cluster_record: cluster_record['name'])
-_get_user_hash = (lambda cluster_record: cluster_record['user_hash'])
-_get_user_name = (lambda cluster_record: cluster_record.get('user_name', '-'))
-_get_launched = (lambda cluster_record: log_utils.readable_time_duration(
-    cluster_record['launched_at']))
-_get_region = (
-    lambda clusters_status: clusters_status['handle'].launched_resources.region)
-_get_command = (lambda cluster_record: cluster_record['last_use'])
-_get_duration = (lambda cluster_record: log_utils.readable_time_duration(
-    0, cluster_record['duration'], absolute=True))
+_get_name = lambda cluster_record: cluster_record['name']
+_get_user_hash = lambda cluster_record: cluster_record['user_hash']
+_get_user_name = lambda cluster_record: cluster_record.get('user_name', '-')
+_get_launched = lambda cluster_record: log_utils.readable_time_duration(
+    cluster_record['launched_at'])
+_get_region = lambda clusters_status: clusters_status['handle'
+                                                     ].launched_resources.region
+_get_command = lambda cluster_record: cluster_record['last_use']
+_get_duration = lambda cluster_record: log_utils.readable_time_duration(
+    0, cluster_record['duration'], absolute=True)
 
 
 def _get_status(cluster_record: _ClusterRecord) -> status_lib.ClusterStatus:

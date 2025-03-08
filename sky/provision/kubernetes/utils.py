@@ -1861,6 +1861,8 @@ def get_endpoint_debug_message() -> str:
     elif port_mode == kubernetes_enums.KubernetesPortMode.PODIP:
         endpoint_type = 'PodIP'
         debug_cmd = 'kubectl describe pod'
+    else:
+        raise ValueError(f'Unknown port mode: {port_mode}')
     return ENDPOINTS_DEBUG_MESSAGE.format(endpoint_type=endpoint_type,
                                           debug_cmd=debug_cmd)
 
@@ -2533,7 +2535,7 @@ def process_skypilot_pods(
                     'nvidia.com/gpu', '0'))
             gpu_name = None
             if gpu_count > 0:
-                label_formatter, _ = (detect_gpu_label_formatter(context))
+                label_formatter, _ = detect_gpu_label_formatter(context)
                 assert label_formatter is not None, (
                     'GPU label formatter cannot be None if there are pods '
                     f'requesting GPUs: {pod.metadata.name}')

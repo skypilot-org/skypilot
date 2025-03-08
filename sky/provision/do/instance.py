@@ -200,7 +200,7 @@ def terminate_instances(
             break
         time.sleep(constants.POLL_INTERVAL)
     else:
-        msg = ('Failed to delete all instances')
+        msg = 'Failed to delete all instances'
         logger.warning(msg)
         raise RuntimeError(msg)
 

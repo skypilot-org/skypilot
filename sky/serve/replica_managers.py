@@ -1046,8 +1046,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         The replica will be terminated if any of the thresholds exceeded.
         """
         # TODO(andyl): Define a TypeAlias for the return type of info.probe.
-        probe_futures: List[mp_pool.ApplyResult[Tuple[ReplicaInfo, bool,
-                                                      float]]] = []
+        probe_futures: List[mp_pool.ApplyResult] = []
         replica_to_probe: List[str] = []
         with mp_pool.ThreadPool() as pool:
             infos = serve_state.get_replica_infos(self._service_name)

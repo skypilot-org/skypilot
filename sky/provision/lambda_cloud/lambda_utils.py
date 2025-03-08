@@ -7,6 +7,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+from sky.utils import common
 from sky.utils import common_utils
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
@@ -104,9 +105,16 @@ def _try_request_with_backoff(method: str,
                                    max_backoff_factor=MAX_BACKOFF_FACTOR)
     for i in range(MAX_ATTEMPTS):
         if method == 'get':
-            response = requests.get(url, headers=headers)
+            response = requests.get(
+                url,
+                headers=headers,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         elif method == 'post':
-            response = requests.post(url, headers=headers, data=data)
+            response = requests.post(
+                url,
+                headers=headers,
+                data=data,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         else:
             raise ValueError(f'Unsupported requests method: {method}')
         # If rate limited, wait and try again
