@@ -31,7 +31,6 @@ class TestBackwardCompatibility:
     # Command templates
     ACTIVATE_BASE = f'source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
-    DEACTIVATE = 'deactivate'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
 
     @pytest.fixture(scope="session")
@@ -119,7 +118,6 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 100',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky status {cluster_name} | grep UP',
             f'{self.ACTIVATE_CURRENT} && sky status -r {cluster_name} | grep UP',
             f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
@@ -136,7 +134,6 @@ class TestBackwardCompatibility:
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml',
@@ -150,7 +147,6 @@ class TestBackwardCompatibility:
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             'sleep 120',
             f'{self.ACTIVATE_CURRENT} && sky status -r {cluster_name} | grep STOPPED',
@@ -165,7 +161,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky launch --cloud {generic_cloud} -y --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
@@ -181,7 +176,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
@@ -199,7 +193,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/multi_hostname.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
@@ -217,7 +210,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
             f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
             f'sky jobs queue | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && sky jobs logs --no-follow -n {managed_job_name}-1 | grep hi',
@@ -237,7 +229,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky serve up --cloud {generic_cloud} -y -n {serve_name}-0 examples/serve/http_server/task.yaml',
             f'{self.ACTIVATE_BASE} && sky serve status {serve_name}-0',
-            self.DEACTIVATE,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky serve status {serve_name}-0',
             f'{self.ACTIVATE_CURRENT} && sky serve logs {serve_name}-0 2 --no-follow',
             f'{self.ACTIVATE_CURRENT} && sky serve logs --controller {serve_name}-0 --no-follow',
