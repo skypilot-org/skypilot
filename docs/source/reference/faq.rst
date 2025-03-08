@@ -283,4 +283,4 @@ Removed arguments: :code:`detach_setup`/:code:`detach_run`
 :code:`detach_setup`/:code:`detach_run` in :code:`sky.launch` were removed after
 :code:`0.8.0`, because setup and run are now detached by default with Python SDK.
 If you would like to view the logs for the jobs submitted to a cluster, you can
-explicitly call `sky.tail_logs(job_id)` as shown above.
+explicitly call ``sky.tail_logs(job_id)`` as shown above.

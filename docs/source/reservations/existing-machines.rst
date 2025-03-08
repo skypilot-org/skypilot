@@ -125,8 +125,8 @@ Deploying SkyPilot
 
    .. tip::
 
-      This is good for your personal usage. To grant teammates access to these machines, SkyPilot you can further deploy a :ref:`SkyPilot API server <sky-api-server>` and
-      share the endpoint.
+      To grant teammates access to these machines through SkyPilot, you can further deploy a :ref:`SkyPilot API server <sky-api-server>` and
+      share the endpoint with them.
 
 What happens behind the scenes?
 -------------------------------
