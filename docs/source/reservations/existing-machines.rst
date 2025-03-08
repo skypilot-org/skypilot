@@ -125,8 +125,7 @@ Deploying SkyPilot
 
    .. tip::
 
-      To grant teammates access to these machines through SkyPilot, you can further deploy a :ref:`SkyPilot API server <sky-api-server>` and
-      share the endpoint with them.
+      To enable shared access to a Kubernetes cluster, you can deploy a :ref:`SkyPilot API server <sky-api-server>`.
 
 What happens behind the scenes?
 -------------------------------
