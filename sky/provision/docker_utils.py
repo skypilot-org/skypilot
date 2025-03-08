@@ -79,9 +79,6 @@ class DockerLoginConfig:
         Returns:
             Processed value with commands executed if applicable
         """
-        if not isinstance(value, str):
-            return value
-
         # Handle escaped command syntax: \$(command) -> $(command)
         if value.startswith('\\$(') and value.endswith(')'):
             return value[1:]  # Remove the escape character
@@ -100,8 +97,6 @@ class DockerLoginConfig:
                     universal_newlines=True,
                 )
                 output = result.stdout.strip()
-                logger.info(
-                    f'Successfully executed command for Docker {var_name}')
                 return output
             except subprocess.CalledProcessError as e:
                 logger.error(
