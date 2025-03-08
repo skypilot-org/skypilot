@@ -1226,7 +1226,8 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
               'total_cost': (float) cost given resources and usage intervals,
             }
     """
-    response = requests.get(f'{server_common.get_server_url()}/cost_report')
+    response = requests.get(f'{server_common.get_server_url()}/cost_report',
+                            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1255,7 +1256,8 @@ def storage_ls() -> server_common.RequestId:
                 }
         ]
     """
-    response = requests.get(f'{server_common.get_server_url()}/storage/ls')
+    response = requests.get(f'{server_common.get_server_url()}/storage/ls',
+                            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1279,7 +1281,8 @@ def storage_delete(name: str) -> server_common.RequestId:
     """
     body = payloads.StorageBody(name=name)
     response = requests.post(f'{server_common.get_server_url()}/storage/delete',
-                             json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()),
+                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1315,7 +1318,8 @@ def local_up(gpus: bool,
                                 cleanup=cleanup,
                                 context_name=context_name)
     response = requests.post(f'{server_common.get_server_url()}/local_up',
-                             json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()),
+                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1331,7 +1335,8 @@ def local_down() -> server_common.RequestId:
         with ux_utils.print_exception_no_traceback():
             raise ValueError('sky local down is only supported when running '
                              'SkyPilot locally.')
-    response = requests.post(f'{server_common.get_server_url()}/local_down')
+    response = requests.post(f'{server_common.get_server_url()}/local_down',
+                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1355,7 +1360,8 @@ def realtime_kubernetes_gpu_availability(
     response = requests.post(
         f'{server_common.get_server_url()}/'
         'realtime_kubernetes_gpu_availability',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1386,7 +1392,8 @@ def kubernetes_node_info(
     body = payloads.KubernetesNodeInfoRequestBody(context=context)
     response = requests.post(
         f'{server_common.get_server_url()}/kubernetes_node_info',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1415,7 +1422,8 @@ def status_kubernetes() -> server_common.RequestId:
         - context: Kubernetes context used to fetch the cluster information.
     """
     response = requests.get(
-        f'{server_common.get_server_url()}/status_kubernetes')
+        f'{server_common.get_server_url()}/status_kubernetes',
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1576,7 +1584,7 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
 
     response = requests.post(f'{server_common.get_server_url()}/api/cancel',
                              json=json.loads(body.model_dump_json()),
-                             timeout=5)
+                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -1631,7 +1639,8 @@ def api_info() -> Dict[str, str]:
             }
 
     """
-    response = requests.get(f'{server_common.get_server_url()}/api/health')
+    response = requests.get(f'{server_common.get_server_url()}/api/health',
+                            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     response.raise_for_status()
     return response.json()
 
