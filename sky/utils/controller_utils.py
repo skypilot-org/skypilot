@@ -431,6 +431,11 @@ def shared_controller_vars_to_fill(
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
         # Disable minimize logging to get more details on the controller.
         env_options.Options.MINIMIZE_LOGGING.env_key: '0',
+        # Make sure the clusters launched by the controller are marked as
+        # launched with a remote API server if the controller is launched
+        # with a remote API server.
+        constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
+            common_utils.get_using_remote_api_server()),
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
