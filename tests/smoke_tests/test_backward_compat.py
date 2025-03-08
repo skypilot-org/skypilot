@@ -1,8 +1,10 @@
-from pathlib import Path
+import pathlib
 import subprocess
 
 import pytest
 from smoke_tests import smoke_tests_utils
+
+from sky.backends.backend_utils import SKY_REMOTE_PATH
 
 
 class TestBackwardCompatibility:
@@ -23,14 +25,17 @@ class TestBackwardCompatibility:
     UV_INSTALL_CMD = 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
     # Environment paths
-    BASE_ENV_DIR = Path('~/sky-back-compat-base').expanduser()
-    CURRENT_ENV_DIR = Path('~/sky-back-compat-current').expanduser()
-    BASE_SKY_DIR = Path('~/sky-base').expanduser()
-    CURRENT_SKY_DIR = Path('./').expanduser()
+    BASE_ENV_DIR = pathlib.Path(
+        '~/sky-back-compat-base').expanduser().absolute()
+    CURRENT_ENV_DIR = pathlib.Path(
+        '~/sky-back-compat-current').expanduser().absolute()
+    BASE_SKY_DIR = pathlib.Path('~/sky-base').expanduser().absolute()
+    CURRENT_SKY_DIR = pathlib.Path('./').expanduser().absolute()
+    SKY_WHEEL_DIR = pathlib.Path(SKY_REMOTE_PATH).expanduser().absolute()
 
     # Command templates
-    ACTIVATE_BASE = f'source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
-    ACTIVATE_CURRENT = f'source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
+    ACTIVATE_BASE = f'rm -r  {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
+    ACTIVATE_CURRENT = f'rm -r  {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
 
     @pytest.fixture(scope="session")
@@ -53,14 +58,18 @@ class TestBackwardCompatibility:
             subprocess.run(self.UV_INSTALL_CMD, shell=True, check=True)
 
         # Clone base SkyPilot version
-        if not self.BASE_SKY_DIR.exists():
-            self.BASE_SKY_DIR.mkdir(parents=True, exist_ok=True)
+        if self.BASE_SKY_DIR.exists():
             subprocess.run(
-                f'git clone -b {self.BASE_BRANCH} '
-                f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
+                f'rm -rf {self.BASE_SKY_DIR}',
                 shell=True,
                 check=True,
             )
+        subprocess.run(
+            f'git clone -b {self.BASE_BRANCH} '
+            f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
+            shell=True,
+            check=True,
+        )
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
@@ -210,6 +219,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
             f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
+            f'sleep 30',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
             f'sky jobs queue | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && sky jobs logs --no-follow -n {managed_job_name}-1 | grep hi',
