@@ -505,8 +505,6 @@ def terminate_instances(
     vc_object.disconnect()
 
 
-sky / provision / vsphere / common / cls_api_helper
-
 
 def wait_instances(region: str, cluster_name: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
