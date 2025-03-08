@@ -6,7 +6,7 @@ determine the return type based on the value of require_outputs.
 """
 # pylint: disable=unused-argument
 # pylint: disable=super-init-not-called
-# pylint: missing-class-docstring
+# pylint: disable=missing-class-docstring
 # These warnings don't make sense for stub files.
 # See https://github.com/pylint-dev/pylint/issues/9417
 import enum
