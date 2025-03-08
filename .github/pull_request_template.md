@@ -7,19 +7,10 @@
 
 Tested (run the relevant ones):
 
-- [ ] Code formatting: `bash format.sh`
-  <!-- Or use pre-commit if installed -->
-
-- [ ] Any manual/new tests:
-  <!-- Specify below (CI command or local test) -->
-
-- [ ] All smoke tests: `/smoke-test` (CI)
-  <!-- Or run locally: `pytest tests/test_smoke.py` -->
-
-- [ ] Relevant individual smoke tests: `/smoke-test --aws -k test_name` (CI)
-  <!-- Or run locally: `pytest tests/test_smoke.py::test_fill_in_the_name` -->
-
-- [ ] Backward compatibility: `/quicktest-core` (CI)
-  <!-- Or run locally: `conda deactivate; bash -i tests/backward_compatibility_tests.sh` -->
+- [ ] Code formatting: **install pre-commit (auto-check on commit)** or `bash format.sh`
+- [ ] Any manual or new tests for this PR (please specify below)
+- [ ] All smoke tests: **`/smoke-test` (CI)** or `pytest tests/test_smoke.py` (local)
+- [ ] Relevant individual tests: **`/smoke-test -k test_name` (CI)** or `pytest tests/test_smoke.py::test_name` (local)
+- [ ] Backward compatibility: **`/quicktest-core` (CI)** or `conda deactivate; bash -i tests/backward_compatibility_tests.sh` (local)
 
 <!-- CI commands (/-prefixed) can only be triggered by repo members -->
