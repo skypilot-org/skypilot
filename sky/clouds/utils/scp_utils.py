@@ -16,6 +16,8 @@ from urllib import parse
 
 import requests
 
+from sky.utils import common
+
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
