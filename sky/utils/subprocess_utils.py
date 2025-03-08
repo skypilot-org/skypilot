@@ -1,4 +1,5 @@
 """Utility functions for subprocesses."""
+import multiprocessing
 from multiprocessing import pool
 import os
 import random
@@ -179,29 +180,6 @@ def kill_children_processes(parent_pids: Optional[Union[
     if isinstance(parent_pids, int):
         parent_pids = [parent_pids]
 
-    def kill(proc: psutil.Process):
-        if not proc.is_running():
-            # Skip if the process is not running.
-            return
-        logger.debug(f'Killing process {proc.pid}')
-        try:
-            if force:
-                proc.kill()
-            else:
-                proc.terminate()
-            proc.wait(timeout=10)
-        except psutil.NoSuchProcess:
-            # The child process may have already been terminated.
-            pass
-        except psutil.TimeoutExpired:
-            logger.debug(
-                f'Process {proc.pid} did not terminate after 10 seconds')
-            # Attempt to force kill if the normal termination fails
-            if not force:
-                logger.debug(f'Force killing process {proc.pid}')
-                proc.kill()
-                proc.wait(timeout=5)  # Shorter timeout after force kill
-
     parent_processes = []
     if parent_pids is None:
         parent_processes = [psutil.Process()]
@@ -216,10 +194,54 @@ def kill_children_processes(parent_pids: Optional[Union[
     for parent_process in parent_processes:
         child_processes = parent_process.children(recursive=True)
         if parent_pids is not None:
-            kill(parent_process)
+            kill_process_with_grace(parent_process, force=force)
         logger.debug(f'Killing child processes: {child_processes}')
         for child in child_processes:
-            kill(child)
+            kill_process_with_grace(child, force=force)
+
+
+def kill_process_with_grace(proc: Union[multiprocessing.Process,
+                                        psutil.Process],
+                            force: bool = False,
+                            grace_period: int = 10) -> None:
+    """Kill a process with SIGTERM and wait for it to exit.
+
+    Args:
+        proc: The process to kill, either a multiprocessing.Process or a
+            psutil.Process.
+        force: Whether to force kill the process.
+        grace_period: The grace period seconds to wait for the process to exit.
+    """
+    if isinstance(proc, psutil.Process):
+        alive = proc.is_running
+        wait = proc.wait
+    else:
+        alive = proc.is_alive
+        wait = proc.join
+    if not alive():
+        # Skip if the process is not running.
+        return
+    logger.debug(f'Killing process {proc.pid}')
+    try:
+        if force:
+            proc.kill()
+        else:
+            proc.terminate()
+        wait(timeout=grace_period)
+    except (psutil.NoSuchProcess, ValueError):
+        # The child process may have already been terminated.
+        return
+    except psutil.TimeoutExpired:
+        # Pass to finally to force kill the process.
+        pass
+    finally:
+        logger.debug(f'Process {proc.pid} did not terminate after '
+                     f'{grace_period} seconds')
+        # Attempt to force kill if the normal termination fails
+        if not force:
+            logger.debug(f'Force killing process {proc.pid}')
+            # Shorter timeout after force kill
+            kill_process_with_grace(proc, force=True, grace_period=5)
 
 
 def run_with_retries(
