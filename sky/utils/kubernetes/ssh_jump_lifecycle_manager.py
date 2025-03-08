@@ -172,8 +172,8 @@ def main():
 
     if not current_name or not current_namespace:
         # Raise Exception with message to terminate pod
-        raise Exception('Missing environment variables MY_POD_NAME or '
-                        'MY_POD_NAMESPACE')
+        raise RuntimeError('Missing environment variables MY_POD_NAME or '
+                           'MY_POD_NAMESPACE')
 
     threads = [
         threading.Thread(target=manage_lifecycle),

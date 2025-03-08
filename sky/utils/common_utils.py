@@ -432,7 +432,7 @@ class ContextManagerProtocol(Protocol):
 # TODO(andy): more accurate typing for Callable[...]
 def make_decorator(
     cls: Union[Type[ContextManagerProtocol],
-               Callable[..., _GeneratorContextManager[Any]]],
+               Callable[..., _GeneratorContextManager]],
     name_or_fn: Union[str, Callable[P, R]], **ctx_kwargs: Any
 ) -> Union[Callable[[Callable[P, R]], Callable[P, R]], Callable[P, R]]:
     """Make the cls a decorator.

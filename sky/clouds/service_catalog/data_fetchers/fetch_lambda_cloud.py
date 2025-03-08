@@ -15,6 +15,8 @@ from typing import Optional, Tuple
 
 import requests
 
+from sky.utils import common
+
 ENDPOINT = 'https://cloud.lambdalabs.com/api/v1/instance-types'
 DEFAULT_LAMBDA_KEYS_PATH = os.path.expanduser('~/.lambda_cloud/lambda_keys')
 
@@ -71,7 +73,9 @@ def name_to_gpu_and_cnt(name: str) -> Optional[Tuple[str, int]]:
 
 def create_catalog(api_key: str, output_path: str) -> None:
     headers = {'Authorization': f'Bearer {api_key}'}
-    response = requests.get(ENDPOINT, headers=headers)
+    response = requests.get(ENDPOINT,
+                            headers=headers,
+                            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     info = response.json()['data']
 
     with open(output_path, mode='w', encoding='utf-8') as f:
