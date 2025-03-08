@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Coroutine, Dict, List, NoReturn, Union
+from typing import Coroutine, Dict, List, NoReturn, Optional, Union
 
 import aiohttp
 import fastapi

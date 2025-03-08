@@ -20,9 +20,9 @@ import uuid
 
 import jinja2
 import jsonschema
+import psutil
 import typing_extensions
 from typing_extensions import Self
-import psutil
 import yaml
 
 from sky import exceptions

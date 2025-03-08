@@ -278,7 +278,7 @@ _COMMON_OPTIONS = [
                  required=False,
                  is_flag=True,
                  default=False,
-                 help=('Run the command asynchronously.'))
+                 help='Run the command asynchronously.')
 ]
 
 _TASK_OPTIONS = [

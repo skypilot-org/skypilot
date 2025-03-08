@@ -10,7 +10,7 @@ import shutil
 import time
 import traceback
 import typing
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import filelock
 
