@@ -219,7 +219,6 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
             f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
-            f'sleep 30',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
             f'sky jobs queue | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && sky jobs logs --no-follow -n {managed_job_name}-1 | grep hi',
