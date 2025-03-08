@@ -302,6 +302,7 @@ def _execute(
         # Optimizer should eventually choose where to store bucket
         task.sync_storage_mounts()
 
+    job_id: Optional[int] = None
     try:
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (

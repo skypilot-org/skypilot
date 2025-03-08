@@ -8,6 +8,9 @@ from typing import Generator
 from sky.skylet import constants
 from sky.utils import common_utils
 
+# Default timeout in seconds for HTTP requests to avoid hanging indefinitely.
+DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS = 30
+
 SKY_SERVE_CONTROLLER_PREFIX: str = 'sky-serve-controller-'
 JOB_CONTROLLER_PREFIX: str = 'sky-jobs-controller-'
 # We use the user hash (machine-specific) for the controller name. It will be

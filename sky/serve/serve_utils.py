@@ -28,6 +28,7 @@ from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -331,7 +332,7 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
             'version': version,
             'mode': mode,
         },
-        timeout=constants.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
     )
     if resp.status_code == 404:
         with ux_utils.print_exception_no_traceback():
@@ -375,7 +376,7 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> str:
             'replica_id': replica_id,
             'purge': purge,
         },
-        timeout=constants.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
     )
 
     message: str = resp.json()['message']

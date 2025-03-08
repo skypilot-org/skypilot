@@ -98,7 +98,8 @@ def check(clouds: Optional[Tuple[str]],
     """
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.post(f'{server_common.get_server_url()}/check',
-                             json=json.loads(body.model_dump_json()))
+                             json=json.loads(body.model_dump_json()),
+                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -114,7 +115,8 @@ def enabled_clouds() -> server_common.RequestId:
     Request Returns:
         A list of enabled clouds in string format.
     """
-    response = requests.get(f'{server_common.get_server_url()}/enabled_clouds')
+    response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
+                             timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 
@@ -164,7 +166,8 @@ def list_accelerators(gpus_only: bool = True,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/list_accelerators',
-        json=json.loads(body.model_dump_json()))
+        json=json.loads(body.model_dump_json()),
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     return server_common.get_request_id(response)
 
 

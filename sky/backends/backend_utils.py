@@ -1576,7 +1576,7 @@ def check_owner_identity(cluster_name: str) -> None:
         if len(user_identities) == 1:
             err_msg = f'the activated identity is {user_identities[0]!r}.'
         else:
-            err_msg = (f'available identities are {user_identities!r}.')
+            err_msg = f'available identities are {user_identities!r}.'
         if cloud.is_same_cloud(clouds.Kubernetes()):
             err_msg += (' Check your kubeconfig file and make sure the '
                         'correct context is available.')

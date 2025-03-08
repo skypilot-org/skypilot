@@ -2,7 +2,7 @@
 
 # pylint: disable=import-outside-toplevel
 import json
-
+from typing import Optional
 from sky.adaptors import common
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for GCP. '
@@ -74,6 +74,7 @@ def get_credentials(cred_type: str, credentials_field: str):
     from google.oauth2 import service_account
     from google.oauth2.credentials import Credentials as OAuthCredentials
 
+    credentials: Optional[service_account.Credentials] = None
     if cred_type == 'service_account':
         # If parsing the gcp_credentials failed, then the user likely made a
         # mistake in copying the credentials into the config yaml.
