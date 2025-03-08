@@ -206,6 +206,8 @@ class KubernetesCommandRunner(CommandRunner):
     def __init__(
         self,
         node: Tuple[Tuple[str, Optional[str]], str],
+        deployment: Optional[str] = ...,
+        **kwargs,
     ) -> None:
         ...
 
