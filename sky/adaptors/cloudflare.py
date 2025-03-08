@@ -2,12 +2,12 @@
 # pylint: disable=import-outside-toplevel
 
 import contextlib
-import functools
 import os
 import threading
 from typing import Dict, Optional, Tuple
 
 from sky.adaptors import common
+from sky.utils import annotations
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
@@ -62,7 +62,7 @@ def get_r2_credentials(boto3_session):
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session."""
     # Creating the session object is not thread-safe for boto3,
@@ -76,7 +76,7 @@ def session():
         return session_
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def resource(resource_name: str, **kwargs):
     """Create a Cloudflare resource.
 
@@ -102,7 +102,7 @@ def resource(resource_name: str, **kwargs):
         **kwargs)
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def client(service_name: str, region):
     """Create an CLOUDFLARE client of a certain service.
 
@@ -177,7 +177,7 @@ def check_credentials() -> Tuple[bool, Optional[str]]:
             hints += f'\n{_INDENT_PREFIX}  $ mkdir -p ~/.cloudflare'
             hints += f'\n{_INDENT_PREFIX}  $ echo <YOUR_ACCOUNT_ID_HERE> > ~/.cloudflare/accountid'  # pylint: disable=line-too-long
         hints += f'\n{_INDENT_PREFIX}For more info: '
-        hints += 'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#cloudflare-r2'  # pylint: disable=line-too-long
+        hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#cloudflare-r2'  # pylint: disable=line-too-long
 
     return (False, hints) if hints else (True, hints)
 

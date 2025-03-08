@@ -7,10 +7,10 @@
 
 On July 23, 2024, Meta released the [Llama 3.1 model family](https://ai.meta.com/blog/meta-llama-3-1/), including a 405B parameter model in both base model and instruction-tuned forms. Llama 3.1 405B became _the first open LLM that closely rivals top proprietary models_ like GPT-4o and Claude 3.5 Sonnet.
 
-This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) and [torchtune](https://pytorch.org/torchtune/stable/index.html) to **finetune Llama 3.1 on your own data and infra**. Everything is packaged in a simple [SkyPilot YAML](https://skypilot.readthedocs.io/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
+This guide shows how to use [SkyPilot](https://github.com/skypilot-org/skypilot) and [torchtune](https://pytorch.org/torchtune/stable/index.html) to **finetune Llama 3.1 on your own data and infra**. Everything is packaged in a simple [SkyPilot YAML](https://docs.skypilot.co/en/latest/getting-started/quickstart.html), that can be launched with one command on your infra: 
 - Local GPU workstation
 - Kubernetes cluster
-- Cloud accounts ([12 clouds supported](https://skypilot.readthedocs.io/en/latest/getting-started/installation.html))
+- Cloud accounts ([12 clouds supported](https://docs.skypilot.co/en/latest/getting-started/installation.html))
 
 <figure>
 <center>
@@ -233,7 +233,7 @@ export HF_TOKEN="xxxx"
 ```bash
 pip install skypilot-nightly[aws,gcp,kubernetes] 
 # or other clouds (12 clouds + kubernetes supported) you have setup
-# See: https://skypilot.readthedocs.io/en/latest/getting-started/installation.html
+# See: https://docs.skypilot.co/en/latest/getting-started/installation.html
 ```
 
 5. Check your infra setup:
@@ -262,6 +262,6 @@ sky check
 ## What's next
     
 * [AI on Kubernetes Without the Pain](https://blog.skypilot.co/ai-on-kubernetes/)
-* [SkyPilot AI Gallery](https://skypilot.readthedocs.io/en/latest/gallery/index.html)
-* [SkyPilot Docs](https://skypilot.readthedocs.io/en/latest/docs/index.html)
+* [SkyPilot AI Gallery](https://docs.skypilot.co/en/latest/gallery/index.html)
+* [SkyPilot Docs](https://docs.skypilot.co)
 * [SkyPilot GitHub](https://github.com/skypilot-org/skypilot)

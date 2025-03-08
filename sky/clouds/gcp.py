@@ -1,6 +1,5 @@
 """Google Cloud Platform."""
 import enum
-import functools
 import json
 import os
 import re
@@ -18,14 +17,16 @@ from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
-    from sky import status_lib
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -66,8 +67,20 @@ _GCLOUD_VERSION = '424.0.0'
 GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     {{ gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
-    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \
-    tar xzf google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="arm"; \
+    else \
+        echo "Architecture $ARCH not supported by Google Cloud SDK. Defaulting to x86_64." > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="x86_64"; \
+    fi && \
+    echo "Detected architecture: $ARCH, using package: $ARCH_SUFFIX" >> {_GCLOUD_INSTALLATION_LOG} && \
+    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-${{ARCH_SUFFIX}}.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    tar xzf google-cloud-sdk-{_GCLOUD_VERSION}-linux-${{ARCH_SUFFIX}}.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
     rm -rf ~/google-cloud-sdk >> {_GCLOUD_INSTALLATION_LOG}  && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
@@ -132,8 +145,11 @@ class GCPIdentityType(enum.Enum):
 
     SHARED_CREDENTIALS_FILE = ''
 
+    def can_credential_expire(self) -> bool:
+        return self == GCPIdentityType.SHARED_CREDENTIALS_FILE
 
-@clouds.CLOUD_REGISTRY.register
+
+@registry.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
@@ -167,7 +183,7 @@ class GCP(clouds.Cloud):
         # ~/.config/gcloud/application_default_credentials.json.
         f'{_INDENT_PREFIX}  $ gcloud auth application-default login\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
     _APPLICATION_CREDENTIAL_HINT = (
         'Run the following commands:\n'
@@ -175,7 +191,7 @@ class GCP(clouds.Cloud):
         f'{_INDENT_PREFIX}Or set the environment variable GOOGLE_APPLICATION_CREDENTIALS '
         'to the path of your service account key file.\n'
         f'{_INDENT_PREFIX}For more info: '
-        'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
+        'https://docs.skypilot.co/en/latest/getting-started/installation.html#google-cloud-platform-gcp'  # pylint: disable=line-too-long
     )
 
     _SUPPORTED_DISK_TIERS = set(resources_utils.DiskTier)
@@ -345,7 +361,7 @@ class GCP(clouds.Cloud):
         return find_machine is not None
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
@@ -417,6 +433,7 @@ class GCP(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         assert zones is not None, (region, zones)
 
@@ -829,13 +846,13 @@ class GCP(clouds.Cloud):
         ret_permissions = request.execute().get('permissions', [])
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if len(diffs) > 0:
+        if diffs:
             identity_str = identity[0] if identity else None
             return False, (
                 'The following permissions are not enabled for the current '
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
-                'For more details, visit: https://skypilot.readthedocs.io/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -862,6 +879,12 @@ class GCP(clouds.Cloud):
             pass
         return credentials
 
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._get_identity_type()
+        return (identity_type is not None and
+                identity_type.can_credential_expire())
+
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
@@ -876,7 +899,8 @@ class GCP(clouds.Cloud):
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='request',
+                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:

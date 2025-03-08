@@ -9,7 +9,7 @@ History:
    file path resolution (by os.path.expanduser) when construct the file
    mounts. This bug will cause the created workder nodes located in different
    compartment and VCN than the header node if user specifies compartment_id
-   in the sky config file, because the ~/.sky/config is not sync-ed to the
+   in the sky config file, because the ~/.sky/config.yaml is not sync-ed to the
    remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
@@ -27,12 +27,14 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
-from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
+from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -44,7 +46,7 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
 
@@ -60,6 +62,9 @@ class OCI(clouds.Cloud):
                              {resources_utils.DiskTier.ULTRA})
     _BEST_DISK_TIER = resources_utils.DiskTier.HIGH
 
+    PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
+    STATUS_VERSION = clouds.StatusVersion.SKYPILOT
+
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
@@ -71,8 +76,6 @@ class OCI(clouds.Cloud):
                 (f'Docker image is currently not supported on {cls._REPR}. '
                  'You can try running docker command inside the '
                  '`run` section in task.yaml.'),
-            clouds.CloudImplementationFeatures.OPEN_PORTS:
-                (f'Opening ports is currently not supported on {cls._REPR}.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
@@ -206,6 +209,7 @@ class OCI(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del cluster_name, dryrun  # Unused.
         assert region is not None, resources
@@ -228,6 +232,14 @@ class OCI(clouds.Cloud):
             image_id = image_str
             listing_id = None
             res_ver = None
+
+        os_type = None
+        if ':' in image_id:
+            # OS type provided in the --image-id. This is the case where
+            # custom image's ocid provided in the --image-id parameter.
+            #  - ocid1.image...aaa:oraclelinux (os type is oraclelinux)
+            #  - ocid1.image...aaa (OS not provided)
+            image_id, os_type = image_id.replace(' ', '').split(':')
 
         cpus = resources.cpus
         instance_type_arr = resources.instance_type.split(
@@ -294,15 +306,18 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
-        image_str = self._get_image_str(image_id=resources.image_id,
-                                        instance_type=resources.instance_type,
-                                        region=region.name)
+        if os_type is None:
+            # OS type is not determined yet. So try to get it from vms.csv
+            image_str = self._get_image_str(
+                image_id=resources.image_id,
+                instance_type=resources.instance_type,
+                region=region.name)
 
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import oci_catalog
-        os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
-                                                    region=region.name)
-        logger.debug(f'OS type for the image {image_str} is {os_type}')
+            # pylint: disable=import-outside-toplevel
+            from sky.clouds.service_catalog import oci_catalog
+            os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
+                                                        region=region.name)
+        logger.debug(f'OS type for the image {image_id} is {os_type}')
 
         return {
             'instance_type': instance_type,
@@ -387,7 +402,7 @@ class OCI(clouds.Cloud):
         short_credential_help_str = (
             'For more details, refer to: '
             # pylint: disable=line-too-long
-            'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
+            'https://docs.skypilot.co/en/latest/getting-started/installation.html#oracle-cloud-infrastructure-oci'
         )
         credential_help_str = (
             'To configure credentials, go to: '
@@ -433,7 +448,7 @@ class OCI(clouds.Cloud):
             return True, None
         except (oci_adaptor.oci.exceptions.ConfigFileNotFound,
                 oci_adaptor.oci.exceptions.InvalidConfig,
-                oci_adaptor.service_exception()) as e:
+                oci_adaptor.oci.exceptions.ServiceError) as e:
             return False, (
                 f'OCI credential is not correctly set. '
                 f'Check the credential file at {conf_file}\n'
@@ -597,25 +612,11 @@ class OCI(clouds.Cloud):
                      region: Optional[str], zone: Optional[str],
                      **kwargs) -> List[status_lib.ClusterStatus]:
         del zone, kwargs  # Unused.
-        # Check the lifecycleState definition from the page
-        # https://docs.oracle.com/en-us/iaas/api/#/en/iaas/latest/Instance/
-        status_map = {
-            'PROVISIONING': status_lib.ClusterStatus.INIT,
-            'STARTING': status_lib.ClusterStatus.INIT,
-            'RUNNING': status_lib.ClusterStatus.UP,
-            'STOPPING': status_lib.ClusterStatus.STOPPED,
-            'STOPPED': status_lib.ClusterStatus.STOPPED,
-            'TERMINATED': None,
-            'TERMINATING': None,
-        }
-
-        # pylint: disable=import-outside-toplevel
-        from sky.skylet.providers.oci.query_helper import oci_query_helper
 
         status_list = []
         try:
-            vms = oci_query_helper.query_instances_by_tags(
-                tag_filters=tag_filters, region=region)
+            vms = query_helper.query_instances_by_tags(tag_filters=tag_filters,
+                                                       region=region)
         except Exception as e:  # pylint: disable=broad-except
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ClusterStatusFetchingError(
@@ -625,9 +626,9 @@ class OCI(clouds.Cloud):
 
         for node in vms:
             vm_status = node.lifecycle_state
-            if vm_status in status_map:
-                sky_status = status_map[vm_status]
-                if sky_status is not None:
-                    status_list.append(sky_status)
+            sky_status = oci_utils.oci_config.STATE_MAPPING_OCI_TO_SKY.get(
+                vm_status, None)
+            if sky_status is not None:
+                status_list.append(sky_status)
 
         return status_list

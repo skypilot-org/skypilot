@@ -39,14 +39,16 @@ def _run_label_test(allowed_labels: Dict[str, str],
                     cloud: clouds.Cloud = None):
     """Run a test for labels with the given allowed and invalid labels."""
     r_allowed = Resources(cloud=cloud, labels=allowed_labels)  # Should pass
+    r_allowed.validate()
     assert r_allowed.labels == allowed_labels, ('Allowed labels '
                                                 'should be the same')
 
     # Check for each invalid label
     for invalid_label, value in invalid_labels.items():
         l = {invalid_label: value}
+        r = Resources(cloud=cloud, labels=l)
         with pytest.raises(ValueError):
-            _ = Resources(cloud=cloud, labels=l)
+            r.validate()
             assert False, (f'Resources were initialized with '
                            f'invalid label {invalid_label}={value}')
 
@@ -140,6 +142,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
+                                            num_nodes=1,
                                             dryrun=True)
 
     expected_config_base = {
@@ -180,6 +183,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
+                                            num_nodes=1,
                                             dryrun=True)
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')
@@ -195,6 +199,7 @@ def test_aws_make_deploy_variables(*mocks) -> None:
     config = resource.make_deploy_variables(cluster_name,
                                             region,
                                             zones,
+                                            num_nodes=1,
                                             dryrun=True)
     assert config == expected_config, ('unexpected resource '
                                        'variables generated')

@@ -1,13 +1,15 @@
-FROM --platform=linux/amd64 continuumio/miniconda3:23.3.1-0
+FROM continuumio/miniconda3:23.3.1-0
 
 # TODO(romilb): Investigate if this image can be consolidated with the skypilot
 #  client image (`Dockerfile`)
 
 ARG DEBIAN_FRONTEND=noninteractive
+# Detect architecture
+ARG TARGETARCH
 
 # Initialize conda for root user, install ssh and other local dependencies
 RUN apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
@@ -28,19 +30,30 @@ RUN useradd -m -s /bin/bash sky && \
 USER sky
 
 # Set HOME environment variable for sky user
-ENV HOME /home/sky
+ENV HOME=/home/sky
 
 # Set current working directory
 WORKDIR /home/sky
 
+SHELL ["/bin/bash", "-c"]
+
 # Install skypilot dependencies
-RUN conda init && export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
-    python3 -m venv ~/skypilot-runtime && \
-    PYTHON_EXEC=$(echo ~/skypilot-runtime)/bin/python && \
-    $PYTHON_EXEC -m pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
-    $PYTHON_EXEC -m pip uninstall skypilot-nightly -y && \
-    curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
-    sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+RUN conda init && \
+    export PIP_DISABLE_PIP_VERSION_CHECK=1 && \
+    curl -LsSf https://astral.sh/uv/install.sh | sh && \
+    $HOME/.local/bin/uv venv ~/skypilot-runtime --seed --python=3.10 && \
+    source ~/skypilot-runtime/bin/activate && \
+    $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
+    $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
+    ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)} && \
+    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
+    chmod +x kubectl && \
+    mkdir -p $HOME/.local/bin && \
+    mv kubectl $HOME/.local/bin/ && \
     echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately

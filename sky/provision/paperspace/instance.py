@@ -4,10 +4,10 @@ import time
 from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 from sky.provision.paperspace import utils
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 # The maximum number of times to poll for the status of an operation.
@@ -286,12 +286,13 @@ def query_instances(
     assert provider_config is not None, (cluster_name_on_cloud, provider_config)
     instances = _filter_instances(cluster_name_on_cloud, None)
 
+    # https://docs.digitalocean.com/reference/paperspace/core/commands/machines/#show
     status_map = {
         'starting': status_lib.ClusterStatus.INIT,
         'restarting': status_lib.ClusterStatus.INIT,
         'upgrading': status_lib.ClusterStatus.INIT,
         'provisioning': status_lib.ClusterStatus.INIT,
-        'stopping': status_lib.ClusterStatus.INIT,
+        'stopping': status_lib.ClusterStatus.STOPPED,
         'serviceready': status_lib.ClusterStatus.INIT,
         'ready': status_lib.ClusterStatus.UP,
         'off': status_lib.ClusterStatus.STOPPED,

@@ -1,5 +1,4 @@
 """Azure."""
-import functools
 import os
 import re
 import subprocess
@@ -8,6 +7,7 @@ import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 
 import colorama
+from packaging import version as pversion
 
 from sky import clouds
 from sky import exceptions
@@ -16,7 +16,9 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import ux_utils
 
@@ -59,7 +61,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Azure(clouds.Cloud):
     """Azure."""
 
@@ -198,6 +200,18 @@ class Azure(clouds.Cloud):
             # not the image location. Marketplace image is globally available.
             region = 'eastus'
         publisher, offer, sku, version = image_id.split(':')
+        # Since the Azure SDK requires explicitly specifying the image version number,
+        # when the version is "latest," we need to manually query the current latest version.
+        # By querying the image size through a precise image version, while directly using the latest image version when creating a VM,
+        # there might be a difference in image information, and the probability of this occurring is very small.
+        if version == 'latest':
+            versions = compute_client.virtual_machine_images.list(
+                location=region,
+                publisher_name=publisher,
+                offer=offer,
+                skus=sku)
+            latest_version = max(versions, key=lambda x: pversion.parse(x.name))
+            version = latest_version.name
         try:
             image = compute_client.virtual_machine_images.get(
                 region, publisher, offer, sku, version)
@@ -302,6 +316,7 @@ class Azure(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Any]:
         assert zones is None, ('Azure does not support zones', zones)
 
@@ -560,7 +575,8 @@ class Azure(clouds.Cloud):
                                                     clouds='azure')
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='global',
+                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns the cloud user identity."""
         # This returns the user's email address + [subscription_id].

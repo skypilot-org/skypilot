@@ -93,7 +93,9 @@ class EnforceAutostopPolicy(sky.AdminPolicy):
         cluster_name = request_options.cluster_name
         cluster_records = []
         if cluster_name is not None:
-            cluster_records = sky.status(cluster_name, refresh=True)
+            cluster_records = sky.status(cluster_name,
+                                         refresh=True,
+                                         all_users=True)
 
         # Check if the user request should specify autostop settings.
         need_autostop = False
@@ -139,7 +141,7 @@ def update_current_kubernetes_clusters_from_registry():
 def get_allowed_contexts():
     """Mock implementation of getting allowed kubernetes contexts."""
     from sky.provision.kubernetes import utils
-    contexts = utils.get_all_kube_config_context_names()
+    contexts = utils.get_all_kube_context_names()
     return contexts[:2]
 
 

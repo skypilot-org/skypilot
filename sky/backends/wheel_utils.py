@@ -129,7 +129,11 @@ def _build_sky_wheel() -> pathlib.Path:
 
         wheel_dir = WHEEL_DIR / hash_of_latest_wheel
         wheel_dir.mkdir(parents=True, exist_ok=True)
-        shutil.move(str(wheel_path), wheel_dir)
+        # shutil.move will fail when the file already exists and is being
+        # moved across filesystems.
+        if not os.path.exists(
+                os.path.join(wheel_dir, os.path.basename(wheel_path))):
+            shutil.move(str(wheel_path), wheel_dir)
         return wheel_dir / wheel_path.name
 
 
@@ -149,7 +153,10 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         if not path.exists():
             return -1.
         try:
-            return max(os.path.getmtime(root) for root, _, _ in os.walk(path))
+            return max(
+                os.path.getmtime(os.path.join(root, f))
+                for root, dirs, files in os.walk(path)
+                for f in (*dirs, *files))
         except ValueError:
             return -1.
 

@@ -75,6 +75,7 @@ def _set_http_proxy_env_vars() -> None:
 
 
 _set_http_proxy_env_vars()
+
 # ----------------------------------------------------------------- #
 
 # Keep this order to avoid cyclic imports
@@ -85,39 +86,46 @@ from sky import clouds
 from sky.admin_policy import AdminPolicy
 from sky.admin_policy import MutatedUserRequest
 from sky.admin_policy import UserRequest
+from sky.client.sdk import api_cancel
+from sky.client.sdk import api_info
+from sky.client.sdk import api_server_logs
+from sky.client.sdk import api_start
+from sky.client.sdk import api_status
+from sky.client.sdk import api_stop
+from sky.client.sdk import autostop
+from sky.client.sdk import cancel
+from sky.client.sdk import cost_report
+from sky.client.sdk import down
+from sky.client.sdk import download_logs
+from sky.client.sdk import exec  # pylint: disable=redefined-builtin
+from sky.client.sdk import get
+from sky.client.sdk import job_status
+from sky.client.sdk import launch
+from sky.client.sdk import optimize
+from sky.client.sdk import queue
+from sky.client.sdk import start
+from sky.client.sdk import status
+from sky.client.sdk import stop
+from sky.client.sdk import storage_delete
+from sky.client.sdk import storage_ls
+from sky.client.sdk import stream_and_get
+from sky.client.sdk import tail_logs
 from sky.clouds.service_catalog import list_accelerators
-from sky.core import autostop
-from sky.core import cancel
-from sky.core import cost_report
-from sky.core import down
-from sky.core import download_logs
-from sky.core import job_status
-from sky.core import queue
-from sky.core import start
-from sky.core import status
-from sky.core import stop
-from sky.core import storage_delete
-from sky.core import storage_ls
-from sky.core import tail_logs
 from sky.dag import Dag
 from sky.data import Storage
 from sky.data import StorageMode
 from sky.data import StoreType
-from sky.execution import exec  # pylint: disable=redefined-builtin
-from sky.execution import launch
-# TODO (zhwu): These imports are for backward compatibility, and spot APIs
-# should be called with `sky.spot.xxx` instead. Remove in release 0.8.0
-from sky.jobs.core import spot_cancel
-from sky.jobs.core import spot_launch
-from sky.jobs.core import spot_queue
-from sky.jobs.core import spot_tail_logs
+from sky.jobs import ManagedJobStatus
 from sky.optimizer import Optimizer
-from sky.optimizer import OptimizeTarget
 from sky.resources import Resources
 from sky.skylet.job_lib import JobStatus
-from sky.skypilot_config import Config
-from sky.status_lib import ClusterStatus
 from sky.task import Task
+from sky.utils.common import OptimizeTarget
+from sky.utils.common import StatusRefreshMode
+from sky.utils.config_utils import Config
+from sky.utils.registry import CLOUD_REGISTRY
+from sky.utils.registry import JOBS_RECOVERY_STRATEGY_REGISTRY
+from sky.utils.status_lib import ClusterStatus
 
 # Aliases.
 IBM = clouds.IBM
@@ -132,9 +140,10 @@ K8s = Kubernetes
 OCI = clouds.OCI
 Paperspace = clouds.Paperspace
 RunPod = clouds.RunPod
+Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
-optimize = Optimizer.optimize
+Nebius = clouds.Nebius
 
 __all__ = [
     '__version__',
@@ -149,9 +158,11 @@ __all__ = [
     'OCI',
     'Paperspace',
     'RunPod',
+    'Vast',
     'SCP',
     'Vsphere',
     'Fluidstack',
+    'Nebius',
     'Optimizer',
     'OptimizeTarget',
     'backends',
@@ -163,14 +174,16 @@ __all__ = [
     'StoreType',
     'ClusterStatus',
     'JobStatus',
+    'ManagedJobStatus',
+    'StatusRefreshMode',
     # APIs
     'Dag',
     'Task',
     'Resources',
-    # execution APIs
+    # core APIs
+    'optimize',
     'launch',
     'exec',
-    'spot_launch',
     # core APIs
     'status',
     'start',
@@ -182,18 +195,26 @@ __all__ = [
     'queue',
     'cancel',
     'tail_logs',
-    'spot_tail_logs',
     'download_logs',
     'job_status',
-    # core APIs Spot Job Management
-    'spot_queue',
-    'spot_cancel',
     # core APIs Storage Management
     'storage_ls',
     'storage_delete',
+    # API server APIs
+    'get',
+    'stream_and_get',
+    'api_status',
+    'api_cancel',
+    'api_info',
+    'api_start',
+    'api_stop',
+    'api_server_logs',
     # Admin Policy
     'UserRequest',
     'MutatedUserRequest',
     'AdminPolicy',
     'Config',
+    # Registry
+    'CLOUD_REGISTRY',
+    'JOBS_RECOVERY_STRATEGY_REGISTRY',
 ]

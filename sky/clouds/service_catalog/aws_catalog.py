@@ -20,6 +20,7 @@ from sky.clouds.service_catalog.data_fetchers import fetch_aws
 from sky.utils import common_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -100,6 +101,7 @@ def _get_az_mappings(aws_user_hash: str) -> Optional['pd.DataFrame']:
     return az_mappings
 
 
+@timeline.event
 def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
     """Maps zone IDs (use1-az1) to zone names (us-east-1x).
 
@@ -126,7 +128,13 @@ def _fetch_and_apply_az_mapping(df: common.LazyDataFrame) -> 'pd.DataFrame':
         assert user_identity_list, user_identity_list
         user_identity = user_identity_list[0]
         aws_user_hash = hashlib.md5(user_identity.encode()).hexdigest()[:8]
-    except exceptions.CloudUserIdentityError:
+    except (exceptions.CloudUserIdentityError, ImportError):
+        # If failed to get user identity, or import aws dependencies, we use the
+        # latest mapping file or the default mapping file.
+        # The import error can happen on the client side when the user does not
+        # have AWS dependencies installed.
+        # TODO(zhwu): we should avoid the dependency of the availability zone
+        # mapping so as to get rid of the import error.
         glob_name = common.get_catalog_path('aws/az_mappings-*.csv')
         # Find the most recent file that matches the glob.
         # We check the existing files because the user could remove the

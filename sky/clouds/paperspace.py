@@ -8,6 +8,7 @@ import requests
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.provision.paperspace import utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -19,7 +20,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Paperspace(clouds.Cloud):
     """Paperspace GPU Cloud"""
 
@@ -175,6 +176,7 @@ class Paperspace(clouds.Cloud):
             cluster_name: resources_utils.ClusterName,
             region: 'clouds.Region',
             zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del zones, dryrun, cluster_name
 
@@ -257,7 +259,7 @@ class Paperspace(clouds.Cloud):
             return False, (
                 'Failed to access Paperspace Cloud with credentials.\n    '
                 'To configure credentials, follow the instructions at: '
-                'https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#paperspace\n    '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#paperspace\n    '
                 'Generate API key and create a json at `~/.paperspace/config.json` with \n     '
                 '    {"apiKey": "[YOUR API KEY]"}\n    '
                 f'Reason: {str(e)}')

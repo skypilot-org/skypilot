@@ -1,13 +1,17 @@
 file_mounts:
   # Mounting public buckets for AWS
+  {% if include_s3_mount | default(True) %}
   /mount_public_s3:
     source: s3://digitalcorpora
     mode: MOUNT
+  {% endif %}
 
   # Mounting public buckets for GCP
+  {% if include_gcs_mount | default(True) %}
   /mount_public_gcp:
     source: gs://gcp-public-data-sentinel-2
     mode: MOUNT
+  {% endif %}
 
   {% if include_azure_mount | default(True) %}
   # Mounting public buckets for Azure
@@ -20,13 +24,13 @@ file_mounts:
   /mount_private_copy:
     name: {{storage_name}}
     source: ~/tmp-workdir
-    mode: COPY
+    mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
 
   # Mounting private buckets in COPY mode with a list of files as source
   /mount_private_copy_lof:
     name: {{storage_name}}
     source: ['~/tmp-workdir/tmp file', '~/tmp-workdir/tmp file2']
-    mode: COPY
+    mode: {% if only_mount | default(false) %}MOUNT{% else %}COPY{% endif %}
 
   {% if include_private_mount | default(True) %}
   # Mounting private buckets in MOUNT mode
@@ -38,10 +42,14 @@ file_mounts:
 
 run: |
   set -ex
-  
+
   # Check public bucket contents
+  {% if include_s3_mount | default(True) %}
   ls -ltr /mount_public_s3/corpora
+  {% endif %}
+  {% if include_gcs_mount | default(True) %}
   ls -ltr /mount_public_gcp/tiles
+  {% endif %}
   {% if include_azure_mount | default(True) %}
   ls -ltr /mount_public_azure/green
   {% endif %}
@@ -55,12 +63,12 @@ run: |
   ls -ltr /mount_private_mount/foo
   ls -ltr /mount_private_mount/tmp\ file
   {% endif %}
-  
+
   # Symlinks are not copied to buckets
   ! ls /mount_private_copy/circle-link
   {% if include_private_mount | default(True) %}
   ! ls /mount_private_mount/circle-link
-  
+
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
   {% endif %}

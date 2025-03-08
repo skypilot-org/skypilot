@@ -29,4 +29,6 @@ run: |
   else
     sleep 5
     ps aux | grep ray | grep 6379 &> /dev/null || ray start --address $head_ip:6379 --disable-usage-stats
+    # Add sleep to after `ray start` to give ray enough time to daemonize 
+    sleep 5
   fi

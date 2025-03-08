@@ -18,11 +18,12 @@ from sky import skypilot_config
 from sky.clouds import service_catalog
 from sky.utils import log_utils
 from sky.utils import resources_utils
+from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources as resources_lib
-    from sky import status_lib
+    from sky.utils import status_lib
 
 
 class CloudImplementationFeatures(enum.Enum):
@@ -282,6 +283,7 @@ class Cloud:
         cluster_name: resources_utils.ClusterName,
         region: 'Region',
         zones: Optional[List['Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         """Converts planned sky.Resources to cloud-specific resource variables.
@@ -366,6 +368,7 @@ class Cloud:
         del label_key, label_value
         return True, None
 
+    @timeline.event
     def get_feasible_launchable_resources(
             self,
             resources: 'resources_lib.Resources',
@@ -532,6 +535,10 @@ class Cloud:
         Returns a dictionary that will be added to a task's file mounts.
         """
         raise NotImplementedError
+
+    def can_credential_expire(self) -> bool:
+        """Returns whether the cloud credential can expire."""
+        return False
 
     @classmethod
     def get_image_size(cls, image_id: str, region: Optional[str]) -> float:

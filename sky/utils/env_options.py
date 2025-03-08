@@ -1,6 +1,7 @@
 """Global environment options for sky."""
 import enum
 import os
+from typing import Dict
 
 
 class Options(enum.Enum):
@@ -11,6 +12,7 @@ class Options(enum.Enum):
     SHOW_DEBUG_INFO = ('SKYPILOT_DEBUG', False)
     DISABLE_LOGGING = ('SKYPILOT_DISABLE_USAGE_COLLECTION', False)
     MINIMIZE_LOGGING = ('SKYPILOT_MINIMIZE_LOGGING', True)
+    SUPPRESS_SENSITIVE_LOG = ('SKYPILOT_SUPPRESS_SENSITIVE_LOG', False)
     # Internal: this is used to skip the cloud user identity check, which is
     # used to protect cluster operations in a multi-identity scenario.
     # Currently, this is only used in the job and serve controller, as there
@@ -34,3 +36,8 @@ class Options(enum.Enum):
     def env_key(self) -> str:
         """The environment variable key name."""
         return self.value[0]
+
+    @classmethod
+    def all_options(cls) -> Dict[str, bool]:
+        """Returns all options as a dictionary."""
+        return {option.env_key: option.get() for option in list(Options)}

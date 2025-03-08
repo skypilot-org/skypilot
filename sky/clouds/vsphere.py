@@ -11,6 +11,7 @@ from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -24,7 +25,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Vsphere(clouds.Cloud):
     """Vsphere cloud"""
 
@@ -173,6 +174,7 @@ class Vsphere(clouds.Cloud):
         cluster_name: resources_utils.ClusterName,
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
+        num_nodes: int,
         dryrun: bool = False,
     ) -> Dict[str, Optional[str]]:
         # TODO get image id here.
@@ -265,7 +267,7 @@ class Vsphere(clouds.Cloud):
                 'Run the following commands:'
                 f'\n{cls._INDENT_PREFIX}  $ pip install skypilot[vSphere]'
                 f'\n{cls._INDENT_PREFIX}Credentials may also need to be set. '
-                'For more details. See https://skypilot.readthedocs.io/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
+                'For more details. See https://docs.skypilot.co/en/latest/getting-started/installation.html#vmware-vsphere'  # pylint: disable=line-too-long
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
         required_keys = ['name', 'username', 'password', 'clusters']

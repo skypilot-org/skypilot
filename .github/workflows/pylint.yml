@@ -21,15 +21,20 @@ jobs:
         python-version: ["3.8"]
     steps:
     - uses: actions/checkout@v3
-    - name: Set up Python ${{ matrix.python-version }}
-      uses: actions/setup-python@v4
+    - name: Install the latest version of uv
+      uses: astral-sh/setup-uv@v4
       with:
+        version: "latest"
         python-version: ${{ matrix.python-version }}
     - name: Install dependencies
       run: |
-        python -m pip install --upgrade pip
-        pip install ".[all]"
-        pip install pylint==$(grep 'pylint==' requirements-dev.txt | cut -d'=' -f3)
+        uv venv --seed ~/test-env
+        source ~/test-env/bin/activate
+        uv pip install --prerelease=allow "azure-cli>=2.65.0"
+        uv pip install ".[all]"
+        uv pip install pylint==3.2.7
+        uv pip install git+https://github.com/marekhanus/pylint-quotes.git@0.3.0a2
     - name: Analysing the code with pylint
       run: |
+        source ~/test-env/bin/activate
         pylint --load-plugins pylint_quotes sky
