@@ -505,7 +505,6 @@ def terminate_instances(
     vc_object.disconnect()
 
 
-
 def wait_instances(region: str, cluster_name: str,
                    state: Optional[status_lib.ClusterStatus]) -> None:
     """See sky/provision/__init__.py"""
