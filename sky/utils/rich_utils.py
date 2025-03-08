@@ -260,7 +260,7 @@ def decode_rich_status(
                 is_payload, line = message_utils.decode_payload(
                     line, raise_for_mismatch=False)
                 control = None
-                encoded_status = ""
+                encoded_status = ''
                 if is_payload:
                     control, encoded_status = Control.decode(line)
                 if control is None:
