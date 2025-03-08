@@ -32,4 +32,4 @@ jobs:
         pip install pylint==$(grep 'pylint==' requirements-dev.txt | cut -d'=' -f3)
     - name: Analysing the code with pylint
       run: |
-        pylint sky
+        pylint --load-plugins pylint_quotes sky

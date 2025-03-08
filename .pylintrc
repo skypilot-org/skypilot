@@ -432,3 +432,10 @@ valid-metaclass-classmethod-first-arg=mcs
 overgeneral-exceptions=builtins.StandardError,
                        builtins.Exception,
                        builtins.BaseException
+
+#######
+
+# https://github.com/edaniszewski/pylint-quotes#configuration
+string-quote=single
+triple-quote=double
+docstring-quote=double
