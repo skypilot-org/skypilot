@@ -15,12 +15,11 @@ import uuid
 
 import colorama
 import filelock
-import pydantic
-import requests
 
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.skylet import constants
@@ -31,7 +30,13 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import pydantic
+    import requests
+
     from sky import dag as dag_lib
+else:
+    pydantic = adaptors_common.LazyImport('pydantic')
+    requests = adaptors_common.LazyImport('requests')
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
@@ -145,7 +150,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def handle_request_error(response: requests.Response) -> None:
+def handle_request_error(response: 'requests.Response') -> None:
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -155,7 +160,7 @@ def handle_request_error(response: requests.Response) -> None:
                 f'{response.text}')
 
 
-def get_request_id(response: requests.Response) -> RequestId:
+def get_request_id(response: 'requests.Response') -> RequestId:
     handle_request_error(response)
     request_id = response.headers.get('X-Request-ID')
     if request_id is None:
@@ -398,7 +403,7 @@ def api_server_user_logs_dir_prefix(
     return API_SERVER_CLIENT_DIR / user_hash / 'sky_logs'
 
 
-def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
+def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
     return {
         k: v for k, v in body.model_dump(mode='json').items() if v is not None
     }

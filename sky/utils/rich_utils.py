@@ -6,15 +6,18 @@ import threading
 import typing
 from typing import Dict, Iterator, Optional, Tuple, Union
 
-import rich.console as rich_console
-
+from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
 from sky.utils import message_utils
+from sky.utils import rich_console_utils
 
 if typing.TYPE_CHECKING:
     import requests
+    import rich.console as rich_console
+else:
+    requests = adaptors_common.LazyImport('requests')
+    rich_console = adaptors_common.LazyImport('rich.console')
 
-console = rich_console.Console(soft_wrap=True)
 _statuses: Dict[str, Optional[Union['EncodedStatus',
                                     'rich_console.Status']]] = {
                                         'server': None,
@@ -219,7 +222,7 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _statuses['client'] is None:
-            _statuses['client'] = console.status(msg)
+            _statuses['client'] = rich_console_utils.get_console().status(msg)
         return _RevertibleStatus(msg, 'client')
     return _NoOpConsoleStatus()
 
