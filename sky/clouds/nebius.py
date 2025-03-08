@@ -254,7 +254,7 @@ class Nebius(clouds.Cloud):
         logging.debug('Nebius cloud check credentials')
         token = nebius.get_iam_token()
         token_msg = ('    Credentials can be set up by running: \n'
-                    f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n')  # pylint: disable=line-too-long
+                     f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n')  # pylint: disable=line-too-long
         tenant_msg = ('   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
                       f'        $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
                       '   Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
