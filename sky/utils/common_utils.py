@@ -263,12 +263,7 @@ def set_client_status(client_entrypoint: Optional[str],
     global _using_remote_api_server
     _current_command = client_command
     _current_client_entrypoint = client_entrypoint
-    if os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR) is not None:
-        _using_remote_api_server = os.getenv(
-            constants.USING_REMOTE_API_SERVER_ENV_VAR,
-            '').lower() in ('true', '1')
-    else:
-        _using_remote_api_server = using_remote_api_server
+    _using_remote_api_server = using_remote_api_server
 
 
 def get_current_command() -> str:
@@ -296,6 +291,9 @@ def get_current_client_entrypoint(server_entrypoint: str) -> str:
 
 def get_using_remote_api_server() -> bool:
     """Returns whether the API server is remote."""
+    if os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR) is not None:
+        return os.getenv(constants.USING_REMOTE_API_SERVER_ENV_VAR,
+                         '').lower() in ('true', '1')
     if _using_remote_api_server is not None:
         return _using_remote_api_server
     # This gets the right status for the local client.
