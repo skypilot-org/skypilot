@@ -314,7 +314,7 @@ def cost_report() -> List[Dict[str, Any]]:
         launched_nodes = cluster_report['num_nodes']
         launched_resources = cluster_report['resources']
 
-        cost = (launched_resources.get_cost(duration) * launched_nodes)
+        cost = launched_resources.get_cost(duration) * launched_nodes
         return cost
 
     for cluster_report in cluster_reports:

@@ -9,11 +9,12 @@ import threading
 import time
 import traceback
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple
 
 import colorama
 import psutil
 import requests
+import typing_extensions
 
 import sky
 from sky import backends
@@ -40,6 +41,9 @@ if typing.TYPE_CHECKING:
     from sky import resources
     from sky.serve import service_spec
 
+T = typing.TypeVar('T')
+P = typing_extensions.ParamSpec('P')
+R = typing.TypeVar('R')
 logger = sky_logging.init_logger(__name__)
 
 _JOB_STATUS_FETCH_INTERVAL = 30
@@ -194,10 +198,19 @@ def _should_use_spot(task_yaml: str,
     return len(spot_use_resources) == len(task.resources)
 
 
-def with_lock(func):
+class HasLock(Protocol):
+    lock: threading.Lock
+
+
+L = typing.TypeVar('L', bound=HasLock)
+
+
+def with_lock(
+    func: Callable[typing_extensions.Concatenate[L, P], R]
+) -> Callable[typing_extensions.Concatenate[L, P], R]:
 
     @functools.wraps(func)
-    def wrapper(self, *args, **kwargs):
+    def wrapper(self: L, *args: P.args, **kwargs: P.kwargs) -> R:
         with self.lock:
             return func(self, *args, **kwargs)
 
@@ -512,7 +525,7 @@ class ReplicaInfo:
                 logger.info(f'Error when probing {replica_identity}: '
                             'Cannot get the endpoint.')
                 return self, False, probe_time
-            readiness_path = (f'{url}{readiness_path}')
+            readiness_path = f'{url}{readiness_path}'
             logger.info(f'Probing {replica_identity} with {readiness_path}.')
             if post_data is not None:
                 msg += 'POST'
@@ -545,9 +558,9 @@ class ReplicaInfo:
                 f'{colorama.Style.RESET_ALL}')
         return self, False, probe_time
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]) -> None:
         """Set state from pickled state, for backward compatibility."""
-        version = state.pop('_version', None)
+        version: Optional[int] = state.pop('_version', None)
         # Handle old version(s) here.
         if version is None:
             version = -1
@@ -560,7 +573,7 @@ class ReplicaInfo:
         self.__dict__.update(state)
 
 
-class ReplicaManager:
+class ReplicaManager(HasLock):
     """Each replica manager monitors one service."""
 
     def __init__(self, service_name: str,
@@ -1032,8 +1045,9 @@ class SkyPilotReplicaManager(ReplicaManager):
             (2) the consecutive failure times.
         The replica will be terminated if any of the thresholds exceeded.
         """
-        probe_futures = []
-        replica_to_probe = []
+        # TODO(andyl): Define a TypeAlias for the return type of info.probe.
+        probe_futures: List[mp_pool.ApplyResult] = []
+        replica_to_probe: List[str] = []
         with mp_pool.ThreadPool() as pool:
             infos = serve_state.get_replica_infos(self._service_name)
             for info in infos:
@@ -1156,7 +1170,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         record = serve_state.get_service_from_name(self._service_name)
         assert record is not None, (f'{self._service_name} not found on '
                                     'controller records.')
-        ready_replica_urls = []
+        ready_replica_urls: List[str] = []
         active_versions = set(record['active_versions'])
         for info in serve_state.get_replica_infos(self._service_name):
             if (info.status == serve_state.ReplicaStatus.READY and

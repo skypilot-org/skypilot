@@ -9,6 +9,7 @@ import uuid
 import requests
 
 from sky.utils import annotations
+from sky.utils import common
 
 
 def get_key_suffix():
@@ -55,8 +56,10 @@ class FluidstackClient:
             os.path.expanduser(FLUIDSTACK_API_KEY_PATH)).strip()
 
     def get_plans(self):
-        response = requests.get(ENDPOINT + 'list_available_configurations',
-                                headers={'api-key': self.api_key})
+        response = requests.get(
+            ENDPOINT + 'list_available_configurations',
+            headers={'api-key': self.api_key},
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_fluidstack_error(response)
         plans = response.json()
         return plans
@@ -65,6 +68,7 @@ class FluidstackClient:
         response = requests.get(
             ENDPOINT + 'instances',
             headers={'api-key': self.api_key},
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
         )
         raise_fluidstack_error(response)
         instances = response.json()
@@ -104,9 +108,11 @@ class FluidstackClient:
                         name=name,
                         ssh_key=ssh_key['name'])
 
-            response = requests.post(ENDPOINT + 'instances',
-                                     headers={'api-key': self.api_key},
-                                     json=body)
+            response = requests.post(
+                ENDPOINT + 'instances',
+                headers={'api-key': self.api_key},
+                json=body,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
             raise_fluidstack_error(response)
             instance_id = response.json().get('id')
             instance_ids.append(instance_id)
@@ -115,8 +121,10 @@ class FluidstackClient:
         return instance_ids
 
     def list_ssh_keys(self):
-        response = requests.get(ENDPOINT + 'ssh_keys',
-                                headers={'api-key': self.api_key})
+        response = requests.get(
+            ENDPOINT + 'ssh_keys',
+            headers={'api-key': self.api_key},
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_fluidstack_error(response)
         return response.json()
 
@@ -132,6 +140,7 @@ class FluidstackClient:
             ENDPOINT + 'ssh_keys',
             headers={'api-key': self.api_key},
             json=dict(name=ssh_key_name, public_key=ssh_pub_key),
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
         )
         raise_fluidstack_error(response)
         return {'name': ssh_key_name, 'ssh_key': ssh_pub_key}
@@ -152,14 +161,18 @@ class FluidstackClient:
         return regions
 
     def delete(self, instance_id: str):
-        response = requests.delete(ENDPOINT + 'instances/' + instance_id,
-                                   headers={'api-key': self.api_key})
+        response = requests.delete(
+            ENDPOINT + 'instances/' + instance_id,
+            headers={'api-key': self.api_key},
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_fluidstack_error(response)
         return response.json()
 
     def stop(self, instance_id: str):
-        response = requests.put(ENDPOINT + 'instances/' + instance_id + '/stop',
-                                headers={'api-key': self.api_key})
+        response = requests.put(
+            ENDPOINT + 'instances/' + instance_id + '/stop',
+            headers={'api-key': self.api_key},
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_fluidstack_error(response)
         return response.json()
 
@@ -168,6 +181,7 @@ class FluidstackClient:
             ENDPOINT + f'instances/{instance_id}/rename',
             headers={'api-key': self.api_key},
             json=dict(new_instance_name=name),
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS,
         )
         raise_fluidstack_error(response)
         return response.json()

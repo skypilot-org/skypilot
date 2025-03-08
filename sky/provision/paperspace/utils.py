@@ -9,6 +9,7 @@ import requests
 
 from sky import sky_logging
 import sky.provision.paperspace.constants as constants
+from sky.utils import common
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -53,15 +54,34 @@ def _try_request_with_backoff(
                                    max_backoff_factor=MAX_BACKOFF_FACTOR)
     for i in range(MAX_ATTEMPTS):
         if method == 'get':
-            response = requests.get(url, headers=headers, params=data)
+            response = requests.get(
+                url,
+                headers=headers,
+                params=data,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         elif method == 'post':
-            response = requests.post(url, headers=headers, data=data)
+            response = requests.post(
+                url,
+                headers=headers,
+                data=data,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         elif method == 'put':
-            response = requests.put(url, headers=headers, data=data)
+            response = requests.put(
+                url,
+                headers=headers,
+                data=data,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         elif method == 'patch':
-            response = requests.patch(url, headers=headers, data=data)
+            response = requests.patch(
+                url,
+                headers=headers,
+                data=data,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         elif method == 'delete':
-            response = requests.delete(url, headers=headers)
+            response = requests.delete(
+                url,
+                headers=headers,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         else:
             raise ValueError(f'Unsupported requests method: {method}')
         # If rate limited, wait and try again

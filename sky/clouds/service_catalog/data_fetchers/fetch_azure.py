@@ -15,6 +15,7 @@ import numpy as np
 import requests
 
 from sky.adaptors import common as adaptors_common
+from sky.utils import common
 
 if typing.TYPE_CHECKING:
     import pandas as pd
@@ -129,7 +130,8 @@ def get_pricing_df(region: Optional[str] = None) -> 'pd.DataFrame':
         page += 1
         if page % 10 == 0:
             print(f'Fetched pricing pages {page}')
-        r = requests.get(url)
+        r = requests.get(url,
+                         timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         r.raise_for_status()
         content_str = r.content.decode('ascii')
         content = json.loads(content_str)

@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Optional, Union
+from typing import Coroutine, Dict, List, NoReturn, Optional, Union
 
 import aiohttp
 import fastapi
@@ -69,7 +69,7 @@ class SkyServeLoadBalancer:
         # updating it from _sync_with_controller.
         self._client_pool_lock: threading.Lock = threading.Lock()
 
-    async def _sync_with_controller(self):
+    async def _sync_with_controller(self) -> NoReturn:
         """Sync with controller periodically.
 
         Every `constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS` seconds, the
@@ -82,7 +82,7 @@ class SkyServeLoadBalancer:
         await asyncio.sleep(5)
 
         while True:
-            close_client_tasks = []
+            close_client_tasks: List[Coroutine[None, None, None]] = []
             async with aiohttp.ClientSession() as session:
                 try:
                     # Send request information
@@ -115,7 +115,7 @@ class SkyServeLoadBalancer:
                                     httpx.AsyncClient(base_url=replica_url))
                         urls_to_close = set(
                             self._client_pool.keys()) - set(ready_replica_urls)
-                        client_to_close = []
+                        client_to_close: List[httpx.AsyncClient] = []
                         for replica_url in urls_to_close:
                             client_to_close.append(
                                 self._client_pool.pop(replica_url))

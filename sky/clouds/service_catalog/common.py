@@ -14,6 +14,7 @@ from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
 from sky.clouds.service_catalog import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import registry
 from sky.utils import rich_utils
@@ -205,8 +206,10 @@ def read_catalog(filename: str,
                             f'Updating {cloud} catalog: {filename}') +
                         f'{update_frequency_str}'):
                     try:
-                        r = requests.get(url=url,
-                                         headers={'User-Agent': 'SkyPilot/0.7'})
+                        r = requests.get(
+                            url=url,
+                            headers={'User-Agent': 'SkyPilot/0.7'},
+                            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
                         r.raise_for_status()
                     except requests.exceptions.RequestException as e:
                         error_str = (f'Failed to fetch {cloud} catalog '
@@ -291,7 +294,7 @@ def validate_region_zone_impl(
         filter_df = _filter_region_zone(filter_df, region, zone=None)
         if filter_df.empty:
             with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid region {region!r}')
+                error_msg = f'Invalid region {region!r}'
                 candidate_strs = _get_candidate_str(
                     region.lower(), df['Region'].str.lower().unique())
                 if not candidate_strs:
@@ -317,7 +320,7 @@ def validate_region_zone_impl(
             region_str = f' for region {region!r}' if region else ''
             df = maybe_region_df if region else df
             with ux_utils.print_exception_no_traceback():
-                error_msg = (f'Invalid zone {zone!r}{region_str}')
+                error_msg = f'Invalid zone {zone!r}{region_str}'
                 error_msg += _get_candidate_str(
                     zone, maybe_region_df['AvailabilityZone'].unique())
                 raise ValueError(error_msg)

@@ -175,13 +175,13 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                     if git_exclude_exists:
                         # removes all the files/dirs created with 'git init'
                         # under .git/ except .git/info/exclude
-                        remove_files_cmd = (f'find {expand_src_dir_path}' \
-                                            f'/.git -path {git_exclude_path}' \
-                                            ' -prune -o -type f -exec rm -f ' \
+                        remove_files_cmd = (f'find {expand_src_dir_path}'
+                                            f'/.git -path {git_exclude_path}'
+                                            ' -prune -o -type f -exec rm -f '
                                             '{} +')
-                        remove_dirs_cmd = (f'find {expand_src_dir_path}' \
-                                        f'/.git -path {git_exclude_path}' \
-                                        ' -o -type d -empty -delete')
+                        remove_dirs_cmd = (f'find {expand_src_dir_path}'
+                                           f'/.git -path {git_exclude_path}'
+                                           ' -o -type d -empty -delete')
                         subprocess.run(remove_files_cmd,
                                        shell=True,
                                        stdout=subprocess.PIPE,
