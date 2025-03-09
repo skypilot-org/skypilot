@@ -694,6 +694,13 @@ def write_cluster_config(
     conda_auto_activate = ('true' if to_provision.extract_docker_image() is None
                            else 'false')
 
+    # Here, if users specify the controller to be high availability, we will
+    # provision a high availability controller. Whether the cloud supports
+    # this feature has been checked by
+    # CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS
+    high_availability_specified = controller_utils.high_availability_specified(
+        cluster_name_on_cloud)
+
     # Use a tmp file path to avoid incomplete YAML file being re-used in the
     # future.
     tmp_yaml_path = yaml_path + '.tmp'
@@ -777,6 +784,9 @@ def write_cluster_config(
                 'sky_wheel_hash': wheel_hash,
                 # Authentication (optional).
                 **auth_config,
+
+                # High availability
+                'high_availability': high_availability_specified,
             }),
         output_path=tmp_yaml_path)
     config_dict['cluster_name'] = cluster_name
@@ -789,8 +799,12 @@ def write_cluster_config(
             cluster_config_overrides=to_provision.cluster_config_overrides)
         kubernetes_utils.combine_metadata_fields(tmp_yaml_path)
         yaml_obj = common_utils.read_yaml(tmp_yaml_path)
-        pod_config = yaml_obj['available_node_types']['ray_head_default'][
-            'node_config']
+        pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
+            'ray_head_default']['node_config']
+
+        # Check pod spec only. Read kubernetes-ray.yml.j2 for more details.
+        pod_config.pop('deployment_spec', None)
+        pod_config.pop('pvc_spec', None)
         valid, message = kubernetes_utils.check_pod_config(pod_config)
         if not valid:
             raise exceptions.InvalidCloudConfigs(

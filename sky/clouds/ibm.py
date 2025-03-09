@@ -50,6 +50,8 @@ class IBM(clouds.Cloud):
                 ),
             clouds.CloudImplementationFeatures.OPEN_PORTS:
                 (f'Opening ports is currently not supported on {cls._REPR}.'),
+            clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+                ('High availability controllers are not supported on IBM.'),
         }
         if resources.use_spot:
             features[clouds.CloudImplementationFeatures.STOP] = (
