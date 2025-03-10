@@ -64,8 +64,11 @@ UPGRADE_REMOTE_SERVER_HINT = (
     'Please refer to the following link to upgrade your server:\n'
     f'{colorama.Style.RESET_ALL}'
     f'{colorama.Style.DIM}'
-    'https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html'
+    'https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html'  # pylint: disable=line-too-long
     f'{colorama.Style.RESET_ALL}')
+# Local API version number.
+_LOCAL_API_VERSION: int = int(server_constants.API_VERSION)
+
 RequestId = str
 ApiVersion = Optional[str]
 
@@ -265,14 +268,16 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
     api_server_info = get_api_server_status(endpoint)
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
-        sv, cv = api_server_info.api_version, server_constants.API_VERSION
+        sv, cv = api_server_info.api_version, _LOCAL_API_VERSION
         assert sv is not None, 'API server version is None'
         try:
-            server_is_older = int(sv) < int(cv)
+            server_is_older = int(sv) < _LOCAL_API_VERSION
         except ValueError:
-            # Raised when the server version is not a numeric. A safe
-            # assumption is that our client is older since we never used
-            # a non-numeric API version before.
+            # Raised when the server version using an unknown scheme.
+            # Version compatibility checking is expected to handle all legacy
+            # cases so we assume the server is newer when the version scheme
+            # is unknown.
+            logger.debug('API server version using unknown scheme: %s', sv)
             server_is_older = False
         if server_is_older:
             if is_api_server_local():
