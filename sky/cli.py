@@ -3943,10 +3943,16 @@ def jobs_launch(
               is_flag=True,
               required=False,
               help='Show jobs from all users.')
+@click.option('--all',
+              '-a',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Show all jobs.')
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
-               all_users: bool):
+               all_users: bool, all: bool):
     """Show statuses of managed jobs.
 
     Each managed jobs can have one of the following statuses:
@@ -4007,6 +4013,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
         _, msg = _handle_jobs_queue_request(managed_jobs_request_id,
                                             show_all=verbose,
                                             show_user=all_users,
+                                            limit_num_jobs_to_show=not all,
                                             is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
@@ -4015,7 +4022,11 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Managed jobs{colorama.Style.RESET_ALL}'
                f'{in_progress_only_hint}\n{msg}')
-
+    if not all:
+        click.echo(f'{colorama.Fore.CYAN}'
+                   f'Only showing the latest {_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} '
+                   f'managed jobs'
+                   f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
