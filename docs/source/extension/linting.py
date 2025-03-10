@@ -98,8 +98,8 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
         # Split on whitespace, preserving punctuation with words
         words = re.findall(r'\S+', heading)
         step_pattern = re.compile(r'^step$', re.IGNORECASE)
-        number_colon = re.compile(
-            r'^\d+[:-]$')  # Matches digits followed by : or -
+        number_pattern = re.compile(
+            r'^\d+[:\-.]$')  # Matches digits followed by : or - or .
         identifier_pattern = re.compile(
             r'^[A-Za-z0-9]+$', re.IGNORECASE)  # Alphanumeric identifier
         punctuation_pattern = re.compile(
@@ -116,11 +116,15 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
 
             # Check for step pattern: "Step [identifier][punctuation?] [word]"
             if ((i >= 2 and step_pattern.match(words[i - 2]) and
-                 (number_colon.match(words[i - 1]) or
+                 (number_pattern.match(words[i - 1]) or
                   identifier_pattern.match(words[i - 1]))) or
                 (i >= 3 and step_pattern.match(words[i - 3]) and
                  identifier_pattern.match(words[i - 2]) and
                  punctuation_pattern.match(words[i - 1]))):
+                continue
+
+            # Check if previous word is a number with punctuation
+            if i >= 1 and number_pattern.match(words[i - 1]):
                 continue
 
             # Allow version numbers and hyphens
