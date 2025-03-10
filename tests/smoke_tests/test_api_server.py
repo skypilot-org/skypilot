@@ -51,7 +51,7 @@ def test_multi_tenant(generic_cloud: str):
         [
             'echo "==== Test multi-tenant job on single cluster ===="',
             *set_user(user_1, user_1_name, [
-                f'sky launch -y -c {name}-1 --cloud {generic_cloud} --cpus 2+ -n job-1 tests/test_yamls/minimal.yaml',
+                f'sky launch -y -c {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-1 tests/test_yamls/minimal.yaml',
                 f's=$(sky queue {name}-1) && echo "$s" && echo "$s" | grep job-1 | grep SUCCEEDED | awk \'{{print $1}}\' | grep 1',
                 f's=$(sky queue -u {name}-1) && echo "$s" && echo "$s" | grep {user_1_name} | grep job-1 | grep SUCCEEDED',
             ]),
@@ -67,7 +67,7 @@ def test_multi_tenant(generic_cloud: str):
                 user_2,
                 user_2_name,
                 [
-                    f'sky launch -y -c {name}-2 --cloud {generic_cloud} --cpus 2+ -n job-3 tests/test_yamls/minimal.yaml',
+                    f'sky launch -y -c {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n job-3 tests/test_yamls/minimal.yaml',
                     f's=$(sky status {name}-2) && echo "$s" && echo "$s" | grep UP',
                     # sky status should not show other clusters from other users.
                     f's=$(sky status) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
@@ -109,14 +109,14 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
         [
             'echo "==== Test multi-tenant managed jobs ===="',
             *set_user(user_1, user_1_name, [
-                f'sky jobs launch -n {name}-1 --cloud {generic_cloud} --cpus 2+ tests/test_yamls/minimal.yaml -y',
+                f'sky jobs launch -n {name}-1 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
             ]),
             *set_user(user_2, user_2_name, [
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-1 && exit 1 || true',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_1_name} | grep {name}-1 | grep SUCCEEDED',
-                f'sky jobs launch -n {name}-2 --cloud {generic_cloud} --cpus 2+ tests/test_yamls/minimal.yaml -y',
+                f'sky jobs launch -n {name}-2 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml -y',
                 f's=$(sky jobs queue) && echo "$s" && echo "$s" | grep {name}-2 | grep SUCCEEDED',
                 f's=$(sky jobs queue -u) && echo "$s" && echo "$s" | grep {user_2_name} | grep {name}-2 | grep SUCCEEDED',
             ]),
@@ -124,7 +124,7 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
             f's=$(sky status -u) && echo "$s" && echo "$s" | grep sky-jobs-controller- | grep -v {user_1_name} | grep -v {user_2_name}',
             'echo "==== Test controller down blocked by other users ===="',
             *set_user(user_1, user_1_name, [
-                f'sky jobs launch -n {name}-3 --cloud {generic_cloud} --cpus 2+ -y -d sleep 1000',
+                f'sky jobs launch -n {name}-3 --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -y -d sleep 1000',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f'{name}-3',
@@ -142,5 +142,6 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
             ]),
         ],
         f'sky jobs cancel -y -n {name}-1; sky jobs cancel -y -n {name}-2; sky jobs cancel -y -n {name}-3',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
