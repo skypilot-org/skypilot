@@ -8,7 +8,7 @@ sys.path.insert(0, os.path.abspath('.'))
 sys.path.insert(0, os.path.abspath('../'))
 sys.path.insert(0, os.path.abspath('../../'))
 
-import prepare_github_markdown
+import generate_examples
 
 # -- Project information
 
@@ -37,6 +37,7 @@ extensions = [
     'sphinx_autodoc_typehints',
     'sphinx_click',
     'sphinx_copybutton',
+    "sphinx_togglebutton",  # Used for collapsible sections in examples.
     'sphinxcontrib.googleanalytics',
     'sphinxemoji.sphinxemoji',
     'sphinx_design',
@@ -44,6 +45,13 @@ extensions = [
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
     'extension.linting',
+]
+# Needed for admonitions in markdown:
+# https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html
+myst_enable_extensions = [
+    "colon_fence",
+    # Converts http links to clickable links in HTML output.
+    "linkify",
 ]
 
 intersphinx_mapping = {
@@ -169,18 +177,50 @@ html_css_files = ['custom.css']
 myst_heading_anchors = 7
 show_sphinx = False
 
-exclude_patterns = ['_gallery_original']
+exclude_patterns = [
+    '_gallery_original',
+    'generated-examples',
+]
 myst_heading_anchors = 3
+myst_url_schemes = {
+    'http': None,
+    'https': None,
+    'mailto': None,
+    'ftp': None,
+    'local': {
+        'url': '{{path}}',
+        'title': '{{path}}',
+    },
+    'gh-issue': {
+        'url': 'https://github.com/skypilot-org/skypilot/issues/{{path}}#{{fragment}}',
+        'title': 'Issue #{{path}}',
+        'classes': ['github'],
+    },
+    'gh-pr': {
+        'url': 'https://github.com/skypilot-org/skypilot/pull/{{path}}#{{fragment}}',
+        'title': 'Pull Request #{{path}}',
+        'classes': ['github'],
+    },
+    'gh-dir': {
+        'url': 'https://github.com/skypilot-org/skypilot/tree/master/{{path}}',
+        'title': '{{path}}',
+        'classes': ['github'],
+    },
+    'gh-file': {
+        'url': 'https://github.com/skypilot-org/skypilot/blob/master/{{path}}',
+        'title': '{{path}}',
+        'classes': ['github'],
+    },
+}
 
 googleanalytics_id = 'G-92WF3MDCJV'
 
 autosectionlabel_prefix_document = True
 
-suppress_warnings = [
-    'autosectionlabel.*',
-]
+suppress_warnings = ['autosectionlabel.*']
 
 
 def setup(app):
-    app.connect('builder-inited',
-                prepare_github_markdown.handle_markdown_in_gallery)
+    # Run generate_examples directly during setup instead of connecting to builder-inited
+    # This ensures it completes fully before any build steps start
+    generate_examples.generate_examples(app)

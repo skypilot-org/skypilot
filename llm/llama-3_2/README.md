@@ -2,7 +2,7 @@
 <!-- $REMOVE -->
 # Point, Launch, and Serve Vision Llama 3.2 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Vision Llama 3.2 (Meta) -->
+<!-- $UNCOMMENT# Vision Llama 3.2 -->
 
 
 [Llama 3.2](https://ai.meta.com/blog/llama-3-2-connect-2024-vision-edge-mobile-devices/) family was released by Meta on Sep 25, 2024. It not only includes the latest improved (and smaller) LLM models for chat, but also includes multimodal vision-language models. Let's _point and launch_ it with SkyPilot.

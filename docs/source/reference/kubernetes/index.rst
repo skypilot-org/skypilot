@@ -39,7 +39,7 @@ Why use SkyPilot on Kubernetes?
             .. grid-item-card::  🖼 Run popular models on Kubernetes
                 :text-align: center
 
-                Train and serve `Llama-3 <https://docs.skypilot.co/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://docs.skypilot.co/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`AI gallery <ai-gallery>`.
+                Train and serve `Llama-3 <https://docs.skypilot.co/en/latest/gallery/llms/llama-3.html>`_, `Mixtral <https://docs.skypilot.co/en/latest/gallery/llms/mixtral.html>`_, and more on your Kubernetes with ready-to-use recipes from the :ref:`Examples <examples>`.
 
 
     .. tab-item:: For Infrastructure Admins
@@ -105,3 +105,4 @@ Table of Contents
    kubernetes-troubleshooting
    multi-kubernetes
    SkyPilot vs. Vanilla Kubernetes <skypilot-and-vanilla-k8s>
+   Examples <examples/index>

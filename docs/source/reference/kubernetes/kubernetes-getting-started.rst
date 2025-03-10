@@ -3,6 +3,25 @@
 Getting Started on Kubernetes
 =============================
 
+Quickstart
+----------
+Have a kubeconfig? Get started with SkyPilot in 3 commands:
+
+.. code-block:: bash
+
+   # Install dependencies
+   $ brew install kubectl socat netcat  
+   # Linux: sudo apt-get install kubectl socat netcat
+
+   # With a valid kubeconfig at ~/.kube/config, run:
+   $ sky check  
+   # Shows "Kubernetes: enabled"
+
+   # Launch your SkyPilot cluster
+   $ sky launch --cpus 2+ -- echo hi
+
+For detailed instructions, prerequisites, and advanced features, read on.
+
 Prerequisites
 -------------
 
@@ -281,25 +300,6 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
                   rdma/rdma_shared_device_a: 1
 
 
-Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) directly to your SkyPilot pods:
-
-.. code-block:: yaml
-
-    # ~/.sky/config.yaml
-    kubernetes:
-      pod_config:
-        spec:
-          containers:
-            - volumeMounts:       # Custom volume mounts for the pod
-                - mountPath: /data
-                  name: nfs-volume
-          volumes:
-            - name: nfs-volume
-              nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
-                server: nfs.example.com
-                path: /nfs
-
-
 .. tip::
 
     As an alternative to setting ``pod_config`` globally, you can also set it on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <task-yaml-experimental>`.
@@ -317,14 +317,40 @@ Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concep
              ...
 
 
+Mounting volumes
+----------------
+
+Using the ``pod_config`` field, you can also attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) to your SkyPilot pods directly from the task YAML:
+
+.. code-block:: yaml
+
+    # task.yaml
+    run: |
+      echo "Hello, world!" > /nfs/hello.txt
+
+    experimental:
+      config_overrides:
+        pod_config:
+          spec:
+            containers:
+              - volumeMounts:       # Custom volume mounts for the pod
+                  - mountPath: /data
+                    name: nfs-volume
+            volumes:
+              - name: nfs-volume
+                nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
+                  server: nfs.example.com
+                  path: /nfs
+
+
 FAQs
 ----
 
 * **Can I use multiple Kubernetes clusters with SkyPilot?**
 
-  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+  SkyPilot can work with multiple Kubernetes contexts in your kubeconfig file by setting the ``allowed_contexts`` key in :code:`~/.sky/config.yaml`. See :ref:`multi-kubernetes`.
 
-  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+  If ``allowed_contexts`` is not set, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
 
 * **Are autoscaling Kubernetes clusters supported?**
 

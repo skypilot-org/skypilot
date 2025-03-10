@@ -93,7 +93,7 @@ SKYLET_VERSION = '12'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 2
+SKYLET_LIB_VERSION = 3
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related
@@ -144,12 +144,14 @@ DISABLE_GPU_ECC_COMMAND = (
 CONDA_INSTALLATION_COMMANDS = (
     'which conda > /dev/null 2>&1 || '
     '{ '
-    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-x86_64.sh -o Miniconda3-Linux-x86_64.sh && '  # pylint: disable=line-too-long
+    # Use uname -m to get the architecture of the machine and download the
+    # corresponding Miniconda3-Linux.sh script.
+    'curl https://repo.anaconda.com/miniconda/Miniconda3-py310_23.11.0-2-Linux-$(uname -m).sh -o Miniconda3-Linux.sh && '  # pylint: disable=line-too-long
     # We do not use && for installation of conda and the following init commands
     # because for some images, conda is already installed, but not initialized.
     # In this case, we need to initialize conda and set auto_activate_base to
     # true.
-    '{ bash Miniconda3-Linux-x86_64.sh -b; '
+    '{ bash Miniconda3-Linux.sh -b; '
     'eval "$(~/miniconda3/bin/conda shell.bash hook)" && conda init && '
     # Caller should replace {conda_auto_activate} with either true or false.
     'conda config --set auto_activate_base {conda_auto_activate} && '
@@ -265,6 +267,12 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
+
+# Internal: Env var indicating the system is running with a remote API server.
+# It is used for internal purposes, including the jobs controller to mark
+# clusters as launched with a remote API server.
+USING_REMOTE_API_SERVER_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}USING_REMOTE_API_SERVER')
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
