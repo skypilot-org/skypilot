@@ -49,65 +49,49 @@ class TestBackwardCompatibility:
         """Class-wide setup fixture for environment preparation"""
         self.generic_cloud = session_cloud
 
+        def _run_cmd(cmd: str):
+            subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+
         # Install gcloud if missing
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
-            subprocess.run(self.GCLOUD_INSTALL_CMD, shell=True, check=True)
+            _run_cmd(self.GCLOUD_INSTALL_CMD)
 
         # Install uv if missing
         if subprocess.run('~/.local/bin/uv --version', shell=True,
                           check=False).returncode != 0:
-            subprocess.run(self.UV_INSTALL_CMD, shell=True, check=True)
+            _run_cmd(self.UV_INSTALL_CMD)
 
         # Clone base SkyPilot version
         if self.BASE_SKY_DIR.exists():
-            subprocess.run(
-                f'rm -rf {self.BASE_SKY_DIR}',
-                shell=True,
-                check=True,
-            )
-        subprocess.run(
+            _run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
+
+        _run_cmd(
             f'git clone -b {self.BASE_BRANCH} '
             f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
-            shell=True,
-            check=True,
         )
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
             if not env_dir.exists():
-                subprocess.run(
-                    f'~/.local/bin/uv venv --seed --python=3.9 {env_dir}',
-                    shell=True,
-                    check=True,
-                )
+                _run_cmd(f'~/.local/bin/uv venv --seed --python=3.9 {env_dir}',)
 
         # Install dependencies in base environment
-        subprocess.run(
+        _run_cmd(
             f'{self.ACTIVATE_BASE} && '
             '~/.local/bin/uv pip uninstall skypilot && '
             '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
-            '~/.local/bin/uv pip install -e .[all]',
-            shell=True,
-            check=True,
-        )
+            '~/.local/bin/uv pip install -e .[all]',)
 
         # Install current version in current environment
-        subprocess.run(
+        _run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
             '~/.local/bin/uv pip uninstall skypilot && '
             '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
-            '~/.local/bin/uv pip install -e .[all]',
-            shell=True,
-            check=True,
-        )
+            '~/.local/bin/uv pip install -e .[all]',)
 
         # Teardown function to stop sky api at the end of the session
         yield
-        subprocess.run(
-            f'cd {self.CURRENT_SKY_DIR} && sky api stop',
-            shell=True,
-            check=True,
-        )
+        _run_cmd(f'cd {self.CURRENT_SKY_DIR} && sky api stop',)
 
     def run_compatibility_test(self, test_name: str, commands: list,
                                teardown: str):
