@@ -64,12 +64,46 @@ UPGRADE_REMOTE_SERVER_HINT = (
     'Please refer to the following link to upgrade your server:\n'
     f'{colorama.Style.RESET_ALL}'
     f'{colorama.Style.DIM}'
-    'https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html'
+    'https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html' # pylint: disable=line-too-long
     f'{colorama.Style.RESET_ALL}')
 RequestId = str
-ApiVersion = Optional[str]
 
 logger = sky_logging.init_logger(__name__)
+
+
+@dataclasses.dataclass
+@functools.total_ordering
+class ApiVersion:
+    '''API version of SkyPilot client/server.
+
+    SkyPilot processes may use different API versions. This class is used to
+    compare the API versions and check if they are compatible. Note that not
+    only the version number but also the scheme of the version string might
+    evolve. So exception should be explicitly handled when parsing a remote
+    version.
+
+    Raises:
+        ValueError: If the given version string is using unknown scheme of
+        current process.
+    '''
+    major: int
+
+    def __init__(self, version: str):
+        self.major = int(version)
+
+
+    def __lt__(self, other: 'ApiVersion') -> bool:
+        return self.major < other.major
+
+    def __eq__(self, other: 'ApiVersion') -> bool:
+        return self.major == other.major
+    
+    def compabile_with(self, other: 'ApiVersion') -> bool:
+        return self == other
+
+
+# Current API version of the local running process.
+_local_version = ApiVersion(server_constants.API_VERSION)
 
 
 class ApiServerStatus(enum.Enum):
@@ -77,11 +111,10 @@ class ApiServerStatus(enum.Enum):
     UNHEALTHY = 'unhealthy'
     VERSION_MISMATCH = 'version_mismatch'
 
-
 @dataclasses.dataclass
 class ApiServerInfo:
     status: ApiServerStatus
-    api_version: ApiVersion
+    api_version: Optional[ApiVersion]
 
 
 @annotations.lru_cache(scope='global')
@@ -132,12 +165,20 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
                                        f'not be running SkyPilot API server.')
                         return ApiServerInfo(status=ApiServerStatus.UNHEALTHY,
                                              api_version=None)
-                    if api_version == server_constants.API_VERSION:
+                    try:
+                        server_version = ApiVersion(api_version)
+                    except ValueError:
+                        logger.warning('API server response unknown version '
+                                       f'info {api_version}. Upgrade SkyPilot '
+                                       'client and retry.')
+                        return ApiServerInfo(status=ApiServerStatus.VERSION_MISMATCH,
+                                             api_version=None)
+                    if server_version.compabile_with(_local_version):
                         return ApiServerInfo(status=ApiServerStatus.HEALTHY,
                                              api_version=api_version)
                     return ApiServerInfo(
                         status=ApiServerStatus.VERSION_MISMATCH,
-                        api_version=api_version)
+                        api_version=server_version)
                 except (json.JSONDecodeError, AttributeError) as e:
                     logger.warning('Failed to parse API server response: '
                                    f'{str(e)}')
@@ -265,8 +306,9 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
     api_server_info = get_api_server_status(endpoint)
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
-        sv, cv = api_server_info.api_version, server_constants.API_VERSION
-        assert sv is not None, 'API server version is None'
+        assert api_server_info.api_version is not None, 'API server version is None'
+        try:
+            remote_version = ApiVersion()
         try:
             server_is_older = int(sv) < int(cv)
         except ValueError:
