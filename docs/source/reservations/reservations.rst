@@ -15,7 +15,7 @@ utilize the capacity in your cloud accounts.
   :align: center
 
 
-AWS Capacity Reservations & Capacity Blocks
+AWS capacity reservations & capacity blocks
 --------------------------------------------
 
 AWS **capacity reservations** and **capacity blocks** are ways to reserve a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s (P4d instances) and H100s (P5d instances), while the former is for all other instance types.
@@ -60,7 +60,7 @@ For more details of the fields, see :ref:`config-yaml`.
 
 .. _utilizing-reservations:
 
-Utilizing Reservations
+Utilizing reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
 By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
@@ -124,10 +124,10 @@ Example:
 SkyPilot will utilize the reservations similar to AWS reservations as described in :ref:`utilizing-reservations`.
 
 
-GCP Dynamic Workload Scheduler (DWS)
+GCP dynamic workload scheduler (DWS)
 -------------------------------------
 
-GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that (1) receives a GPU capacity request, (2) automatically provisions the requested resources when they become available, and (3) keeps the resources running for a specified duration.
+GCP `dynamic workload scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that (1) receives a GPU capacity request, (2) automatically provisions the requested resources when they become available, and (3) keeps the resources running for a specified duration.
 
 .. tip::
 
@@ -207,4 +207,3 @@ Unlike short-term reservations above, long-term reservations are typically more 
 SkyPilot supports long-term reservations and on-premise clusters through Kubernetes, i.e., you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
 
 See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`Using Existing Machines <existing-machines>` or :ref:`bring your existing Kubernetes cluster <kubernetes-overview>`.
-

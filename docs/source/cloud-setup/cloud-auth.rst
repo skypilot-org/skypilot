@@ -52,10 +52,10 @@ GCP
 
 .. _gcp-service-account:
 
-GCP Service Account
+GCP service account
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-`GCP Service Accounts
+`GCP service accounts
 <https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
 
 .. tip::

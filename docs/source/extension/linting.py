@@ -33,30 +33,14 @@ ALLOWED_TERMS = {
     'Nginx',
     'Kubernetes',
     'Kubectl',
-    'Weights & Biases',
-    'Config',
     'Kueue',
-    'Sky Computing',
+    'Sky',
     'Llama',
     'Llama2',
-    # Product names with versioning
-    'Llama 3.1',
-    'Llama 3.2',
-    'Vision Llama 3.2',
-    'Mixtral 8x7b',
-    # Cloud terms
-    'Cloud',
-    'Service Account',
-    'Cloud Platform',
-    'Cloud Infrastructure',
-    # Common technical verbs
-    'Deploy',
-    'Run',
-    'Serve',
-    'Scale',
-    'Connect',
-    'Check',
-    'Open',
+    'Pods',
+    'Samsung',
+    'Google',
+    'Amazon',
     # Framework names
     'vLLM',
     'TGI',
@@ -64,6 +48,8 @@ ALLOWED_TERMS = {
     'DWS',
     'FAIR',
     'Qwen',
+    # Area
+    'Europe',
 }
 
 
@@ -110,7 +96,7 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
     for heading in headings:
         violations = []
         # Split on whitespace, preserving punctuation with words
-        words = re.findall(r'\S+', heading)  # Changed splitting method
+        words = re.findall(r'\S+', heading)
         step_pattern = re.compile(r'^step$', re.IGNORECASE)
         number_colon = re.compile(
             r'^\d+[:-]$')  # Matches digits followed by : or -
@@ -120,10 +106,12 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
             r'^[:-]$')  # Punctuation as separate word
 
         for i in range(len(words)):
-            word = words[i]
+            original_word = words[i]
+            # Remove ALL leading/trailing non-alphanumeric characters
+            stripped_word = re.sub(r'^\W+|\W+$', '', original_word)
 
-            # Skip allowed terms and acronyms
-            if word in ALLOWED_TERMS or word.isupper():
+            # Skip allowed terms and acronyms (check stripped version)
+            if stripped_word in ALLOWED_TERMS or stripped_word.isupper():
                 continue
 
             # Check for step pattern: "Step [identifier][punctuation?] [word]"
@@ -136,12 +124,13 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
                 continue
 
             # Allow version numbers and hyphens
-            if re.search(r'([.-]\d|\d[.-])', word):
+            if re.search(r'([.-]\d|\d[.-])', original_word):
                 continue
 
-            # Check unexpected title case
-            if i != 0 and word.istitle():
-                violations.append(word)
+            # Check unexpected title case (skip if previous word ends with : or ))
+            if (i != 0 and original_word.istitle() and
+                    not words[i - 1].endswith((':', ')'))):
+                violations.append(original_word)
 
         if violations:
             logger = getLogger(__name__)

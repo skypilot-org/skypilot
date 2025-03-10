@@ -29,14 +29,14 @@ regions/clusters with the lowest cost" or "monitor and manage jobs on both AWS a
 - Valuable engineering hours are invested to mask the differences across infra choices.
 - Workloads are forced to run on suboptimal choices (to heuristically simplify the search space), wasting utilization, cost savings, and capacity.
 
-Sky Computing
+Sky computing
 -------------------------
 
-To combat this, *Sky Computing* was recently proposed in two papers from UC Berkeley:
-`From Cloud Computing to Sky Computing <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ and
-`The Sky Above The Clouds <https://arxiv.org/abs/2205.07147>`_ (whitepaper).
+To combat this, *Sky computing* was recently proposed in two papers from UC Berkeley:
+`From cloud computing to sky computing <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ and
+`The sky above the clouds <https://arxiv.org/abs/2205.07147>`_ (whitepaper).
 
-In a nutshell, Sky Computing **combines a team's diverse cloud infra into a unified pool**, a "sky".
+In a nutshell, Sky computing **combines a team's diverse cloud infra into a unified pool**, a "sky".
 Sky comes with two components to simplify---and exploit---the complex search space:
 
 - A unified interface to run workloads on different cloud infra.
@@ -53,7 +53,7 @@ With Sky, cloud users and their workloads gain the following benefits:
 * **Lower costs**: Engineering time is saved from dealing with cloud infra. Sky optimizes the cost of each workload. Large organizations gain pricing leverage due to portability.
 * **Higher capacity**: Workloads can now run on a bigger compute pool, with many choices of locations, hardware, and pricing models.
 
-Why does AI benefit from Sky Computing?
+Why does AI benefit from Sky computing?
 ---------------------------------------------------
 
 AI is highly **capacity and cost intensive**, many orders of magnitude more so
@@ -70,16 +70,16 @@ These choices often interleave: e.g., it is common for AI teams to use reserved 
 for large-scale batch inference.
 Therefore, AI workloads inherently require managing many compute choices in the complex search space.
 
-Sky Computing presents a natural solution.
+Sky computing presents a natural solution.
 Sky offers AI teams **a unified interface to easily and portably run AI** on their diverse compute.
 Further, Sky intelligently orchestrates across a team's AI compute choices, providing large cost savings and higher compute capacity.
 
-SkyPilot and Sky Computing
+SkyPilot and Sky computing
 ---------------------------------------------------
 
 SkyPilot was born out of the same `UC Berkeley lab <https://sky.cs.berkeley.edu/>`_  that
-proposed Sky Computing.
-SkyPilot is Sky's first instantiation, and it was started to implement Sky Computing for one important class of workloads: AI and compute-intensive workloads.
+proposed Sky computing.
+SkyPilot is Sky's first instantiation, and it was started to implement Sky computing for one important class of workloads: AI and compute-intensive workloads.
 
 Over the last few years, SkyPilot has been widely adopted by ~100s of leading companies and AI teams.
 While the initial development team
@@ -92,10 +92,10 @@ are launched in a user's existing cloud accounts, VPCs, and clusters.
 SkyPilot is open sourced under the permissive Apache 2 license and under
 active development on `GitHub <https://github.com/skypilot-org/skypilot>`_.
 
-What if I have a single cloud: Levels of Sky Computing
+What if I have a single cloud: Levels of Sky computing
 ------------------------------------------------------
 
-Just like autonomous driving has different levels of autonomy (e.g., Level 1-5), one can adopt Sky Computing and SkyPilot in increasing "levels" and benefits.
+Just like autonomous driving has different levels of autonomy (e.g., Level 1-5), one can adopt Sky computing and SkyPilot in increasing "levels" and benefits.
 
 **For users on a fixed cluster** (e.g., Kubernetes, Slurm), SkyPilot provides:
 

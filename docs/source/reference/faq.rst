@@ -55,7 +55,7 @@ This can be useful if your jobs use certain experiment tracking tools that depen
 File mounting (``file_mounts``)
 -------------------------------
 
-How to make SkyPilot clusters use my Weights & Biases credentials?
+How to make SkyPilot clusters use my weights & biases credentials?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Install the wandb library on your laptop and login to your account via ``wandb login``.
@@ -213,7 +213,7 @@ You will need to install a PyTorch version that is compatible with your NVIDIA d
 Miscellaneous
 -------------
 
-How can I launch a VS Code tunnel using a SkyPilot task definition?
+How can I launch a VS code tunnel using a SkyPilot task definition?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To launch a VS Code tunnel using a SkyPilot task definition, you can use the following task definition:

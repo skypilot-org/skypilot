@@ -22,17 +22,17 @@ If your cluster does not support LoadBalancer services, SkyPilot can also use `a
 
 .. _kubernetes-loadbalancer:
 
-LoadBalancer Service
+LoadBalancer service
 --------------------
 
-This mode exposes ports through a Kubernetes `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
+This mode exposes ports through a Kubernetes `LoadBalancer service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
 
-To use this mode, you must have a Kubernetes cluster that supports LoadBalancer Services:
+To use this mode, you must have a Kubernetes cluster that supports LoadBalancer services:
 
 * On Google GKE, Amazon EKS or other cloud-hosted Kubernetes services, this mode is supported out of the box and no additional configuration is needed.
-* On bare metal and self-managed Kubernetes clusters, `MetalLB <https://metallb.universe.tf/>`_ can be used to support LoadBalancer Services.
+* On bare metal and self-managed Kubernetes clusters, `MetalLB <https://metallb.universe.tf/>`_ can be used to support LoadBalancer services.
 
-When using this mode, SkyPilot will create a single LoadBalancer Service for all ports that you expose on a cluster.
+When using this mode, SkyPilot will create a single LoadBalancer service for all ports that you expose on a cluster.
 Each port can be accessed using the LoadBalancer's external IP address and the port number. Use :code:`sky status --endpoints <cluster>` to view the external endpoints for all ports.
 
 In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.
@@ -52,7 +52,7 @@ These load balancers will be automatically terminated when the cluster is delete
 
     To work around this issue, make sure all your ports have services running behind them.
 
-Internal Load Balancers
+Internal load balancers
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.

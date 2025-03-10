@@ -323,7 +323,7 @@ By default, the provisioned nodes will be in the root `compartment <https://docs
       compartment_ocid: ocid1.compartment.oc1..aaaaaaaa......
 
 
-Lambda Cloud
+Lambda cloud
 ~~~~~~~~~~~~~~~~~~
 
 `Lambda Cloud <https://lambdalabs.com/>`_ is a cloud provider offering low-cost GPUs. To configure Lambda Cloud access, go to the `API Keys <https://cloud.lambdalabs.com/api-keys>`_ page on your Lambda console to generate a key and then add it to :code:`~/.lambda_cloud/lambda_keys`:
@@ -376,10 +376,10 @@ Fluidstack
 
 
 
-Cudo Compute
+Cudo compute
 ~~~~~~~~~~~~~~~~~~
 
-`Cudo Compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
+`Cudo compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
 
 1. Create a `billing account <https://www.cudocompute.com/docs/guide/billing/>`__.
 2. Create a `project <https://www.cudocompute.com/docs/guide/projects/>`__.
@@ -440,7 +440,7 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 
 
 
-SCP (Samsung Cloud Platform)
+SCP (Samsung cloud platform)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.

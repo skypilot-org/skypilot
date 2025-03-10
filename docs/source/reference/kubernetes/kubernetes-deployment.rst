@@ -1,7 +1,8 @@
 .. _kubernetes-deployment:
 
 Deployment Guides
------------------
+=================
+
 Below we include minimal guides to set up a new Kubernetes cluster in different environments, including hosted services on the cloud.
 
 .. grid:: 2
@@ -83,7 +84,7 @@ It runs a Kubernetes cluster inside a container, so no setup is required.
 
 .. _kubernetes-setup-gke:
 
-Deploying on Google Cloud GKE
+Deploying on Google cloud GKE
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 1. Create a GKE standard cluster with at least 1 node. We recommend creating nodes with at least 4 vCPUs.
@@ -231,7 +232,7 @@ Notes for specific Kubernetes distributions
 
 Some Kubernetes distributions require additional steps to set up GPU support.
 
-Rancher Kubernetes Engine 2 (RKE2)
+Rancher Kubernetes engine 2 (RKE2)
 **********************************
 
 Nvidia GPU operator installation on RKE2 through helm requires extra flags to set ``nvidia`` as the default runtime for containerd.
