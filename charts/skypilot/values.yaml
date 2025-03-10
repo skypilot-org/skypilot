@@ -100,13 +100,10 @@ ingress-nginx:
     service:
       type: LoadBalancer
       # Default annotations for the ingress controller service. We want an L4 loadbalancer by default for maximum compatibility,
-      # especially for websocket SSH tunneling. To achieve this, different cloud providers and kubernetes versions require different
-      # annotations. Annotations with no side effects are aggregated below to simplify the usage. Users with more complex networking
-      # setup should customize the annotations directly.
+      # especially for websocket SSH tunneling. Different cloud providers may require different annotations. 
+      # Annotations with no side effects are aggregated below to simplify the usage.
       annotations:
-        # For EKS with AWS Load Balancer Controller prior to v2.5.0, this annitation is needed to bypass the legacy cloud controller manager.
-        # Ref: https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.11/guide/service/annotations/#legacy-cloud-provider
-        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        # AWS CLB works out of the box, use NLB is a better option but requires AWS Load Balancer Controller to be installed.
         # For GKE, use backend service-based external passthrough Network Load Balancer as per best practices.
         # Ref: https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer#load_balancer_types
         cloud.google.com/l4-rbs: "enabled"
