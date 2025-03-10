@@ -3,11 +3,16 @@
 import json
 import os
 import time
+import typing
 from typing import Any, Dict, List, Optional, Tuple
 
-import requests
-
+from sky.adaptors import common as adaptors_common
 from sky.utils import common_utils
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 CREDENTIALS_PATH = '~/.lambda_cloud/lambda_keys'
 API_ENDPOINT = 'https://cloud.lambdalabs.com/api/v1'
@@ -76,7 +81,7 @@ class Metadata:
             json.dump(metadata, f)
 
 
-def raise_lambda_error(response: requests.Response) -> None:
+def raise_lambda_error(response: 'requests.Response') -> None:
     """Raise LambdaCloudError if appropriate."""
     status_code = response.status_code
     if status_code == 200:

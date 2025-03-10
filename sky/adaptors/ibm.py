@@ -6,9 +6,6 @@ import json
 import multiprocessing
 import os
 
-import requests
-import yaml
-
 from sky import sky_logging
 from sky.adaptors import common
 
@@ -27,6 +24,9 @@ ibm_boto3 = common.LazyImport('ibm_boto3',
                               import_error_message=_IMPORT_ERROR_MESSAGE)
 ibm_botocore = common.LazyImport('ibm_botocore',
                                  import_error_message=_IMPORT_ERROR_MESSAGE)
+requests = common.LazyImport('requests',
+                             import_error_message=_IMPORT_ERROR_MESSAGE)
+yaml = common.LazyImport('yaml', import_error_message=_IMPORT_ERROR_MESSAGE)
 
 
 def read_credential_file():

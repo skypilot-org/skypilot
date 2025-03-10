@@ -1,9 +1,14 @@
 """SSL Helper
 """
-
 import ssl
+import typing
 
-import requests
+from sky.adaptors import common as adaptors_common
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 
 def get_unverified_context():
