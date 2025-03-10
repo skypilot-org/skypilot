@@ -76,23 +76,40 @@ ingress:
   authCredentials: "username:$apr1$encrypted_password"
   # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
   path: '/'
-  # GKE load balancer used for ingress does not work with websocket connections
-  # (required for our k8s SSH tunneling), in such case NodePort should be enabled
-  # to exposes the ingress controller.
+
+  # TODO(aylei): remove the following fields before v0.11.0 release
+  # TODO(aylei): document the migration steps in release note.
+  # This is a break change for users in v0.8.0 nightly. If user does not specify ingress.nodePortEnabled explicitly,
+  # helm upgrade will delete the existing NodePort service and change the ingress controller service to LoadBalancer. The endpoint
+  # of API server will be changed consequently.
+
+  # Create a NodePort service for the ingress controller
   # Note: nodePort svc will only be created when both ingress.nodePortEnabled=true AND ingress-nginx.enabled=true
-  nodePortEnabled: true
+  # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
+  nodePortEnabled: false
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
+  # Deprecated: use ingress-nginx.controller.service.nodePorts.http instead
   httpNodePort: 30050 # Set to null to automatically assign a random port
+  # Deprecated: use ingress-nginx.controller.service.nodePorts.https instead
   httpsNodePort: 30051 # Set to null to automatically assign a random port
 
 ingress-nginx:
   enabled: true
   controller:
     service:
-      # Use ClusterIP here to disable the LoadBalancer created by nginx. 
-      # If not using NodePort, set this to LoadBalancer.
-      type: ClusterIP  
+      type: LoadBalancer
+      # Default annotations for the ingress controller service. We want an L4 loadbalancer by default for maximum compatibility,
+      # especially for websocket SSH tunneling. To achieve this, different cloud providers and kubernetes versions require different
+      # annotations. Annotations with no side effects are aggregated below to simplify the usage. Users with more complex networking
+      # setup should customize the annotations directly.
+      annotations:
+        # For EKS with AWS Load Balancer Controller prior to v2.5.0, this annitation is needed to bypass the legacy cloud controller manager.
+        # Ref: https://kubernetes-sigs.github.io/aws-load-balancer-controller/v2.11/guide/service/annotations/#legacy-cloud-provider
+        service.beta.kubernetes.io/aws-load-balancer-type: "external"
+        # For GKE, use backend service-based external passthrough Network Load Balancer as per best practices.
+        # Ref: https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer#load_balancer_types
+        cloud.google.com/l4-rbs: "enabled"
     config:
       http-snippet: |
         map $http_upgrade $connection_upgrade {

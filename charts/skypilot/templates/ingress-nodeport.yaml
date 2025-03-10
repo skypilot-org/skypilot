@@ -1,3 +1,4 @@
+{{- /* TODO(aylei): remove this template in v0.11.0 */ -}}
 {{- if and .Values.ingress.nodePortEnabled (index .Values "ingress-nginx" "enabled") }}
 apiVersion: v1
 kind: Service
