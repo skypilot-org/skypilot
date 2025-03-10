@@ -18,6 +18,9 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+RequestQueueEntry = Tuple[fastapi.Request, asyncio.Event,
+                          asyncio.Future[fastapi.responses.Response]]
+
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _ENABLE_2_LAYER_LB = False
 
@@ -76,6 +79,7 @@ class ClientPool:
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
         with self._lock:
             # Get available replicas (those with capacity)
+            logger.info(f'Active requests: {self._active_requests}')
             available_replicas = [
                 replica
                 for replica in self._load_balancing_policy.ready_replicas
@@ -290,15 +294,12 @@ class SkyServeLoadBalancer:
                         f'{self._request_queue.qsize()}')
             try:
                 # Get a request from the queue
-                entry: Tuple[
-                    fastapi.Request, asyncio.Event,
-                    asyncio.Future[fastapi.responses.
-                                   Response]] = await self._request_queue.get()
+                entry: RequestQueueEntry = await self._request_queue.get()
                 request, request_event, response_future = entry
 
                 # Process the request
                 try:
-                    # Attempt to find an available replica
+                    # Determine if request is from another load balancer
                     if _ENABLE_2_LAYER_LB:
                         is_from_lb = request.headers.get(
                             _IS_FROM_LB_HEADER, False)
@@ -307,6 +308,11 @@ class SkyServeLoadBalancer:
 
                     pool_to_use = (self._replica_pool
                                    if is_from_lb else self._lb_pool)
+                    source_identity = 'LB' if is_from_lb else 'User'
+                    logger.info(f'Processing queued request {request.url} '
+                                f'from {source_identity}.')
+
+                    # Attempt to find an available replica
                     ready_replica_url = pool_to_use.select_replica(request)
 
                     if ready_replica_url is not None:
@@ -334,62 +340,32 @@ class SkyServeLoadBalancer:
 
     async def _proxy_with_retries(
             self, request: fastapi.Request) -> fastapi.responses.Response:
-        """Try to proxy the request to the endpoint replica with retries."""
+        """Queue the request for processing by the queue processor."""
         self._request_aggregator.add(request)
+        logger.info(f'Received request {request.url}.')
 
-        # Determine if request is from another load balancer
-        if _ENABLE_2_LAYER_LB:
-            is_from_lb = request.headers.get(_IS_FROM_LB_HEADER, False)
-        else:
-            is_from_lb = True
-
-        pool_to_use = self._replica_pool if is_from_lb else self._lb_pool
-        source_identity = 'LB' if is_from_lb else 'User'
-        logger.info(f'Received request {request.url} from {source_identity}.')
-
-        # Check if there's an available replica first
-        ready_replica_url = pool_to_use.select_replica(request)
-        logger.info(f'Ready replica URL: {ready_replica_url}, '
-                    f'pool_to_use: {pool_to_use}, '
-                    f'is_from_lb: {is_from_lb}')
-
-        if ready_replica_url is not None:
-            # If a replica is available, process immediately
-            response_or_exception = await self._proxy_request_to(
-                ready_replica_url, request, is_from_lb)
-            if not isinstance(response_or_exception, Exception):
-                return response_or_exception
-
-        # No replica available immediately or error occurred, try queue
         try:
             # Create future and event in the current event loop context
-            # This ensures they're associated with the correct loop
             assert self._loop is not None
             response_future: asyncio.Future[
                 fastapi.responses.Response] = self._loop.create_future()
             request_event: asyncio.Event = asyncio.Event()
 
-            # Attempt to queue the request
+            # Queue the request for processing
             assert self._request_queue is not None
             await asyncio.wait_for(
                 self._request_queue.put(
                     (request, request_event, response_future)),
                 timeout=0.1  # Short timeout to not block the server
             )
-            # await self._request_queue.put(
-            #     (request, request_event, response_future))
 
-            # Wait for the request to be processed
+            # Wait for the request to be processed by the queue processor
             await request_event.wait()
 
             # Get the result or exception
-            if response_future.done():
-                return await response_future
-            else:
-                # This shouldn't happen if the queue processor is
-                # working correctly
-                raise RuntimeError(
-                    'Request processing completed but future not set')
+            assert response_future.done(), (
+                'Request processing completed but future not set')
+            return await response_future
 
         except asyncio.TimeoutError:
             # Queue is full
@@ -427,8 +403,7 @@ class SkyServeLoadBalancer:
 
             # # Make sure we're using the current event loop
             self._loop = asyncio.get_running_loop()
-            self._request_queue = asyncio.Queue(maxsize=self._max_queue_size,
-                                                loop=self._loop)
+            self._request_queue = asyncio.Queue(maxsize=self._max_queue_size)
 
             # Register controller synchronization task
             self._sync_controller_task = self._loop.create_task(
@@ -558,5 +533,5 @@ if __name__ == '__main__':
     args = parser.parse_args()
     run_load_balancer(args.controller_addr, args.load_balancer_port,
                       args.load_balancing_policy,
-                      args.meta_load_balancing_policy, args.region,
+                      args.meta_load_balancing_policy, args.region, None,
                       args.max_concurrent_requests, args.max_queue_size)

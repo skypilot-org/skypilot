@@ -118,7 +118,7 @@ class SkyServeController:
                     service_spec.load_balancing_policy,
                     # TODO(tian): Constant for default.
                     service_spec.max_concurrent_requests or 10,
-                    service_spec.max_queue_size or 1000)
+                    service_spec.max_queue_size or 10000)
                 rc = copy.deepcopy(lb_config['resources'])
                 if 'cloud' in rc:
                     rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])
