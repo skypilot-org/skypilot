@@ -1842,8 +1842,14 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 get_node_counts_from_ray_status(head_runner))
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
             if ready_head + ready_workers != total_nodes:
-                # if cluster JUST started, maybe not all the nodes have shown up.
-                # Wait for a few seconds and try again
+                # If cluster JUST started, maybe not all the nodes have shown up.
+                # Wait for a few seconds and try again.
+                # Note: We are okay with this performance hit because it's very
+                # rare to normally hit this case. It requires:
+                # - All the instances in the cluster are up on the cloud side
+                #   (not preempted), but
+                # - The ray cluster is somehow degraded so not all instances are
+                #   showing up
                 logger.debug(f'Refreshing status ({cluster_name!r}): first '
                              'ray status not showing all nodes '
                              f'({ready_head + ready_workers}/{total_nodes}); '
