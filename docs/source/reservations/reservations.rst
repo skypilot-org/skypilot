@@ -169,6 +169,8 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
 
     num_nodes: 4
 
+.. _dws-on-gke:
+
 Using DWS on GKE with Kueue
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
