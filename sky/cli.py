@@ -1398,7 +1398,8 @@ def _handle_jobs_queue_request(
         show_all: Show all information of each job (e.g., region, price).
         show_user: Show the user who submitted the job.
         max_num_jobs_to_show: If not None, limit the number of jobs to show to
-            this number, which is mainly used by `sky status`.
+            this number, which is mainly used by `sky status`
+            and `sky jobs queue`.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
 
@@ -1869,13 +1870,11 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                    f'Managed jobs{colorama.Style.RESET_ALL}')
         with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
             try:
-                max_num_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS
-                                        if not all else None)
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
                     show_all=False,
                     show_user=all_users,
-                    max_num_jobs_to_show=max_num_jobs_to_show,
+                    max_num_jobs_to_show=_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS,
                     is_called_by_user=False)
             except KeyboardInterrupt:
                 sdk.api_cancel(managed_jobs_queue_request_id, silent=True)
@@ -4009,13 +4008,13 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
     with rich_utils.client_status('[cyan]Checking managed jobs[/]'):
         managed_jobs_request_id = managed_jobs.queue(
             refresh=refresh, skip_finished=skip_finished, all_users=all_users)
-        max_num_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW
-                                if not all else None)
-        num_jobs, msg = _handle_jobs_queue_request(managed_jobs_request_id,
-                                            show_all=verbose,
-                                            show_user=all_users,
-                                            max_num_jobs_to_show=max_num_jobs_to_show,
-                                            is_called_by_user=True)
+        max_num_jobs_to_show = (_NUM_MANAGED_JOBS_TO_SHOW if not all else None)
+        num_jobs, msg = _handle_jobs_queue_request(
+            managed_jobs_request_id,
+            show_all=verbose,
+            show_user=all_users,
+            max_num_jobs_to_show=max_num_jobs_to_show,
+            is_called_by_user=True)
     if not skip_finished:
         in_progress_only_hint = ''
     else:
@@ -4023,10 +4022,10 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
     click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                f'Managed jobs{colorama.Style.RESET_ALL}'
                f'{in_progress_only_hint}\n{msg}')
-    if not all and max_num_jobs_to_show < num_jobs:
+    if max_num_jobs_to_show and num_jobs and max_num_jobs_to_show < num_jobs:
         click.echo(
             f'{colorama.Fore.CYAN}'
-            f'Only showing the latest {_NUM_MANAGED_JOBS_TO_SHOW} '
+            f'Only showing the latest {max_num_jobs_to_show} '
             f'managed jobs'
             f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
 
