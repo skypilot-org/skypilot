@@ -6,5 +6,6 @@ Frameworks
 
    Airflow <airflow>
    DVC <dvc>
-   MPI <mpi>
    Jupyter <jupyter>
+   Kueue <https://github.com/GoogleCloudPlatform/ai-on-gke/tree/main/tutorials-and-examples/skypilot/dws-and-kueue>
+   MPI <mpi>

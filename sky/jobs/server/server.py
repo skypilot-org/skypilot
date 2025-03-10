@@ -159,6 +159,9 @@ async def dashboard(request: fastapi.Request,
             except Exception as e:  # pylint: disable=broad-except
                 # We catch all exceptions to gracefully handle unknown
                 # errors and retry or raise an HTTPException to the client.
+                # Assume an exception indicates that the dashboard connection
+                # is stale - remove it so that a new one is created.
+                dashboard_utils.remove_dashboard_session(user_hash)
                 msg = (
                     f'Dashboard connection attempt {attempt + 1} failed with '
                     f'{common_utils.format_exception(e, use_bracket=True)}')
