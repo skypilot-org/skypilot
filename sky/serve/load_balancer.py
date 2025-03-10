@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Deque, Dict, List, Optional, Tuple, Union
 
 import aiohttp
 import fastapi
@@ -24,13 +24,23 @@ RequestQueueEntry = Tuple[fastapi.Request, asyncio.Event,
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _ENABLE_2_LAYER_LB = False
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
+_ENABLE_CREATE_TASK_CONCURRENCY = False
+
+
+class QueueSizeFilter(logging.Filter):
+
+    def filter(self, record):
+        return '/queue-size' not in record.getMessage()
 
 
 class PeekableQueue(asyncio.Queue):
     """A queue that allows peeking at the first item without removing it."""
 
+    def get_queue(self) -> Deque[RequestQueueEntry]:
+        return self._queue  # type: ignore[attr-defined]
+
     def peek(self) -> RequestQueueEntry:
-        return self._queue[0]  # type: ignore[attr-defined]
+        return self.get_queue()[0]
 
 
 class ClientPool:
@@ -59,6 +69,7 @@ class ClientPool:
         self._pool: Dict[str, httpx.AsyncClient] = dict()
         # Track current active requests per replica
         self._active_requests: Dict[str, int] = dict()
+        self._available_replicas: List[str] = []
         # Maximum concurrent requests per replica
         self._max_concurrent_requests = max_concurrent_requests
         # We need this lock to avoid getting from the client pool while
@@ -76,29 +87,31 @@ class ClientPool:
                         base_url=replica_url)
                     # Initialize active requests counter for new replicas
                     self._active_requests[replica_url] = 0
+                    if replica_url not in self._available_replicas:
+                        self._available_replicas.append(replica_url)
             urls_to_close = set(self._pool.keys()) - set(ready_urls)
             for replica_url in urls_to_close:
                 client = self._pool.pop(replica_url)
                 if replica_url in self._active_requests:
                     del self._active_requests[replica_url]
                 close_client_tasks.append(client.aclose())
+                if replica_url in self._available_replicas:
+                    self._available_replicas.remove(replica_url)
         return close_client_tasks
 
     def select_replica(self, request: fastapi.Request) -> Optional[str]:
         with self._lock:
             # Get available replicas (those with capacity)
-            logger.info(f'Active requests: {self._active_requests}')
-            available_replicas = [
-                replica
-                for replica in self._load_balancing_policy.ready_replicas
-                if self._active_requests.get(replica, 0) <
-                self._max_concurrent_requests
-            ]
+            logger.info(f'Active requests: {self._active_requests}, '
+                        f'Available replicas: {self._available_replicas}')
             # Only select from replicas that have capacity
-            if not available_replicas:
+            if not self._available_replicas:
                 return None
             return self._load_balancing_policy.select_replica_from_subset(
-                request, available_replicas)
+                request, self._available_replicas)
+
+    def ready_replicas(self) -> List[str]:
+        return self._load_balancing_policy.ready_replicas
 
     def get_client(self, url: str) -> Optional[httpx.AsyncClient]:
         with self._lock:
@@ -108,12 +121,18 @@ class ClientPool:
         with self._lock:
             self._load_balancing_policy.pre_execute_hook(url, request)
             self._active_requests[url] = self._active_requests.get(url, 0) + 1
+            if self._active_requests[url] >= self._max_concurrent_requests:
+                if url in self._available_replicas:
+                    self._available_replicas.remove(url)
 
     def post_execute_hook(self, url: str, request: fastapi.Request) -> None:
         with self._lock:
             self._load_balancing_policy.post_execute_hook(url, request)
             if url in self._active_requests and self._active_requests[url] > 0:
                 self._active_requests[url] -= 1
+                if self._active_requests[url] < self._max_concurrent_requests:
+                    if url not in self._available_replicas:
+                        self._available_replicas.append(url)
 
 
 class SkyServeLoadBalancer:
@@ -163,9 +182,15 @@ class SkyServeLoadBalancer:
                                                max_concurrent_requests)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._request_queue: Optional[PeekableQueue] = None
-        self._sync_controller_task: Optional[asyncio.Task] = None
-        self._queue_processor_task: Optional[asyncio.Task] = None
+        # self._sync_controller_task: Optional[asyncio.Task] = None
+        # self._queue_processor_task: Optional[asyncio.Task] = None
+        # self._cleanup_completed_tasks_task: Optional[asyncio.Task] = None
+        # self._request_stealing_loop_task: Optional[asyncio.Task] = None
+        self._tasks: List[asyncio.Task] = []
         self._max_queue_size: int = max_queue_size
+        self._external_host: str = serve_utils.get_external_host()
+        self._workload_steal_session: Optional[aiohttp.ClientSession] = None
+        self._handle_request_tasks: List[asyncio.Task] = []
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
@@ -266,7 +291,7 @@ class SkyServeLoadBalancer:
             worker_url = httpx.URL(path=request.url.path,
                                    query=request.url.query.encode('utf-8'))
             headers = request.headers.mutablecopy()
-            if _ENABLE_2_LAYER_LB and not is_from_lb:
+            if not is_from_lb:
                 # If it is not from LB, then the following request will be sent
                 # out from LB. So we add the header to indicate it.
                 headers[_IS_FROM_LB_HEADER] = 'true'
@@ -293,8 +318,30 @@ class SkyServeLoadBalancer:
                          f'{common_utils.format_exception(e)}')
             return e
 
+    def _steal_targets(self) -> Tuple[List[str], Optional[str]]:
+        """Return the target LBs to steal from."""
+        steal_targets = []
+        self_url = None
+        for lb in self._lb_pool.ready_replicas():
+            if self._external_host not in lb and str(
+                    self._load_balancer_port) not in lb:
+                steal_targets.append(lb)
+            else:
+                assert self_url is None
+                self_url = lb
+        return steal_targets, self_url
+
+    async def _handle_requests(self, target_url: str, entry: RequestQueueEntry,
+                               is_from_lb: bool) -> None:
+        """Handle the request."""
+        request, request_event, response_future = entry
+        response = await self._proxy_request_to(target_url, request, is_from_lb)
+        response_future.set_result(response)
+        request_event.set()
+
     async def _queue_processor(self) -> None:
         """Background task to process queued requests."""
+        assert self._loop is not None
         assert self._request_queue is not None
         logger.info('Starting request queue processor')
         while True:
@@ -321,20 +368,24 @@ class SkyServeLoadBalancer:
                     pool_to_use = (self._replica_pool
                                    if is_from_lb else self._lb_pool)
                     source_identity = 'LB' if is_from_lb else 'User'
-                    logger.info(f'Processing queued request {request.url} '
-                                f'from {source_identity}.')
 
                     # Attempt to find an available replica
                     ready_replica_url = pool_to_use.select_replica(request)
+                    logger.info(f'Processing queued request {request.url} from '
+                                f'{source_identity} to {ready_replica_url}.')
 
                     if ready_replica_url is not None:
                         # Process the request if a replica is available
                         # Now we can safely remove it from the queue
                         await self._request_queue.get()
-                        response = await self._proxy_request_to(
-                            ready_replica_url, request, is_from_lb)
-                        response_future.set_result(response)
-                        request_event.set()
+                        if _ENABLE_CREATE_TASK_CONCURRENCY:
+                            self._handle_request_tasks.append(
+                                self._loop.create_task(
+                                    self._handle_requests(
+                                        ready_replica_url, entry, is_from_lb)))
+                        else:
+                            await self._handle_requests(ready_replica_url,
+                                                        entry, is_from_lb)
                     else:
                         # No replica available, leave in queue and try next
                         # time. Sleep briefly to avoid tight loop when no
@@ -353,6 +404,55 @@ class SkyServeLoadBalancer:
                 # Sleep briefly to avoid tight loop in case of persistent errors
                 await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
 
+    async def _request_stealing_loop(self) -> None:
+        """Background task to process request stealing."""
+        assert self._loop is not None
+        assert self._request_queue is not None
+        assert self._workload_steal_session is not None
+        logger.info('Starting request stealing loop')
+        while True:
+            try:
+                if self._request_queue.empty():
+                    steal_targets, self_url = self._steal_targets()
+                    if steal_targets:
+                        assert self_url is not None
+                        # logger.info('Request queue is empty. Try to '
+                        #             f'steal from {steal_targets}')
+                        steal_target = steal_targets[0]
+                        if len(steal_targets) > 1:
+                            logger.error('More than one steal target. '
+                                         'Select the first one '
+                                         f'({steal_target}).')
+                        # TODO(tian): Use urlparse for robustness.
+                        # TODO(tian): Investigate this pylint warning.
+                        async with self._workload_steal_session.get(  # pylint: disable=not-async-context-manager
+                                steal_target + '/queue-size') as response:
+                            queue_size = (await response.json())['queue_size']
+                        # logger.info(f'Queue size of {steal_target}: '
+                        #             f'{queue_size}')
+                        if queue_size > 0:
+                            logger.info(f'Steal from {steal_target} with '
+                                        f'{queue_size} requests.')
+                            async with self._workload_steal_session.post(  # pylint: disable=not-async-context-manager
+                                    steal_target + '/steal-request',
+                                    json={
+                                        'num_steal': queue_size // 2,
+                                        'source_lb_url': self_url,
+                                    }) as response:
+                                response.raise_for_status()
+            except Exception as e:  # pylint: disable=broad-except
+                logger.error(f'Error in request stealing loop: '
+                             f'{common_utils.format_exception(e)}')
+            await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
+
+    async def _cleanup_completed_tasks(self) -> None:
+        """Cleanup completed tasks."""
+        while True:
+            for task in self._handle_request_tasks:
+                if task.done():
+                    self._handle_request_tasks.remove(task)
+            await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
+
     async def _proxy_with_retries(
             self, request: fastapi.Request) -> fastapi.responses.Response:
         """Queue the request for processing by the queue processor."""
@@ -368,11 +468,8 @@ class SkyServeLoadBalancer:
 
             # Queue the request for processing
             assert self._request_queue is not None
-            await asyncio.wait_for(
-                self._request_queue.put(
-                    (request, request_event, response_future)),
-                timeout=0.1  # Short timeout to not block the server
-            )
+            await self._request_queue.put(
+                (request, request_event, response_future))
 
             # Wait for the request to be processed by the queue processor
             await request_event.wait()
@@ -399,11 +496,64 @@ class SkyServeLoadBalancer:
         """Health check endpoint."""
         return fastapi.responses.Response(status_code=200)
 
+    async def _queue_size(self) -> fastapi.responses.Response:
+        """Return the size of the request queue."""
+        assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={'queue_size': self._request_queue.qsize()})
+
+    async def _steal_request(
+            self, steal_request: fastapi.Request) -> fastapi.responses.Response:
+        """Let other LBs steal requests from this LB."""
+        assert self._loop is not None
+        req_json = await steal_request.json()
+        num_steal = req_json['num_steal']
+        source_lb_url = req_json['source_lb_url']
+        assert self._request_queue is not None
+        # TODO(tian): Steal from the tail of the queue.
+        request_queue_snapshot = list(self._request_queue.get_queue())
+        for entry in request_queue_snapshot:
+            # TODO(tian): Check if the request is from the source LB.
+            # request, _, _ = entry
+            # if not request.headers.get(_IS_FROM_LB_HEADER, True):
+            #     continue
+            await self._request_queue.get()
+            if _ENABLE_CREATE_TASK_CONCURRENCY:
+                self._handle_request_tasks.append(
+                    self._loop.create_task(
+                        self._handle_requests(source_lb_url,
+                                              entry,
+                                              is_from_lb=False)))
+            else:
+                await self._handle_requests(source_lb_url,
+                                            entry,
+                                            is_from_lb=False)
+            num_steal -= 1
+            if not num_steal:
+                break
+
+        if num_steal:
+            raise fastapi.HTTPException(
+                status_code=429,
+                detail=f'Not enough requests to steal. '
+                f'Requested {num_steal}, but only {num_steal} requests '
+                f'available.')
+        return fastapi.responses.Response(status_code=200)
+
     def run(self):
         # Add health check endpoint first so it takes precedence
         self._app.add_api_route(constants.LB_HEALTH_ENDPOINT,
                                 self._health_check,
                                 methods=['GET'])
+
+        self._app.add_api_route('/queue-size',
+                                self._queue_size,
+                                methods=['GET'])
+
+        self._app.add_api_route('/steal-request',
+                                self._steal_request,
+                                methods=['POST'])
 
         self._app.add_api_route('/{path:path}',
                                 self._proxy_with_retries,
@@ -415,39 +565,35 @@ class SkyServeLoadBalancer:
             uvicorn_access_logger = logging.getLogger('uvicorn.access')
             for handler in uvicorn_access_logger.handlers:
                 handler.setFormatter(sky_logging.FORMATTER)
-
+                handler.addFilter(QueueSizeFilter())
             # # Make sure we're using the current event loop
             self._loop = asyncio.get_running_loop()
             self._request_queue = PeekableQueue(maxsize=self._max_queue_size)
+            self._workload_steal_session = aiohttp.ClientSession()
 
             # Register controller synchronization task
-            self._sync_controller_task = self._loop.create_task(
-                self._sync_with_controller())
+            self._tasks.append(
+                self._loop.create_task(self._sync_with_controller()))
 
             # Start the request queue processor
-            self._queue_processor_task = self._loop.create_task(
-                self._queue_processor())
+            self._tasks.append(self._loop.create_task(self._queue_processor()))
 
-            logger.info(
-                f'Started queue processor task: {self._queue_processor_task}')
+            # Start the task to cleanup completed tasks
+            self._tasks.append(
+                self._loop.create_task(self._cleanup_completed_tasks()))
+
+            # Start the request stealing loop
+            self._tasks.append(
+                self._loop.create_task(self._request_stealing_loop()))
 
         @self._app.on_event('shutdown')
         async def shutdown():
             # Cancel all tasks
             tasks_to_cancel = []
-
-            if (self._queue_processor_task and
-                    not self._queue_processor_task.done()):
-                logger.info('Cancelling queue processor task: '
-                            f'{self._queue_processor_task}')
-                self._queue_processor_task.cancel()
-                tasks_to_cancel.append(self._queue_processor_task)
-
-            if hasattr(self, '_sync_controller_task'
-                      ) and not self._sync_controller_task.done():
-                self._sync_controller_task.cancel()
-                tasks_to_cancel.append(self._sync_controller_task)
-
+            for task in self._tasks:
+                if not task.done():
+                    task.cancel()
+                    tasks_to_cancel.append(task)
             if tasks_to_cancel:
                 try:
                     await asyncio.gather(*tasks_to_cancel,

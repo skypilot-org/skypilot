@@ -9,6 +9,7 @@ import pickle
 import re
 import shlex
 import shutil
+import subprocess
 import threading
 import time
 import typing
@@ -200,6 +201,12 @@ class RequestTimestamp(RequestsAggregator):
 
     def __repr__(self) -> str:
         return f'RequestTimestamp(timestamps={self.timestamps})'
+
+
+def get_external_host() -> str:
+    # TODO(tian): Use a more robust way to get the host.
+    return subprocess.check_output('curl -s https://checkip.amazonaws.com',
+                                   shell=True).decode('utf-8').strip()
 
 
 def generate_service_name():

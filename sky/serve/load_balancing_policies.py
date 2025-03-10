@@ -286,7 +286,7 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
                 current_hashes += 1
                 i += 1
         hash_ring.sort(key=lambda x: x.hash_val)
-        logger.info(f'Hash ring: {hash_ring}')
+        # logger.info(f'Hash ring: {hash_ring}')
         self.hash_ring = hash_ring
 
     def _bisect_ready(self, target_hash: int) -> Optional[int]:
@@ -313,12 +313,12 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
         if not self.hash_ring:
             return None
         key_hash = self._hash_function(key)
-        logger.info(f'Key hash to find: {key_hash}')
+        logger.debug(f'Key hash to find: {key_hash}')
         # TODO(tian): Avoid this O(n) scan on every request.
         idx = self._bisect_ready(key_hash)
         if idx is None:
             return None
-        logger.info(f'Selected replica {idx}: {self.hash_ring[idx]}')
+        logger.debug(f'Selected replica {idx}: {self.hash_ring[idx]}')
         return self.hash_ring[idx].replica
 
     async def set_ready_replicas(self, ready_replicas: List[str]) -> None:

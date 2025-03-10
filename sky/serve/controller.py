@@ -6,7 +6,6 @@ import contextlib
 import copy
 import logging
 import os
-import subprocess
 import threading
 import time
 import traceback
@@ -58,12 +57,6 @@ def _get_lb_j2_vars(controller_addr: str, lb_port: int, lb_region: str,
     }
 
 
-def _get_external_host():
-    # TODO(tian): Use a more robust way to get the host.
-    return subprocess.check_output('curl -s https://checkip.amazonaws.com',
-                                   shell=True).decode('utf-8').strip()
-
-
 class SkyServeController:
     """SkyServeController: control everything about replica.
 
@@ -90,7 +83,7 @@ class SkyServeController:
             service_dir = os.path.expanduser(
                 serve_utils.generate_remote_service_dir_name(lb_svc_name))
             os.makedirs(service_dir, exist_ok=True)
-            external_host = _get_external_host()
+            external_host = serve_utils.get_external_host()
             controller_addr = f'http://{external_host}:{port}'
             lb_service_spec = copy.deepcopy(service_spec)
             # NOTE(tian): Only readiness probe is used in replica manager. We
