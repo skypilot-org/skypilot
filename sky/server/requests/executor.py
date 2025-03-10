@@ -47,6 +47,7 @@ from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -440,7 +441,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
                                               args=(worker, 1))
         long_workers.append(worker_proc)
         sub_procs.append(worker_proc)
-    threading.Thread(target=_slow_start_long_workers,
+    threading.Thread(target=subprocess_utils.slow_start_processes,
                      args=(long_workers,),
                      daemon=True).start()
 
@@ -451,31 +452,6 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     worker_proc.start()
     sub_procs.append(worker_proc)
     return sub_procs
-
-
-def _slow_start_long_workers(long_workers: List[multiprocessing.Process],
-                             delay: float = 2.0) -> None:
-    """Start long workers with TCP-like slow start.
-
-    This is to avoid overwhelming the CPU on startup.
-
-    Args:
-        long_workers: The list of long worker processes to start.
-        delay: The delay between starting each worker process, default to 2.0
-            seconds based on profile.
-    """
-    workers_left = len(long_workers)
-    batch_size = 1
-    while workers_left > 0:
-        current_batch = min(batch_size, workers_left)
-        for i in range(current_batch):
-            worker_idx = len(long_workers) - workers_left + i
-            long_workers[worker_idx].start()
-        workers_left -= current_batch
-        if workers_left <= 0:
-            break
-        time.sleep(delay)
-        batch_size *= 2
 
 
 @annotations.lru_cache(scope='global', maxsize=1)

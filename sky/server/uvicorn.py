@@ -1,10 +1,15 @@
-"""Uvicorn wrapper for Sky server."""
+"""Uvicorn wrapper for SkyPilot API server.
+
+This module is a wrapper around uvicorn to customize the behavior of the
+server.
+"""
 import os
 import threading
-import time
 
 import uvicorn
 from uvicorn.supervisors import multiprocess
+
+from sky.utils import subprocess_utils
 
 
 def run(config: uvicorn.Config):
@@ -29,21 +34,22 @@ def run(config: uvicorn.Config):
 
 
 class SlowStartMultiprocess(multiprocess.Multiprocess):
-    """Uvicorn Multiprocess wrapper with slow start."""
+    """Uvicorn Multiprocess wrapper with slow start.
 
-    def __init__(self,
-                 config: uvicorn.Config,
-                 slow_start_delay: float = 2.0,
-                 **kwargs):
+    Slow start offers faster and more stable  start time.
+    Profile shows the start time is more stable and accelerated from
+    ~7s to ~3.3s on a 12-core machine after switching LONG workers and
+    Uvicorn workers to slow start.
+    Refer to subprocess_utils.slow_start_processes() for more details.
+    """
+
+    def __init__(self, config: uvicorn.Config, **kwargs):
         """Initialize the multiprocess wrapper.
 
         Args:
             config: The uvicorn config.
-            slow_start_delay: The delay between starting each worker process,
-                default to 2.0 seconds based on profile.
         """
         super().__init__(config, **kwargs)
-        self.slow_start_delay = slow_start_delay
 
     def init_processes(self) -> None:
         # Slow start worker processes asynchronously to avoid blocking signal
@@ -51,23 +57,14 @@ class SlowStartMultiprocess(multiprocess.Multiprocess):
         threading.Thread(target=self.slow_start_processes, daemon=True).start()
 
     def slow_start_processes(self) -> None:
-        """Initialize remaining processes with slow start."""
-        batch_size = 1
-        processes_left = self.processes_num
-
-        # Though the processes are started asynchronously, we still have to be
-        # slow to avoid overwhelming the CPU on startup.
-        while processes_left > 0:
-            current_batch = min(batch_size, processes_left)
-            for _ in range(current_batch):
-                process = multiprocess.Process(self.config, self.target,
-                                               self.sockets)
-                # Must start the process before appending to self.processes
-                # since uvicorn periodically restarts unresponsive workers.
-                process.start()
-                self.processes.append(process)
-                processes_left -= 1
-            if processes_left <= 0:
-                break
-            time.sleep(self.slow_start_delay)
-            batch_size *= 2
+        """Initialize processes with slow start."""
+        to_start = []
+        # Init N worker processes
+        for _ in range(self.processes_num):
+            to_start.append(
+                multiprocess.Process(self.config, self.target, self.sockets))
+        # Start the processes with slow start, we only append start to
+        # self.processes because Uvicorn periodically restarts unstarted
+        # workers.
+        subprocess_utils.slow_start_processes(to_start,
+                                              on_start=self.processes.append)
