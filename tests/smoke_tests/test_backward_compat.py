@@ -116,10 +116,12 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep RUNNING | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml',
-            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status',
+            f'{self.ACTIVATE_CURRENT} && s=$(sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml) && '
+            'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4"',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status | grep -E "RUNNING|SUCCEEDED"',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep SUCCEEDED | wc -l | grep 4'
         ]
-        teardown = f'sky down {cluster_name}* -y || true'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y || true'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_cluster_stop_start(self, generic_cloud: str):
@@ -130,9 +132,10 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky start -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml',
+            f'{self.ACTIVATE_CURRENT} && s=$(sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml) && '
+            'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2"',
         ]
-        teardown = f'sky down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_autostop_functionality(self, generic_cloud: str):
@@ -142,10 +145,14 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
-            'sleep 120',
-            f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep STOPPED',
+            f"""
+            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
+                    cluster_name=f"{cluster_name}",
+                    cluster_status=[sky.ClusterStatus.STOPPED],
+                    timeout=150)}
+            """
         ]
-        teardown = f'sky down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_single_node_operations(self, generic_cloud: str):
@@ -159,8 +166,10 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2',
         ]
-        teardown = f'sky down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_restarted_cluster_operations(self, generic_cloud: str):
@@ -173,11 +182,13 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
             f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -y -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2',
         ]
-        teardown = f'sky down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_multi_node_operations(self, generic_cloud: str):
@@ -190,11 +201,13 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
             f'{self.ACTIVATE_CURRENT} && sky exec --cloud {generic_cloud} {cluster_name} examples/multi_hostname.yaml',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status',
+            f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2',
         ]
-        teardown = f'sky down {cluster_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
 
     def test_managed_jobs(self, generic_cloud: str):
@@ -206,6 +219,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
             f"""
             {self.ACTIVATE_BASE} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f"{managed_job_name}-0",
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f"{managed_job_name}-1",
                     job_status=[sky.ManagedJobStatus.RUNNING],
                     timeout=300)}
@@ -224,6 +240,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {managed_job_name}-0',
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f"{managed_job_name}-0",
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f"{managed_job_name}-1",
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=300)}
@@ -231,7 +250,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 1',
         ]
-        teardown = f'sky jobs cancel -n {managed_job_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
 
     def test_serve_deployment(self, generic_cloud: str):
@@ -253,5 +272,5 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve logs --load-balancer {serve_name}-1 --no-follow',
             f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}-1 -y',
         ]
-        teardown = f'sky serve down {serve_name}* -y'
+        teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
         self.run_compatibility_test(serve_name, commands, teardown)
