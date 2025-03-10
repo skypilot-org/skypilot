@@ -58,7 +58,7 @@ SKY_SERVER_TOO_OLD_WARNING = (
     f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
     f'v{{server_version}} (client version is v{{client_version}}). {{hint}}'
     f'{colorama.Style.RESET_ALL}')
-RESTART_LOCAL_API_SERVER_HINT = ('Please restart the SkyPilot API server with: '
+RESTART_LOCAL_API_SERVER_HINT = ('Restart the SkyPilot API server with: '
                                  'sky api stop; sky api start')
 UPGRADE_REMOTE_SERVER_HINT = (
     'Please refer to the following link to upgrade your server:\n'
