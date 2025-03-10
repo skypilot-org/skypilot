@@ -4,6 +4,7 @@ import subprocess
 import pytest
 from smoke_tests import smoke_tests_utils
 
+import sky
 from sky.backends.backend_utils import SKY_REMOTE_PATH
 
 
@@ -127,10 +128,10 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 100',
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky status {cluster_name} | grep UP',
-            f'{self.ACTIVATE_CURRENT} && sky status -r {cluster_name} | grep UP',
+            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
-            f'{self.ACTIVATE_CURRENT} && sky queue -u {cluster_name} | grep RUNNING | wc -l | grep 2',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep RUNNING | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status',
         ]
@@ -158,7 +159,7 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             'sleep 120',
-            f'{self.ACTIVATE_CURRENT} && sky status -r {cluster_name} | grep STOPPED',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep STOPPED',
         ]
         teardown = f'sky down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
@@ -219,14 +220,32 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
             f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
+            f"""
+            {self.ACTIVATE_BASE} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f"{managed_job_name}-1",
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=300)}
+            """,
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
             f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && sky jobs logs --no-follow -n {managed_job_name}-1 | grep hi',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
             f'{self.ACTIVATE_CURRENT} && sky jobs launch -d --cloud {generic_cloud} --num-nodes 2 -y -n {managed_job_name}-2 \'echo hi; sleep 40\'',
-            f'{self.ACTIVATE_CURRENT} && sky jobs logs --no-follow -n {managed_job_name}-2 | grep hi',
+            f"""
+            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f"{managed_job_name}-2",
+                    job_status=[sky.ManagedJobStatus.RUNNING],
+                    timeout=300)}
+            """,
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
             f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {managed_job_name}-0',
-            f'{self.ACTIVATE_CURRENT} && sky jobs queue | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && sky jobs queue | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 1',
+            f"""
+            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                    job_name=f"{managed_job_name}-1",
+                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                    timeout=300)}
+            """,
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 2',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 1',
         ]
         teardown = f'sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
