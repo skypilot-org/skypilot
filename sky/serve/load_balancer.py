@@ -23,6 +23,14 @@ RequestQueueEntry = Tuple[fastapi.Request, asyncio.Event,
 
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _ENABLE_2_LAYER_LB = False
+_QUEUE_PROCESSOR_SLEEP_TIME = 0.01
+
+
+class PeekableQueue(asyncio.Queue):
+    """A queue that allows peeking at the first item without removing it."""
+
+    def peek(self) -> RequestQueueEntry:
+        return self._queue[0]  # type: ignore[attr-defined]
 
 
 class ClientPool:
@@ -154,7 +162,7 @@ class SkyServeLoadBalancer:
         self._lb_pool: ClientPool = ClientPool(meta_load_balancing_policy_name,
                                                max_concurrent_requests)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._request_queue: Optional[asyncio.Queue] = None
+        self._request_queue: Optional[PeekableQueue] = None
         self._sync_controller_task: Optional[asyncio.Task] = None
         self._queue_processor_task: Optional[asyncio.Task] = None
         self._max_queue_size: int = max_queue_size
@@ -290,11 +298,15 @@ class SkyServeLoadBalancer:
         assert self._request_queue is not None
         logger.info('Starting request queue processor')
         while True:
-            logger.info('Length of request queue: '
-                        f'{self._request_queue.qsize()}')
             try:
-                # Get a request from the queue
-                entry: RequestQueueEntry = await self._request_queue.get()
+                if self._request_queue.empty():
+                    await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
+                    continue
+                logger.info('Length of request queue: '
+                            f'{self._request_queue.qsize()}')
+
+                # Peek at the first item in the queue without removing it
+                entry: RequestQueueEntry = self._request_queue.peek()
                 request, request_event, response_future = entry
 
                 # Process the request
@@ -317,17 +329,20 @@ class SkyServeLoadBalancer:
 
                     if ready_replica_url is not None:
                         # Process the request if a replica is available
+                        # Now we can safely remove it from the queue
+                        await self._request_queue.get()
                         response = await self._proxy_request_to(
                             ready_replica_url, request, is_from_lb)
                         response_future.set_result(response)
                         request_event.set()
                     else:
-                        # No replica available, put back in queue
-                        await self._request_queue.put(entry)
-                        # Sleep briefly to avoid tight loop
-                        # when no replicas are available.
-                        await asyncio.sleep(0.1)
+                        # No replica available, leave in queue and try next
+                        # time. Sleep briefly to avoid tight loop when no
+                        # replicas are available.
+                        await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
                 except Exception as e:  # pylint: disable=broad-except
+                    # Remove the entry from the queue on error
+                    await self._request_queue.get()
                     # Set exception to propagate to the waiting handler
                     response_future.set_exception(e)
                     request_event.set()
@@ -336,7 +351,7 @@ class SkyServeLoadBalancer:
                 logger.error(f'Error in queue processor: '
                              f'{common_utils.format_exception(e)}')
                 # Sleep briefly to avoid tight loop in case of persistent errors
-                await asyncio.sleep(0.1)
+                await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
 
     async def _proxy_with_retries(
             self, request: fastapi.Request) -> fastapi.responses.Response:
@@ -403,7 +418,7 @@ class SkyServeLoadBalancer:
 
             # # Make sure we're using the current event loop
             self._loop = asyncio.get_running_loop()
-            self._request_queue = asyncio.Queue(maxsize=self._max_queue_size)
+            self._request_queue = PeekableQueue(maxsize=self._max_queue_size)
 
             # Register controller synchronization task
             self._sync_controller_task = self._loop.create_task(
