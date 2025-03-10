@@ -131,9 +131,9 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
             if re.search(r'([.-]\d|\d[.-])', original_word):
                 continue
 
-            # Check unexpected title case (skip if previous word ends with : or ))
+            # Check unexpected title case (skip if previous word ends with : or ) or ])
             if (i != 0 and original_word.istitle() and
-                    not words[i - 1].endswith((':', ')'))):
+                    not words[i - 1].endswith((':', ')', ']'))):
                 violations.append(original_word)
 
         if violations:
