@@ -38,6 +38,20 @@ class TestBackwardCompatibility:
     ACTIVATE_BASE = f'rm -r  {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r  {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
+    # TODO:(zeping): Remove this after #4867 merged, without this the backward
+    # compatibility test is highly flaky.
+    WAIT_UNTIL_CLUSTER_UP = (
+        'start_time=$SECONDS; '
+        'while true; do '
+        'if (( $SECONDS - $start_time > 60 )); then '
+        '  echo "Timeout after 60 seconds waiting for cluster to be UP"; exit 1; '
+        'fi; '
+        'if sky status {cluster_name} | grep UP; then '
+        '  echo "Cluster {cluster_name} is UP."; break; '
+        'fi; '
+        'echo "Waiting for cluster {cluster_name} to be UP..."; '
+        'sleep 10; '
+        'done')
 
     @pytest.fixture(scope="session")
     def session_cloud(self, request):
@@ -119,6 +133,17 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && s=$(sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml) && '
             'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job ID: 4"',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 2 --status | grep -E "RUNNING|SUCCEEDED"',
+            f"""
+            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=f"{cluster_name}",
+                job_id=2,
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=120)} && {smoke_tests_utils.get_cmd_wait_until_job_status_contains_matching_job_id(
+                cluster_name=f"{cluster_name}",
+                job_id=3,
+                job_status=[sky.JobStatus.SUCCEEDED],
+                timeout=120)}
+            """
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep SUCCEEDED | wc -l | grep 4'
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky down {cluster_name}* -y || true'
@@ -132,6 +157,7 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {self.WAIT_UNTIL_CLUSTER_UP.format(cluster_name=cluster_name)}',
             f'{self.ACTIVATE_CURRENT} && s=$(sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml) && '
             'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2"',
         ]
@@ -180,6 +206,7 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {self.WAIT_UNTIL_CLUSTER_UP.format(cluster_name=cluster_name)}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
@@ -199,6 +226,7 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/multi_hostname.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
+            f'{self.ACTIVATE_CURRENT} && {self.WAIT_UNTIL_CLUSTER_UP.format(cluster_name=cluster_name)}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
@@ -240,10 +268,10 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {managed_job_name}-0',
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-0",
+                    job_name=f"{managed_job_name}-1",
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-1",
+                    job_name=f"{managed_job_name}-2",
                     job_status=[sky.ManagedJobStatus.SUCCEEDED],
                     timeout=300)}
             """,
