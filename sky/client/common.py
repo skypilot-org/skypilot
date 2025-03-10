@@ -23,6 +23,7 @@ from sky.data import storage_utils
 from sky.server import common as server_common
 from sky.server.requests import payloads
 from sky.skylet import constants
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -69,9 +70,11 @@ def download_logs_from_api_server(
             constants.SKY_LOGS_DIRECTORY) for remote_path in paths_on_api_server
     }
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
-    response = requests.post(f'{server_common.get_server_url()}/download',
-                             json=json.loads(body.model_dump_json()),
-                             stream=True)
+    response = requests.post(
+        f'{server_common.get_server_url()}/download',
+        json=json.loads(body.model_dump_json()),
+        stream=True,
+        timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
     if response.status_code == 200:
         remote_home_path = response.headers.get('X-Home-Path')
         assert remote_home_path is not None, response.headers
@@ -111,7 +114,7 @@ def download_logs_from_api_server(
 
         return remote2local_path_dict
     else:
-        raise Exception(
+        raise RuntimeError(
             f'Failed to download logs: {response.status_code} {response.text}')
 
 

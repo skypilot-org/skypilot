@@ -2,7 +2,7 @@
 import pprint
 import threading
 import typing
-from typing import List, Optional
+from typing import Any, List, Optional
 
 if typing.TYPE_CHECKING:
     from sky import task
@@ -20,8 +20,7 @@ class Dag:
     def __init__(self) -> None:
         self.tasks: List['task.Task'] = []
         import networkx as nx  # pylint: disable=import-outside-toplevel
-
-        self.graph = nx.DiGraph()
+        self.graph: nx.DiGraph = nx.DiGraph()
         self.name: Optional[str] = None
         self.policy_applied: bool = False
 
@@ -45,7 +44,8 @@ class Dag:
         push_dag(self)
         return self
 
-    def __exit__(self, exc_type, exc_value, traceback) -> None:
+    def __exit__(self, exec_type: Any, exec_val: Any, exec_tb: Any) -> None:
+        """Exit the runtime context related to this object."""
         pop_dag()
 
     def __repr__(self) -> str:
@@ -58,13 +58,15 @@ class Dag:
     def is_chain(self) -> bool:
         """Check if the DAG is a linear chain of tasks."""
 
-        nodes = list(self.graph.nodes)
+        nodes: List['task.Task'] = list(self.graph.nodes)
 
         if len(nodes) == 0:
             return True
 
-        in_degrees = [self.graph.in_degree(node) for node in nodes]
-        out_degrees = [self.graph.out_degree(node) for node in nodes]
+        in_degrees = typing.cast(List[int],
+                                 [self.graph.in_degree(node) for node in nodes])
+        out_degrees = typing.cast(
+            List[int], [self.graph.out_degree(node) for node in nodes])
 
         # Check out-degrees: all <= 1 and exactly one node has out_degree == 0
         out_degree_condition = (all(degree <= 1 for degree in out_degrees) and

@@ -262,9 +262,9 @@ class ClsApiHelper(object):
                 return file_info
             else:
                 time.sleep(sleep_interval)
-        raise Exception(
-            'timed out after waiting {0} seconds for file {1} to reach'
-            ' a terminal state'.format(timeout, file_name))
+        raise RuntimeError(
+            f'timed out after waiting {timeout} seconds for file {file_name} '
+            'to reach a terminal state')
 
     def get_item_id_by_name(self, name):
         """        Returns the identifier of the item with the given name.

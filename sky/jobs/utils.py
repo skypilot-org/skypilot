@@ -267,7 +267,7 @@ def update_managed_jobs_statuses(job_id: Optional[int] = None):
             logger.error(f'Job {job_id} has DONE schedule state, but some '
                          f'tasks are not terminal. Task statuses: '
                          f'{", ".join(task["status"].value for task in tasks)}')
-            failure_reason = ('Inconsistent internal job state. This is a bug.')
+            failure_reason = 'Inconsistent internal job state. This is a bug.'
         elif pid is None:
             # Non-legacy job and controller process has not yet started.
             controller_status = job_lib.get_status(job_id)
@@ -765,7 +765,8 @@ def stream_logs(job_id: Optional[int],
     if controller:
         if job_id is None:
             assert job_name is not None
-            managed_jobs = managed_job_state.get_managed_jobs()
+            managed_jobs: List[Dict[
+                str, Any]] = managed_job_state.get_managed_jobs()
             # We manually filter the jobs by name, instead of using
             # get_nonterminal_job_ids_by_name, as with `controller=True`, we
             # should be able to show the logs for jobs in terminal states.

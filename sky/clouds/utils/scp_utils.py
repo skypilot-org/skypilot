@@ -16,6 +16,8 @@ from urllib import parse
 
 import requests
 
+from sky.utils import common
+
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
 TEMP_VM_JSON_PATH = '/tmp/json/tmp_vm_body.json'
@@ -187,7 +189,10 @@ class SCPClient:
         self.set_timestamp()
         self.set_signature(url=url, method=method)
 
-        response = requests.get(url, headers=self.headers)
+        response = requests.get(
+            url,
+            headers=self.headers,
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_scp_error(response)
         if contents_key is not None:
             return response.json().get(contents_key, [])
@@ -200,7 +205,11 @@ class SCPClient:
         self.set_timestamp()
         self.set_signature(url=url, method=method)
 
-        response = requests.post(url, json=request_body, headers=self.headers)
+        response = requests.post(
+            url,
+            json=request_body,
+            headers=self.headers,
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
 
         raise_scp_error(response)
         return response.json()
@@ -211,12 +220,17 @@ class SCPClient:
         self.set_timestamp()
         self.set_signature(url=url, method=method)
         if request_body:
-            response = requests.delete(url,
-                                       json=request_body,
-                                       headers=self.headers)
+            response = requests.delete(
+                url,
+                json=request_body,
+                headers=self.headers,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
 
         else:
-            response = requests.delete(url, headers=self.headers)
+            response = requests.delete(
+                url,
+                headers=self.headers,
+                timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_scp_error(response)
         return response.json()
 
@@ -320,8 +334,10 @@ class SCPClient:
 
     def list_catalog(self) -> Dict[str, Any]:
         """List offered instances and their availability."""
-        response = requests.get(f'{API_ENDPOINT}/instance-types',
-                                headers=self.headers)
+        response = requests.get(
+            f'{API_ENDPOINT}/instance-types',
+            headers=self.headers,
+            timeout=common.DEFAULT_HTTP_REQUEST_TIMEOUT_SECONDS)
         raise_scp_error(response)
         return response.json().get('data', [])
 
