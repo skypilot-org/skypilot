@@ -64,7 +64,7 @@ UPGRADE_REMOTE_SERVER_HINT = (
     'Please refer to the following link to upgrade your server:\n'
     f'{colorama.Style.RESET_ALL}'
     f'{colorama.Style.DIM}'
-    'https://docs.skypilot.co/en/latest/reference/api-server/api-server.html'
+    'https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html'
     f'{colorama.Style.RESET_ALL}')
 RequestId = str
 ApiVersion = Optional[str]
