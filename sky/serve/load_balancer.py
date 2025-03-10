@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Deque, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import aiohttp
 import fastapi
@@ -33,14 +33,37 @@ class QueueSizeFilter(logging.Filter):
         return '/queue-size' not in record.getMessage()
 
 
-class PeekableQueue(asyncio.Queue):
-    """A queue that allows peeking at the first item without removing it."""
+class QueueWithLock:
+    """A queue with an async lock to allow concurrent access."""
 
-    def get_queue(self) -> Deque[RequestQueueEntry]:
-        return self._queue  # type: ignore[attr-defined]
+    def __init__(self, max_queue_size: int = 1000):
+        # TODO(tian): max_queue_size.
+        del max_queue_size
+        self._queue: List[Any] = []
+        self._lock = threading.Lock()
 
-    def peek(self) -> RequestQueueEntry:
-        return self.get_queue()[0]
+    def put(self, item: Any) -> None:
+        with self._lock:
+            self._queue.append(item)
+
+    def get(self, index: int = 0) -> Any:
+        with self._lock:
+            return self._queue[index]
+
+    def qsize(self) -> int:
+        with self._lock:
+            return len(self._queue)
+
+    def get_and_remove(self, index: int = 0) -> Any:
+        with self._lock:
+            return self._queue.pop(index)
+
+    def empty(self) -> bool:
+        with self._lock:
+            return not self._queue
+
+    def peek(self) -> Any:
+        return self.get(0)
 
 
 class ClientPool:
@@ -181,7 +204,7 @@ class SkyServeLoadBalancer:
         self._lb_pool: ClientPool = ClientPool(meta_load_balancing_policy_name,
                                                max_concurrent_requests)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
-        self._request_queue: Optional[PeekableQueue] = None
+        self._request_queue: QueueWithLock = QueueWithLock(max_queue_size)
         # self._sync_controller_task: Optional[asyncio.Task] = None
         # self._queue_processor_task: Optional[asyncio.Task] = None
         # self._cleanup_completed_tasks_task: Optional[asyncio.Task] = None
@@ -342,14 +365,14 @@ class SkyServeLoadBalancer:
     async def _queue_processor(self) -> None:
         """Background task to process queued requests."""
         assert self._loop is not None
-        assert self._request_queue is not None
         logger.info('Starting request queue processor')
         while True:
             try:
                 if self._request_queue.empty():
                     await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
                     continue
-                logger.info('Length of request queue: '
+                logger.info('Length of request queue for '
+                            f'{self._external_host}: '
                             f'{self._request_queue.qsize()}')
 
                 # Peek at the first item in the queue without removing it
@@ -377,15 +400,14 @@ class SkyServeLoadBalancer:
                     if ready_replica_url is not None:
                         # Process the request if a replica is available
                         # Now we can safely remove it from the queue
-                        await self._request_queue.get()
+                        self._request_queue.get_and_remove()
+                        coro = self._handle_requests(ready_replica_url, entry,
+                                                     is_from_lb)
                         if _ENABLE_CREATE_TASK_CONCURRENCY:
                             self._handle_request_tasks.append(
-                                self._loop.create_task(
-                                    self._handle_requests(
-                                        ready_replica_url, entry, is_from_lb)))
+                                self._loop.create_task(coro))
                         else:
-                            await self._handle_requests(ready_replica_url,
-                                                        entry, is_from_lb)
+                            await coro
                     else:
                         # No replica available, leave in queue and try next
                         # time. Sleep briefly to avoid tight loop when no
@@ -393,7 +415,7 @@ class SkyServeLoadBalancer:
                         await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
                 except Exception as e:  # pylint: disable=broad-except
                     # Remove the entry from the queue on error
-                    await self._request_queue.get()
+                    self._request_queue.get_and_remove()
                     # Set exception to propagate to the waiting handler
                     response_future.set_exception(e)
                     request_event.set()
@@ -407,7 +429,6 @@ class SkyServeLoadBalancer:
     async def _request_stealing_loop(self) -> None:
         """Background task to process request stealing."""
         assert self._loop is not None
-        assert self._request_queue is not None
         assert self._workload_steal_session is not None
         logger.info('Starting request stealing loop')
         while True:
@@ -467,9 +488,7 @@ class SkyServeLoadBalancer:
             request_event: asyncio.Event = asyncio.Event()
 
             # Queue the request for processing
-            assert self._request_queue is not None
-            await self._request_queue.put(
-                (request, request_event, response_future))
+            self._request_queue.put((request, request_event, response_future))
 
             # Wait for the request to be processed by the queue processor
             await request_event.wait()
@@ -498,10 +517,13 @@ class SkyServeLoadBalancer:
 
     async def _queue_size(self) -> fastapi.responses.Response:
         """Return the size of the request queue."""
-        assert self._request_queue is not None
-        return fastapi.responses.JSONResponse(
-            status_code=200,
-            content={'queue_size': self._request_queue.qsize()})
+        num = 0
+        for i in range(self._request_queue.qsize()):
+            request, _, _ = self._request_queue.get(i)
+            if request.headers.get(_IS_FROM_LB_HEADER, True):
+                num += 1
+        return fastapi.responses.JSONResponse(status_code=200,
+                                              content={'queue_size': num})
 
     async def _steal_request(
             self, steal_request: fastapi.Request) -> fastapi.responses.Response:
@@ -510,25 +532,19 @@ class SkyServeLoadBalancer:
         req_json = await steal_request.json()
         num_steal = req_json['num_steal']
         source_lb_url = req_json['source_lb_url']
-        assert self._request_queue is not None
         # TODO(tian): Steal from the tail of the queue.
-        request_queue_snapshot = list(self._request_queue.get_queue())
-        for entry in request_queue_snapshot:
+        for i in range(self._request_queue.qsize() - 1, -1, -1):
+            entry = self._request_queue.get(i)
             # TODO(tian): Check if the request is from the source LB.
-            # request, _, _ = entry
-            # if not request.headers.get(_IS_FROM_LB_HEADER, True):
-            #     continue
-            await self._request_queue.get()
+            request, _, _ = entry
+            if not request.headers.get(_IS_FROM_LB_HEADER, True):
+                continue
+            self._request_queue.get_and_remove(i)
+            coro = self._handle_requests(source_lb_url, entry, is_from_lb=False)
             if _ENABLE_CREATE_TASK_CONCURRENCY:
-                self._handle_request_tasks.append(
-                    self._loop.create_task(
-                        self._handle_requests(source_lb_url,
-                                              entry,
-                                              is_from_lb=False)))
+                self._handle_request_tasks.append(self._loop.create_task(coro))
             else:
-                await self._handle_requests(source_lb_url,
-                                            entry,
-                                            is_from_lb=False)
+                await coro
             num_steal -= 1
             if not num_steal:
                 break
@@ -568,7 +584,6 @@ class SkyServeLoadBalancer:
                 handler.addFilter(QueueSizeFilter())
             # # Make sure we're using the current event loop
             self._loop = asyncio.get_running_loop()
-            self._request_queue = PeekableQueue(maxsize=self._max_queue_size)
             self._workload_steal_session = aiohttp.ClientSession()
 
             # Register controller synchronization task
@@ -583,8 +598,8 @@ class SkyServeLoadBalancer:
                 self._loop.create_task(self._cleanup_completed_tasks()))
 
             # Start the request stealing loop
-            self._tasks.append(
-                self._loop.create_task(self._request_stealing_loop()))
+            # self._tasks.append(
+            #     self._loop.create_task(self._request_stealing_loop()))
 
         @self._app.on_event('shutdown')
         async def shutdown():
