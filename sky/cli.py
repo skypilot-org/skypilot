@@ -4023,10 +4023,12 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
                f'Managed jobs{colorama.Style.RESET_ALL}'
                f'{in_progress_only_hint}\n{msg}')
     if not all:
-        click.echo(f'{colorama.Fore.CYAN}'
-                   f'Only showing the latest {_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} '
-                   f'managed jobs'
-                   f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
+        click.echo(
+            f'{colorama.Fore.CYAN}'
+            f'Only showing the latest {_NUM_MANAGED_JOBS_TO_SHOW_IN_STATUS} '
+            f'managed jobs'
+            f'(use --all to show all managed jobs) {colorama.Style.RESET_ALL} ')
+
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
 @click.option('--name',
