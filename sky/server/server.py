@@ -1128,3 +1128,4 @@ if __name__ == '__main__':
             if sub_proc.is_alive():
                 sub_proc.terminate()
                 sub_proc.join()
+            sub_proc.close()
