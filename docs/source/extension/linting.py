@@ -114,17 +114,8 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
             if stripped_word in ALLOWED_TERMS or stripped_word.isupper():
                 continue
 
-            # Check for step pattern: "Step [identifier][punctuation?] [word]"
-            if ((i >= 2 and step_pattern.match(words[i - 2]) and
-                 (number_pattern.match(words[i - 1]) or
-                  identifier_pattern.match(words[i - 1]))) or
-                (i >= 3 and step_pattern.match(words[i - 3]) and
-                 identifier_pattern.match(words[i - 2]) and
-                 punctuation_pattern.match(words[i - 1]))):
-                continue
-
-            # Check if previous word is a number with punctuation
-            if i >= 1 and number_pattern.match(words[i - 1]):
+            # Skip if previous word ends with punctuation (like "Step 1:", "1.", "Part:")
+            if i >= 1 and re.search(r'[:.)\]-]$', words[i - 1]):
                 continue
 
             # Allow version numbers and hyphens
