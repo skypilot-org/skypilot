@@ -344,12 +344,19 @@ class SkyServeLoadBalancer:
         """Return the target LBs to steal from."""
         steal_targets = []
         self_url = None
-        for lb in self._lb_pool.ready_replicas():
-            if self._external_host not in lb and str(
-                    self._load_balancer_port) not in lb:
+        all_lb_urls = self._lb_pool.ready_replicas()
+        for lb in all_lb_urls:
+            # NOTE(tian): Hack for local debugging. For SkyServe deployment,
+            # all external load balancers will get the same port. However, in
+            # local debug deployment, we spin up multiple load balancers with
+            # different ports. Hence we only check the port if the host is
+            # 0.0.0.0 (local deployment).
+            if self._external_host not in lb and (
+                    self._external_host != '0.0.0.0' or
+                    str(self._load_balancer_port) not in lb):
                 steal_targets.append(lb)
             else:
-                assert self_url is None
+                assert self_url is None, (self_url, lb, all_lb_urls)
                 self_url = lb
         return steal_targets, self_url
 
@@ -428,8 +435,9 @@ class SkyServeLoadBalancer:
                 if not await self._request_queue.empty():
                     continue
                 steal_targets, self_url = self._steal_targets()
-                if steal_targets:
-                    assert self_url is not None
+                # It is possible that self_url is not ready in the LB
+                # replica manager yet. We wait until it is ready.
+                if steal_targets and self_url is not None:
                     # logger.info('Request queue is empty. Try to '
                     #             f'steal from {steal_targets}')
                     steal_target = steal_targets[0]
