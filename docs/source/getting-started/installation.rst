@@ -376,10 +376,10 @@ Fluidstack
 
 
 
-Cudo compute
+Cudo Compute
 ~~~~~~~~~~~~~~~~~~
 
-`Cudo compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
+`Cudo Compute <https://www.cudocompute.com/>`__ provides low cost GPUs powered by green energy.
 
 1. Create a `billing account <https://www.cudocompute.com/docs/guide/billing/>`__.
 2. Create a `project <https://www.cudocompute.com/docs/guide/projects/>`__.
@@ -440,7 +440,7 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 
 
 
-SCP (Samsung cloud platform)
+SCP (Samsung Cloud Platform)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.

@@ -56,7 +56,8 @@ ALLOWED_TERMS = {
 MULTI_WORD_TERMS = {
     'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
     'Google Cloud', 'LoadBalancer Service', 'dynamic Workload Scheduler',
-    'Sky Computing', 'VS Code'
+    'Sky Computing', 'VS Code', 'GCP Service Account', 'Cudo Compute',
+    'Samsung Cloud Platform'
 }
 
 
@@ -114,8 +115,8 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
                 if i + len(phrase_words) <= len(words):
                     # Join words first, then strip punctuation at the end for comparison
                     joined_words = ' '.join(words[i:i + len(phrase_words)])
-                    # Only strip punctuation at the end, preserving middle punctuation
-                    stripped_joined = re.sub(r'\W+$', '', joined_words)
+                    # Strip punctuation at both the beginning and end, preserving middle punctuation
+                    stripped_joined = re.sub(r'^\W+|\W+$', '', joined_words)
                     if stripped_joined == phrase:
                         # Skip all words in the matched phrase
                         i += len(phrase_words)

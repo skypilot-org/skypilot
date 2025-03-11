@@ -33,8 +33,8 @@ Sky Computing
 -------------------------
 
 To combat this, *Sky Computing* was recently proposed in two papers from UC Berkeley:
-`From cloud Computing to sky Computing <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ and
-`The sky above the clouds <https://arxiv.org/abs/2205.07147>`_ (whitepaper).
+`From Cloud Computing to Sky Computing <https://sigops.org/s/conferences/hotos/2021/papers/hotos21-s02-stoica.pdf>`_ and
+`The Sky Above The Clouds <https://arxiv.org/abs/2205.07147>`_ (whitepaper).
 
 In a nutshell, Sky Computing **combines a team's diverse cloud infra into a unified pool**, a "sky".
 Sky comes with two components to simplify---and exploit---the complex search space:
