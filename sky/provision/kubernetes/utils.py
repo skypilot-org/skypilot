@@ -853,7 +853,7 @@ def get_accelerator_label_key_value(
                 for label, value in label_list:
                     if (label_formatter.match_label_key(label) and
                             label_formatter.get_accelerator_from_label_value(
-                                value) == acc_type):
+                                value).lower() == acc_type.lower()):
                         if is_tpu_on_gke(acc_type):
                             assert isinstance(label_formatter,
                                               GKELabelFormatter)
