@@ -55,8 +55,8 @@ This can be useful if your jobs use certain experiment tracking tools that depen
 File mounting (``file_mounts``)
 -------------------------------
 
-How to make SkyPilot clusters use my  Weights & Biases credentials?
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+How to make SkyPilot clusters use my Weights & Biases credentials?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Install the wandb library on your laptop and login to your account via ``wandb login``.
 Then, add the following lines in your task yaml file:
