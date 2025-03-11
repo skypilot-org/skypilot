@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
+import multiprocessing
 import os
 import pathlib
 import re
@@ -47,6 +48,7 @@ from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -1123,9 +1125,15 @@ if __name__ == '__main__':
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for sub_proc in sub_procs:
-            # Ignore dead or not started processes.
-            if sub_proc.is_alive():
-                sub_proc.terminate()
-                sub_proc.join()
-            sub_proc.close()
+
+        def cleanup(proc: multiprocessing.Process) -> None:
+            try:
+                proc.terminate()
+                proc.join()
+            finally:
+                # The process may not be started yet, close it anyway.
+                proc.close()
+
+        subprocess_utils.run_in_parallel(cleanup,
+                                         sub_procs,
+                                         num_threads=len(sub_procs))

@@ -5,6 +5,7 @@ import random
 import resource
 import shlex
 import subprocess
+import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
@@ -370,7 +371,8 @@ OnStartFn = Callable[[Startable], None]
 
 def slow_start_processes(processes: List[Startable],
                          delay: float = 2.0,
-                         on_start: Optional[OnStartFn] = None) -> None:
+                         on_start: Optional[OnStartFn] = None,
+                         should_exit: Optional[threading.Event] = None) -> None:
     """Start processes with slow start.
 
     Profile shows that it takes 1~2 seconds to start a worker process when
@@ -385,11 +387,16 @@ def slow_start_processes(processes: List[Startable],
         processes: The list of processes to start.
         delay: The delay between starting each process, default to 2.0 seconds,
             based on profile.
+        on_start: An optional function to callback when a process starts.
+        should_exit: An optional event to check if the function should exit
+            before starting all the processes.
     """
     max_batch_size = max(1, int(common_utils.get_cpu_count() / 2))
     batch_size = 1
     left = len(processes)
     while left > 0:
+        if should_exit and should_exit.is_set():
+            break
         current_batch = min(batch_size, left)
         for i in range(current_batch):
             worker_idx = len(processes) - left + i
@@ -399,5 +406,5 @@ def slow_start_processes(processes: List[Startable],
         left -= current_batch
         if left <= 0:
             break
-        time.sleep(delay)
         batch_size = min(batch_size * 2, max_batch_size)
+        time.sleep(delay)

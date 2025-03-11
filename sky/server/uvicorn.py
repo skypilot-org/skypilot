@@ -5,6 +5,7 @@ server.
 """
 import os
 import threading
+from typing import Optional
 
 import uvicorn
 from uvicorn.supervisors import multiprocess
@@ -50,11 +51,14 @@ class SlowStartMultiprocess(multiprocess.Multiprocess):
             config: The uvicorn config.
         """
         super().__init__(config, **kwargs)
+        self._init_thread: Optional[threading.Thread] = None
 
     def init_processes(self) -> None:
         # Slow start worker processes asynchronously to avoid blocking signal
         # handling of uvicorn.
-        threading.Thread(target=self.slow_start_processes, daemon=True).start()
+        self._init_thread = threading.Thread(target=self.slow_start_processes,
+                                             daemon=True)
+        self._init_thread.start()
 
     def slow_start_processes(self) -> None:
         """Initialize processes with slow start."""
@@ -67,4 +71,11 @@ class SlowStartMultiprocess(multiprocess.Multiprocess):
         # self.processes because Uvicorn periodically restarts unstarted
         # workers.
         subprocess_utils.slow_start_processes(to_start,
-                                              on_start=self.processes.append)
+                                              on_start=self.processes.append,
+                                              should_exit=self.should_exit)
+
+    def terminate_all(self) -> None:
+        """Wait init thread to finish before terminating all processes."""
+        if self._init_thread is not None:
+            self._init_thread.join()
+        super().terminate_all()
