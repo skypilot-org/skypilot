@@ -46,7 +46,6 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
-    :ref:`networking <config-yaml-kubernetes-networking>`: portforward
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
     :ref:`remote_identity <config-yaml-kubernetes-remote-identity>`: my-k8s-service-account
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
@@ -831,21 +830,6 @@ Example:
 ~~~~~~~~~~~~~~~
 
 Advanced Kubernetes configurations (optional).
-
-.. _config-yaml-kubernetes-networking:
-
-``kubernetes.networking``
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Networking mode (optional).
-
-Can be one of:
-
-- ``portforward``: Use port forwarding to access the pods.
-- ``hostnetwork``: Use host network to access the pods.
-- ``weave``: Use Weave CNI for networking.
-
-Default: ``portforward``.
 
 .. _config-yaml-kubernetes-ports:
 
