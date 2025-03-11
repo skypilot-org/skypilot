@@ -124,10 +124,10 @@ Example:
 SkyPilot will utilize the reservations similar to AWS reservations as described in :ref:`utilizing-reservations`.
 
 
-GCP dynamic workload scheduler (DWS)
+GCP dynamic Workload Scheduler (DWS)
 -------------------------------------
 
-GCP `dynamic workload scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that (1) receives a GPU capacity request, (2) automatically provisions the requested resources when they become available, and (3) keeps the resources running for a specified duration.
+GCP `dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/compute/introducing-dynamic-workload-scheduler>`__ is a resource management service that (1) receives a GPU capacity request, (2) automatically provisions the requested resources when they become available, and (3) keeps the resources running for a specified duration.
 
 .. tip::
 

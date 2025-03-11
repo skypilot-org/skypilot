@@ -22,17 +22,17 @@ If your cluster does not support LoadBalancer services, SkyPilot can also use `a
 
 .. _kubernetes-loadbalancer:
 
-LoadBalancer service
+LoadBalancer Service
 --------------------
 
-This mode exposes ports through a Kubernetes `LoadBalancer service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
+This mode exposes ports through a Kubernetes `LoadBalancer Service <https://kubernetes.io/docs/concepts/services-networking/service/#loadbalancer>`__. This is the default mode used by SkyPilot.
 
-To use this mode, you must have a Kubernetes cluster that supports LoadBalancer services:
+To use this mode, you must have a Kubernetes cluster that supports LoadBalancer Services:
 
 * On Google GKE, Amazon EKS or other cloud-hosted Kubernetes services, this mode is supported out of the box and no additional configuration is needed.
-* On bare metal and self-managed Kubernetes clusters, `MetalLB <https://metallb.universe.tf/>`_ can be used to support LoadBalancer services.
+* On bare metal and self-managed Kubernetes clusters, `MetalLB <https://metallb.universe.tf/>`_ can be used to support LoadBalancer Services.
 
-When using this mode, SkyPilot will create a single LoadBalancer service for all ports that you expose on a cluster.
+When using this mode, SkyPilot will create a single LoadBalancer Service for all ports that you expose on a cluster.
 Each port can be accessed using the LoadBalancer's external IP address and the port number. Use :code:`sky status --endpoints <cluster>` to view the external endpoints for all ports.
 
 In cloud based Kubernetes clusters, this will automatically create an external Load Balancer.

@@ -52,6 +52,13 @@ ALLOWED_TERMS = {
     'Europe',
 }
 
+# Add multi-word terms that should be treated as a single entity
+MULTI_WORD_TERMS = {
+    'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
+    'Google Cloud', 'LoadBalancer Service', 'dynamic Workload Scheduler',
+    'Sky Computing', 'VS Code'
+}
+
 
 def check_sentence_case(app: Sphinx, docname: str, source: list):
     """Check heading style across Markdown and reST"""
@@ -97,35 +104,52 @@ def check_sentence_case(app: Sphinx, docname: str, source: list):
         violations = []
         # Split on whitespace, preserving punctuation with words
         words = re.findall(r'\S+', heading)
-        step_pattern = re.compile(r'^step$', re.IGNORECASE)
-        number_pattern = re.compile(
-            r'^\d+[:\-.]$')  # Matches digits followed by : or - or .
-        identifier_pattern = re.compile(
-            r'^[A-Za-z0-9]+$', re.IGNORECASE)  # Alphanumeric identifier
-        punctuation_pattern = re.compile(
-            r'^[:-]$')  # Punctuation as separate word
 
-        for i in range(len(words)):
+        i = 0
+        while i < len(words):
+            # Check for multi-word terms
+            matched_phrase = False
+            for phrase in MULTI_WORD_TERMS:
+                phrase_words = phrase.split()
+                if i + len(phrase_words) <= len(words):
+                    # Join words first, then strip punctuation at the end for comparison
+                    joined_words = ' '.join(words[i:i + len(phrase_words)])
+                    # Only strip punctuation at the end, preserving middle punctuation
+                    stripped_joined = re.sub(r'\W+$', '', joined_words)
+                    if stripped_joined == phrase:
+                        # Skip all words in the matched phrase
+                        i += len(phrase_words)
+                        matched_phrase = True
+                        break
+
+            if matched_phrase:
+                continue
+
             original_word = words[i]
             # Remove ALL leading/trailing non-alphanumeric characters
             stripped_word = re.sub(r'^\W+|\W+$', '', original_word)
 
             # Skip allowed terms and acronyms (check stripped version)
             if stripped_word in ALLOWED_TERMS or stripped_word.isupper():
+                i += 1
                 continue
 
             # Skip if previous word ends with punctuation (like "Step 1:", "1.", "Part:")
             if i >= 1 and re.search(r'[:.)\]-]$', words[i - 1]):
+                i += 1
                 continue
 
             # Allow version numbers and hyphens
             if re.search(r'([.-]\d|\d[.-])', original_word):
+                i += 1
                 continue
 
             # Check unexpected title case (skip if previous word ends with : or ) or ])
             if (i != 0 and original_word.istitle() and
                     not words[i - 1].endswith((':', ')', ']'))):
                 violations.append(original_word)
+
+            i += 1
 
         if violations:
             logger = getLogger(__name__)
