@@ -220,7 +220,7 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. tip::
             
             If you're using a Kubernetes cluster without LoadBalancer support, you may get an empty IP address in the output above.
-            In that case, use the :ref:`NodePort <sky-api-server-deploy-nodeport>` option instead.
+            In that case, use the NodePort option instead.
 
     .. tab-item:: NodePort
         :sync: nodeport-tab
@@ -256,7 +256,7 @@ Our default of using a NodePort service is the recommended way to expose the API
     
 .. dropdown:: Migration notes for 0.8.0 nightly users
 
-    If you are upgrading from 0.8.0 nightly with a previously deployed :ref:`NodePort <sky-api-server-deploy-nodeport>` service, the service will be kept by default to avoid breaking existing workflows. In addition, a new LoadBalancer service will be created to expose the API server by default. You can choose any of the following options based on your needs:
+    If you are upgrading from 0.8.0 nightly with a previously deployed NodePort service, the service will be kept by default to avoid breaking existing workflows. In addition, a new LoadBalancer service will be created to expose the API server by default. You can choose any of the following options based on your needs:
 
     - Keep the NodePort service and disable the LoadBalancer service:
 
