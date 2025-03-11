@@ -1838,30 +1838,27 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                     reason=exceptions.FetchClusterInfoError.Reason.HEAD)
             head_runner = runners[0]
 
-            ready_head, ready_workers, output, stderr = (
-                get_node_counts_from_ray_status(head_runner))
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
 
-            if ready_head + ready_workers == total_nodes:
-                return True
-            logger.debug(f'Refreshing status ({cluster_name!r}): first '
-                         'ray status not showing all nodes '
-                         f'({ready_head + ready_workers}/{total_nodes});\n'
-                         f'output:\n{output}\nstderr:\n{stderr}')
+            for i in range(5):
+                ready_head, ready_workers, output, stderr = (
+                    get_node_counts_from_ray_status(head_runner))
+                if ready_head + ready_workers == total_nodes:
+                    return True
+                logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
+                             f'{i}: ray status not showing all nodes '
+                             f'({ready_head + ready_workers}/{total_nodes});\n'
+                             f'output:\n{output}\nstderr:\n{stderr}')
 
-            # If cluster JUST started, maybe not all the nodes have shown up.
-            # Wait for a few seconds and try again.
-            # Note: We are okay with this performance hit because it's very rare
-            # to normally hit this case. It requires:
-            # - All the instances in the cluster are up on the cloud side (not
-            #   preempted), but
-            # - The ray cluster is somehow degraded so not all instances are
-            #   showing up
-            time.sleep(5)
-            ready_head, ready_workers, output, stderr = (
-                get_node_counts_from_ray_status(head_runner))
-            if ready_head + ready_workers == total_nodes:
-                return True
+                # If cluster JUST started, maybe not all the nodes have shown
+                # up. Try again for a few seconds.
+                # Note: We are okay with this performance hit because it's very
+                # rare to normally hit this case. It requires:
+                # - All the instances in the cluster are up on the cloud side
+                #   (not preempted), but
+                # - The ray cluster is somehow degraded so not all instances are
+                #   showing up
+                time.sleep(1)
 
             raise RuntimeError(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
