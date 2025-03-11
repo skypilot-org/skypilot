@@ -822,7 +822,15 @@ def open_ports(
 
     # For the case when every new ports is already opened.
     if ip_permissions:
-        sg.authorize_ingress(IpPermissions=ip_permissions)
+        try:
+            sg.authorize_ingress(IpPermissions=ip_permissions)
+        except aws.botocore_exceptions().ClientError as e:
+            if 'InvalidPermission.Duplicate' in str(e):
+                # This is possible when a previous cleanup failed.
+                logger.warning(f'Port {ports} is already opened. '
+                               'Skip opening again.')
+            else:
+                raise
 
 
 def cleanup_ports(

@@ -314,7 +314,6 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
             return None
         key_hash = self._hash_function(key)
         logger.debug(f'Key hash to find: {key_hash}')
-        # TODO(tian): Avoid this O(n) scan on every request.
         idx = self._bisect_ready(key_hash)
         if idx is None:
             return None

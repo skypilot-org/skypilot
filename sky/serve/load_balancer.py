@@ -134,6 +134,10 @@ class ClientPool:
             return self._load_balancing_policy.select_replica_from_subset(
                 request, self._available_replicas)
 
+    def empty(self) -> bool:
+        with self._lock:
+            return not self._pool
+
     def ready_replicas(self) -> List[str]:
         return self._load_balancing_policy.ready_replicas
 
@@ -396,6 +400,19 @@ class SkyServeLoadBalancer:
                                if is_from_lb else self._lb_pool)
                 source_identity = 'LB' if is_from_lb else 'User'
 
+                # TODO(tian): Handle no replica case.
+                if pool_to_use.empty():
+                    await self._request_queue.get_and_remove()
+                    exception = fastapi.HTTPException(
+                        # 503 means that the server is currently
+                        # unable to handle the incoming requests.
+                        status_code=503,
+                        detail=('No ready replicas. '
+                                'Use "sky serve status [SERVICE_NAME]" '
+                                'to check the replica status.'))
+                    response_future.set_exception(exception)
+                    request_event.set()
+
                 # Attempt to find an available replica
                 ready_replica_url = pool_to_use.select_replica(request)
 
@@ -453,15 +470,23 @@ class SkyServeLoadBalancer:
                     # logger.info(f'Queue size of {steal_target}: '
                     #             f'{queue_size}')
                     if queue_size > 0:
+                        num_steal = queue_size // 2
                         logger.info(f'Steal from {steal_target} with '
-                                    f'{queue_size} requests.')
+                                    f'{num_steal}/{queue_size} requests.')
                         async with self._workload_steal_session.post(  # pylint: disable=not-async-context-manager
                                 steal_target + '/steal-request',
                                 json={
-                                    'num_steal': queue_size // 2,
+                                    'num_steal': num_steal,
                                     'source_lb_url': self_url,
-                                }) as response:
-                            response.raise_for_status()
+                                }) as steal_response:
+                            steal_response.raise_for_status()
+                            remaining_to_steal = (
+                                await
+                                steal_response.json())['remaining_to_steal']
+                            logger.info(f'Remaining to steal: '
+                                        f'{remaining_to_steal}/'
+                                        f'{num_steal} from '
+                                        f'{steal_target}.')
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in request stealing loop: '
                              f'{common_utils.format_exception(e)}')
@@ -529,6 +554,13 @@ class SkyServeLoadBalancer:
         return fastapi.responses.JSONResponse(status_code=200,
                                               content={'queue_size': num})
 
+    async def _raw_queue_size(self) -> fastapi.responses.Response:
+        """Return the size of the request queue."""
+        assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={'queue_size': await self._request_queue.qsize()})
+
     async def _steal_request(
             self, steal_request: fastapi.Request) -> fastapi.responses.Response:
         """Let other LBs steal requests from this LB."""
@@ -537,6 +569,8 @@ class SkyServeLoadBalancer:
         req_json = await steal_request.json()
         num_steal = req_json['num_steal']
         source_lb_url = req_json['source_lb_url']
+        logger.info(f'Received steal request from {source_lb_url} with '
+                    f'{num_steal} requests.')
         for i in range(await self._request_queue.qsize()):
             # Re-getting the queue size since it is possible the queue changed
             # during the loop, e.g. a request from head is popped out.
@@ -557,6 +591,8 @@ class SkyServeLoadBalancer:
             num_steal -= 1
             if not num_steal:
                 break
+        logger.info(f'{num_steal} requests was NOT stolen and remained '
+                    f'from {source_lb_url}.')
 
         # if num_steal:
         #     raise fastapi.HTTPException(
@@ -564,7 +600,8 @@ class SkyServeLoadBalancer:
         #         detail=f'Not enough requests to steal. '
         #         f'Requested {num_steal}, but only {num_steal} requests '
         #         f'available.')
-        return fastapi.responses.Response(status_code=200)
+        return fastapi.responses.JSONResponse(
+            status_code=200, content={'remaining_to_steal': num_steal})
 
     def run(self):
         # Add health check endpoint first so it takes precedence
@@ -574,6 +611,10 @@ class SkyServeLoadBalancer:
 
         self._app.add_api_route('/queue-size',
                                 self._queue_size,
+                                methods=['GET'])
+
+        self._app.add_api_route('/raw-queue-size',
+                                self._raw_queue_size,
                                 methods=['GET'])
 
         self._app.add_api_route('/steal-request',
@@ -717,7 +758,13 @@ if __name__ == '__main__':
                         default=1000,
                         help='Maximum size of the request queue.')
     args = parser.parse_args()
-    run_load_balancer(args.controller_addr, args.load_balancer_port,
-                      args.load_balancing_policy,
-                      args.meta_load_balancing_policy, args.region, None,
-                      args.max_concurrent_requests, args.max_queue_size)
+    run_load_balancer(
+        args.controller_addr,
+        args.load_balancer_port,
+        args.load_balancing_policy,
+        args.meta_load_balancing_policy,
+        args.region,
+        tls_credential=None,
+        max_concurrent_requests=args.max_concurrent_requests,
+        max_queue_size=args.max_queue_size,
+    )

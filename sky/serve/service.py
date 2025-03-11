@@ -429,8 +429,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                     sn, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:
-            shutil.rmtree(service_dir)
             for sn in [lb_svc_name, service_name]:
+                shutil.rmtree(
+                    os.path.expanduser(
+                        serve_utils.generate_remote_service_dir_name(sn)))
                 serve_state.remove_service(sn)
                 serve_state.delete_all_versions(sn)
             logger.info(f'Service {service_name} terminated successfully.')

@@ -26,6 +26,7 @@ run: |
     --max-concurrent-requests {{max_concurrent_requests}} \
     --max-queue-size {{max_queue_size}} \
     --region {{region}}
+
 envs:
 {%- for env_name, env_value in lb_envs.items() %}
   {{env_name}}: {{env_value}}
