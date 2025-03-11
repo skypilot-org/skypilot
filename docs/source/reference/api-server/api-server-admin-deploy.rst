@@ -163,6 +163,7 @@ Install the SkyPilot Helm chart with the following command:
 
 .. code-block:: bash
 
+    # The following variables will be used throughout the guide
     NAMESPACE=skypilot
     RELEASE_NAME=skypilot
     WEB_USERNAME=skypilot
@@ -212,16 +213,14 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            # RELEASE_NAME and NAMESPACE should match the values used in Step 3
             $ ENDPOINT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
             $ echo $ENDPOINT
             http://1.1.1.1
         
         .. tip::
             
-            LoadBalancer service requires cloud infrastructure that supports it. If you're using 
-            a cloud provider without LoadBalancer support or running on-premises, use the 
-            NodePort option instead.
+            If you're using a Kubernetes cluster without LoadBalancer support, you may get an empty IP address in the output above.
+            In that case, use the :ref:`NodePort <sky-api-server-deploy-nodeport>` option instead.
 
     .. tab-item:: NodePort
         :sync: nodeport-tab
@@ -232,7 +231,6 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: bash
 
-            # RELEASE_NAME and NAMESPACE should match the values used in Step 3
             $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
               --set ingress-nginx.controller.service.type=NodePort \
               --set ingress-nginx.controller.service.nodePorts.http=30050 \
@@ -242,7 +240,6 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
             $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np -n $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
             $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
@@ -256,7 +253,31 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. tip::
 
             To avoid frequent IP address changes on nodes by your cloud provider, you can attach a static IP address to your nodes (`instructions for GKE <https://cloud.google.com/compute/docs/ip-addresses/configure-static-external-ip-address>`_) and use it as the ``NODE_IP`` in the command above.
+    
+.. dropdown:: Migration notes for 0.8.0 nightly users
 
+    If you are upgrading from 0.8.0 nightly with a previously deployed :ref:`NodePort <sky-api-server-deploy-nodeport>` service, the service will be kept by default to avoid breaking existing workflows. In addition, a new LoadBalancer service will be created to expose the API server by default. You can choose any of the following options based on your needs:
+
+    - Keep the NodePort service and disable the LoadBalancer service:
+
+    .. code-block:: bash
+
+        helm upgrade --install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --set ingress.nodePortEnabled=true \
+            --set ingress-nginx.controller.service.type=ClusterIP
+
+    - Migrate from the NodePort service to the LoadBalancer service:
+
+    .. note::
+
+        Make sure there is no clients using the NodePort service before disabling it.
+
+    .. code-block:: bash
+
+        helm upgrade --install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+            --set ingress.nodePortEnabled=false
+
+    - Keep both services, no action needed. You can still migrate to one of the options above later.
 
 Step 5: Test the API server
 ---------------------------

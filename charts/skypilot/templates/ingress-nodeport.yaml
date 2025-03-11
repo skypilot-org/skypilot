@@ -1,5 +1,16 @@
-{{- /* TODO(aylei): remove this template in v0.11.0 */ -}}
-{{- if and .Values.ingress.nodePortEnabled (index .Values "ingress-nginx" "enabled") }}
+{{- $createNodePort := false -}}
+{{- if eq .Values.ingress.nodePortEnabled nil -}}
+  {{- /* Keep existing NodePort service if ingress.nodePortEnabled is not set */ -}}
+  {{- $existingService := lookup "v1" "Service" .Release.Namespace (printf "%s-ingress-controller-np" .Release.Name) -}}
+  {{- if $existingService -}}
+    {{- $createNodePort = true -}}
+  {{- end -}}
+{{- else -}}
+  {{- /* Use explicitly set value */ -}}
+  {{- $createNodePort = .Values.ingress.nodePortEnabled -}}
+{{- end -}}
+
+{{- if and $createNodePort (index .Values "ingress-nginx" "enabled") }}
 apiVersion: v1
 kind: Service
 metadata:
@@ -24,4 +35,4 @@ spec:
     app.kubernetes.io/component: controller
     app.kubernetes.io/instance: {{ .Release.Name }}
     app.kubernetes.io/name: ingress-nginx
-{{- end}}
+{{- end }}
