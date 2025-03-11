@@ -27,6 +27,7 @@ import os
 import queue as queue_lib
 import signal
 import sys
+import threading
 import time
 import traceback
 import typing
@@ -46,6 +47,7 @@ from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -431,13 +433,17 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
 
     logger.info('Request queues created')
 
+    long_workers = []
     for worker_id in range(max_parallel_for_long):
         worker = RequestWorker(id=worker_id,
                                schedule_type=api_requests.ScheduleType.LONG)
         worker_proc = multiprocessing.Process(target=request_worker,
                                               args=(worker, 1))
-        worker_proc.start()
+        long_workers.append(worker_proc)
         sub_procs.append(worker_proc)
+    threading.Thread(target=subprocess_utils.slow_start_processes,
+                     args=(long_workers,),
+                     daemon=True).start()
 
     # Start a worker for short requests.
     worker = RequestWorker(id=1, schedule_type=api_requests.ScheduleType.SHORT)
