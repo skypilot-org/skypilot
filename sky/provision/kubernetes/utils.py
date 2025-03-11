@@ -125,6 +125,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
         retry_interval: Initial seconds to wait between retries
         resource_type: Type of resource being accessed (e.g. 'node', 'pod').
             Used to provide more specific error messages.
+
+    Raises:
+        KubeAPIUnreachableError: If the API server of the given context is
+            unreachable.
     """
 
     def decorator(func):
@@ -134,6 +138,9 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
             last_exception = None
             backoff = common_utils.Backoff(initial_backoff=retry_interval,
                                            max_backoff_factor=3)
+
+            assert 'context' in kwargs, 'context is required'
+            context = kwargs.get('context')
 
             for attempt in range(max_retries):
                 try:
@@ -160,6 +167,8 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                 if resource_type else ''
             debug_cmd = f' To debug, run: kubectl get {resource_type}s' \
                 if resource_type else ''
+            if context:
+                debug_cmd += f' --context {context}'
 
             if isinstance(last_exception, kubernetes.max_retry_error()):
                 error_msg = f'Timed out{resource_msg} from Kubernetes cluster.'
@@ -170,7 +179,7 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                 error_msg = (f'Kubernetes configuration error{resource_msg}: '
                              f'{str(last_exception)}')
 
-            raise exceptions.ResourcesUnavailableError(
+            raise exceptions.KubeAPIUnreachableError(
                 f'{error_msg}'
                 f' Please check if the cluster is healthy and retry.'
                 f'{debug_cmd}') from last_exception
@@ -529,7 +538,7 @@ def detect_gpu_label_formatter(
     """
     # Get all labels across all nodes
     node_labels: Dict[str, List[Tuple[str, str]]] = {}
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         node_labels[node.metadata.name] = []
         for label, value in node.metadata.labels.items():
@@ -564,7 +573,7 @@ def detect_accelerator_resource(
     """
     # Get the set of resources across all nodes
     cluster_resources: Set[str] = set()
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         cluster_resources.update(node.status.allocatable.keys())
     has_accelerator = (get_gpu_resource_key() in cluster_resources or
@@ -575,7 +584,7 @@ def detect_accelerator_resource(
 
 @annotations.lru_cache(scope='request', maxsize=10)
 @_retry_on_error(resource_type='node')
-def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
+def get_kubernetes_nodes(*, context: Optional[str] = None) -> List[Any]:
     """Gets the kubernetes nodes in the context.
 
     If context is None, gets the nodes in the current context.
@@ -589,8 +598,9 @@ def get_kubernetes_nodes(context: Optional[str] = None) -> List[Any]:
 
 
 @_retry_on_error(resource_type='pod')
-def get_all_pods_in_kubernetes_cluster(
-        context: Optional[str] = None) -> List[Any]:
+def get_all_pods_in_kubernetes_cluster(*,
+                                       context: Optional[str] = None
+                                      ) -> List[Any]:
     """Gets pods in all namespaces in kubernetes cluster indicated by context.
 
     Used for computing cluster resource usage.
@@ -618,9 +628,6 @@ def check_instance_fits(context: Optional[str],
         bool: True if the instance fits on the cluster, False otherwise.
         Optional[str]: Error message if the instance does not fit.
     """
-
-    # TODO(zhwu): this should check the node for specific context, instead
-    # of the default context to make failover fully functional.
 
     def check_cpu_mem_fits(candidate_instance_type: 'KubernetesInstanceType',
                            node_list: List[Any]) -> Tuple[bool, Optional[str]]:
@@ -682,7 +689,7 @@ def check_instance_fits(context: Optional[str],
                        f'{tpu_list_in_cluster_str}. Note that multi-host TPU '
                        'podslices are currently not unsupported.')
 
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     k8s_instance_type = KubernetesInstanceType.\
         from_instance_type(instance)
     acc_type = k8s_instance_type.accelerator_type
@@ -2083,7 +2090,7 @@ def get_spot_label(
     """
     # Check if the cluster supports spot instances by checking nodes for known
     # spot label keys and values
-    for node in get_kubernetes_nodes(context):
+    for node in get_kubernetes_nodes(context=context):
         for _, (key, value) in SPOT_LABEL_MAP.items():
             if key in node.metadata.labels and node.metadata.labels[
                     key] == value:
@@ -2133,10 +2140,10 @@ def get_kubernetes_node_info(
         Dict[str, KubernetesNodeInfo]: Dictionary containing the node name as
             key and the KubernetesNodeInfo object as value
     """
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     # Get the pods to get the real-time resource usage
     try:
-        pods = get_all_pods_in_kubernetes_cluster(context)
+        pods = get_all_pods_in_kubernetes_cluster(context=context)
     except kubernetes.api_exception() as e:
         if e.status == 403:
             pods = None
@@ -2443,7 +2450,7 @@ def is_multi_host_tpu(node_metadata_labels: dict) -> bool:
 
 def multi_host_tpu_exists_in_cluster(context: Optional[str] = None) -> bool:
     """Checks if there exists a multi-host TPU within the cluster."""
-    nodes = get_kubernetes_nodes(context)
+    nodes = get_kubernetes_nodes(context=context)
     for node in nodes:
         if is_multi_host_tpu(node.metadata.labels):
             return True
