@@ -105,7 +105,10 @@ ingress-nginx:
       # especially for websocket SSH tunneling. Different cloud providers may require different annotations. 
       # Annotations with no side effects are aggregated below to simplify the usage.
       annotations:
-        # AWS CLB works out of the box, use NLB is a better option but requires AWS Load Balancer Controller to be installed.
+        # For AWS service reconciled by cloud-controller-manager, use NLB by default.
+        # If you are using AWS Load Balancer Controller, refer to the following doc to configure annotations:
+        # https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
         # For GKE, use backend service-based external passthrough Network Load Balancer as per best practices.
         # Ref: https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer#load_balancer_types
         cloud.google.com/l4-rbs: "enabled"
