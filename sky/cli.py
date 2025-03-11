@@ -278,7 +278,7 @@ _COMMON_OPTIONS = [
                  required=False,
                  is_flag=True,
                  default=False,
-                 help=('Run the command asynchronously.'))
+                 help='Run the command asynchronously.')
 ]
 
 _TASK_OPTIONS = [
@@ -336,7 +336,7 @@ _TASK_OPTIONS = [
                  default=None,
                  type=int,
                  required=False,
-                 help=('OS disk size in GBs.')),
+                 help='OS disk size in GBs.'),
     click.option('--disk-tier',
                  default=None,
                  type=click.Choice(resources_utils.DiskTier.supported_tiers(),
@@ -532,7 +532,8 @@ def _install_shell_completion(ctx: click.Context, param: click.Parameter,
     else:
         click.secho(f'Unsupported shell: {value}', fg='red')
         ctx.exit()
-
+        # Though `ctx.exit()` already NoReturn, we need to make pylint happy.
+        assert False, 'Unreachable'
     try:
         subprocess.run(cmd,
                        shell=True,
@@ -587,6 +588,8 @@ def _uninstall_shell_completion(ctx: click.Context, param: click.Parameter,
     else:
         click.secho(f'Unsupported shell: {value}', fg='red')
         ctx.exit()
+        # Though `ctx.exit()` already NoReturn, we need to make pylint happy.
+        assert False, 'Unreachable'
 
     try:
         subprocess.run(cmd, shell=True, check=True)
@@ -3799,7 +3802,7 @@ def jobs():
               default=None,
               type=str,
               hidden=True,
-              help=('Alias for --name, the name of the managed job.'))
+              help='Alias for --name, the name of the managed job.')
 @click.option('--job-recovery',
               default=None,
               type=str,
@@ -4776,7 +4779,7 @@ def serve_logs(
         sky serve logs [SERVICE_NAME] 1
     """
     have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
+    num_flags = controller + load_balancer + have_replica_id
     if num_flags > 1:
         raise click.UsageError('At most one of --controller, --load-balancer, '
                                '[REPLICA_ID] can be specified.')

@@ -65,9 +65,8 @@ def remove(instance_id: str):
         retry_count += 1
         time.sleep(retry_interval)
     else:
-        raise Exception(
-            'Timeout error, could not terminate due to VM state: {}'.format(
-                state))
+        raise RuntimeError(
+            f'Timeout error, could not terminate due to VM state: {state}')
 
     try:
         api.terminate_vm(project_id, instance_id)
@@ -137,7 +136,7 @@ def vm_available(to_start_count, gpu_count, gpu_model, data_center_id, mem,
         hc = types_dict['host_configs']
         total_count = sum(item['count_vm_available'] for item in hc)
         if total_count < to_start_count:
-            raise Exception(
+            raise RuntimeError(
                 'Too many VMs requested, try another gpu type or region')
         return total_count
     except cudo.cudo.rest.ApiException as e:

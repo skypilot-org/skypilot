@@ -1,5 +1,6 @@
 """Utils shared between all of sky"""
 
+from contextlib import _GeneratorContextManager
 import difflib
 import functools
 import getpass
@@ -13,12 +14,15 @@ import re
 import socket
 import sys
 import time
-from typing import Any, Callable, Dict, List, Optional, Union
+import typing
+from typing import Any, Callable, Dict, List, Optional, Protocol, Type, Union
 import uuid
 
 import jinja2
 import jsonschema
 import psutil
+import typing_extensions
+from typing_extensions import Self
 import yaml
 
 from sky import exceptions
@@ -28,6 +32,11 @@ from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import ux_utils
 from sky.utils import validator
+
+T = typing.TypeVar('T')
+P = typing_extensions.ParamSpec('P')
+R = typing.TypeVar('R')
+C = typing_extensions.ParamSpec('C')
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -411,8 +420,24 @@ def dump_yaml_str(config: Union[List[Dict[str, Any]], Dict[str, Any]]) -> str:
                      default_flow_style=False)
 
 
-def make_decorator(cls, name_or_fn: Union[str, Callable],
-                   **ctx_kwargs) -> Callable:
+class ContextManagerProtocol(Protocol):
+
+    def __init__(self, name: str, **_) -> None:
+        ...
+
+    def __enter__(self) -> Self:
+        ...
+
+    def __exit__(self, exec_type: Any, exec_value: Any, traceback: Any) -> None:
+        ...
+
+
+# TODO(andy): more accurate typing for Callable[...]
+def make_decorator(
+    cls: Union[Type[ContextManagerProtocol],
+               Callable[..., _GeneratorContextManager]],
+    name_or_fn: Union[str, Callable[P, R]], **ctx_kwargs: Any
+) -> Union[Callable[[Callable[P, R]], Callable[P, R]], Callable[P, R]]:
     """Make the cls a decorator.
 
     class cls:
@@ -429,10 +454,10 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
     """
     if isinstance(name_or_fn, str):
 
-        def _wrapper(f):
+        def _wrapper(f: Callable[P, R]) -> Callable[P, R]:
 
             @functools.wraps(f)
-            def _record(*args, **kwargs):
+            def _record(*args: P.args, **kwargs: P.kwargs) -> R:
                 with cls(name_or_fn, **ctx_kwargs):
                     return f(*args, **kwargs)
 
@@ -445,8 +470,8 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
                 'Should directly apply the decorator to a function.')
 
         @functools.wraps(name_or_fn)
-        def _record(*args, **kwargs):
-            f = name_or_fn
+        def _record(*args: P.args, **kwargs: P.kwargs) -> R:
+            f: Callable[P, R] = name_or_fn
             func_name = getattr(f, '__qualname__', f.__name__)
             module_name = getattr(f, '__module__', '')
             if module_name:
@@ -459,11 +484,15 @@ def make_decorator(cls, name_or_fn: Union[str, Callable],
         return _record
 
 
-def retry(method, max_retries=3, initial_backoff=1):
+def retry(method: Callable[P, R],
+          max_retries: int = 3,
+          initial_backoff: float = 1) -> Callable[P, R]:
     """Retry a function up to max_retries times with backoff between retries."""
 
+    assert max_retries > 0
+
     @functools.wraps(method)
-    def method_with_retries(*args, **kwargs):
+    def method_with_retries(*args: P.args, **kwargs: P.kwargs) -> R:
         backoff = Backoff(initial_backoff)
         try_count = 0
         while try_count < max_retries:
@@ -476,11 +505,12 @@ def retry(method, max_retries=3, initial_backoff=1):
                     time.sleep(backoff.current_backoff())
                 else:
                     raise
+        assert False, 'Unreachable'
 
     return method_with_retries
 
 
-def class_fullname(cls, skip_builtins: bool = True):
+def class_fullname(cls: Type[T], skip_builtins: bool = True) -> str:
     """Get the full name of a class.
 
     Example:

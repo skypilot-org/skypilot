@@ -2572,10 +2572,12 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
             num_ips = 1
         return num_ips
 
-    def __setstate__(self, state):
+    def __setstate__(self, state: Dict[str, Any]):
         self._version = self._VERSION
 
         version = state.pop('_version', None)
+        head_ip: Optional[str] = None
+
         if version is None:
             version = -1
             state.pop('cluster_region', None)
@@ -2599,7 +2601,6 @@ class CloudVmRayResourceHandle(backends.backend.ResourceHandle):
         if version < 9:
             # For backward compatibility, we should update the region of a
             # SkyPilot cluster on Kubernetes to the actual context it is using.
-            # pylint: disable=import-outside-toplevel
             launched_resources = state['launched_resources']
             if isinstance(launched_resources.cloud, clouds.Kubernetes):
                 yaml_config = common_utils.read_yaml(
@@ -3415,7 +3416,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
             # with pid is the same driver process.
@@ -4066,6 +4067,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         requests_lib.kill_cluster_requests(handle.cluster_name,
                                            exclude_request_to_kill)
         cluster_status_fetched = False
+        prev_cluster_status = None
         if refresh_cluster_status:
             try:
                 prev_cluster_status, _ = (
