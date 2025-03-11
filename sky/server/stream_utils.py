@@ -68,7 +68,7 @@ async def log_streamer(request_id: Optional[str],
             # Sleep 0 to yield, so other coroutines can run. This busy waiting
             # loop is performance critical for short-running requests, so we do
             # not want to yield too long.
-            await asyncio.sleep(0)
+            await asyncio.sleep(0.1)
             request_task = requests_lib.get_request(request_id)
             if not follow:
                 break
@@ -88,6 +88,9 @@ async def log_streamer(request_id: Optional[str],
                 yield line_str
 
         while True:
+            # Sleep 0 to yield control to allow other coroutines to run,
+            # while keeps the loop tight to make log stream responsive.
+            await asyncio.sleep(0)
             line: Optional[bytes] = await f.readline()
             if not line:
                 if request_id is not None:
@@ -100,24 +103,18 @@ async def log_streamer(request_id: Optional[str],
                         break
                 if not follow:
                     break
-
-                # Sleep 0 to yield, so other coroutines can run. This busy
-                # waiting loop is performance critical for short-running
-                # requests, so we do not want to yield too long.
-                await asyncio.sleep(0)
+                # Sleep shortly to avoid storming the DB and CPU, this has
+                # little impact on the responsivness here since we are waiting
+                # for a new line to come in.
+                await asyncio.sleep(0.1)
                 continue
             line_str = line.decode('utf-8')
             if plain_logs:
                 is_payload, line_str = message_utils.decode_payload(
                     line_str, raise_for_mismatch=False)
                 if is_payload:
-                    # Sleep 0 to yield, so other coroutines can run. This busy
-                    # waiting loop is performance critical for short-running
-                    # requests, so we do not want to yield too long.
-                    await asyncio.sleep(0)
                     continue
             yield line_str
-            await asyncio.sleep(0)  # Allow other tasks to run
 
 
 def stream_response(

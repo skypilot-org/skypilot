@@ -191,7 +191,8 @@ def _get_cluster_config_template(cloud):
         clouds.Kubernetes: 'kubernetes-ray.yml.j2',
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
-        clouds.Fluidstack: 'fluidstack-ray.yml.j2'
+        clouds.Fluidstack: 'fluidstack-ray.yml.j2',
+        clouds.Nebius: 'nebius-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
@@ -3233,7 +3234,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         all_file_mounts: Optional[Dict[Path, Path]],
         storage_mounts: Optional[Dict[Path, storage_lib.Storage]],
     ) -> None:
-        """Mounts all user files to the remote nodes."""
+        """Mounts all user files to the remote nodes.
+
+        Note: This does not handle COPY storage_mounts. These should have
+        already been translated into file_mounts by task.sync_storage_mounts().
+
+        TODO: Delete COPY storage_mounts in task.sync_storage_mounts(), and
+        assert here that all storage_mounts are MOUNT mode.
+        """
         with rich_utils.safe_status(ux_utils.spinner_message('Syncing files')):
             controller_utils.replace_skypilot_config_path_in_file_mounts(
                 handle.launched_resources.cloud, all_file_mounts)
@@ -3815,6 +3823,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             follow: Whether to follow the logs.
             tail: The number of lines to display from the end of the
                 log file. If 0, print all lines.
+
+        Returns:
+            The exit code of the tail command. Returns code 100 if the job has
+            failed. See exceptions.JobExitCode for possible return codes.
         """
         code = job_lib.JobLibCodeGen.tail_logs(job_id,
                                                managed_job_id=managed_job_id,
@@ -3848,7 +3860,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                               job_id: Optional[int] = None,
                               job_name: Optional[str] = None,
                               controller: bool = False,
-                              follow: bool = True) -> None:
+                              follow: bool = True) -> int:
         # if job_name is not None, job_id should be None
         assert job_name is None or job_id is None, (job_name, job_id)
         code = managed_jobs.ManagedJobCodeGen.stream_logs(
@@ -3861,13 +3873,17 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             signal.signal(signal.SIGTSTP, backend_utils.stop_handler)
 
         # Refer to the notes in tail_logs.
-        self.run_on_head(
-            handle,
-            code,
-            stream_logs=True,
-            process_stream=False,
-            ssh_mode=command_runner.SshMode.INTERACTIVE,
-        )
+        try:
+            returncode = self.run_on_head(
+                handle,
+                code,
+                stream_logs=True,
+                process_stream=False,
+                ssh_mode=command_runner.SshMode.INTERACTIVE,
+            )
+        except SystemExit as e:
+            returncode = e.code
+        return returncode
 
     def sync_down_managed_job_logs(
             self,

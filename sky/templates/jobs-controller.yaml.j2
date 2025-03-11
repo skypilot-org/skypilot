@@ -10,6 +10,9 @@ file_mounts:
   {%- for remote_catalog_path, local_catalog_path in modified_catalogs.items() %}
   {{remote_catalog_path}}: {{local_catalog_path}}
   {%- endfor %}
+  {%- for controller_file_mount_path, local_file_mount_path in local_to_controller_file_mounts.items() %}
+  {{controller_file_mount_path}}: {{local_file_mount_path}}
+  {%- endfor %}
 
 setup: |
   {{ sky_activate_python_env }}
@@ -36,9 +39,7 @@ setup: |
   After=network.target
 
   [Service]
-  Environment="PATH={{ sky_python_env_path }}:\$PATH"
-  Environment="SKYPILOT_USER_ID={{controller_envs.SKYPILOT_USER_ID}}"
-  Environment="SKYPILOT_USER={{controller_envs.SKYPILOT_USER}}"
+  Environment="SKYPILOT_USER_ID={{ dashboard_user_id }}"
   Restart=always
   StandardOutput=append:/home/$USER/.sky/job-dashboard.log
   StandardError=append:/home/$USER/.sky/job-dashboard.log
@@ -48,16 +49,24 @@ setup: |
   WantedBy=default.target
   EOF
 
+  export SKYPILOT_USER_ID="{{ dashboard_user_id }}"
   {{ dashboard_setup_cmd }}
 
 run: |
   {{ sky_activate_python_env }}
+
+  # Write env vars to a file
+  {%- for env_name, env_value in controller_envs.items() %}
+  echo "export {{env_name}}='{{env_value}}'" >> {{remote_env_file_path}}
+  {%- endfor %}
+
   # Submit the job to the scheduler.
   # Note: The job is already in the `spot` table, marked as PENDING.
   # CloudVmRayBackend._exec_code_on_head() calls
   # managed_job_codegen.set_pending() before we get here.
   python -u -m sky.jobs.scheduler {{remote_user_yaml_path}} \
-    --job-id $SKYPILOT_INTERNAL_JOB_ID
+    --job-id $SKYPILOT_INTERNAL_JOB_ID \
+    --env-file {{remote_env_file_path}}
 
 
 envs:

@@ -27,12 +27,12 @@ import os
 import queue as queue_lib
 import signal
 import sys
+import threading
 import time
 import traceback
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
-import psutil
 import setproctitle
 
 from sky import global_user_state
@@ -47,6 +47,7 @@ from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -70,18 +71,36 @@ logger = sky_logging.init_logger(__name__)
 # platforms, including macOS.
 multiprocessing.set_start_method('spawn', force=True)
 
-# Constants based on profiling the peak memory usage of
-# various sky commands. See `tests/load_test/` for details.
-# Max memory consumption for each request.
-_PER_BLOCKING_REQUEST_MEM_GB = 0.25
-_PER_NON_BLOCKING_REQUEST_MEM_GB = 0.15
-# To control the number of blocking workers.
-_CPU_MULTIPLIER_FOR_BLOCKING_WORKERS = 2
-_MAX_BLOCKING_WORKERS_LOCAL = 4
-# Percentage of memory for blocking requests
+# Constants based on profiling the peak memory usage while serving various
+# sky commands. These estimation are highly related to usage patterns
+# (clouds enabled, type of requests, etc. see `tests/load_tests` for details.),
+# the profiling covers major clouds and common usage patterns. For user has
+# deviated usage pattern, they can override the default estimation by
+# environment variables.
+# NOTE(dev): update these constants for each release according to the load
+# test results.
+# TODO(aylei): maintaining these constants is error-prone, we may need to
+# automatically tune parallelism at runtime according to system usage stats
+# in the future.
+_LONG_WORKER_MEM_GB = 0.4
+_SHORT_WORKER_MEM_GB = 0.25
+# To control the number of long workers.
+_CPU_MULTIPLIER_FOR_LONG_WORKERS = 2
+# Limit the number of long workers of local API server, since local server is
+# typically:
+# 1. launched automatically in an environment with high resource contention
+#    (e.g. Laptop)
+# 2. used by a single user
+_MAX_LONG_WORKERS_LOCAL = 4
+# Percentage of memory for long requests
 # from the memory reserved for SkyPilot.
-# This is to reserve some memory for non-blocking requests.
+# This is to reserve some memory for short requests.
 _MAX_MEM_PERCENT_FOR_BLOCKING = 0.6
+# Minimal number of long workers to ensure responsiveness.
+_MIN_LONG_WORKERS = 1
+# Minimal number of short workers, there is a daemon task running on short
+# workers so at least 2 workers are needed to ensure responsiveness.
+_MIN_SHORT_WORKERS = 2
 
 
 class QueueBackend(enum.Enum):
@@ -161,7 +180,8 @@ def override_request_env_and_config(
     os.environ['CLICOLOR_FORCE'] = '1'
     server_common.reload_for_new_request(
         client_entrypoint=request_body.entrypoint,
-        client_command=request_body.entrypoint_command)
+        client_command=request_body.entrypoint_command,
+        using_remote_api_server=request_body.using_remote_api_server)
     try:
         with skypilot_config.override_skypilot_config(
                 request_body.override_skypilot_config):
@@ -238,6 +258,7 @@ def _request_execution_wrapper(request_id: str,
         try:
             with override_request_env_and_config(request_body):
                 return_value = func(**request_body.to_kwargs())
+                f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
             _restore_output(original_stdout, original_stderr)
@@ -301,34 +322,32 @@ def schedule_request(request_id: str,
     _get_queue(schedule_type).put(input_tuple)
 
 
+def executor_initializer(proc_group: str):
+    setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
+                              f'{multiprocessing.current_process().pid}')
+
+
 def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
     """Worker for the requests.
 
     Args:
         max_parallel_size: Maximum number of parallel jobs this worker can run.
     """
-    logger.info(f'Starting {worker} with pid '
-                f'{multiprocessing.current_process().pid}')
-    setproctitle.setproctitle(
-        f'SkyPilot:worker:{worker.schedule_type.value}-{worker.id}')
+    proc_group = f'{worker.schedule_type.value}-{worker.id}'
+    setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
     queue = _get_queue(worker.schedule_type)
-    # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
-    # because the former is more efficient with the support of lazy creation of
-    # worker processes.
-    # We use executor instead of individual multiprocessing.Process to avoid
-    # the overhead of forking a new process for each request, which can be about
-    # 1s delay.
-    with concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_parallel_size) as executor:
-        while True:
+
+    def process_request(executor: concurrent.futures.ProcessPoolExecutor):
+        try:
             request_element = queue.get()
             if request_element is None:
                 time.sleep(0.1)
-                continue
+                return
             request_id, ignore_return_value = request_element
             request = api_requests.get_request(request_id)
+            assert request is not None, f'Request with ID {request_id} is None'
             if request.status == api_requests.RequestStatus.CANCELLED:
-                continue
+                return
             logger.info(f'[{worker}] Submitting request: {request_id}')
             # Start additional process to run the request, so that it can be
             # cancelled when requested by a user.
@@ -347,61 +366,52 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
-
-
-def _get_cpu_count() -> int:
-    """Get the number of CPUs.
-
-    If the API server is deployed as a pod in k8s cluster, we assume the
-    number of CPUs is provided by the downward API.
-    """
-    cpu_count = os.getenv('SKYPILOT_POD_CPU_CORE_LIMIT')
-    if cpu_count is not None:
-        try:
-            return int(float(cpu_count))
-        except ValueError as e:
+        except KeyboardInterrupt:
+            # Interrupt the worker process will stop request execution, but
+            # the SIGTERM request should be respected anyway since it might
+            # be explicitly sent by user.
+            # TODO(aylei): crash the API server or recreate the worker process
+            # to avoid broken state.
+            logger.error(f'[{worker}] Worker process interrupted')
             with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to parse the number of CPUs from {cpu_count}'
-                ) from e
-    return psutil.cpu_count()
+                raise
+        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            # Catch any other exceptions to avoid crashing the worker process.
+            logger.error(
+                f'[{worker}] Error processing request {request_id}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
 
-
-def _get_mem_size_gb() -> float:
-    """Get the memory size in GB.
-
-    If the API server is deployed as a pod in k8s cluster, we assume the
-    memory size is provided by the downward API.
-    """
-    mem_size = os.getenv('SKYPILOT_POD_MEMORY_GB_LIMIT')
-    if mem_size is not None:
-        try:
-            return float(mem_size)
-        except ValueError as e:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    f'Failed to parse the memory size from {mem_size}') from e
-    return psutil.virtual_memory().total / (1024**3)
+    # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
+    # because the former is more efficient with the support of lazy creation of
+    # worker processes.
+    # We use executor instead of individual multiprocessing.Process to avoid
+    # the overhead of forking a new process for each request, which can be about
+    # 1s delay.
+    with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_parallel_size,
+            initializer=executor_initializer,
+            initargs=(proc_group,)) as executor:
+        while True:
+            process_request(executor)
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
     """Start the request workers."""
     # Determine the job capacity of the workers based on the system resources.
-    cpu_count = _get_cpu_count()
-    mem_size_gb = _get_mem_size_gb()
+    cpu_count = common_utils.get_cpu_count()
+    mem_size_gb = common_utils.get_mem_size_gb()
     mem_size_gb = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
-    parallel_for_blocking = _max_parallel_size_for_blocking(
-        cpu_count, mem_size_gb)
-    if not deploy:
-        parallel_for_blocking = min(parallel_for_blocking,
-                                    _MAX_BLOCKING_WORKERS_LOCAL)
-    max_parallel_for_non_blocking = _max_parallel_size_for_non_blocking(
-        mem_size_gb, parallel_for_blocking)
+    max_parallel_for_long = _max_long_worker_parallism(cpu_count,
+                                                       mem_size_gb,
+                                                       local=not deploy)
+    max_parallel_for_short = _max_short_worker_parallism(
+        mem_size_gb, max_parallel_for_long)
     logger.info(
-        f'SkyPilot API server will start {parallel_for_blocking} workers for '
-        f'blocking requests and will allow at max '
-        f'{max_parallel_for_non_blocking} non-blocking requests in parallel.')
+        f'SkyPilot API server will start {max_parallel_for_long} workers for '
+        f'long requests and will allow at max '
+        f'{max_parallel_for_short} short requests in parallel.')
 
+    sub_procs = []
     # Setup the queues.
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
@@ -418,45 +428,51 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_server = multiprocessing.Process(
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
-
+        sub_procs.append(queue_server)
         mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
 
     logger.info('Request queues created')
 
-    worker_procs = []
-    for worker_id in range(parallel_for_blocking):
+    long_workers = []
+    for worker_id in range(max_parallel_for_long):
         worker = RequestWorker(id=worker_id,
                                schedule_type=api_requests.ScheduleType.LONG)
         worker_proc = multiprocessing.Process(target=request_worker,
                                               args=(worker, 1))
-        worker_proc.start()
-        worker_procs.append(worker_proc)
+        long_workers.append(worker_proc)
+        sub_procs.append(worker_proc)
+    threading.Thread(target=subprocess_utils.slow_start_processes,
+                     args=(long_workers,),
+                     daemon=True).start()
 
-    # Start a non-blocking worker.
+    # Start a worker for short requests.
     worker = RequestWorker(id=1, schedule_type=api_requests.ScheduleType.SHORT)
     worker_proc = multiprocessing.Process(target=request_worker,
-                                          args=(worker,
-                                                max_parallel_for_non_blocking))
+                                          args=(worker, max_parallel_for_short))
     worker_proc.start()
-    worker_procs.append(worker_proc)
-    return worker_procs
+    sub_procs.append(worker_proc)
+    return sub_procs
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
-def _max_parallel_size_for_blocking(cpu_count: int, mem_size_gb: float) -> int:
-    """Max parallelism for blocking requests."""
-    cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_BLOCKING_WORKERS
+def _max_long_worker_parallism(cpu_count: int,
+                               mem_size_gb: float,
+                               local=False) -> int:
+    """Max parallelism for long workers."""
+    cpu_based_max_parallel = cpu_count * _CPU_MULTIPLIER_FOR_LONG_WORKERS
     mem_based_max_parallel = int(mem_size_gb * _MAX_MEM_PERCENT_FOR_BLOCKING /
-                                 _PER_BLOCKING_REQUEST_MEM_GB)
-    n = max(1, min(cpu_based_max_parallel, mem_based_max_parallel))
+                                 _LONG_WORKER_MEM_GB)
+    n = max(_MIN_LONG_WORKERS,
+            min(cpu_based_max_parallel, mem_based_max_parallel))
+    if local:
+        return min(n, _MAX_LONG_WORKERS_LOCAL)
     return n
 
 
 @annotations.lru_cache(scope='global', maxsize=1)
-def _max_parallel_size_for_non_blocking(mem_size_gb: float,
-                                        parallel_size_for_blocking: int) -> int:
-    """Max parallelism for non-blocking requests."""
-    available_mem = mem_size_gb - (parallel_size_for_blocking *
-                                   _PER_BLOCKING_REQUEST_MEM_GB)
-    n = max(1, int(available_mem / _PER_NON_BLOCKING_REQUEST_MEM_GB))
+def _max_short_worker_parallism(mem_size_gb: float,
+                                long_worker_parallism: int) -> int:
+    """Max parallelism for short workers."""
+    available_mem = mem_size_gb - (long_worker_parallism * _LONG_WORKER_MEM_GB)
+    n = max(_MIN_SHORT_WORKERS, int(available_mem / _SHORT_WORKER_MEM_GB))
     return n

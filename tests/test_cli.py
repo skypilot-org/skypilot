@@ -7,7 +7,7 @@ from sky import cli
 from sky import exceptions
 
 CLOUDS_TO_TEST = [
-    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere'
+    'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
 ]
 
 

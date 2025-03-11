@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -125,6 +126,7 @@ def test_launch_fast(generic_cloud: str):
 @pytest.mark.no_lambda_cloud
 @pytest.mark.no_ibm
 @pytest.mark.no_kubernetes
+@pytest.mark.no_nebius
 def test_launch_fast_with_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -145,7 +147,8 @@ def test_launch_fast_with_autostop(generic_cloud: str):
                 timeout=autostop_timeout),
             # Even the cluster is stopped, cloud platform may take a while to
             # delete the VM.
-            f'sleep 35',
+            # FIXME(aylei): this can be flaky, sleep longer for now.
+            f'sleep 60',
             # Launch again. Do full output validation - we expect the cluster to re-launch
             f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
@@ -360,6 +363,7 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
 # The sky launch CLI has some additional checks to make sure the cluster is up/
 # restarted. However, the core API doesn't have these; make sure it still works
 @pytest.mark.no_kubernetes
+@pytest.mark.no_nebius  # Nebius Autodown and Autostop not supported.
 def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
@@ -462,6 +466,7 @@ class TestYamlSpecs:
 @pytest.mark.no_vast  # Vast has low availability for K80 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack does not support K80 gpus for now
 @pytest.mark.no_paperspace  # Paperspace does not support K80 gpus
+@pytest.mark.no_nebius  # Nebius does not support K80s
 def test_multiple_accelerators_ordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -479,6 +484,7 @@ def test_multiple_accelerators_ordered():
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 def test_multiple_accelerators_ordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -496,6 +502,7 @@ def test_multiple_accelerators_ordered_with_default():
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 def test_multiple_accelerators_unordered():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -512,6 +519,7 @@ def test_multiple_accelerators_unordered():
 @pytest.mark.no_vast  # Vast has low availability for T4 GPUs
 @pytest.mark.no_fluidstack  # Fluidstack has low availability for T4 GPUs
 @pytest.mark.no_paperspace  # Paperspace does not support T4 GPUs
+@pytest.mark.no_nebius  # Nebius does not support T4 GPUs
 def test_multiple_accelerators_unordered_with_default():
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test(
@@ -562,8 +570,56 @@ def test_sky_bench(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.fixture(scope='session')
+def unreachable_context():
+    """Setup the kubernetes context for the test.
+
+    This fixture will copy the kubeconfig file and inject an unreachable context
+    to it. So this must be session scoped that the kubeconfig is modified before
+    the local API server starts.
+    """
+    # Get kubeconfig path from environment variable or use default
+    kubeconfig_path = os.environ.get('KUBECONFIG',
+                                     os.path.expanduser('~/.kube/config'))
+    if not os.path.exists(kubeconfig_path):
+        return
+    import shutil
+
+    # Create a temp kubeconfig
+    temp_kubeconfig = tempfile.NamedTemporaryFile(delete=False, suffix='.yaml')
+    shutil.copy(kubeconfig_path, temp_kubeconfig.name)
+    original_kubeconfig = os.environ.get('KUBECONFIG')
+    os.environ['KUBECONFIG'] = temp_kubeconfig.name
+
+    free_port = common_utils.find_free_port(30000)
+    unreachable_name = '_unreachable_context_'
+    subprocess.run(
+        'kubectl config set-cluster unreachable-cluster '
+        f'--server=https://127.0.0.1:{free_port} && '
+        'kubectl config set-credentials unreachable-user '
+        '--token="aQo=" && '
+        'kubectl config set-context ' + unreachable_name + ' '
+        '--cluster=unreachable-cluster --user=unreachable-user && '
+        # Restart the API server to pick up kubeconfig change
+        # TODO(aylei): There is a implicit API server restart before starting
+        # smoke tests in CI pipeline. We should move that to fixture to make
+        # the test coherent.
+        'sky api stop || true && sky api start',
+        shell=True,
+        check=True)
+
+    yield unreachable_name
+
+    # Clean up
+    if original_kubeconfig:
+        os.environ['KUBECONFIG'] = original_kubeconfig
+    else:
+        os.environ.pop('KUBECONFIG', None)
+    os.unlink(temp_kubeconfig.name)
+
+
 @pytest.mark.kubernetes
-def test_kubernetes_context_failover():
+def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
     This test requires two kubernetes clusters:
@@ -573,12 +629,8 @@ def test_kubernetes_context_failover():
       sky local up
       # Add mock label for accelerator
       kubectl label node --overwrite skypilot-control-plane skypilot.co/accelerator=h100 --context kind-skypilot
-      # Get the token for the cluster in context kind-skypilot
-      TOKEN=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.users[0].user.token}\')
-      # Get the API URL for the cluster in context kind-skypilot
-      API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
-      # Add mock capacity for GPU
-      curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+      # Patch accelerator capacity
+      kubectl patch node skypilot-control-plane --subresource=status -p '{"status": {"capacity": {"nvidia.com/gpu": "8"}}}' --context kind-skypilot
       # Add a new namespace to test the handling of namespaces
       kubectl create namespace test-namespace --context kind-skypilot
       # Set the namespace to test-namespace
@@ -587,12 +639,20 @@ def test_kubernetes_context_failover():
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
-    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    assert unreachable_context in contexts, (
+        'unreachable_context should be initialized in the fixture')
+    context = [
+        context for context in contexts
+        if (context != 'kind-skypilot' and context != unreachable_context)
+    ][0]
+    # Test unreachable context and non-existing context do not break failover
     config = textwrap.dedent(f"""\
     kubernetes:
       allowed_contexts:
-        - kind-skypilot
         - {context}
+        - {unreachable_context}
+        - _nonexist_
+        - kind-skypilot
     """)
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(config.encode('utf-8'))
@@ -641,8 +701,13 @@ def test_kubernetes_context_failover():
                 f'sky launch -c {name}-3 --gpus h100 echo hi',
                 f'sky logs {name}-3 --status',
                 f'sky status -r {name}-3 | grep UP',
+                # Test failure for launching on unreachable context
+                f'kubectl config use-context {unreachable_context}',
+                f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --cloud kubernetes --region {unreachable_context} echo hi && exit 1 || true',
+                # Test failover from unreachable context
+                f'sky launch -y -c {name}-5 --cpus 1 echo hi',
             ],
-            f'sky down -y {name}-1 {name}-3',
+            f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
                 'SKYPILOT_CONFIG': f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
@@ -650,3 +715,28 @@ def test_kubernetes_context_failover():
             },
         )
         smoke_tests_utils.run_one_test(test)
+
+
+# ---------- Testing Exit Codes for CLI commands ----------
+def test_cli_exit_codes(generic_cloud: str):
+    """Test that CLI commands properly return exit codes based on job success/failure."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'cli_exit_codes',
+        [
+            # Test successful job exit code (0)
+            f'sky launch -y -c {name} --cloud {generic_cloud} "echo success" && echo "Exit code: $?"',
+            f'sky logs {name} 1 --status | grep SUCCEEDED',
+
+            # Test that sky logs with successful job returns 0
+            f'sky logs {name} 1 && echo "Exit code: $?"',
+
+            # Test failed job exit code (100)
+            f'sky exec {name} "exit 1" || echo "Command failed with code: $?" | grep "Command failed with code: 100"',
+            f'sky logs {name} 2 --status | grep FAILED',
+            f'sky logs {name} 2 || echo "Job logs exit code: $?" | grep "Job logs exit code: 100"',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
+    )
+    smoke_tests_utils.run_one_test(test)

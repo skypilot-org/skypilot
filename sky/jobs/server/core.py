@@ -19,12 +19,14 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
+from sky.data import storage as storage_lib
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import utils as managed_job_utils
-from sky.provision import common
+from sky.provision import common as provision_common
 from sky.skylet import constants as skylet_constants
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
@@ -100,9 +102,35 @@ def launch(
 
     with rich_utils.safe_status(
             ux_utils.spinner_message('Initializing managed job')):
-        for task_ in dag.tasks:
-            controller_utils.maybe_translate_local_file_mounts_and_sync_up(
-                task_, task_type='jobs')
+
+        local_to_controller_file_mounts = {}
+
+        if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+            for task_ in dag.tasks:
+                controller_utils.maybe_translate_local_file_mounts_and_sync_up(
+                    task_, task_type='jobs')
+
+        else:
+            # We do not have any cloud storage available, so fall back to
+            # two-hop file_mount uploading.
+            # Note: we can't easily hack sync_storage_mounts() to upload
+            # directly to the controller, because the controller may not
+            # even be up yet.
+            for task_ in dag.tasks:
+                if task_.storage_mounts:
+                    # Technically, we could convert COPY storage_mounts that
+                    # have a local source and do not specify `store`, but we
+                    # will not do that for now. Only plain file_mounts are
+                    # supported.
+                    raise exceptions.NotSupportedError(
+                        'Cloud-based file_mounts are specified, but no cloud '
+                        'storage is available. Please specify local '
+                        'file_mounts only.')
+
+                # Merge file mounts from all tasks.
+                local_to_controller_file_mounts.update(
+                    controller_utils.translate_local_file_mounts_to_two_hop(
+                        task_))
 
     with tempfile.NamedTemporaryFile(prefix=f'managed-dag-{dag.name}-',
                                      mode='w') as f:
@@ -112,6 +140,7 @@ def launch(
         prefix = managed_job_constants.JOBS_TASK_YAML_PREFIX
         remote_user_yaml_path = f'{prefix}/{dag.name}-{dag_uuid}.yaml'
         remote_user_config_path = f'{prefix}/{dag.name}-{dag_uuid}.config_yaml'
+        remote_env_file_path = f'{prefix}/{dag.name}-{dag_uuid}.env'
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.JOBS_CONTROLLER,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
@@ -119,13 +148,16 @@ def launch(
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
             'user_yaml_path': f.name,
+            'local_to_controller_file_mounts': local_to_controller_file_mounts,
             'jobs_controller': controller_name,
             # Note: actual cluster name will be <task.name>-<managed job ID>
             'dag_name': dag.name,
             'remote_user_config_path': remote_user_config_path,
+            'remote_env_file_path': remote_env_file_path,
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
+            'dashboard_user_id': common.SERVER_ID,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -149,14 +181,18 @@ def launch(
             f'{colorama.Fore.YELLOW}'
             f'Launching managed job {dag.name!r} from jobs controller...'
             f'{colorama.Style.RESET_ALL}')
-        return execution.launch(task=controller_task,
-                                cluster_name=controller_name,
-                                stream_logs=stream_logs,
-                                idle_minutes_to_autostop=skylet_constants.
-                                CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                                retry_until_up=True,
-                                fast=True,
-                                _disable_controller_check=True)
+
+        # Launch with the api server's user hash, so that sky status does not
+        # show the owner of the controller as whatever user launched it first.
+        with common.with_server_user_hash():
+            return execution.launch(task=controller_task,
+                                    cluster_name=controller_name,
+                                    stream_logs=stream_logs,
+                                    idle_minutes_to_autostop=skylet_constants.
+                                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
+                                    retry_until_up=True,
+                                    fast=True,
+                                    _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -194,16 +230,16 @@ def queue_from_kubernetes_pod(
     provider_config = {'context': context}
     instances = {
         pod_name: [
-            common.InstanceInfo(instance_id=pod_name,
-                                internal_ip='',
-                                external_ip='',
-                                tags={})
+            provision_common.InstanceInfo(instance_id=pod_name,
+                                          internal_ip='',
+                                          external_ip='',
+                                          tags={})
         ]
     }  # Internal IP is not required for Kubernetes
-    cluster_info = common.ClusterInfo(provider_name='kubernetes',
-                                      head_instance_id=pod_name,
-                                      provider_config=provider_config,
-                                      instances=instances)
+    cluster_info = provision_common.ClusterInfo(provider_name='kubernetes',
+                                                head_instance_id=pod_name,
+                                                provider_config=provider_config,
+                                                instances=instances)
     managed_jobs_runner = provision_lib.get_command_runners(
         'kubernetes', cluster_info)[0]
 
@@ -270,10 +306,9 @@ def _maybe_restart_controller(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Starting dashboard...')):
         runner = handle.get_command_runners()[0]
-        user_hash = common_utils.get_user_hash()
         runner.run(
             f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={user_hash!r}; '
+            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
             f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
             stream_logs=True,
         )
@@ -285,7 +320,9 @@ def _maybe_restart_controller(
 
 
 @usage_lib.entrypoint
-def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
+def queue(refresh: bool,
+          skip_finished: bool = False,
+          all_users: bool = False) -> List[Dict[str, Any]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Gets statuses of managed jobs.
 
@@ -304,6 +341,8 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
+                'user_name': (Optional[str]) job creator's user name,
+                'user_hash': (str) job creator's user hash,
             }
         ]
     Raises:
@@ -333,6 +372,19 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
                            f'{returncode}')
 
     jobs = managed_job_utils.load_managed_job_queue(job_table_payload)
+
+    if not all_users:
+
+        def user_hash_matches_or_missing(job: Dict[str, Any]) -> bool:
+            user_hash = job.get('user_hash', None)
+            if user_hash is None:
+                # For backwards compatibility, we show jobs that do not have a
+                # user_hash. TODO(cooperc): Remove before 0.12.0.
+                return True
+            return user_hash == common_utils.get_user_hash()
+
+        jobs = list(filter(user_hash_matches_or_missing, jobs))
+
     if skip_finished:
         # Filter out the finished jobs. If a multi-task job is partially
         # finished, we will include all its tasks.
@@ -341,6 +393,7 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
         non_finished_job_ids = {job['job_id'] for job in non_finished_tasks}
         jobs = list(
             filter(lambda job: job['job_id'] in non_finished_job_ids, jobs))
+
     return jobs
 
 
@@ -348,7 +401,8 @@ def queue(refresh: bool, skip_finished: bool = False) -> List[Dict[str, Any]]:
 # pylint: disable=redefined-builtin
 def cancel(name: Optional[str] = None,
            job_ids: Optional[List[int]] = None,
-           all: bool = False) -> None:
+           all: bool = False,
+           all_users: bool = False) -> None:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Cancels managed jobs.
 
@@ -364,17 +418,22 @@ def cancel(name: Optional[str] = None,
         stopped_message='All managed jobs should have finished.')
 
     job_id_str = ','.join(map(str, job_ids))
-    if sum([bool(job_ids), name is not None, all]) != 1:
-        argument_str = f'job_ids={job_id_str}' if job_ids else ''
-        argument_str += f' name={name}' if name is not None else ''
-        argument_str += ' all' if all else ''
+    if sum([bool(job_ids), name is not None, all or all_users]) != 1:
+        arguments = []
+        arguments += [f'job_ids={job_id_str}'] if job_ids else []
+        arguments += [f'name={name}'] if name is not None else []
+        arguments += ['all'] if all else []
+        arguments += ['all_users'] if all_users else []
         with ux_utils.print_exception_no_traceback():
-            raise ValueError('Can only specify one of JOB_IDS or name or all. '
-                             f'Provided {argument_str!r}.')
+            raise ValueError('Can only specify one of JOB_IDS, name, or all/'
+                             f'all_users. Provided {" ".join(arguments)!r}.')
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
-    if all:
+    if all_users:
+        code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(
+            None, all_users=True)
+    elif all:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(None)
     elif job_ids:
         code = managed_job_utils.ManagedJobCodeGen.cancel_jobs_by_id(job_ids)
@@ -403,11 +462,16 @@ def cancel(name: Optional[str] = None,
 
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool) -> None:
+              controller: bool, refresh: bool) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
+
+    Returns:
+        Exit code based on success or failure of the job. 0 if success,
+        100 if the job failed. See exceptions.JobExitCode for possible exit
+        codes.
 
     Raises:
         ValueError: invalid arguments.
@@ -437,11 +501,11 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    backend.tail_managed_job_logs(handle,
-                                  job_id=job_id,
-                                  job_name=name,
-                                  follow=follow,
-                                  controller=controller)
+    return backend.tail_managed_job_logs(handle,
+                                         job_id=job_id,
+                                         job_name=name,
+                                         follow=follow,
+                                         controller=controller)
 
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
