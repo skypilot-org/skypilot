@@ -32,6 +32,7 @@ async def stream_response():
             word = words[i % base_length]
             yield f'{word}\n'
             await asyncio.sleep(0.2)
+        yield f'{_cached_ip}\n'
 
     return StreamingResponse(generate(), media_type='text/plain')
 
