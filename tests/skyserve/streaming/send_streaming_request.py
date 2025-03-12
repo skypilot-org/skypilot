@@ -28,6 +28,10 @@ while retry_count < max_retries:
             break  # Success, exit the loop
     except requests.exceptions.HTTPError as e:
         if e.response.status_code == 503:
+            # 503 Service Unavailable errors can occur when the load balancer has no available replicas.
+            # As seen in the logs: "No replica selected for request" and "Available Replica URLs: []"
+            # The availability of replicas can fluctuate during service startup and operation.
+            # Implementing retries helps handle these temporary unavailability periods.
             retry_count += 1
             if retry_count < max_retries:
                 print(

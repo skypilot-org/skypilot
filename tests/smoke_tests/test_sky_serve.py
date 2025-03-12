@@ -141,11 +141,13 @@ _WAIT_PROVISION_REPR = (
     'echo "Provisioning complete. PROVISIONING: $num_provisioning, vCPU=2: $num_vcpu_in_provision"'
 )
 
-# Shell script snippet to monitor and wait for resolution of NOT_READY replicas:
+# Shell script snippet to monitor and wait for resolution of NOT_READY status:
+# EKS clusters and services can be slow to initialize, causing both the service and replicas
+# to remain in NOT_READY status for extended periods. This script:
 # 1. Runs for max 5 minutes
 # 2. Specifically checks 10th column (STATUS) for "NOT_READY"
 # 3. Ignores other states like SHUTTING_DOWN/STARTING
-# 4. Exits successfully when zero NOT_READY replicas remain
+# 4. Exits successfully when zero NOT_READY services/replicas remain
 # 5. Fails immediately if timeout reached
 _WAIT_NO_NOT_READY = (
     'start_time=$(date +%s); '
@@ -158,10 +160,10 @@ _WAIT_NO_NOT_READY = (
     '    current_time=$(date +%s); '
     '    elapsed=$((current_time - start_time)); '
     '    if [ "$elapsed" -ge "$timeout" ]; then '
-    '        echo "Timeout: $not_ready_count replica(s) stuck in NOT_READY"; '
+    '        echo "Timeout: $not_ready_count service/replica(s) stuck in NOT_READY"; '
     '        exit 1; '
     '    fi; '
-    '    echo "Waiting for $not_ready_count NOT_READY replicas..."; '
+    '    echo "Waiting for $not_ready_count NOT_READY service/replicas..."; '
     '    sleep 10; '
     'done')
 
