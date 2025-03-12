@@ -1,7 +1,7 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 60
+    initial_delay_seconds: 120
   replicas: 1
 
 resources:
