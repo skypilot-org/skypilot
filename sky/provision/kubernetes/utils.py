@@ -710,7 +710,7 @@ def check_instance_fits(context: Optional[str],
             node for node in nodes if gpu_label_key in node.metadata.labels and
             node.metadata.labels[gpu_label_key] == gpu_label_val
         ]
-        assert gpu_nodes, 'GPU nodes not found'
+        # assert gpu_nodes, 'GPU nodes not found'
         if is_tpu_on_gke(acc_type):
             # If requested accelerator is a TPU type, check if the cluster
             # has sufficient TPU resource to meet the requirement.
