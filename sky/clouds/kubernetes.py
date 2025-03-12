@@ -249,100 +249,19 @@ class Kubernetes(clouds.Cloud):
                 if fits:
                     regions_to_return.append(r)
                 else:
-                    if autoscaler_type is not None and cls.check_can_autoscale(context, instance_type, autoscaler_type):
-                        regions_to_return.append(r)
-                    else:
-                        logger.debug(
-                            f'Instance type {instance_type} does '
-                            'not fit in the Kubernetes cluster with context: '
-                            f'{context}. Reason: {reason}')
+                    if autoscaler_type is not None:
+                        autoscale_detector = kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR[autoscaler_type]
+                        if autoscale_detector.may_autoscale(context, instance_type):
+                            regions_to_return.append(r)
+                        else:
+                            logger.debug(
+                                f'Instance type {instance_type} does '
+                                'not fit in the Kubernetes cluster with context: '
+                                f'{context}. Reason: {reason}')
         else:
             regions_to_return = regions
 
         return regions_to_return
-    
-    @classmethod
-    def check_can_autoscale(cls, context: str, instance_type: str, autoscaler_type: kubernetes_enums.KubernetesAutoscalerType) -> bool:
-        if autoscaler_type == kubernetes_enums.KubernetesAutoscalerType.GKE:
-            return cls.check_can_autoscale_gke(context, instance_type)
-        return False
-
-    @classmethod
-    def check_can_autoscale_gke(cls, context: str, instance_type: str) -> bool:
-        # assume context naming convention of gke_PROJECT-ID_ZONE_CLUSTER-NAME
-        print(f"Checking if {context} can autoscale")
-        context_components = context.split("_")
-        if len(context_components) != 4:
-            return False
-        project_id = context_components[1]
-        location = context_components[2]
-        cluster_name = context_components[3]
-        # pylint: disable=import-outside-toplevel
-        import google.auth
-        credentials, _ = google.auth.default()
-        container_service = gcp.build('container',
-                                    'v1',
-                                    credentials=credentials)
-        cluster = container_service.projects().locations().clusters() \
-            .get(name=f"projects/{project_id}/locations/{location}/clusters/{cluster_name}").execute()
-
-        # get node pools
-        for node_pool in cluster['nodePools']:
-            if node_pool['autoscaling'] is not None \
-                and 'enabled' in node_pool['autoscaling'] \
-                and node_pool['autoscaling']['enabled']:
-                
-                if cls.check_instance_fits_gke_autoscaler_node_pool(context, instance_type, node_pool):
-                    return True
-
-        return False
-    
-    @classmethod
-    def check_instance_fits_gke_autoscaler_node_pool(cls, context: str, instance_type: str, node_pool: dict) -> bool:
-        print(f"Node pool", node_pool['name'])   
-
-        # check if there are any spare capacity in the autoscaler.   
-        node_count = 0
-        if 'initialNodeCount' in node_pool.keys():
-            node_count = node_pool['initialNodeCount']
-        max_node_count = node_pool['autoscaling']['maxNodeCount']
-        free_node_count = max_node_count - node_count
-        print(f"free node count: {free_node_count}")
-        if free_node_count == 0:
-            return False
-
-
-        k8s_instance_type = kubernetes_utils.KubernetesInstanceType.\
-            from_instance_type(instance_type)
-        
-        # Accelerator check
-        acc_type = k8s_instance_type.accelerator_type
-        acc_count = k8s_instance_type.accelerator_count
-        if acc_type is not None:   
-            if 'accelerators' in node_pool['config'].keys():
-                accelerator_type = kubernetes_utils.GKELabelFormatter.get_accelerator_from_label_value(
-                    node_pool['config']['accelerators'][0]['acceleratorType'])
-                accelerator_count = node_pool['config']['accelerators'][0]['acceleratorCount']
-
-                if accelerator_type is not None:
-                    print(f"accelerator: {accelerator_type}:{accelerator_count}")
-                else:
-                    print(f"no accelerator")
-
-                if accelerator_type != acc_type or int(accelerator_count) < acc_count:
-                    return False
-            else:
-                return False
-            
-        # VCPU and memory check
-        machine_type = node_pool['config']['machineType']
-        vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
-        if vcpus < k8s_instance_type.cpus or mem < k8s_instance_type.memory:
-            return False
-        
-        # disk_size = node_pool['config']['diskSizeGb']
-        # print(f"vcpus: {vcpus}, mem: {mem}, diskSizeGb: {disk_size}, maxNodeCount: {max_node_count}") 
-        return True
 
     def instance_type_to_hourly_cost(self,
                                      instance_type: str,
