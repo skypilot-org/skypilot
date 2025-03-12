@@ -11,6 +11,7 @@ import sky
 def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
     use_spot = True
     if cloud == 'kubernetes':
+        # EKS does not support spot instances.
         use_spot = False
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
@@ -32,7 +33,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
             # is not limited by the number of CPU cores (5 x 2 x 2 = 20).
             cpus='5+',
             accelerators={'T4': 1},
-            use_spot=True)
+            use_spot=use_spot)
         task = sky.Task(num_nodes=2).set_resources(cluster_resources)
     request_id = sky.launch(dag, cluster_name=cluster)
     sky.stream_and_get(request_id)
