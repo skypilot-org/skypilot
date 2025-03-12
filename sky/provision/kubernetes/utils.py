@@ -565,19 +565,28 @@ class AutoscaleDetector:
     """
 
     @classmethod
-    def may_autoscale(cls, context: str, instance_type: str) -> bool:
+    # pylint: disable=unused-argument
+    def can_create_new_instance_of_type(cls, context: str,
+                                        instance_type: str) -> bool:
         """Returns if the Kubernetes context has an autoscaler
-        that can scale to accommodate the instance type.
+        that can create a new node that satisfies the instance type.
         Args:
             context: The Kubernetes context to check.
             instance_type: The instance type to check.
         Returns:
             bool: True if the Kubernetes context has an autoscaler that can
-                scale to accommodate the instance type, or if such determination
-                is not possible. False if the Kubernetes context cannot
-                autoscale to accommodate the instance type.
+                create a new node satisfying the instance type,
+                or if such determination is not possible.
+                False if the Kubernetes context autoscaler cannot create a new
+                node satisfying the instance type.
         """
-        raise NotImplementedError
+        # For autoscalers that SkyPilot does not know how to interface with,
+        # assume the autoscaler can create a new node that satisfies
+        # the instance type.
+        # If this is not the case, the autoscaler will fail to provision the
+        # node and the pod will be stuck in pending state until
+        # provision_timeout, after which failover will be triggered.
+        return True
 
 
 class GKEAutoscaleDetector(AutoscaleDetector):
@@ -585,9 +594,10 @@ class GKEAutoscaleDetector(AutoscaleDetector):
     """
 
     @classmethod
-    def may_autoscale(cls, context: str, instance_type: str) -> bool:
+    def can_create_new_instance_of_type(cls, context: str,
+                                        instance_type: str) -> bool:
         """Looks at each node pool in the cluster and checks if
-        it can autoscale to accommodate the instance type.
+        it can create a new node that satisfies the instance type.
         If the context does not match standard GKE context naming convention,
         or GKE credential is not set, this function returns True
         for optimistic pod scheduling.
@@ -607,11 +617,10 @@ class GKEAutoscaleDetector(AutoscaleDetector):
         container_service = gcp.build('container',
                                       'v1',
                                       credentials=credentials)
-        cluster = container_service.projects().locations().clusters() \
-            .get(name=
-                 f'projects/{project_id}'
-                 f'/locations/{location}'
-                 f'/clusters/{cluster_name}').execute()
+        cluster = container_service.projects().locations().clusters().get(
+            name=f'projects/{project_id}'
+            f'/locations/{location}'
+            f'/clusters/{cluster_name}').execute()
         # get node pools
         for node_pool in cluster['nodePools']:
             if node_pool['autoscaling'] is not None \
@@ -675,6 +684,12 @@ class GKEAutoscaleDetector(AutoscaleDetector):
 AUTOSCALER_TO_AUTOSCALE_DETECTOR = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaleDetector,
 }
+
+
+def get_autoscaler_detector(
+        autoscaler_type: kubernetes_enums.KubernetesAutoscalerType):
+    return AUTOSCALER_TO_AUTOSCALE_DETECTOR.get(autoscaler_type,
+                                                AutoscaleDetector)
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
