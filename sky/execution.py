@@ -528,7 +528,7 @@ def launch(
                 Stage.DOWN,
             ]
             skip_unnecessary_provisioning = True
-    
+
     detach_setup = True
     if controller_utils.Controllers.from_name(cluster_name) is not None:
         # Attach to setup if the cluster is a controller, so that user can
