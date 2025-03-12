@@ -42,7 +42,6 @@ You also need to set up your huggingface account and the [Gemma3 usage agreement
 
 Now it's time to run deepseek with SkyPilot. The instruction can be dependent on your existing hardware.  
 
-8B: 
 ```
 sky launch gemma3.yaml \
   -c gemma-3 \
