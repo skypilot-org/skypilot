@@ -9,6 +9,9 @@ import sky
 
 
 def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
+    use_spot = True
+    if cloud == 'kubernetes':
+        use_spot = False
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
