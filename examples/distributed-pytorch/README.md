@@ -2,7 +2,7 @@
 
 This example demonstrates how to run distributed training with PyTorch using SkyPilot.
 
-**The example is based on [PyTorch's official minGPT example](https://github.com/pytorch/examples/tree/main/distributed/minGPT-ddp)**
+**The example is based on [PyTorch's official minGPT example](https://github.com/pytorch/examples/tree/main/distributed/minGPT-ddp)**.
 
 
 ## Overview
@@ -24,7 +24,7 @@ The following command will spawn 2 nodes with 2 L4 GPU each:
 sky launch -c train train.yaml
 ```
 
-In [train.yaml](./train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
+In [train.yaml](https://github.com/skypilot-org/skypilot/blob/master/examples/distributed-pytorch/train.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
 
 ```yaml
 run: |
@@ -49,7 +49,7 @@ run: |
 sky launch -c train-rdzv train-rdzv.yaml
 ```
 
-In [train-rdzv.yaml](./train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
+In [train-rdzv.yaml](https://github.com/skypilot-org/skypilot/blob/master/examples/distributed-pytorch/train-rdzv.yaml), we use `torchrun` to launch the training and set the arguments for distributed training using [environment variables](https://docs.skypilot.co/en/latest/running-jobs/environment-variables.html#skypilot-environment-variables) provided by SkyPilot.
 
 ```yaml
 run: |

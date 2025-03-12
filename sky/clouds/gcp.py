@@ -67,8 +67,20 @@ _GCLOUD_VERSION = '424.0.0'
 GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     {{ gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
-    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \
-    tar xzf google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="arm"; \
+    else \
+        echo "Architecture $ARCH not supported by Google Cloud SDK. Defaulting to x86_64." > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="x86_64"; \
+    fi && \
+    echo "Detected architecture: $ARCH, using package: $ARCH_SUFFIX" >> {_GCLOUD_INSTALLATION_LOG} && \
+    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-${{ARCH_SUFFIX}}.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    tar xzf google-cloud-sdk-{_GCLOUD_VERSION}-linux-${{ARCH_SUFFIX}}.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
     rm -rf ~/google-cloud-sdk >> {_GCLOUD_INSTALLATION_LOG}  && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \

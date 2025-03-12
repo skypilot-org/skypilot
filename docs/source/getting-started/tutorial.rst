@@ -1,10 +1,10 @@
 .. _ai-training:
 
-Tutorial: AI Training
+Quickstart: PyTorch
 ======================
 This example uses SkyPilot to train a GPT-like model (inspired by Karpathy's `minGPT <https://github.com/karpathy/minGPT>`_) with Distributed Data Parallel (DDP) in PyTorch.
 
-We define a :ref:`task YAML <yaml-spec>` with the resource requirements, the setup commands,
+We define a :ref:`SkyPilot YAML <yaml-spec>` with the resource requirements, the setup commands,
 and the commands to run:
 
 .. code-block:: yaml

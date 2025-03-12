@@ -71,7 +71,7 @@ def test_file_mounts(generic_cloud: str):
         extra_flags = '--num-nodes 1'
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {name} --cloud {generic_cloud} {extra_flags} examples/using_file_mounts.yaml',
+        f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {extra_flags} examples/using_file_mounts.yaml',
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
     ]
     test = smoke_tests_utils.Test(
@@ -124,12 +124,12 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
     storage_name = TestStorageWithCredentials.generate_bucket_name()
     test_commands = [
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        (f'sky launch -y -c {name} --cpus 2+ --cloud {generic_cloud} '
+        (f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name}'),
         f'sky logs {name} 1 --status',  # Ensure the job succeeded.
         # Override with --env:
-        (f'sky launch -y -c {name}-2 --cpus 2+ --cloud {generic_cloud} '
+        (f'sky launch -y -c {name}-2 {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} '
          'examples/using_file_mounts_with_env_vars.yaml '
          f'--env MY_BUCKET={storage_name} '
          '--env MY_LOCAL_PATH=tmpfile'),
@@ -173,7 +173,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     test_commands = [
         smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
         *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-        f'sky launch -y -c {cluster_name} --cloud {cloud} {file_path}',
+        f'sky launch -y -c {cluster_name} --cloud {cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {file_path}',
         f'sky logs {cluster_name} 1 --status',  # Ensure job succeeded.
         smoke_tests_utils.run_cloud_cmd_on_cluster(cluster_name,
                                                    cmd=ls_hello_command),
@@ -416,7 +416,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         file_path = f.name
         test_commands = [
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
-            f'sky launch -y -c {name} --cloud {generic_cloud} {region_str} --image-id {image_id} {file_path}',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} {region_str} --image-id {image_id} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
             # Check AWS, GCP, or Azure storage mount.
             f'sky exec {name} {quoted_check}',

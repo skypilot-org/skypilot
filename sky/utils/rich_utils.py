@@ -230,15 +230,53 @@ def decode_rich_status(
     decoding_status = None
     try:
         last_line = ''
+        # Buffer to store incomplete UTF-8 bytes between chunks
+        undecoded_buffer = b''
+
         # Iterate over the response content in chunks. We do not use iter_lines
         # because it will strip the trailing newline characters, causing the
         # progress bar ending with `\r` becomes a pyramid.
-        for encoded_msg in response.iter_content(chunk_size=None):
-            if encoded_msg is None:
+        for chunk in response.iter_content(chunk_size=None):
+            if chunk is None:
                 return
-            encoded_msg = encoded_msg.decode('utf-8')
+
+            # Append the new chunk to any leftover bytes from previous iteration
+            current_bytes = undecoded_buffer + chunk
+            undecoded_buffer = b''
+
+            # Try to decode the combined bytes
+            try:
+                encoded_msg = current_bytes.decode('utf-8')
+            except UnicodeDecodeError as e:
+                # Check if this is potentially an incomplete sequence at the end
+                if e.start > 0:
+                    # Decode the valid part
+                    encoded_msg = current_bytes[:e.start].decode('utf-8')
+
+                    # Check if the remaining bytes are likely a partial char
+                    # or actually invalid UTF-8
+                    remaining_bytes = current_bytes[e.start:]
+                    if len(remaining_bytes) < 4:  # Max UTF-8 char is 4 bytes
+                        # Likely incomplete - save for next chunk
+                        undecoded_buffer = remaining_bytes
+                    else:
+                        # Likely invalid - replace with replacement character
+                        encoded_msg += remaining_bytes.decode('utf-8',
+                                                              errors='replace')
+                        undecoded_buffer = b''
+                else:
+                    # Error at the very beginning of the buffer - invalid UTF-8
+                    encoded_msg = current_bytes.decode('utf-8',
+                                                       errors='replace')
+                    undecoded_buffer = b''
+
             lines = encoded_msg.splitlines(keepends=True)
 
+            # Skip processing if lines is empty to avoid IndexError
+            if not lines:
+                continue
+
+            # Append any leftover text from previous chunk to first line
             lines[0] = last_line + lines[0]
             last_line = lines[-1]
             # If the last line is not ended with `\r` or `\n` (with ending

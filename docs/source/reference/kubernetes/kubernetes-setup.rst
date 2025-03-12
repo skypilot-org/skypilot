@@ -55,7 +55,7 @@ After these steps, the administrator can share the kubeconfig file with users, w
 
 .. _kubernetes-setup-deploy:
 
-Step 1 - Deploy a Kubernetes Cluster
+Step 1 - Deploy a Kubernetes cluster
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
@@ -158,7 +158,7 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
           echo "$output"
         fi
 
-Automatically Labelling Nodes
+Automatically labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If none of the above labels are present on your cluster, we provide a convenience script that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
@@ -177,7 +177,7 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
-Manually Labelling Nodes
+Manually labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
@@ -198,7 +198,7 @@ Use the following command to label a node:
 
 .. _kubernetes-setup-ports:
 
-[Optional] Step 3 - Set up for Exposing Services
+[Optional] Step 3 - Set up for exposing services
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
@@ -215,7 +215,7 @@ Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more deta
 
 .. _kubernetes-setup-serviceaccount:
 
-[Optional] Step 4 - Namespace and Service Account Setup
+[Optional] Step 4 - Namespace and service account setup
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
@@ -321,7 +321,7 @@ Unlike :code:`sky status` which lists only the SkyPilot resources launched by th
 
 .. _kubernetes-observability-dashboard:
 
-Kubernetes Dashboard
+Kubernetes dashboard
 ^^^^^^^^^^^^^^^^^^^^
 You can deploy tools such as the `Kubernetes dashboard <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_ to easily view and manage
 SkyPilot resources on your cluster.
@@ -329,7 +329,7 @@ SkyPilot resources on your cluster.
 .. image:: ../../images/screenshots/kubernetes/kubernetes-dashboard.png
     :width: 80%
     :align: center
-    :alt: Kubernetes Dashboard
+    :alt: Kubernetes dashboard
 
 
 As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:

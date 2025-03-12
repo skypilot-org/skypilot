@@ -1,3 +1,5 @@
+# Pushing Docker Image
+
 ## GCR
 
 1. Install skypilot package by following these [instructions](https://docs.skypilot.co/en/latest/getting-started/installation.html).

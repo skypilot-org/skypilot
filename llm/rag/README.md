@@ -4,6 +4,8 @@
 <img src="https://i.imgur.com/yysdtA4.png" alt="RAG with DeepSeek R1" style="width: 70%;">
 </p>
 
+For the full blog post, please find it [here](https://blog.skypilot.co/deepseek-rag/).
+
 ## Large-Scale Legal Document Search and Analysis
 As legal document collections grow, traditional keyword search becomes insufficient for finding relevant information. Retrieval-Augmented Generation (RAG) combines the power of vector search with large language models to enable semantic search and intelligent answers.
 

@@ -77,7 +77,7 @@ def canonicalize_accelerator_name(accelerator: str,
     # Look for Kubernetes accelerators online if the accelerator is not found
     # in the public cloud catalog. This is to make sure custom accelerators
     # on Kubernetes can be correctly canonicalized.
-    if not names and cloud_str in ['kubernetes', None]:
+    if not names and cloud_str in ['Kubernetes', None]:
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Listing accelerators on Kubernetes')):
             searched = service_catalog.list_accelerators(

@@ -1,6 +1,9 @@
 # Use the latest version with Python 3.10
 FROM continuumio/miniconda3:23.3.1-0
 
+# Detect architecture
+ARG TARGETARCH
+
 # Install dependencies
 RUN conda install -c conda-forge google-cloud-sdk && \
     gcloud components install gke-gcloud-auth-plugin --quiet && \
@@ -11,8 +14,13 @@ RUN conda install -c conda-forge google-cloud-sdk && \
         git gcc rsync sudo patch openssh-server \
         pciutils nano fuse socat netcat-openbsd curl rsync vim tini && \
     rm -rf /var/lib/apt/lists/* && \
-    # Install kubectl
-    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/amd64/kubectl" && \
+    # Install kubectl based on architecture
+    ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)} && \
+    curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
     rm kubectl && \
     # Install uv and skypilot

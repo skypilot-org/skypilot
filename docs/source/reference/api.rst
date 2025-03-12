@@ -68,7 +68,7 @@ Clusters SDK
 Jobs SDK
 --------
 
-Cluster Jobs SDK
+Cluster jobs SDK
 ~~~~~~~~~~~~~~~~
 
 ``sky.exec``
@@ -111,7 +111,7 @@ Cluster Jobs SDK
   :noindex:
 
 
-Managed Jobs SDK
+Managed jobs SDK
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 ``sky.jobs.launch``
@@ -222,7 +222,7 @@ Enums
 
 .. _ref-api-server-sdk:
 
-API Server SDK
+API server SDK
 -----------------
 
 .. _sky-get:

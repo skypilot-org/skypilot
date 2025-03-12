@@ -46,7 +46,6 @@ Below is the configuration syntax and some example values. See detailed explanat
   :ref:`admin_policy <config-yaml-admin-policy>`: my_package.SkyPilotPolicyV1
 
   :ref:`kubernetes <config-yaml-kubernetes>`:
-    :ref:`networking <config-yaml-kubernetes-networking>`: portforward
     :ref:`ports <config-yaml-kubernetes-ports>`: loadbalancer
     :ref:`remote_identity <config-yaml-kubernetes-remote-identity>`: my-k8s-service-account
     :ref:`allowed_contexts <config-yaml-kubernetes-allowed-contexts>`:
@@ -183,6 +182,8 @@ Supported bucket types:
 
 Configure resources for the managed jobs controller.
 
+For more details about tuning the jobs controller resources, see :ref:`jobs-controller-sizing`.
+
 Example:
 
 .. code-block:: yaml
@@ -190,10 +191,13 @@ Example:
   jobs:
     controller:
       resources:  # same spec as 'resources' in a task YAML
+        # optionally set specific cloud/region
         cloud: gcp
         region: us-central1
-        cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
-        disk_size: 100
+        # default resources:
+        cpus: 4+
+        memory: 8x
+        disk_size: 50
 
 .. _config-yaml-allowed-clouds:
 
@@ -827,21 +831,6 @@ Example:
 
 Advanced Kubernetes configurations (optional).
 
-.. _config-yaml-kubernetes-networking:
-
-``kubernetes.networking``
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Networking mode (optional).
-
-Can be one of:
-
-- ``portforward``: Use port forwarding to access the pods.
-- ``hostnetwork``: Use host network to access the pods.
-- ``weave``: Use Weave CNI for networking.
-
-Default: ``portforward``.
-
 .. _config-yaml-kubernetes-ports:
 
 ``kubernetes.ports``
@@ -901,13 +890,13 @@ Default: ``10``.
 
 Autoscaler type (optional).
 
-Type of autoscaler to use.
+Type of autoscaler used by the underlying Kubernetes cluster. Used to configure the GPU labels used by the pods submitted by SkyPilot.
 
 Can be one of:
 
-- ``gke``: Google Kubernetes Engine Autopilot
-- ``eks``: Amazon EKS
-- ``aks``: Azure Kubernetes Service
+- ``gke``: Google Kubernetes Engine
+- ``karpenter``: Karpenter
+- ``generic``: Generic autoscaler, assumes nodes are labelled with ``skypilot.co/accelerator``.
 
 .. _config-yaml-kubernetes-pod-config:
 

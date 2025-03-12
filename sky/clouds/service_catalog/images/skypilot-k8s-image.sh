@@ -1,6 +1,11 @@
 #!/bin/bash
 # Builds the Dockerfile_k8s image as the SkyPilot image.
 # Uses buildx to build the image for both amd64 and arm64.
+#
+# Note: Running `docker run --rm --privileged multiarch/qemu-user-static --reset -p yes`
+# first may solve some segmentation faults issue with QEMU when building the
+# image across architectures.
+#
 # Usage: ./skypilot-k8s-image.sh [-p] [-g] [-l] [-r region]
 # -p: Push the image to the registry
 # -g: Builds the GPU image in Dockerfile_k8s_gpu. GPU image is built only for amd64
@@ -56,8 +61,10 @@ fi
 # Add -gpu to the tag if the GPU image is being built
 if [[ $gpu == "true" ]]; then
   TAG=$TAG-gpu:${VERSION_TAG}
+  DOCKERFILE=Dockerfile_k8s_gpu
 else
   TAG=$TAG:${VERSION_TAG}
+  DOCKERFILE=Dockerfile_k8s
 fi
 
 echo "Building image: $TAG"
@@ -69,33 +76,35 @@ shift $((OPTIND-1))
 # Navigate to the root of the project (inferred from git)
 cd "$(git rev-parse --show-toplevel)"
 
+# Set up Docker buildx for multi-platform builds if it's not already set up
+if ! docker buildx inspect mybuilder >/dev/null 2>&1; then
+  echo "Setting up Docker buildx builder for multi-platform builds..."
+  docker buildx create --name mybuilder --driver docker-container --bootstrap
+  docker buildx use mybuilder
+fi
+
 # If push is used, build the image for both amd64 and arm64
 if [[ $push == "true" ]]; then
-  # If gpu is used, build the GPU image
-  if [[ $gpu == "true" ]]; then
-    echo "Building and pushing GPU image for amd64: $TAG"
-    docker buildx build --push --platform linux/amd64 -t $TAG -f Dockerfile_k8s_gpu ./sky
+  # Build for both architectures
+  echo "Building and pushing image for amd64 and arm64: $TAG"
+  docker buildx build --push --platform linux/amd64,linux/arm64 -t $TAG -f $DOCKERFILE ./sky
+else
+  # Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
+  if [[ $(uname -m) == "arm64" ]]; then
+    echo "Loading image for arm64 (Apple Silicon etc.): $TAG"
+    docker buildx build --load --platform linux/arm64 -t $TAG -f $DOCKERFILE ./sky
+  elif [[ $(uname -m) == "x86_64" ]]; then
+    echo "Building for amd64 (Intel CPUs): $TAG"
+    docker buildx build --load --platform linux/amd64 -t $TAG -f $DOCKERFILE ./sky
   else
-    echo "Building and pushing CPU image for amd64 and arm64: $TAG"
-    docker buildx build --push --platform linux/arm64,linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
+    echo "Unsupported architecture: $(uname -m)"
+    exit 1
   fi
-fi
 
-# Load the right image depending on the architecture of the host machine (Apple Silicon or Intel)
-if [[ $(uname -m) == "arm64" ]]; then
-  echo "Loading image for arm64 (Apple Silicon etc.): $TAG"
-  docker buildx build --load --platform linux/arm64 -t $TAG -f Dockerfile_k8s ./sky
-elif [[ $(uname -m) == "x86_64" ]]; then
-  echo "Building for amd64 (Intel CPUs): $TAG"
-  docker buildx build --load --platform linux/amd64 -t $TAG -f Dockerfile_k8s ./sky
-else
-  echo "Unsupported architecture: $(uname -m)"
-  exit 1
-fi
-
-echo "Tagging image."
-if [[ $gpu ]]; then
-  docker tag $TAG skypilot-gpu:latest
-else
-  docker tag $TAG skypilot:latest
+  echo "Tagging image."
+  if [[ $gpu ]]; then
+    docker tag $TAG skypilot-gpu:latest
+  else
+    docker tag $TAG skypilot:latest
+  fi
 fi

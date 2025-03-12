@@ -6,7 +6,19 @@
 #   AWS: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/install-nvidia-driver.html
 export DEBIAN_FRONTEND=noninteractive
 
-wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.1-1_all.deb
+# Detect architecture
+ARCH=$(uname -m)
+
+if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then
+    echo "Detected ARM architecture: $ARCH"
+    ARCH_PATH="arm64"
+else
+    echo "Detected x86_64 architecture"
+    ARCH_PATH="x86_64"
+fi
+
+# Download architecture-specific CUDA keyring package
+wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/${ARCH_PATH}/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt-get update
 

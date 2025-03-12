@@ -116,7 +116,7 @@ For more details, please refer to the `VSCode documentation <https://code.visual
 
 .. _dev-notebooks:
 
-Jupyter Notebooks
+Jupyter notebooks
 ~~~~~~~~~~~~~~~~~
 
 Jupyter notebooks are a useful tool for interactive development, debugging, and

@@ -3,7 +3,7 @@ import os
 import shlex
 import subprocess
 import tempfile
-from typing import List
+from typing import List, Optional
 
 from sky import check as sky_check
 from sky import sky_logging
@@ -19,8 +19,11 @@ from sky.utils import ux_utils
 logger = sky_logging.init_logger(__name__)
 
 
-def deploy_remote_cluster(ip_list: List[str], ssh_user: str, ssh_key: str,
-                          cleanup: bool):
+def deploy_remote_cluster(ip_list: List[str],
+                          ssh_user: str,
+                          ssh_key: str,
+                          cleanup: bool,
+                          context_name: Optional[str] = None):
     success = False
     path_to_package = os.path.dirname(__file__)
     up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.sh')
@@ -41,6 +44,8 @@ def deploy_remote_cluster(ip_list: List[str], ssh_user: str, ssh_key: str,
 
         deploy_command = (f'{up_script_path} {ip_file.name} '
                           f'{ssh_user} {key_file.name}')
+        if context_name is not None:
+            deploy_command += f' {context_name}'
         if cleanup:
             deploy_command += ' --cleanup'
 
@@ -52,10 +57,6 @@ def deploy_remote_cluster(ip_list: List[str], ssh_user: str, ssh_key: str,
         log_path = os.path.join(constants.SKY_LOGS_DIRECTORY, run_timestamp,
                                 'local_up.log')
 
-        # Check if ~/.kube/config exists:
-        if os.path.exists(os.path.expanduser('~/.kube/config')):
-            logger.info('Found existing kube config. '
-                        'It will be backed up to ~/.kube/config.bak.')
         if cleanup:
             msg_str = 'Cleaning up remote cluster...'
         else:

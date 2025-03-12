@@ -1,7 +1,8 @@
 .. _kubernetes-deployment:
 
 Deployment Guides
------------------
+=================
+
 Below we include minimal guides to set up a new Kubernetes cluster in different environments, including hosted services on the cloud.
 
 .. grid:: 2

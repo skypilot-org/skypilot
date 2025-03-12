@@ -86,13 +86,13 @@ Note: `eval` can be optionally run on the same cluster as `train` with `sky exec
 
 Once we have developed the tasks, we can seamlessly run them in Airflow.
 
-1. **No changes required to our tasks -** we use the same YAMLs we wrote in the previous step to create an Airflow DAG in `sky_k8s_train_pipeline.py`.
+1. **No changes required to our tasks -** we use the same YAMLs we wrote in the previous step to create an Airflow DAG in `sky_train_dag.py`.
 2. **Airflow native logging** - SkyPilot logs are written to container stdout, which is captured as task logs in Airflow and displayed in the UI.
 3. **Easy debugging** - If a task fails, you can independently run the task using `sky launch` to debug the issue. SkyPilot will recreate the environment in which the task failed. 
 
-Here's a snippet of the DAG declaration in [sky_k8s_train_pipeline.py](sky_k8s_train_pipeline.py):
+Here's a snippet of the DAG declaration in [sky_train_dag.py](https://github.com/skypilot-org/skypilot/blob/master/examples/airflow/sky_train_dag.py):
 ```python
-with DAG(dag_id='sky_k8s_train_pipeline',
+with DAG(dag_id='sky_train_dag',
          default_args=default_args,
          schedule_interval=None,
          catchup=False) as dag:
@@ -143,12 +143,12 @@ All clusters are set to auto-down after the task is done, so no dangling cluster
 
 1. Copy the DAG file to the Airflow DAGs directory.
    ```bash
-   cp sky_k8s_train_pipeline.py /path/to/airflow/dags                                               
+   cp sky_train_dag.py /path/to/airflow/dags                                               
    # If your Airflow is running on Kubernetes, you may use kubectl cp to copy the file to the pod
-   # kubectl cp sky_k8s_example.py <airflow-pod-name>:/opt/airflow/dags 
+   # kubectl cp sky_train_dag.py <airflow-pod-name>:/opt/airflow/dags 
    ```
 2. Run `airflow dags list` to confirm that the DAG is loaded. 
-3. Find the DAG in the Airflow UI (typically http://localhost:8080) and enable it. The UI may take a couple of minutes to reflect the changes. Force unpause the DAG if it is paused with `airflow dags unpause sky_k8s_train_pipeline`
+3. Find the DAG in the Airflow UI (typically http://localhost:8080) and enable it. The UI may take a couple of minutes to reflect the changes. Force unpause the DAG if it is paused with `airflow dags unpause sky_train_dag`
 4. Trigger the DAG from the Airflow UI using the `Trigger DAG` button.
 5. Navigate to the run in the Airflow UI to see the DAG progress and logs of each task.
 
