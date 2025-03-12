@@ -229,7 +229,7 @@ Our default of using a NodePort service is the recommended way to expose the API
     .. tab-item:: NodePort
         :sync: nodeport-tab
 
-        1. Select two ports on your nodes that are not in use and allow network inbound traffic to them, 30050 and 30051 will be used in this example.
+        1. Select two ports on your nodes that are not in use and allow network inbound traffic to them. 30050 and 30051 will be used in this example.
 
         2. Upgrade the API server to use NodePort, and set the node ports to the selected ports:
 
