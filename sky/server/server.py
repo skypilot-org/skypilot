@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
+import multiprocessing
 import os
 import pathlib
 import re
@@ -46,7 +47,9 @@ from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -66,6 +69,10 @@ def _add_timestamp_prefix_for_server_logs() -> None:
     # Add date prefix to the log message printed by loggers under
     # server.
     stream_handler = logging.StreamHandler(sys.stdout)
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.INFO)
     stream_handler.flush = sys.stdout.flush  # type: ignore
     stream_handler.setFormatter(sky_logging.FORMATTER)
     server_logger.addHandler(stream_handler)
@@ -1089,6 +1096,9 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 
 if __name__ == '__main__':
     import uvicorn
+
+    from sky.server import uvicorn as skyuvicorn
+
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
@@ -1110,16 +1120,26 @@ if __name__ == '__main__':
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
-        uvicorn.run('sky.server.server:app',
-                    host=cmd_args.host,
-                    port=cmd_args.port,
-                    workers=num_workers)
+        config = uvicorn.Config('sky.server.server:app',
+                                host=cmd_args.host,
+                                port=cmd_args.port,
+                                workers=num_workers)
+        skyuvicorn.run(config)
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for sub_proc in sub_procs:
-            sub_proc.terminate()
-            sub_proc.join()
+
+        def cleanup(proc: multiprocessing.Process) -> None:
+            try:
+                proc.terminate()
+                proc.join()
+            finally:
+                # The process may not be started yet, close it anyway.
+                proc.close()
+
+        subprocess_utils.run_in_parallel(cleanup,
+                                         sub_procs,
+                                         num_threads=len(sub_procs))

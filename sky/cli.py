@@ -1874,7 +1874,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                 num_in_progress_jobs, msg = _handle_jobs_queue_request(
                     managed_jobs_queue_request_id,
                     show_all=False,
-                    show_user=False,
+                    show_user=all_users,
                     limit_num_jobs_to_show=not all,
                     is_called_by_user=False)
             except KeyboardInterrupt:
@@ -3034,7 +3034,7 @@ def _down_or_stop_clusters(
                     # with the termination.
                     hint_or_raise(controller_name, purge)
                 except (exceptions.ClusterOwnerIdentityMismatchError,
-                        RuntimeError) as e:
+                        exceptions.NotSupportedError, RuntimeError) as e:
                     if purge:
                         click.echo(common_utils.format_exception(e))
                     else:

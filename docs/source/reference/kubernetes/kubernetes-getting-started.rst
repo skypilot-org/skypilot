@@ -10,11 +10,11 @@ Have a kubeconfig? Get started with SkyPilot in 3 commands:
 .. code-block:: bash
 
    # Install dependencies
-   $ brew install kubectl socat netcat  
+   $ brew install kubectl socat netcat
    # Linux: sudo apt-get install kubectl socat netcat
 
    # With a valid kubeconfig at ~/.kube/config, run:
-   $ sky check  
+   $ sky check
    # Shows "Kubernetes: enabled"
 
    # Launch your SkyPilot cluster
@@ -217,7 +217,7 @@ Your image must satisfy the following requirements:
 
 .. _kubernetes-custom-images-private-repos:
 
-Using Images from Private Repositories
+Using images from private repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
 
@@ -348,9 +348,9 @@ FAQs
 
 * **Can I use multiple Kubernetes clusters with SkyPilot?**
 
-  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+  SkyPilot can work with multiple Kubernetes contexts in your kubeconfig file by setting the ``allowed_contexts`` key in :code:`~/.sky/config.yaml`. See :ref:`multi-kubernetes`.
 
-  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+  If ``allowed_contexts`` is not set, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
 
 * **Are autoscaling Kubernetes clusters supported?**
 
@@ -414,4 +414,3 @@ FAQs
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
-
