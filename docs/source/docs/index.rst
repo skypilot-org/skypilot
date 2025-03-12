@@ -112,6 +112,7 @@ Read the research:
    :caption: Clusters
 
    Start a Cluster <../examples/interactive-development>
+   Cluster Jobs <../reference/job-queue>
    ../examples/auto-failover
    ../reference/auto-stop
 
@@ -120,7 +121,6 @@ Read the research:
    :maxdepth: 1
    :caption: Jobs
 
-   Cluster Jobs <../reference/job-queue>
    ../examples/managed-jobs
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
