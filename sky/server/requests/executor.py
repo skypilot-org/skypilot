@@ -40,7 +40,7 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
-from sky.server.requests import precond
+from sky.server.requests import preconditions
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
@@ -287,7 +287,7 @@ def schedule_request(
         schedule_type: api_requests.ScheduleType = (
             api_requests.ScheduleType.LONG),
         is_skypilot_system: bool = False,
-        precondition: Optional[precond.Precondition] = None) -> None:
+        precondition: Optional[preconditions.Precondition] = None) -> None:
     """Enqueue a request to the request queue.
 
     Args:

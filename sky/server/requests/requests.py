@@ -518,8 +518,8 @@ def create_if_not_exists(request: Request) -> bool:
 def get_request_tasks(
     status: Optional[List[RequestStatus]] = None,
     cluster_names: Optional[List[str]] = None,
-    exclude_request_names: Optional[List[str]] = None,
     user_id: Optional[str] = None,
+    exclude_request_names: Optional[List[str]] = None,
     include_request_names: Optional[List[str]] = None,
 ) -> List[Request]:
     """Get a list of requests that match the given filters.

@@ -3,7 +3,7 @@ import unittest
 from unittest import mock
 
 from sky import exceptions
-from sky.server.requests import precond
+from sky.server.requests import preconditions
 from sky.server.requests import requests as api_requests
 from sky.utils import status_lib
 
@@ -18,7 +18,7 @@ class TestPrecondition(unittest.TestCase):
     async def test_precondition_timeout(self, mock_get_request):
         """Test Precondition timeout behavior."""
 
-        class Timeouted(precond.Precondition):
+        class Timeouted(preconditions.Precondition):
 
             async def check(self):
                 return False, 'Still checking'
@@ -38,7 +38,7 @@ class TestPrecondition(unittest.TestCase):
     async def test_precondition_cancelled(self, mock_get_request):
         """Test Precondition cancellation behavior."""
 
-        class Canceled(precond.Precondition):
+        class Canceled(preconditions.Precondition):
 
             async def check(self):
                 return False, 'Waiting'
@@ -55,7 +55,7 @@ class TestPrecondition(unittest.TestCase):
     async def test_precondition_check_exception(self, mock_get_request):
         """Test Precondition behavior when check raises exception."""
 
-        class Errored(precond.Precondition):
+        class Errored(preconditions.Precondition):
 
             async def check(self):
                 raise RuntimeError('Test error')
@@ -85,8 +85,8 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         mock_get_cluster.return_value = {'status': status_lib.ClusterStatus.UP}
         mock_get_tasks.return_value = []
 
-        p = precond.ClusterStartCompletePrecondition(self.request_id,
-                                                     self.cluster_name)
+        p = preconditions.ClusterStartCompletePrecondition(
+            self.request_id, self.cluster_name)
         met, msg = await p.check()
 
         self.assertTrue(met)
@@ -101,8 +101,8 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         mock_get_cluster.return_value = None
         mock_get_tasks.return_value = []
 
-        p = precond.ClusterStartCompletePrecondition(self.request_id,
-                                                     self.cluster_name)
+        p = preconditions.ClusterStartCompletePrecondition(
+            self.request_id, self.cluster_name)
         met, msg = await p.check()
 
         self.assertTrue(met)
@@ -117,8 +117,8 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         }
         mock_get_tasks.return_value = [mock.MagicMock()]
 
-        p = precond.ClusterStartCompletePrecondition(self.request_id,
-                                                     self.cluster_name)
+        p = preconditions.ClusterStartCompletePrecondition(
+            self.request_id, self.cluster_name)
         met, msg = await p.check()
 
         self.assertFalse(met)
@@ -132,8 +132,8 @@ class TestClusterStartCompletePrecondition(unittest.TestCase):
         mock_get_cluster.return_value = None
         mock_get_tasks.return_value = [mock.MagicMock()]
 
-        p = precond.ClusterStartCompletePrecondition(self.request_id,
-                                                     self.cluster_name)
+        p = preconditions.ClusterStartCompletePrecondition(
+            self.request_id, self.cluster_name)
         met, msg = await p.check()
 
         self.assertFalse(met)

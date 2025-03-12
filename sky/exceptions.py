@@ -34,6 +34,13 @@ def is_safe_exception(exc: BaseException) -> bool:
     Safe exceptions are:
     1. Built-in exceptions
     2. SkyPilot's own exceptions
+
+    Args:
+        exc: The exception to check, accept BaseException to handle SystemExit
+            and KeyboardInterrupt.
+
+    Returns:
+        True if the exception is safe to send to clients, False otherwise.
     """
     module = type(exc).__module__
 

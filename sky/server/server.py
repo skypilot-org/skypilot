@@ -38,7 +38,7 @@ from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
-from sky.server.requests import precond
+from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -498,7 +498,7 @@ async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
-        precondition=precond.ClusterStartCompletePrecondition(
+        precondition=preconditions.ClusterStartCompletePrecondition(
             request_id=request.state.request_id,
             cluster_name=cluster_name,
         ),
