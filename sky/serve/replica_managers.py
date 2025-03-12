@@ -1252,8 +1252,10 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Bump replica version if all fields except for service are
                 # the same. File mounts should both be empty, as update always
                 # create new buckets if they are not empty.
-                if (old_config == new_config and
-                        old_config.get('file_mounts', None) == {}):
+                # TODO(tian): Hack. In this project we dont update the actual
+                # replica and this serves only for updating LBs.
+                if True or (old_config == new_config and
+                            old_config.get('file_mounts', None) == {}):
                     logger.info(
                         f'Updating replica {info.replica_id} to version '
                         f'{version}. Replica {info.replica_id}\'s config '

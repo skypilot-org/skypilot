@@ -1,4 +1,5 @@
 """SkyServe core APIs."""
+import os
 import re
 import signal
 import tempfile
@@ -507,6 +508,9 @@ def update(
 
     print(f'New version: {current_version}')
     controller_name = common.SKY_SERVE_CONTROLLER_NAME
+    # TODO(tian): Hack to update the load balancer code on the controller.
+    # Remove this on production.
+    os.system('rm -rf ~/.sky/wheels')
     sky.core.start(controller_name)
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',

@@ -2,7 +2,7 @@
 import asyncio
 import logging
 import threading
-from typing import Dict, Generic, List, Optional, Tuple, TypeVar, Union
+from typing import Dict, Generic, List, Optional, Tuple, TypeVar
 
 import aiohttp
 import fastapi
@@ -23,7 +23,6 @@ RequestQueueEntry = Tuple[fastapi.Request, asyncio.Event,
 
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
-_ENABLE_CREATE_TASK_CONCURRENCY = False
 
 
 class QueueSizeFilter(logging.Filter):
@@ -287,26 +286,51 @@ class SkyServeLoadBalancer:
             await asyncio.gather(*close_client_tasks)
 
     async def _proxy_request_to(
-            self, url: str, request: fastapi.Request,
-            is_from_lb: bool) -> Union[fastapi.responses.Response, Exception]:
+            self, pool_to_use: ClientPool, proxy_request: httpx.Request,
+            client: httpx.AsyncClient, url: str, request: fastapi.Request,
+            extra_header: Dict[str, str]) -> fastapi.responses.Response:
         """Proxy the request to the specified URL.
 
         Returns:
             The response from the endpoint replica. Return the exception
             encountered if anything goes wrong.
         """
-        # if is_from_lb:
-        #     log_key = 'replica-decision'
-        #     replica_id = self._replica2id.get(url, 'N/A')
-        #     log_to_request = (f'Select Replica with id {replica_id} ({url})')
-        # else:
-        #     log_key = 'lb-decision'
-        #     lb_region = self._lb2region.get(url, 'N/A')
-        #     log_to_request = (f'Select LB in region {lb_region} ({url})')
         logger.info(f'Proxy request to {url}')
-        pool_to_use = self._lb_pool if is_from_lb else self._replica_pool
-        pool_to_use.pre_execute_hook(url, request)
+        proxy_response = await client.send(proxy_request, stream=True)
+
+        async def background_func():
+            await proxy_response.aclose()
+            pool_to_use.post_execute_hook(url, request)
+
+        proxy_response.headers.update(extra_header)
+        return fastapi.responses.StreamingResponse(
+            content=proxy_response.aiter_raw(),
+            status_code=proxy_response.status_code,
+            headers=proxy_response.headers,
+            background=background.BackgroundTask(background_func))
+
+    async def _request_finish_callback(self, pool_to_use: ClientPool,
+                                       proxy_request: httpx.Request,
+                                       client: httpx.AsyncClient, url: str,
+                                       request: fastapi.Request,
+                                       extra_header: Dict[str, str],
+                                       response_future: asyncio.Future[
+                                           fastapi.responses.Response],
+                                       request_event: asyncio.Event) -> None:
+        response = await self._proxy_request_to(pool_to_use, proxy_request,
+                                                client, url, request,
+                                                extra_header)
+        response_future.set_result(response)
+        request_event.set()
+
+    async def _handle_requests(self, url: str, entry: RequestQueueEntry,
+                               is_from_lb: bool) -> None:
+        """Handle the request."""
+        assert self._loop is not None
         try:
+            request, request_event, response_future = entry
+            pool_to_use = self._lb_pool if is_from_lb else self._replica_pool
+            pool_to_use.pre_execute_hook(url, request)
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_put_request_to_queue` but refreshed before
             # entering this function. In that case we will return an error here
@@ -314,7 +338,10 @@ class SkyServeLoadBalancer:
             # update of the client pool to finish before getting the client.
             client = pool_to_use.get_client(url)
             if client is None:
-                return RuntimeError(f'Client for {url} not found.')
+                response_future.set_exception(
+                    RuntimeError(f'Client for {url} not found.'))
+                request_event.set()
+                return
             worker_url = httpx.URL(path=request.url.path,
                                    query=request.url.query.encode('utf-8'))
             headers = request.headers.mutablecopy()
@@ -328,18 +355,20 @@ class SkyServeLoadBalancer:
                 headers=headers.raw,
                 content=await request.body(),
                 timeout=constants.LB_STREAM_TIMEOUT)
-            proxy_response = await client.send(proxy_request, stream=True)
-
-            async def background_func():
-                await proxy_response.aclose()
-                pool_to_use.post_execute_hook(url, request)
-
-            # proxy_response.headers.update({log_key: log_to_request})
-            return fastapi.responses.StreamingResponse(
-                content=proxy_response.aiter_raw(),
-                status_code=proxy_response.status_code,
-                headers=proxy_response.headers,
-                background=background.BackgroundTask(background_func))
+            extra_header = {}
+            if not is_from_lb:
+                replica_id = self._replica2id.get(url, 'N/A')
+                extra_header['replica-decision'] = (
+                    f'Select Replica with id {replica_id} ({url})')
+            else:
+                lb_region = self._lb2region.get(url, 'N/A')
+                extra_header['lb-decision'] = (
+                    f'Select LB in region {lb_region} ({url})')
+            coro = self._request_finish_callback(pool_to_use, proxy_request,
+                                                 client, url, request,
+                                                 extra_header, response_future,
+                                                 request_event)
+            self._handle_request_tasks.append(self._loop.create_task(coro))
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}')
@@ -364,14 +393,6 @@ class SkyServeLoadBalancer:
                 assert self_url is None, (self_url, lb, all_lb_urls)
                 self_url = lb
         return steal_targets, self_url
-
-    async def _handle_requests(self, target_url: str, entry: RequestQueueEntry,
-                               is_from_lb: bool) -> None:
-        """Handle the request."""
-        request, request_event, response_future = entry
-        response = await self._proxy_request_to(target_url, request, is_from_lb)
-        response_future.set_result(response)
-        request_event.set()
 
     async def _queue_processor(self) -> None:
         """Background task to process queued requests."""
@@ -418,14 +439,9 @@ class SkyServeLoadBalancer:
                         logger.info(f'Processing queued request {request.url} '
                                     f'from {source_identity} to '
                                     f'{ready_replica_url}.')
-                        coro = self._handle_requests(ready_replica_url,
-                                                     entry,
-                                                     is_from_lb=False)
-                        if _ENABLE_CREATE_TASK_CONCURRENCY:
-                            self._handle_request_tasks.append(
-                                self._loop.create_task(coro))
-                        else:
-                            await coro
+                        await self._handle_requests(ready_replica_url,
+                                                    entry,
+                                                    is_from_lb=False)
                     except Exception as e:  # pylint: disable=broad-except
                         # Set exception to propagate to the waiting handler
                         response_future.set_exception(e)
@@ -582,11 +598,7 @@ class SkyServeLoadBalancer:
             if request.headers.get(_IS_FROM_LB_HEADER, False):
                 continue
             await self._request_queue.get_and_remove(idx)
-            coro = self._handle_requests(source_lb_url, entry, is_from_lb=True)
-            if _ENABLE_CREATE_TASK_CONCURRENCY:
-                self._handle_request_tasks.append(self._loop.create_task(coro))
-            else:
-                await coro
+            await self._handle_requests(source_lb_url, entry, is_from_lb=True)
             num_steal -= 1
             if not num_steal:
                 break
