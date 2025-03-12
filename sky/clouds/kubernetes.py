@@ -246,9 +246,9 @@ class Kubernetes(clouds.Cloud):
                 regions_to_return.append(r)
             else:
                 if autoscaler_type is not None:
-                    autoscale_detector = kubernetes_utils. \
-                        get_autoscaler_detector(autoscaler_type)
-                    if autoscale_detector.can_create_new_instance_of_type(
+                    autoscaler = kubernetes_utils. \
+                        get_autoscaler(autoscaler_type)
+                    if autoscaler.can_create_new_instance_of_type(
                             context, instance_type):
                         regions_to_return.append(r)
                     else:

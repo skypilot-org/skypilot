@@ -558,9 +558,9 @@ def detect_gpu_label_formatter(
     return label_formatter, node_labels
 
 
-class AutoscaleDetector:
-    """Base class to define a autoscale detector for a Kubernetes cluster.
-    An autoscale detector is a class that defines how to detect if a Kubernetes
+class Autoscaler:
+    """Base class to define a autoscaler for a Kubernetes cluster.
+    An autoscaler is a class that defines how to detect if a Kubernetes
     context can autoscale to meet the resource requirements of a task.
     """
 
@@ -589,8 +589,8 @@ class AutoscaleDetector:
         return True
 
 
-class GKEAutoscaleDetector(AutoscaleDetector):
-    """GKE autoscale detector
+class GKEAutoscaler(Autoscaler):
+    """GKE autoscaler
     """
 
     @classmethod
@@ -680,16 +680,14 @@ class GKEAutoscaleDetector(AutoscaleDetector):
         return True
 
 
-# Mapping of autoscaler type to autoscaler detector
-AUTOSCALER_TO_AUTOSCALE_DETECTOR = {
-    kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaleDetector,
+# Mapping of autoscaler type to autoscaler
+AUTOSCALER_TYPE_TO_AUTOSCALER = {
+    kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
 }
 
 
-def get_autoscaler_detector(
-        autoscaler_type: kubernetes_enums.KubernetesAutoscalerType):
-    return AUTOSCALER_TO_AUTOSCALE_DETECTOR.get(autoscaler_type,
-                                                AutoscaleDetector)
+def get_autoscaler(autoscaler_type: kubernetes_enums.KubernetesAutoscalerType):
+    return AUTOSCALER_TYPE_TO_AUTOSCALER.get(autoscaler_type, Autoscaler)
 
 
 @annotations.lru_cache(scope='request', maxsize=10)
