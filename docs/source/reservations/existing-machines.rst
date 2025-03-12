@@ -125,7 +125,7 @@ Deploying SkyPilot
 
    .. tip::
 
-     You can also use ``kubectl`` to interact and perform administrative operations on the cluster.
+      To enable shared access to a Kubernetes cluster, you can deploy a :ref:`SkyPilot API server <sky-api-server>`.
 
 What happens behind the scenes?
 -------------------------------
@@ -196,3 +196,4 @@ You can view the available clusters and GPUs using:
 
     # List GPUs on cluster2
     sky show-gpus --cloud k8s --region cluster2
+

@@ -19,6 +19,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/smoke_tests/test_basic.py --generic-cloud aws
 
+import os
 import pathlib
 import subprocess
 import tempfile
@@ -31,6 +32,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.skylet import constants
 from sky.skylet import events
+import sky.skypilot_config
 from sky.utils import common_utils
 
 
@@ -51,12 +53,12 @@ def test_minimal(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --cpus 2+ tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -99,7 +101,7 @@ def test_launch_fast(generic_cloud: str):
         'test_launch_fast',
         [
             # First launch to create the cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Second launch to test fast launch - should not reprovision
@@ -135,7 +137,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -169,7 +171,7 @@ def test_stale_job(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'stale_job',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} "echo hi"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -196,7 +198,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
+            f'sky launch -y -c {name} --cloud aws --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -243,7 +245,7 @@ def test_gcp_stale_job_manual_restart():
         'gcp_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} --cloud gcp --zone {zone} "echo hi"',
+            f'sky launch -y -c {name} --cloud gcp --zone {zone} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=stop_cmd),
@@ -273,7 +275,7 @@ def test_env_check(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'env_check',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/env_check.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             # Test with only setup.
             f'sky launch -y -c {name} tests/test_yamls/test_only_setup.yaml',
@@ -297,7 +299,7 @@ def test_cli_logs(generic_cloud: str):
         num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
-        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
+        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
         f'sky exec {name} "echo {timestamp} 2"',
         f'sky exec {name} "echo {timestamp} 3"',
         f'sky exec {name} "echo {timestamp} 4"',
@@ -339,7 +341,8 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     task = sky.Task(run="whoami")
-    task.set_resources(sky.Resources(cloud=cloud))
+    task.set_resources(
+        sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
     try:
         job_id, handle = sky.get(sky.launch(task, cluster_name=name))
         assert job_id == 1
@@ -367,7 +370,8 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     try:
-        task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
+        task = sky.Task(run="whoami").set_resources(
+            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
         sky.launch(task,
                    cluster_name=name,
                    idle_minutes_to_autostop=1,
@@ -387,21 +391,25 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 def test_jobs_launch_and_logs(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    task = sky.Task(run="echo start job; sleep 30; echo end job")
-    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
-    task.set_resources(sky.Resources(cloud=cloud))
-    job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
-    assert handle is not None
-    try:
-        with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
-            sky.jobs.tail_logs(job_id=job_id, output_stream=f)
-            f.seek(0)
-            content = f.read()
-            assert content.count('start job') == 1
-            assert content.count('end job') == 1
-    finally:
-        sky.jobs.cancel(job_ids=[job_id])
+    # Use the context manager
+    with sky.skypilot_config.override_skypilot_config(
+            smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+        name = smoke_tests_utils.get_cluster_name()
+        task = sky.Task(run="echo start job; sleep 30; echo end job")
+        cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
+        task.set_resources(
+            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
+        assert handle is not None
+        try:
+            with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
+                sky.jobs.tail_logs(job_id=job_id, output_stream=f)
+                f.seek(0)
+                content = f.read()
+                assert content.count('start job') == 1
+                assert content.count('end job') == 1
+        finally:
+            sky.jobs.cancel(job_ids=[job_id])
 
 
 # ---------- Testing YAML Specs ----------
@@ -569,8 +577,56 @@ def test_sky_bench(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+@pytest.fixture(scope='session')
+def unreachable_context():
+    """Setup the kubernetes context for the test.
+
+    This fixture will copy the kubeconfig file and inject an unreachable context
+    to it. So this must be session scoped that the kubeconfig is modified before
+    the local API server starts.
+    """
+    # Get kubeconfig path from environment variable or use default
+    kubeconfig_path = os.environ.get('KUBECONFIG',
+                                     os.path.expanduser('~/.kube/config'))
+    if not os.path.exists(kubeconfig_path):
+        return
+    import shutil
+
+    # Create a temp kubeconfig
+    temp_kubeconfig = tempfile.NamedTemporaryFile(delete=False, suffix='.yaml')
+    shutil.copy(kubeconfig_path, temp_kubeconfig.name)
+    original_kubeconfig = os.environ.get('KUBECONFIG')
+    os.environ['KUBECONFIG'] = temp_kubeconfig.name
+
+    free_port = common_utils.find_free_port(30000)
+    unreachable_name = '_unreachable_context_'
+    subprocess.run(
+        'kubectl config set-cluster unreachable-cluster '
+        f'--server=https://127.0.0.1:{free_port} && '
+        'kubectl config set-credentials unreachable-user '
+        '--token="aQo=" && '
+        'kubectl config set-context ' + unreachable_name + ' '
+        '--cluster=unreachable-cluster --user=unreachable-user && '
+        # Restart the API server to pick up kubeconfig change
+        # TODO(aylei): There is a implicit API server restart before starting
+        # smoke tests in CI pipeline. We should move that to fixture to make
+        # the test coherent.
+        'sky api stop || true && sky api start',
+        shell=True,
+        check=True)
+
+    yield unreachable_name
+
+    # Clean up
+    if original_kubeconfig:
+        os.environ['KUBECONFIG'] = original_kubeconfig
+    else:
+        os.environ.pop('KUBECONFIG', None)
+    os.unlink(temp_kubeconfig.name)
+
+
 @pytest.mark.kubernetes
-def test_kubernetes_context_failover():
+def test_kubernetes_context_failover(unreachable_context):
     """Test if the kubernetes context failover works.
 
     This test requires two kubernetes clusters:
@@ -580,12 +636,8 @@ def test_kubernetes_context_failover():
       sky local up
       # Add mock label for accelerator
       kubectl label node --overwrite skypilot-control-plane skypilot.co/accelerator=h100 --context kind-skypilot
-      # Get the token for the cluster in context kind-skypilot
-      TOKEN=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.users[0].user.token}\')
-      # Get the API URL for the cluster in context kind-skypilot
-      API_URL=$(kubectl config view --minify --context kind-skypilot -o jsonpath=\'{.clusters[0].cluster.server}\')
-      # Add mock capacity for GPU
-      curl --header "Content-Type: application/json-patch+json" --header "Authorization: Bearer $TOKEN" --request PATCH --data \'[{"op": "add", "path": "/status/capacity/nvidia.com~1gpu", "value": "8"}]\' "$API_URL/api/v1/nodes/skypilot-control-plane/status"
+      # Patch accelerator capacity
+      kubectl patch node skypilot-control-plane --subresource=status -p '{"status": {"capacity": {"nvidia.com/gpu": "8"}}}' --context kind-skypilot
       # Add a new namespace to test the handling of namespaces
       kubectl create namespace test-namespace --context kind-skypilot
       # Set the namespace to test-namespace
@@ -594,12 +646,20 @@ def test_kubernetes_context_failover():
     # Get context that is not kind-skypilot
     contexts = subprocess.check_output('kubectl config get-contexts -o name',
                                        shell=True).decode('utf-8').split('\n')
-    context = [context for context in contexts if context != 'kind-skypilot'][0]
+    assert unreachable_context in contexts, (
+        'unreachable_context should be initialized in the fixture')
+    context = [
+        context for context in contexts
+        if (context != 'kind-skypilot' and context != unreachable_context)
+    ][0]
+    # Test unreachable context and non-existing context do not break failover
     config = textwrap.dedent(f"""\
     kubernetes:
       allowed_contexts:
-        - kind-skypilot
         - {context}
+        - {unreachable_context}
+        - _nonexist_
+        - kind-skypilot
     """)
     with tempfile.NamedTemporaryFile(delete=True) as f:
         f.write(config.encode('utf-8'))
@@ -648,8 +708,13 @@ def test_kubernetes_context_failover():
                 f'sky launch -c {name}-3 --gpus h100 echo hi',
                 f'sky logs {name}-3 --status',
                 f'sky status -r {name}-3 | grep UP',
+                # Test failure for launching on unreachable context
+                f'kubectl config use-context {unreachable_context}',
+                f'sky launch -y -c {name}-4 --gpus H100 --cpus 1 --cloud kubernetes --region {unreachable_context} echo hi && exit 1 || true',
+                # Test failover from unreachable context
+                f'sky launch -y -c {name}-5 --cpus 1 echo hi',
             ],
-            f'sky down -y {name}-1 {name}-3',
+            f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
                 'SKYPILOT_CONFIG': f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:

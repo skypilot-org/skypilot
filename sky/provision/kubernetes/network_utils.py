@@ -194,9 +194,10 @@ def create_or_replace_namespaced_service(
                                         _request_timeout=kubernetes.API_TIMEOUT)
 
 
-def delete_namespaced_service(namespace: str, service_name: str) -> None:
+def delete_namespaced_service(context: Optional[str], namespace: str,
+                              service_name: str) -> None:
     """Deletes a service resource."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
 
     try:
         core_api.delete_namespaced_service(

@@ -42,6 +42,33 @@ STORAGE_SETUP_COMMANDS = [
     'touch ~/.ssh/id_rsa.pub'
 ]
 
+LOW_RESOURCE_ARG = '--cpus 2+ --memory 4+'
+LOW_RESOURCE_PARAM = {
+    'cpus': '2+',
+    'memory': '4+',
+}
+LOW_CONTROLLER_RESOURCE_ENV = {
+    'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
+}
+LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
+    'jobs': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    },
+    'serve': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    }
+}
+
 # Get the job queue, and print it once on its own, then print it again to
 # use with grep by the caller.
 GET_JOB_QUEUE = 's=$(sky jobs queue); echo "$s"; echo "$s"'
@@ -85,6 +112,20 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
     'sleep 10; '
     'done')
+
+
+def get_cloud_specific_resource_config(generic_cloud: str):
+    # Kubernetes (EKS) requires more resources to avoid flakiness.
+    # Only some EKS tests use this function - specifically those that previously
+    # failed with low resources. Other EKS tests that work fine with low resources
+    # don't need to call this function.
+    if generic_cloud == 'kubernetes':
+        resource_arg = ""
+        env = None
+    else:
+        resource_arg = LOW_RESOURCE_ARG
+        env = LOW_CONTROLLER_RESOURCE_ENV
+    return resource_arg, env
 
 
 def get_cmd_wait_until_cluster_status_contains(
@@ -469,7 +510,9 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
     if sky.server.common.is_api_server_local():
         return 'true'
     else:
-        return (f'sky launch -y -c {cluster_name} --cloud {cloud} --async')
+        return (
+            f'sky launch -y -c {cluster_name} --cloud {cloud} {LOW_RESOURCE_ARG} --async'
+        )
 
 
 def run_cloud_cmd_on_cluster(test_cluster_name: str,

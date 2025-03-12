@@ -14,6 +14,4 @@ Training
    Ray <ray.md>
    Training on TPUs <tpu.md>
    Unsloth <unsloth.md>
-
-
-.. Hugging Face <https://github.com/skypilot-org/skypilot/blob/master/examples/huggingface_glue_imdb_app.yaml>
+   Vertex AI <https://medium.com/google-cloud/streamline-ai-ml-model-development-on-gke-with-skypilot-and-vertex-ai-workbench-453729a8897c>
