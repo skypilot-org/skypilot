@@ -234,10 +234,11 @@ class Kubernetes(clouds.Cloud):
         autoscaler_type = kubernetes_utils.get_autoscaler_type()
         if (autoscaler_type in kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR.keys() or
         autoscaler_type is None) and instance_type is not None:
-            # If autoscaler is not set, check if the instance type fits in the
-            # cluster. Else, rely on the autoscaler to provision the right
-            # instance type without running checks. Worst case, if autoscaling
-            # fails, the pod will be stuck in pending state until
+            # If autoscaler is not set, or we have a way to interface with the autoscaler
+            # to determine if the instance type fits in the cluster, check if the 
+            # instance type fits in the cluster. Else, rely on the autoscaler to 
+            # provision the right instance type without running checks. Worst case, 
+            # if autoscaling fails, the pod will be stuck in pending state until
             # provision_timeout, after which failover will be triggered.
             for r in regions:
                 context = r.name
