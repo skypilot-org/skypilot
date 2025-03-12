@@ -247,6 +247,28 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
+_WAIT_UNTIL_JOB_STATUS_SUCCEEDED = (
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for job to succeed"; exit 1; '
+    'fi; '
+    'if sky logs {cluster_name} {job_id} --status | grep "SUCCEEDED"; then '
+    '  echo "Job {job_id} succeeded."; break; '
+    'fi; '
+    'echo "Waiting for job {job_id} to succeed..."; '
+    'sleep 10; '
+    'done')
+
+
+def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
+                                            job_id: str,
+                                            timeout: int = 30):
+    return _WAIT_UNTIL_JOB_STATUS_SUCCEEDED.format(cluster_name=cluster_name,
+                                                   job_id=job_id,
+                                                   timeout=timeout)
+
+
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
