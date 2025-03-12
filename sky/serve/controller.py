@@ -67,10 +67,17 @@ class SkyServeController:
         - Providing the HTTP Server API for SkyServe to communicate with.
     """
 
+    def _get_latest_service_spec(self) -> serve.SkyServiceSpec:
+        version = self._replica_manager.latest_version
+        assert isinstance(self._replica_manager,
+                          replica_managers.SkyPilotReplicaManager)
+        return self._replica_manager.get_version_spec(version)
+
     def _terminate_all_lb_replicas(self) -> None:
+        ss = self._get_latest_service_spec()
         lb_svc_name = serve_utils.format_lb_service_name(self._service_name)
         lb_replicas = serve_state.get_replica_infos(lb_svc_name)
-        hosted_zone = self._service_spec.route53_hosted_zone
+        hosted_zone = ss.route53_hosted_zone
         change_batch = []
         for info in lb_replicas:
             cn = info.cluster_name
@@ -88,40 +95,43 @@ class SkyServeController:
                                                        self._service_name,
                                                        hosted_zone, 'A',
                                                        lb_region, lb_ip))
-            self._replica_manager.scale_down(info.replica_id,
-                                             purge=True,
-                                             drain_seconds=0)
+            assert self._lb_replica_manager is not None
+            self._lb_replica_manager.scale_down(info.replica_id,
+                                                purge=True,
+                                                drain_seconds=0)
         serve_utils.apply_change_batch(change_batch, self._service_name,
-                                       self._service_spec.target_hosted_zone_id,
-                                       logger)
+                                       ss.target_hosted_zone_id, logger)
 
     def _launch_lb_replicas(self) -> None:
-        if self._service_spec.external_load_balancers is None:
+        ss = self._get_latest_service_spec()
+        if ss.external_load_balancers is None:
             return
-        for lb_config in self._service_spec.external_load_balancers:
+        rids = []
+        for lb_config in ss.external_load_balancers:
             j2_vars = _get_lb_j2_vars(
                 self._controller_addr,
                 constants.EXTERNAL_LB_PORT,
                 lb_config['resources']['region'],
                 lb_config['load_balancing_policy'],
-                self._service_spec.load_balancing_policy,
+                ss.load_balancing_policy,
                 # TODO(tian): Constant for default.
-                self._service_spec.max_concurrent_requests or 10,
-                self._service_spec.max_queue_size or 10000)
+                ss.max_concurrent_requests or 10,
+                ss.max_queue_size or 10000)
             rc = copy.deepcopy(lb_config['resources'])
             if 'cloud' in rc:
                 rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])
             assert self._lb_replica_manager is not None
-            self._lb_replica_manager.scale_up(rc, j2_vars)
+            rid = self._lb_replica_manager.scale_up(rc, j2_vars)
+            rids.append(rid)
         p = multiprocessing.Process(
             target=serve_utils.wait_external_load_balancers,
-            args=(self._service_name, self._service_spec, logger))
-        self._procs[len(self._procs)] = p
+            args=(self._service_name, ss, logger))
+        self._procs[str(rids)] = p
         p.start()
 
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
                  task_yaml: str, host: str, port: int) -> None:
-        self._procs: Dict[int, multiprocessing.Process] = {}
+        self._procs: Dict[str, multiprocessing.Process] = {}
         self._service_name = service_name
         self._service_spec = service_spec
         external_host = serve_utils.get_external_host()
@@ -205,6 +215,7 @@ class SkyServeController:
                         self._replica_manager.scale_down(scaling_option.target)
                 for k, p in list(self._procs.items()):
                     if not p.is_alive():
+                        logger.info(f'Wait LB Process {k} finished.')
                         del self._procs[k]
                         p.join()
             except Exception as e:  # pylint: disable=broad-except

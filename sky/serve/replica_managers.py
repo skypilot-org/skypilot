@@ -607,7 +607,7 @@ class ReplicaManager:
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None,
-                 j2_vars: Optional[Dict[str, Any]] = None) -> None:
+                 j2_vars: Optional[Dict[str, Any]] = None) -> int:
         """Scale up the service by 1 replica with resources_override.
         resources_override is of the same format with resources section
         in skypilot task yaml
@@ -707,9 +707,11 @@ class SkyPilotReplicaManager(ReplicaManager):
 
     def scale_up(self,
                  resources_override: Optional[Dict[str, Any]] = None,
-                 j2_vars: Optional[Dict[str, Any]] = None) -> None:
-        self._launch_replica(self._next_replica_id, resources_override, j2_vars)
+                 j2_vars: Optional[Dict[str, Any]] = None) -> int:
+        rid = self._next_replica_id
+        self._launch_replica(rid, resources_override, j2_vars)
         self._next_replica_id += 1
+        return rid
 
     def _terminate_replica(self,
                            replica_id: int,
@@ -1260,24 +1262,28 @@ class SkyPilotReplicaManager(ReplicaManager):
                     info.version = version
                     serve_state.add_or_update_replica(self._service_name,
                                                       info.replica_id, info)
+                else:
+                    logger.info(f'[!!] Replica {info.replica_id} has different '
+                                f'config {new_config} from latest version '
+                                f'{old_config} ({self.latest_version}).')
 
-    def _get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
+    def get_version_spec(self, version: int) -> 'service_spec.SkyServiceSpec':
         spec = serve_state.get_spec(self._service_name, version)
         if spec is None:
             raise ValueError(f'Version {version} not found.')
         return spec
 
     def _get_readiness_path(self, version: int) -> str:
-        return self._get_version_spec(version).readiness_path
+        return self.get_version_spec(version).readiness_path
 
     def _get_post_data(self, version: int) -> Optional[Dict[str, Any]]:
-        return self._get_version_spec(version).post_data
+        return self.get_version_spec(version).post_data
 
     def _get_readiness_headers(self, version: int) -> Optional[Dict[str, str]]:
-        return self._get_version_spec(version).readiness_headers
+        return self.get_version_spec(version).readiness_headers
 
     def _get_initial_delay_seconds(self, version: int) -> int:
-        return self._get_version_spec(version).initial_delay_seconds
+        return self.get_version_spec(version).initial_delay_seconds
 
     def _get_readiness_timeout_seconds(self, version: int) -> int:
-        return self._get_version_spec(version).readiness_timeout_seconds
+        return self.get_version_spec(version).readiness_timeout_seconds

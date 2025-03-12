@@ -506,6 +506,8 @@ def update(
                              f'Returncode: {returncode}') from e
 
     print(f'New version: {current_version}')
+    controller_name = common.SKY_SERVE_CONTROLLER_NAME
+    sky.core.start(controller_name)
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:

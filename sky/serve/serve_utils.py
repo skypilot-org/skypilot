@@ -472,6 +472,14 @@ def update_service_encoded(service_name: str, version: int, mode: str) -> str:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(f'Failed to update service: {resp.text}')
 
+    resp_reload_lb = requests.post(
+        _CONTROLLER_URL.format(CONTROLLER_PORT=controller_port) +
+        '/controller/reload_lb_replicas',
+        json={})
+    if resp_reload_lb.status_code != 200:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(f'Failed to reload LBs: {resp_reload_lb.text}')
+
     service_msg = resp.json()['message']
     return message_utils.encode_payload(service_msg)
 
