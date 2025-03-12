@@ -232,8 +232,8 @@ class Kubernetes(clouds.Cloud):
         if instance_type is None:
             return regions
 
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
         regions_to_return = []
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
         for r in regions:
             context = r.name
             try:
@@ -244,18 +244,20 @@ class Kubernetes(clouds.Cloud):
                 continue
             if fits:
                 regions_to_return.append(r)
+                continue
+            debug_msg = (f'Instance type {instance_type} does '
+                         'not fit in the Kubernetes cluster '
+                         'with context: '
+                         f'{context}. Reason: {reason}')
+            if autoscaler_type is None:
+                logger.debug(debug_msg)
+                continue
+            autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
+            if autoscaler.can_create_new_instance_of_type(
+                    context, instance_type):
+                regions_to_return.append(r)
             else:
-                if autoscaler_type is not None:
-                    autoscaler = kubernetes_utils. \
-                        get_autoscaler(autoscaler_type)
-                    if autoscaler.can_create_new_instance_of_type(
-                            context, instance_type):
-                        regions_to_return.append(r)
-                    else:
-                        logger.debug(f'Instance type {instance_type} does '
-                                     'not fit in the Kubernetes cluster '
-                                     'with context: '
-                                     f'{context}. Reason: {reason}')
+                logger.debug(debug_msg)
         return regions_to_return
 
     def instance_type_to_hourly_cost(self,
