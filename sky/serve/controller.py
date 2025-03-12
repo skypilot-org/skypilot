@@ -5,6 +5,7 @@ Responsible for autoscaling and replica management.
 import contextlib
 import copy
 import logging
+import multiprocessing
 import os
 import threading
 import time
@@ -16,6 +17,7 @@ import fastapi
 from fastapi import responses
 import uvicorn
 
+from sky import global_user_state
 from sky import serve
 from sky import sky_logging
 from sky.serve import autoscalers
@@ -65,9 +67,65 @@ class SkyServeController:
         - Providing the HTTP Server API for SkyServe to communicate with.
     """
 
+    def _terminate_all_lb_replicas(self) -> None:
+        lb_svc_name = serve_utils.format_lb_service_name(self._service_name)
+        lb_replicas = serve_state.get_replica_infos(lb_svc_name)
+        hosted_zone = self._service_spec.route53_hosted_zone
+        change_batch = []
+        for info in lb_replicas:
+            cn = info.cluster_name
+            lb_record = global_user_state.get_cluster_from_name(cn)
+            if lb_record is not None:
+                lb_region = lb_record['handle'].launched_resources.region
+                lb_ip = serve_utils.get_cluster_ip(cn)
+                if lb_ip is not None:
+                    # Hosted zone must be set for external LBs.
+                    # TODO(tian): Directly query all related records,
+                    # so we don't need the LB IP anymore.
+                    assert hosted_zone is not None
+                    change_batch.append(
+                        serve_utils.get_route53_change('DELETE',
+                                                       self._service_name,
+                                                       hosted_zone, 'A',
+                                                       lb_region, lb_ip))
+            self._replica_manager.scale_down(info.replica_id,
+                                             purge=True,
+                                             drain_seconds=0)
+        serve_utils.apply_change_batch(change_batch, self._service_name,
+                                       self._service_spec.target_hosted_zone_id,
+                                       logger)
+
+    def _launch_lb_replicas(self) -> None:
+        if self._service_spec.external_load_balancers is None:
+            return
+        for lb_config in self._service_spec.external_load_balancers:
+            j2_vars = _get_lb_j2_vars(
+                self._controller_addr,
+                constants.EXTERNAL_LB_PORT,
+                lb_config['resources']['region'],
+                lb_config['load_balancing_policy'],
+                self._service_spec.load_balancing_policy,
+                # TODO(tian): Constant for default.
+                self._service_spec.max_concurrent_requests or 10,
+                self._service_spec.max_queue_size or 10000)
+            rc = copy.deepcopy(lb_config['resources'])
+            if 'cloud' in rc:
+                rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])
+            assert self._lb_replica_manager is not None
+            self._lb_replica_manager.scale_up(rc, j2_vars)
+        p = multiprocessing.Process(
+            target=serve_utils.wait_external_load_balancers,
+            args=(self._service_name, self._service_spec, logger))
+        self._procs[len(self._procs)] = p
+        p.start()
+
     def __init__(self, service_name: str, service_spec: serve.SkyServiceSpec,
                  task_yaml: str, host: str, port: int) -> None:
+        self._procs: Dict[int, multiprocessing.Process] = {}
         self._service_name = service_name
+        self._service_spec = service_spec
+        external_host = serve_utils.get_external_host()
+        self._controller_addr = f'http://{external_host}:{port}'
         self._replica_manager: replica_managers.ReplicaManager = (
             replica_managers.SkyPilotReplicaManager(service_name=service_name,
                                                     spec=service_spec,
@@ -83,8 +141,6 @@ class SkyServeController:
             service_dir = os.path.expanduser(
                 serve_utils.generate_remote_service_dir_name(lb_svc_name))
             os.makedirs(service_dir, exist_ok=True)
-            external_host = serve_utils.get_external_host()
-            controller_addr = f'http://{external_host}:{port}'
             lb_service_spec = copy.deepcopy(service_spec)
             # NOTE(tian): Only readiness probe is used in replica manager. We
             # manually set it here. Please align with
@@ -102,20 +158,7 @@ class SkyServeController:
                 service_name=lb_svc_name,
                 spec=lb_service_spec,
                 task_yaml_path=constants.EXTERNAL_LB_TEMPLATE)
-            for lb_config in service_spec.external_load_balancers:
-                j2_vars = _get_lb_j2_vars(
-                    controller_addr,
-                    constants.EXTERNAL_LB_PORT,
-                    lb_config['resources']['region'],
-                    lb_config['load_balancing_policy'],
-                    service_spec.load_balancing_policy,
-                    # TODO(tian): Constant for default.
-                    service_spec.max_concurrent_requests or 10,
-                    service_spec.max_queue_size or 10000)
-                rc = copy.deepcopy(lb_config['resources'])
-                if 'cloud' in rc:
-                    rc['cloud'] = registry.CLOUD_REGISTRY.from_str(rc['cloud'])
-                self._lb_replica_manager.scale_up(rc, j2_vars)
+            self._launch_lb_replicas()
         self._autoscaler: autoscalers.Autoscaler = (
             autoscalers.Autoscaler.from_spec(service_name, service_spec))
         self._host = host
@@ -160,6 +203,10 @@ class SkyServeController:
                         assert isinstance(scaling_option.target,
                                           int), scaling_option
                         self._replica_manager.scale_down(scaling_option.target)
+                for k, p in list(self._procs.items()):
+                    if not p.is_alive():
+                        del self._procs[k]
+                        p.join()
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
                 # monitor running.
@@ -193,6 +240,34 @@ class SkyServeController:
                 },
                 status_code=200,
             )
+
+        @self._app.post('/controller/reload_lb_replicas')
+        async def reload_lb_replicas(
+                request: fastapi.Request) -> fastapi.Response:
+            del request
+            try:
+                lb_svc_name = serve_utils.format_lb_service_name(
+                    self._service_name)
+                self._terminate_all_lb_replicas()
+                # Wait for all replicas to goes to shutting down stage.
+                while True:
+                    lb_replicas = serve_state.get_replica_infos(lb_svc_name)
+                    lb_replicas = [
+                        info for info in lb_replicas if
+                        info.status != serve_state.ReplicaStatus.SHUTTING_DOWN
+                    ]
+                    if not lb_replicas:
+                        break
+                    time.sleep(1)
+                self._launch_lb_replicas()
+            except Exception as e:  # pylint: disable=broad-except
+                err = (f'Error in reload_lb_replicas: '
+                       f'{common_utils.format_exception(e)}')
+                logger.error(err)
+                return responses.JSONResponse(content={'message': err},
+                                              status_code=500)
+            return responses.JSONResponse(content={'message': 'Success'},
+                                          status_code=200)
 
         @self._app.post('/controller/update_service')
         async def update_service(request: fastapi.Request) -> fastapi.Response:

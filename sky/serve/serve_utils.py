@@ -3,6 +3,7 @@ import base64
 import collections
 import dataclasses
 import enum
+import logging
 import os
 import pathlib
 import pickle
@@ -12,6 +13,7 @@ import shutil
 import subprocess
 import threading
 import time
+import traceback
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
                     Optional, TextIO, Type, TypeVar, Union)
@@ -40,6 +42,7 @@ if typing.TYPE_CHECKING:
     import fastapi
 
     from sky.serve import replica_managers
+    from sky.serve import service_spec
 
 _SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
 NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
@@ -207,6 +210,111 @@ def get_external_host() -> str:
     # TODO(tian): Use a more robust way to get the host.
     return subprocess.check_output('curl -s https://checkip.amazonaws.com',
                                    shell=True).decode('utf-8').strip()
+
+
+def get_cluster_ip(cluster_name: str) -> Optional[str]:
+    record = global_user_state.get_cluster_from_name(cluster_name)
+    if record is None:
+        return None
+    if record['handle'].head_ip is None:
+        return None
+    return record['handle'].head_ip
+
+
+def get_domain_name(subdomain: str, hosted_zone: str) -> str:
+    return f'{subdomain}.{hosted_zone}'
+
+
+def get_route53_change(action: str, subdomain: str, hosted_zone: str,
+                       record_type: str, region: str,
+                       value: str) -> Dict[str, Any]:
+    return {
+        'Action': action,
+        'ResourceRecordSet': {
+            'Name': get_domain_name(subdomain, hosted_zone),
+            'Type': record_type,
+            'TTL': 300,
+            'Region': region,
+            'SetIdentifier': f'{subdomain}-{region}',
+            'ResourceRecords': [{
+                'Value': value
+            }]
+        }
+    }
+
+
+# TODO(tian): Fix this logger hack.
+def apply_change_batch(change_batch: List[Dict[str, Any]], service_name: str,
+                       target_hosted_zone_id: Optional[str],
+                       logger: logging.Logger) -> None:
+    if not change_batch:
+        return
+    assert target_hosted_zone_id is not None
+    # TODO(tian): Fix this import hack.
+    import boto3  # pylint: disable=import-outside-toplevel
+    client = boto3.client('route53')
+    logger.info(f'Deleting Route53 records for {service_name}. '
+                f'Change batch: {change_batch}')
+    try:
+        client.change_resource_record_sets(
+            HostedZoneId=target_hosted_zone_id,
+            ChangeBatch={'Changes': change_batch})
+    except Exception as e:  # pylint: disable=broad-except
+        logger.error(f'Failed to delete Route53 records for {service_name}:'
+                     f' {common_utils.format_exception(e)}')
+        with ux_utils.enable_traceback():
+            logger.error(f'  Traceback: {traceback.format_exc()}')
+
+
+def wait_external_load_balancers(service_name: str,
+                                 service_spec: 'service_spec.SkyServiceSpec',
+                                 logger: logging.Logger) -> None:
+    # Wait for the LBs is ready, get the IPs and setup Route53.
+    external_lbs = service_spec.external_load_balancers
+    hosted_zone = service_spec.route53_hosted_zone
+    assert hosted_zone is not None
+    assert external_lbs is not None
+    lb_replicas = []
+    lb_svc_name = format_lb_service_name(service_name)
+    while True:
+        # TODO(tian): Hack. Keep it align with
+        # sky/serve/controller.py::SkyServeController::__init__.
+        lb_replicas = serve_state.get_replica_infos(lb_svc_name)
+        # Filter those shutting down. This is possible when reloading LBs.
+        lb_replicas = [
+            info for info in lb_replicas
+            if info.status != serve_state.ReplicaStatus.SHUTTING_DOWN
+        ]
+        if len(lb_replicas) == len(external_lbs):
+            if all(
+                    get_cluster_ip(lb_info.cluster_name) is not None
+                    for lb_info in lb_replicas):
+                break
+        logger.info('Waiting for the LBs to be ready: '
+                    f'{len(lb_replicas)}/{len(external_lbs)}.')
+        time.sleep(1)
+    # TODO(tian): Fix this import hack.
+    import boto3  # pylint: disable=import-outside-toplevel
+    client = boto3.client('route53')
+    change_batch = []
+    for lb_info in lb_replicas:
+        lb_ip = get_cluster_ip(lb_info.cluster_name)
+        assert lb_ip is not None
+        lb_record = global_user_state.get_cluster_from_name(
+            lb_info.cluster_name)
+        assert lb_record is not None
+        lb_region = lb_record['handle'].launched_resources.region
+        assert lb_region is not None
+        logger.info(f'Setting up Route53 for {lb_info.cluster_name} '
+                    f'in {lb_region}...')
+        change_batch.append(
+            get_route53_change('CREATE', service_name, hosted_zone, 'A',
+                               lb_region, lb_ip))
+    client.change_resource_record_sets(
+        HostedZoneId=service_spec.target_hosted_zone_id,
+        ChangeBatch={'Changes': change_batch})
+    serve_state.set_service_dns_endpoint(
+        service_name, get_domain_name(service_name, hosted_zone))
 
 
 def generate_service_name():

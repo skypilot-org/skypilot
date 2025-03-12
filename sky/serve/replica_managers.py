@@ -606,14 +606,18 @@ class ReplicaManager:
         self.least_recent_version: int = serve_constants.INITIAL_VERSION
 
     def scale_up(self,
-                 resources_override: Optional[Dict[str, Any]] = None) -> None:
+                 resources_override: Optional[Dict[str, Any]] = None,
+                 j2_vars: Optional[Dict[str, Any]] = None) -> None:
         """Scale up the service by 1 replica with resources_override.
         resources_override is of the same format with resources section
         in skypilot task yaml
         """
         raise NotImplementedError
 
-    def scale_down(self, replica_id: int, purge: bool = False) -> None:
+    def scale_down(self,
+                   replica_id: int,
+                   purge: bool = False,
+                   drain_seconds: Optional[int] = None) -> None:
         """Scale down replica with replica_id."""
         raise NotImplementedError
 
@@ -802,13 +806,17 @@ class SkyPilotReplicaManager(ReplicaManager):
         p.start()
         self._down_process_pool[replica_id] = p
 
-    def scale_down(self, replica_id: int, purge: bool = False) -> None:
-        self._terminate_replica(
-            replica_id,
-            sync_down_logs=False,
-            replica_drain_delay_seconds=_DEFAULT_DRAIN_SECONDS,
-            is_scale_down=True,
-            purge=purge)
+    def scale_down(self,
+                   replica_id: int,
+                   purge: bool = False,
+                   drain_seconds: Optional[int] = None) -> None:
+        if drain_seconds is None:
+            drain_seconds = _DEFAULT_DRAIN_SECONDS
+        self._terminate_replica(replica_id,
+                                sync_down_logs=False,
+                                replica_drain_delay_seconds=drain_seconds,
+                                is_scale_down=True,
+                                purge=purge)
 
     def _handle_preemption(self, info: ReplicaInfo) -> bool:
         """Handle preemption of the replica if any error happened.

@@ -10,7 +10,7 @@ import shutil
 import time
 import traceback
 import typing
-from typing import Any, Dict, Optional
+from typing import Dict
 
 import filelock
 
@@ -94,37 +94,6 @@ def cleanup_storage(task_yaml: str) -> bool:
     return True
 
 
-def _get_cluster_ip(cluster_name: str) -> Optional[str]:
-    record = global_user_state.get_cluster_from_name(cluster_name)
-    if record is None:
-        return None
-    if record['handle'].head_ip is None:
-        return None
-    return record['handle'].head_ip
-
-
-def _get_domain_name(subdomain: str, hosted_zone: str) -> str:
-    return f'{subdomain}.{hosted_zone}'
-
-
-def _get_route53_change(action: str, subdomain: str, hosted_zone: str,
-                        record_type: str, region: str,
-                        value: str) -> Dict[str, Any]:
-    return {
-        'Action': action,
-        'ResourceRecordSet': {
-            'Name': _get_domain_name(subdomain, hosted_zone),
-            'Type': record_type,
-            'TTL': 300,
-            'Region': region,
-            'SetIdentifier': f'{subdomain}-{region}',
-            'ResourceRecords': [{
-                'Value': value
-            }]
-        }
-    }
-
-
 def _cleanup(service_name: str,
              service_spec: 'service_spec.SkyServiceSpec') -> bool:
     """Clean up all service related resources, i.e. replicas and storage."""
@@ -144,16 +113,16 @@ def _cleanup(service_name: str,
                 lb_record = global_user_state.get_cluster_from_name(cn)
                 if lb_record is not None:
                     lb_region = lb_record['handle'].launched_resources.region
-                    lb_ip = _get_cluster_ip(cn)
+                    lb_ip = serve_utils.get_cluster_ip(cn)
                     if lb_ip is not None:
                         # Hosted zone must be set for external LBs.
                         # TODO(tian): Directly query all related records,
                         # so we don't need the LB IP anymore.
                         assert hosted_zone is not None
                         change_batch.append(
-                            _get_route53_change('DELETE', service_name,
-                                                hosted_zone, 'A', lb_region,
-                                                lb_ip))
+                            serve_utils.get_route53_change(
+                                'DELETE', service_name, hosted_zone, 'A',
+                                lb_region, lb_ip))
                 # If lb_record is None or the ip is None, that means the LB does
                 # not have an IP address yet, which means the record is not
                 # added to Route53 yet. Hence we skip the cleanup for it.
@@ -171,21 +140,8 @@ def _cleanup(service_name: str,
             identity = 'external load balancer' if is_external_lb else 'replica'
             logger.info(f'Terminating {identity} {info.replica_id} ...')
 
-    if change_batch:
-        # TODO(tian): Fix this import hack.
-        import boto3  # pylint: disable=import-outside-toplevel
-        client = boto3.client('route53')
-        logger.info(f'Deleting Route53 records for {service_name}. '
-                    f'Change batch: {change_batch}')
-        try:
-            client.change_resource_record_sets(
-                HostedZoneId=service_spec.target_hosted_zone_id,
-                ChangeBatch={'Changes': change_batch})
-        except Exception as e:  # pylint: disable=broad-except
-            logger.error(f'Failed to delete Route53 records for {service_name}:'
-                         f' {common_utils.format_exception(e)}')
-            with ux_utils.enable_traceback():
-                logger.error(f'  Traceback: {traceback.format_exc()}')
+    serve_utils.apply_change_batch(change_batch, service_name,
+                                   service_spec.target_hosted_zone_id, logger)
 
     for info, p in info2proc.items():
         p.join()
@@ -222,50 +178,6 @@ def _cleanup(service_name: str,
         failed = True
 
     return failed
-
-
-def _wait_external_load_balancers(
-        service_name: str, hosted_zone: str,
-        service_spec: 'service_spec.SkyServiceSpec') -> None:
-    # Wait for the LBs is ready, get the IPs and setup Route53.
-    external_lbs = service_spec.external_load_balancers
-    assert external_lbs is not None
-    lb_replicas = []
-    lb_svc_name = serve_utils.format_lb_service_name(service_name)
-    while True:
-        # TODO(tian): Hack. Keep it align with
-        # sky/serve/controller.py::SkyServeController::__init__.
-        lb_replicas = serve_state.get_replica_infos(lb_svc_name)
-        if len(lb_replicas) == len(external_lbs):
-            if all(
-                    _get_cluster_ip(lb_info.cluster_name) is not None
-                    for lb_info in lb_replicas):
-                break
-        logger.info('Waiting for the LBs to be ready: '
-                    f'{len(lb_replicas)}/{len(external_lbs)}.')
-        time.sleep(1)
-    # TODO(tian): Fix this import hack.
-    import boto3  # pylint: disable=import-outside-toplevel
-    client = boto3.client('route53')
-    change_batch = []
-    for lb_info in lb_replicas:
-        lb_ip = _get_cluster_ip(lb_info.cluster_name)
-        assert lb_ip is not None
-        lb_record = global_user_state.get_cluster_from_name(
-            lb_info.cluster_name)
-        assert lb_record is not None
-        lb_region = lb_record['handle'].launched_resources.region
-        assert lb_region is not None
-        logger.info(f'Setting up Route53 for {lb_info.cluster_name} '
-                    f'in {lb_region}...')
-        change_batch.append(
-            _get_route53_change('CREATE', service_name, hosted_zone, 'A',
-                                lb_region, lb_ip))
-    client.change_resource_record_sets(
-        HostedZoneId=service_spec.target_hosted_zone_id,
-        ChangeBatch={'Changes': change_batch})
-    serve_state.set_service_dns_endpoint(
-        service_name, _get_domain_name(service_name, hosted_zone))
 
 
 def _start(service_name: str, tmp_task_yaml: str, job_id: int):
@@ -387,17 +299,19 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 serve_state.set_service_load_balancer_port(
                     service_name, load_balancer_port)
             elif service_spec.route53_hosted_zone is not None:
-                # Generate load balancer log file name.
-                load_balancer_log_file = os.path.expanduser(
-                    serve_utils.generate_remote_load_balancer_log_file_name(
-                        service_name))
-                load_balancer_process = multiprocessing.Process(
-                    target=ux_utils.RedirectOutputForProcess(
-                        _wait_external_load_balancers,
-                        load_balancer_log_file).run,
-                    args=(service_name, service_spec.route53_hosted_zone,
-                          service_spec))
-                load_balancer_process.start()
+                # # Generate load balancer log file name.
+                # load_balancer_log_file = os.path.expanduser(
+                #     serve_utils.generate_remote_load_balancer_log_file_name(
+                #         service_name))
+                # NOTE(tian): Running this in sky/serve/controller.py,
+                # SkyServeController::_launch_lb_replicas now.
+                # load_balancer_process = multiprocessing.Process(
+                #     target=ux_utils.RedirectOutputForProcess(
+                #         serve_utils.wait_external_load_balancers,
+                #         load_balancer_log_file).run,
+                #     args=(service_name,
+                #           service_spec, logger))
+                # load_balancer_process.start()
                 serve_state.set_service_load_balancer_port(
                     service_name, constants.EXTERNAL_LB_PORT)
             if load_balancer_process is not None:
