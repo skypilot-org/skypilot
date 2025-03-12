@@ -153,7 +153,7 @@ To clean up all state created by SkyPilot on your machines, use the ``--cleanup`
 This will stop all Kubernetes services on the remote machines.
 
 
-Setting up Multiple Clusters
+Setting up multiple clusters
 ----------------------------
 
 You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster:
@@ -196,4 +196,3 @@ You can view the available clusters and GPUs using:
 
     # List GPUs on cluster2
     sky show-gpus --cloud k8s --region cluster2
-
