@@ -1,0 +1,24 @@
+resources:
+  accelerators:  {L4:1, L4:4, A100:1, A100-80GB:1}
+  ports:
+    - 8000
+  disk_tier: best
+  use_spot: true
+
+envs: 
+  HF_TOKEN:
+  MODEL_NAME: google/gemma-3-4b-it
+  MAX_MODEL_LEN: 4096
+
+setup: |
+  uv pip install git+https://github.com/huggingface/transformers.git
+  uv pip install vllm --extra-index-url https://wheels.vllm.ai/nightly
+
+
+run: |
+  echo 'Starting vllm openai api server...'
+  python -m vllm.entrypoints.openai.api_server \
+    --host 0.0.0.0 \
+    --tensor-parallel-size $SKYPILOT_NUM_GPUS_PER_NODE \
+    --model $MODEL_NAME \
+    --max-model-len $MAX_MODEL_LEN
