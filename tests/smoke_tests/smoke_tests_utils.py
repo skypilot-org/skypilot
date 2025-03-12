@@ -1,10 +1,11 @@
 import enum
 import inspect
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set
 import uuid
 
 import colorama
@@ -14,13 +15,14 @@ import sky
 from sky import serve
 from sky.clouds import AWS
 from sky.clouds import GCP
+from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 
 # To avoid the second smoke test reusing the cluster launched in the first
 # smoke test. Also required for test_managed_jobs_recovery to make sure the
 # manual termination with aws ec2 does not accidentally terminate other clusters
-# for for the different managed jobs launch with the same job name but a
+# for the different managed jobs launch with the same job name but a
 # different job id.
 test_id = str(uuid.uuid4())[-2:]
 
@@ -37,6 +39,33 @@ STORAGE_SETUP_COMMANDS = [
     '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
 ]
+
+LOW_RESOURCE_ARG = '--cpus 2+ --memory 4+'
+LOW_RESOURCE_PARAM = {
+    'cpus': '2+',
+    'memory': '4+',
+}
+LOW_CONTROLLER_RESOURCE_ENV = {
+    'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
+}
+LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
+    'jobs': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    },
+    'serve': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    }
+}
 
 # Get the job queue, and print it once on its own, then print it again to
 # use with grep by the caller.
@@ -83,6 +112,20 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'done')
 
 
+def get_cloud_specific_resource_config(generic_cloud: str):
+    # Kubernetes (EKS) requires more resources to avoid flakiness.
+    # Only some EKS tests use this function - specifically those that previously
+    # failed with low resources. Other EKS tests that work fine with low resources
+    # don't need to call this function.
+    if generic_cloud == 'kubernetes':
+        resource_arg = ""
+        env = None
+    else:
+        resource_arg = LOW_RESOURCE_ARG
+        env = LOW_CONTROLLER_RESOURCE_ENV
+    return resource_arg, env
+
+
 def get_cmd_wait_until_cluster_status_contains(
         cluster_name: str, cluster_status: List[sky.ClusterStatus],
         timeout: int):
@@ -113,7 +156,7 @@ _WAIT_UNTIL_CLUSTER_IS_NOT_FOUND = (
     'if (( $SECONDS - $start_time > {timeout} )); then '
     '  echo "Timeout after {timeout} seconds waiting for cluster to be removed"; exit 1; '
     'fi; '
-    'if sky status -r {cluster_name}; sky status {cluster_name} | grep "{cluster_name} not found"; then '
+    'if sky status -r {cluster_name}; sky status {cluster_name} | grep "\'{cluster_name}\' not found"; then '
     '  echo "Cluster {cluster_name} successfully removed."; break; '
     'fi; '
     'echo "Waiting for cluster {cluster_name} to be removed..."; '
@@ -202,6 +245,28 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         job_name=job_name,
         job_status=_statuses_to_str(job_status),
         timeout=timeout)
+
+
+_WAIT_UNTIL_JOB_STATUS_SUCCEEDED = (
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for job to succeed"; exit 1; '
+    'fi; '
+    'if sky logs {cluster_name} {job_id} --status | grep "SUCCEEDED"; then '
+    '  echo "Job {job_id} succeeded."; break; '
+    'fi; '
+    'echo "Waiting for job {job_id} to succeed..."; '
+    'sleep 10; '
+    'done')
+
+
+def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
+                                            job_id: str,
+                                            timeout: int = 30):
+    return _WAIT_UNTIL_JOB_STATUS_SUCCEEDED.format(cluster_name=cluster_name,
+                                                   job_id=job_id,
+                                                   timeout=timeout)
 
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
@@ -397,12 +462,11 @@ VALIDATE_LAUNCH_OUTPUT = (
     # ⚙️ Launching on Kubernetes.
     #   Pod is up.
     # ✓ Cluster launched: test. View logs at: ~/sky_logs/sky-2024-10-07-19-44-18-177288/provision.log
-    # ⚙️ Running setup on 1 pod.
-    # running setup
-    # ✓ Setup completed.
+    # ✓ Setup Detached.
     # ⚙️ Job submitted, ID: 1.
     # ├── Waiting for task resources on 1 node.
     # └── Job started. Streaming logs... (Ctrl-C to exit log streaming; job will not be killed)
+    # (setup pid=1277) running setup
     # (min, pid=1277) # conda environments:
     # (min, pid=1277) #
     # (min, pid=1277) base                  *  /opt/conda
@@ -423,17 +487,80 @@ VALIDATE_LAUNCH_OUTPUT = (
     # └── To teardown the cluster:    sky down test
     'echo "$s" && echo "==Validating launching==" && '
     'echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
-    'echo "==Validating setup output==" && '
-    'echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+    'echo "$s" && echo "==Validating setup output==" && '
+    'echo "$s" | grep -A 1 "Setup detached" | grep "Job submitted" && '
     'echo "==Validating running output hints==" && echo "$s" | '
     'grep -A 1 "Job submitted, ID:" | '
     'grep "Waiting for task resources on " && '
-    'echo "==Validating task output starting==" && echo "$s" | '
-    'grep -A 1 "Job started. Streaming logs..." | grep "(min, pid=" && '
+    'echo "==Validating task setup/run output starting==" && echo "$s" | '
+    'grep -A 1 "Job started. Streaming logs..." | grep "(setup" | '
+    'grep "running setup" && '
+    'echo "$s" | grep -A 1 "(setup" | grep "(min, pid=" && '
     'echo "==Validating task output ending==" && '
     'echo "$s" | grep -A 1 "task run finish" | '
     'grep "Job finished (status: SUCCEEDED)" && '
     'echo "==Validating task output ending 2==" && '
     'echo "$s" | grep -A 5 "Job finished (status: SUCCEEDED)" | '
     'grep "Job ID:" && '
-    'echo "$s" | grep -A 1 "Job ID:" | grep "Useful Commands"')
+    'echo "$s" | grep -A 1 "Useful Commands" | grep "Job ID:"')
+
+_CLOUD_CMD_CLUSTER_NAME_SUFFIX = '-cloud-cmd'
+
+
+# === Helper functions for executing cloud commands ===
+# When the API server is remote, we should make sure that the tests can run
+# without cloud credentials or cloud dependencies locally. To do this, we run
+# the cloud commands required in tests on a separate remote cluster with the
+# cloud credentials and dependencies setup.
+# Example usage:
+# Test(
+#     'mytest',
+#     [
+#         launch_cluster_for_cloud_cmd('aws', 'mytest-cluster'),
+#         # ... commands for the test ...
+#         # Run the cloud commands on the remote cluster.
+#         run_cloud_cmd_on_cluster('mytest-cluster', 'aws ec2 describe-instances'),
+#         # ... commands for the test ...
+#     ],
+#     f'sky down -y mytest-cluster && {down_cluster_for_cloud_cmd('mytest-cluster')}',
+# )
+def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
+    """Launch the cluster for cloud commands asynchronously."""
+    cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
+    if sky.server.common.is_api_server_local():
+        return 'true'
+    else:
+        return (
+            f'sky launch -y -c {cluster_name} --cloud {cloud} {LOW_RESOURCE_ARG} --async'
+        )
+
+
+def run_cloud_cmd_on_cluster(test_cluster_name: str,
+                             cmd: str,
+                             envs: Set[str] = None) -> str:
+    """Run the cloud command on the remote cluster for cloud commands."""
+    cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
+    if sky.server.common.is_api_server_local():
+        return cmd
+    else:
+        cmd = f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && {cmd}'
+        wait_for_cluster_up = get_cmd_wait_until_cluster_status_contains(
+            cluster_name=cluster_name,
+            cluster_status=[sky.ClusterStatus.UP],
+            timeout=180,
+        )
+        envs_str = ''
+        if envs is not None:
+            envs_str = ' '.join([f'--env {env}' for env in envs])
+        return (f'{wait_for_cluster_up}; '
+                f'sky exec {envs_str} {cluster_name} {shlex.quote(cmd)} && '
+                f'sky logs {cluster_name} --status')
+
+
+def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
+    """Down the cluster for cloud commands."""
+    cluster_name = test_cluster_name + _CLOUD_CMD_CLUSTER_NAME_SUFFIX
+    if sky.server.common.is_api_server_local():
+        return 'true'
+    else:
+        return f'sky down -y {cluster_name}'

@@ -9,7 +9,7 @@ import psutil
 from sky import sky_logging
 from sky.skylet import configs
 from sky.skylet import constants
-from sky.utils import common_utils
+from sky.utils import message_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -85,7 +85,7 @@ def get_is_autostopping() -> bool:
 def get_is_autostopping_payload() -> str:
     """Payload for whether the cluster is in the process of autostopping."""
     is_autostopping = get_is_autostopping()
-    return common_utils.encode_payload(is_autostopping)
+    return message_utils.encode_payload(is_autostopping)
 
 
 def get_last_active_time() -> float:

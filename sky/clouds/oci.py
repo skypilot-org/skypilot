@@ -9,7 +9,7 @@ History:
    file path resolution (by os.path.expanduser) when construct the file
    mounts. This bug will cause the created workder nodes located in different
    compartment and VCN than the header node if user specifies compartment_id
-   in the sky config file, because the ~/.sky/config is not sync-ed to the
+   in the sky config file, because the ~/.sky/config.yaml is not sync-ed to the
    remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
@@ -27,13 +27,14 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
-from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
 

@@ -1,12 +1,12 @@
 """Kubernetes adaptors"""
-import functools
 import logging
 import os
 from typing import Any, Callable, Optional, Set
 
 from sky.adaptors import common
 from sky.sky_logging import set_logging_level
-from sky.utils import env_options
+from sky.utils import annotations
+from sky.utils import common_utils
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Kubernetes. '
@@ -69,22 +69,20 @@ def _load_config(context: Optional[str] = None):
         try:
             kubernetes.config.load_kube_config(context=context)
         except kubernetes.config.config_exception.ConfigException as e:
-            suffix = ''
-            if env_options.Options.SHOW_DEBUG_INFO.get():
-                suffix += f' Error: {str(e)}'
+            suffix = common_utils.format_exception(e, use_bracket=True)
             # Check if exception was due to no current-context
             if 'Expected key current-context' in str(e):
                 err_str = (
                     f'Failed to load Kubernetes configuration for {context!r}. '
                     'Kubeconfig does not contain any valid context(s).'
-                    f'{suffix}\n'
+                    f'\n{suffix}\n'
                     '    If you were running a local Kubernetes '
                     'cluster, run `sky local up` to start the cluster.')
             else:
                 err_str = (
                     f'Failed to load Kubernetes configuration for {context!r}. '
                     'Please check if your kubeconfig file exists at '
-                    f'~/.kube/config and is valid.{suffix}')
+                    f'~/.kube/config and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
@@ -106,49 +104,49 @@ def _load_config(context: Optional[str] = None):
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def core_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CoreV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def auth_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.RbacAuthorizationV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def networking_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NetworkingV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def custom_objects_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.CustomObjectsApi()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def node_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.NodeV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)
-@functools.lru_cache()
+@annotations.lru_cache(scope='request')
 def api_client(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.ApiClient()

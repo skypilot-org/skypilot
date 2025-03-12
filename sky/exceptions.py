@@ -1,13 +1,18 @@
 """Exceptions."""
+import builtins
 import enum
+import traceback
+import types
 import typing
-from typing import List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
-    from sky import status_lib
+    from sky import jobs as managed_jobs
     from sky.backends import backend
+    from sky.skylet import job_lib
+    from sky.utils import status_lib
 
 # Return code for keyboard interruption and SIGTSTP
 KEYBOARD_INTERRUPT_CODE = 130
@@ -19,6 +24,117 @@ MOUNT_PATH_NON_EMPTY_CODE = 42
 INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
+# Architecture, such as arm64, not supported by the dependency
+ARCH_NOT_SUPPORTED_EXIT_CODE = 133
+
+
+def is_safe_exception(exc: BaseException) -> bool:
+    """Returns True if the exception is safe to send to clients.
+
+    Safe exceptions are:
+    1. Built-in exceptions
+    2. SkyPilot's own exceptions
+
+    Args:
+        exc: The exception to check, accept BaseException to handle SystemExit
+            and KeyboardInterrupt.
+
+    Returns:
+        True if the exception is safe to send to clients, False otherwise.
+    """
+    module = type(exc).__module__
+
+    # Builtin exceptions (e.g., ValueError, RuntimeError)
+    if module == 'builtins':
+        return True
+
+    # SkyPilot exceptions
+    if module.startswith('sky.'):
+        return True
+
+    return False
+
+
+def wrap_exception(exc: BaseException) -> BaseException:
+    """Wraps non-safe exceptions into SkyPilot exceptions
+
+    This is used to wrap exceptions that are not safe to deserialize at clients.
+
+    Examples include exceptions from cloud providers whose packages are not
+    available at clients.
+    """
+    if is_safe_exception(exc):
+        return exc
+
+    return CloudError(message=str(exc),
+                      cloud_provider=type(exc).__module__.split('.')[0],
+                      error_type=type(exc).__name__)
+
+
+# Accept BaseException to handle SystemExit and KeyboardInterrupt
+def serialize_exception(e: BaseException) -> Dict[str, Any]:
+    """Serialize the exception.
+
+    This function also wraps any unsafe exceptions (e.g., cloud exceptions)
+    into SkyPilot's CloudError before serialization to ensure clients can
+    deserialize them without needing cloud provider packages installed.
+    """
+    # Wrap unsafe exceptions before serialization
+    e = wrap_exception(e)
+
+    stacktrace = getattr(e, 'stacktrace', None)
+    attributes = e.__dict__.copy()
+    if 'stacktrace' in attributes:
+        del attributes['stacktrace']
+    for attr_k in list(attributes.keys()):
+        attr_v = attributes[attr_k]
+        if isinstance(attr_v, types.TracebackType):
+            attributes[attr_k] = traceback.format_tb(attr_v)
+
+    data = {
+        'type': e.__class__.__name__,
+        'message': str(e),
+        'args': e.args,
+        'attributes': attributes,
+        'stacktrace': stacktrace,
+    }
+    if isinstance(e, SkyPilotExcludeArgsBaseException):
+        data['args'] = tuple()
+    return data
+
+
+def deserialize_exception(serialized: Dict[str, Any]) -> Exception:
+    """Deserialize the exception."""
+    exception_type = serialized['type']
+    if hasattr(builtins, exception_type):
+        exception_class = getattr(builtins, exception_type)
+    else:
+        exception_class = globals().get(exception_type, None)
+    if exception_class is None:
+        # Unknown exception type.
+        return Exception(f'{exception_type}: {serialized["message"]}')
+    e = exception_class(*serialized['args'], **serialized['attributes'])
+    if serialized['stacktrace'] is not None:
+        setattr(e, 'stacktrace', serialized['stacktrace'])
+    return e
+
+
+class CloudError(Exception):
+    """Wraps cloud-specific errors into a SkyPilot exception."""
+
+    def __init__(self, message: str, cloud_provider: str, error_type: str):
+        super().__init__(message)
+        self.cloud_provider = cloud_provider
+        self.error_type = error_type
+
+    def __str__(self):
+        return (f'{self.cloud_provider} error ({self.error_type}): '
+                f'{super().__str__()}')
+
+
+class InvalidSkyPilotConfigError(ValueError):
+    """Raised when the SkyPilot config is invalid."""
+    pass
 
 
 class ResourcesUnavailableError(Exception):
@@ -46,6 +162,15 @@ class ResourcesUnavailableError(Exception):
         # Copy the list to avoid modifying from outside.
         self.failover_history = list(failover_history)
         return self
+
+
+class KubeAPIUnreachableError(ResourcesUnavailableError):
+    """Raised when the Kubernetes API is currently unreachable.
+
+    This is a subclass of ResourcesUnavailableError to trigger same failover
+    behavior as other ResourcesUnavailableError.
+    """
+    pass
 
 
 class InvalidCloudConfigs(Exception):
@@ -94,7 +219,21 @@ class ResourcesMismatchError(Exception):
     pass
 
 
-class CommandError(Exception):
+class SkyPilotExcludeArgsBaseException(Exception):
+    """Base class for exceptions that don't need args while serialization.
+
+    Due to our serialization/deserialization logic, when an exception does
+    not take `args` as an argument in __init__, `args` should not be included
+    in the serialized exception.
+
+    This is useful when an exception needs to construct the error message based
+    on the arguments passed in instead of directly having the error message as
+    the first argument in __init__. Refer to `CommandError` for an example.
+    """
+    pass
+
+
+class CommandError(SkyPilotExcludeArgsBaseException):
     """Raised when a command fails.
 
     Args:
@@ -116,7 +255,7 @@ class CommandError(Exception):
         else:
             if (len(command) > 100 and
                     not env_options.Options.SHOW_DEBUG_INFO.get()):
-                # Chunck the command to avoid overflow.
+                # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}')
@@ -128,7 +267,7 @@ class ClusterNotUpError(Exception):
 
     def __init__(self,
                  message: str,
-                 cluster_status: Optional['status_lib.ClusterStatus'],
+                 cluster_status: Optional['status_lib.ClusterStatus'] = None,
                  handle: Optional['backend.ResourceHandle'] = None) -> None:
         super().__init__(message)
         self.cluster_status = cluster_status
@@ -265,7 +404,7 @@ class NoCloudAccessError(Exception):
     pass
 
 
-class AWSAzFetchingError(Exception):
+class AWSAzFetchingError(SkyPilotExcludeArgsBaseException):
     """Raised when fetching the AWS availability zone fails."""
 
     class Reason(enum.Enum):
@@ -314,3 +453,95 @@ class UserRequestRejectedByPolicy(Exception):
 class NoClusterLaunchedError(Exception):
     """No cluster launched, so cleanup can be skipped during failover."""
     pass
+
+
+class RequestCancelled(Exception):
+    """Raised when a request is cancelled."""
+    pass
+
+
+class ApiServerConnectionError(RuntimeError):
+    """Raised when the API server cannot be connected."""
+
+    def __init__(self, server_url: str):
+        super().__init__(
+            f'Could not connect to SkyPilot API server at {server_url}. '
+            f'Please ensure that the server is running. '
+            f'Try: curl {server_url}/api/health')
+
+
+class JobExitCode(enum.IntEnum):
+    """Job exit code enum.
+
+    These codes are used as return codes for job-related operations and as
+    process exit codes to indicate job status.
+    """
+
+    SUCCEEDED = 0
+    """The job completed successfully"""
+
+    FAILED = 100
+    """The job failed (due to user code, setup, or driver failure)"""
+
+    NOT_FINISHED = 101
+    """The job has not finished yet"""
+
+    NOT_FOUND = 102
+    """The job was not found"""
+
+    CANCELLED = 103
+    """The job was cancelled by the user"""
+
+    @classmethod
+    def from_job_status(cls,
+                        status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
+        """Convert a job status to an exit code."""
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet import job_lib
+
+        if status is None:
+            return cls.NOT_FOUND
+
+        if not status.is_terminal():
+            return cls.NOT_FINISHED
+
+        if status == job_lib.JobStatus.SUCCEEDED:
+            return cls.SUCCEEDED
+
+        if status == job_lib.JobStatus.CANCELLED:
+            return cls.CANCELLED
+
+        if status in job_lib.JobStatus.user_code_failure_states(
+        ) or status == job_lib.JobStatus.FAILED_DRIVER:
+            return cls.FAILED
+
+        # Should not hit this case, but included to avoid errors
+        return cls.FAILED
+
+    @classmethod
+    def from_managed_job_status(
+            cls,
+            status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
+        """Convert a managed job status to an exit code."""
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky import jobs as managed_jobs
+
+        if status is None:
+            return cls.NOT_FOUND
+
+        if not status.is_terminal():
+            return cls.NOT_FINISHED
+
+        if status == managed_jobs.ManagedJobStatus.SUCCEEDED:
+            return cls.SUCCEEDED
+
+        if status == managed_jobs.ManagedJobStatus.CANCELLED:
+            return cls.CANCELLED
+
+        if status.is_failed():
+            return cls.FAILED
+
+        # Should not hit this case, but included to avoid errors
+        return cls.FAILED

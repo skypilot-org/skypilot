@@ -8,7 +8,6 @@ service:
 resources:
   ports: 8081
   cloud: gcp
-  cpus: 2+
 
 workdir: tests/skyserve/update
 

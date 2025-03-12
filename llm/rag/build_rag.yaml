@@ -1,0 +1,31 @@
+name: build-legal-rag
+
+workdir: .
+
+resources:
+  memory: 32+  # Need more memory for merging embeddings
+  cloud: aws
+
+envs:
+  EMBEDDINGS_BUCKET_NAME: sky-rag-embeddings
+  VECTORDB_BUCKET_NAME: sky-rag-vectordb
+
+file_mounts:
+  /embeddings:
+    name: ${EMBEDDINGS_BUCKET_NAME}
+    # this needs to be the same as the output in compute_embeddings.yaml
+    mode: MOUNT
+  
+  /vectordb:
+    name: ${VECTORDB_BUCKET_NAME}
+    mode: MOUNT
+
+setup: |
+  pip install chromadb pandas tqdm pyarrow
+
+run: |
+  python scripts/build_rag.py \
+    --collection-name legal_docs \
+    --persist-dir /vectordb/chroma \
+    --embeddings-dir /embeddings \
+    --batch-size 1000 

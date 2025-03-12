@@ -94,7 +94,6 @@ def main():
         sky.jobs.launch(
             task_copy,
             name=f'vector-compute-{job_start}-{job_end}',
-            detach_run=True,
         )
 
 

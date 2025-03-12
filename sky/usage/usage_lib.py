@@ -10,8 +10,6 @@ import traceback
 import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 
-import click
-
 import sky
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -26,8 +24,8 @@ if typing.TYPE_CHECKING:
     import requests
 
     from sky import resources as resources_lib
-    from sky import status_lib
     from sky import task as task_lib
+    from sky.utils import status_lib
 else:
     # requests and inspect cost ~100ms to load, which can be postponed to
     # collection phase or skipped if user specifies no collection
@@ -85,7 +83,12 @@ class UsageMessageToReport(MessageToReport):
         self.sky_commit: str = sky.__commit__
 
         # Entry
-        self.cmd: str = common_utils.get_pretty_entry_point()
+        self.cmd: Optional[str] = common_utils.get_current_command()
+        # The entrypoint on the client side.
+        self.client_entrypoint: Optional[str] = None
+        # The entrypoint on the server side, where each request has a entrypoint
+        # and a single client_entrypoint can have multiple server-side
+        # entrypoints.
         self.entrypoint: Optional[str] = None  # entrypoint_context
         #: Whether entrypoint is called by sky internal code.
         self.internal: bool = False  # set_internal
@@ -162,7 +165,14 @@ class UsageMessageToReport(MessageToReport):
         self.exception: Optional[str] = None  # entrypoint_context
         self.stacktrace: Optional[str] = None  # entrypoint_context
 
+        # Whether API server is deployed remotely.
+        self.using_remote_api_server: bool = (
+            common_utils.get_using_remote_api_server())
+
     def update_entrypoint(self, msg: str):
+        if self.client_entrypoint is None:
+            self.client_entrypoint = common_utils.get_current_client_entrypoint(
+                msg)
         self.entrypoint = msg
 
     def set_internal(self):
@@ -207,9 +217,11 @@ class UsageMessageToReport(MessageToReport):
     def update_ray_yaml(self, yaml_config_or_path: Union[Dict, str]):
         if self.ray_yamls is None:
             self.ray_yamls = []
-        self.ray_yamls.extend(
-            prepare_json_from_yaml_config(yaml_config_or_path))
-        self.num_tried_regions = len(self.ray_yamls)
+        if self.num_tried_regions is None:
+            self.num_tried_regions = 0
+        # Only keep the latest ray yaml to reduce the size of the message.
+        self.ray_yamls = prepare_json_from_yaml_config(yaml_config_or_path)
+        self.num_tried_regions += 1
 
     def update_cluster_name(self, cluster_name: Union[List[str], str]):
         if isinstance(cluster_name, str):
@@ -439,9 +451,36 @@ def _send_local_messages():
                              f'exception caught: {type(e)}({e})')
 
 
+def store_exception(e: Union[Exception, SystemExit, KeyboardInterrupt]) -> None:
+    with ux_utils.enable_traceback():
+        if hasattr(e, 'stacktrace') and e.stacktrace is not None:
+            messages.usage.stacktrace = e.stacktrace
+        else:
+            trace = traceback.format_exc()
+            messages.usage.stacktrace = trace
+        if hasattr(e, 'detailed_reason') and e.detailed_reason is not None:
+            messages.usage.stacktrace += '\nDetails: ' + e.detailed_reason
+        messages.usage.exception = common_utils.remove_color(
+            common_utils.format_exception(e))
+
+
 def send_heartbeat(interval_seconds: int = 600):
     messages.heartbeat.interval_seconds = interval_seconds
     _send_to_loki(MessageType.HEARTBEAT)
+
+
+def maybe_show_privacy_policy():
+    """Show the privacy policy if it is not already shown."""
+    # Show the policy message only when the entrypoint is used.
+    # An indicator for PRIVACY_POLICY has already been shown.
+    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
+    if not env_options.Options.DISABLE_LOGGING.get():
+        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
+        try:
+            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
+                logger.info(constants.USAGE_POLICY_MESSAGE)
+        except FileExistsError:
+            pass
 
 
 @contextlib.contextmanager
@@ -455,17 +494,6 @@ def entrypoint_context(name: str, fallback: bool = False):
     additional entrypoint_context with fallback=True can be used to wrap
     the global entrypoint to catch any exceptions that are not caught.
     """
-    # Show the policy message only when the entrypoint is used.
-    # An indicator for PRIVACY_POLICY has already been shown.
-    privacy_policy_indicator = os.path.expanduser(constants.PRIVACY_POLICY_PATH)
-    if not env_options.Options.DISABLE_LOGGING.get():
-        os.makedirs(os.path.dirname(privacy_policy_indicator), exist_ok=True)
-        try:
-            with open(privacy_policy_indicator, 'x', encoding='utf-8'):
-                click.secho(constants.USAGE_POLICY_MESSAGE, fg='yellow')
-        except FileExistsError:
-            pass
-
     is_entry = messages.usage.entrypoint is None
     if is_entry and not fallback:
         for message in messages.values():
@@ -479,14 +507,7 @@ def entrypoint_context(name: str, fallback: bool = False):
     try:
         yield
     except (Exception, SystemExit, KeyboardInterrupt) as e:
-        with ux_utils.enable_traceback():
-            trace = traceback.format_exc()
-            messages.usage.stacktrace = trace
-            detailed_reason = getattr(e, 'detailed_reason', None)
-            if detailed_reason is not None:
-                messages.usage.stacktrace += '\nDetails: ' + detailed_reason
-            messages.usage.exception = common_utils.remove_color(
-                common_utils.format_exception(e))
+        store_exception(e)
         raise
     finally:
         if fallback:
@@ -494,7 +515,27 @@ def entrypoint_context(name: str, fallback: bool = False):
         _send_local_messages()
 
 
-def entrypoint(name_or_fn: Union[str, Callable], fallback: bool = False):
+T = typing.TypeVar('T')
+
+
+@typing.overload
+def entrypoint(
+        name_or_fn: str,
+        fallback: bool = False
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    ...
+
+
+@typing.overload
+def entrypoint(name_or_fn: Callable[..., T],
+               fallback: bool = False) -> Callable[..., T]:
+    ...
+
+
+def entrypoint(
+    name_or_fn: Union[str, Callable[..., T]],
+    fallback: bool = False
+) -> Union[Callable[..., T], Callable[[Callable[..., T]], Callable[..., T]]]:
     return common_utils.make_decorator(entrypoint_context,
                                        name_or_fn,
                                        fallback=fallback)

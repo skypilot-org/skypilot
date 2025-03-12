@@ -116,7 +116,9 @@ def create_table(cursor, conn):
         name TEXT,
         schedule_state TEXT,
         controller_pid INTEGER DEFAULT NULL,
-        dag_yaml_path TEXT)""")
+        dag_yaml_path TEXT,
+        env_file_path TEXT,
+        user_hash TEXT)""")
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'schedule_state',
                                  'TEXT')
@@ -126,6 +128,11 @@ def create_table(cursor, conn):
 
     db_utils.add_column_to_table(cursor, conn, 'job_info', 'dag_yaml_path',
                                  'TEXT')
+
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'env_file_path',
+                                 'TEXT')
+
+    db_utils.add_column_to_table(cursor, conn, 'job_info', 'user_hash', 'TEXT')
 
     conn.commit()
 
@@ -181,6 +188,8 @@ columns = [
     'schedule_state',
     'controller_pid',
     'dag_yaml_path',
+    'env_file_path',
+    'user_hash',
 ]
 
 
@@ -212,6 +221,7 @@ class ManagedJobStatus(enum.Enum):
     is dedicated to a managed job, i.e. there should always be enough resource
     to run the job and the job will be immediately transitioned to RUNNING.
 
+    You can see a state diagram for ManagedJobStatus in sky/jobs/README.md.
     """
     # PENDING: Waiting for the jobs controller to have a slot to run the
     # controller process.
@@ -331,6 +341,8 @@ class ManagedJobScheduleState(enum.Enum):
       and the job is in some terminal status. In the future it may be possible
       to transition directly from WAITING or even INACTIVE to DONE if the job is
       cancelled.
+
+    You can see a state diagram in sky/jobs/README.md.
 
     There is no well-defined mapping from the managed job status to schedule
     state or vice versa. (In fact, schedule state is defined on the job and
@@ -680,20 +692,24 @@ def set_local_log_file(job_id: int, task_id: Optional[int],
 
 
 # ======== utility functions ========
-def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
+def get_nonterminal_job_ids_by_name(name: Optional[str],
+                                    all_users: bool = False) -> List[int]:
     """Get non-terminal job ids by name."""
     statuses = ', '.join(['?'] * len(ManagedJobStatus.terminal_statuses()))
     field_values = [
         status.value for status in ManagedJobStatus.terminal_statuses()
     ]
 
-    name_filter = ''
+    job_filter = ''
+    if name is None and not all_users:
+        job_filter += 'AND (job_info.user_hash=(?)) '
+        field_values.append(common_utils.get_user_hash())
     if name is not None:
         # We match the job name from `job_info` for the jobs submitted after
         # #1982, and from `spot` for the jobs submitted before #1982, whose
         # job_info is not available.
-        name_filter = ('AND (job_info.name=(?) OR '
-                       '(job_info.name IS NULL AND spot.task_name=(?)))')
+        job_filter += ('AND (job_info.name=(?) OR '
+                       '(job_info.name IS NULL AND spot.task_name=(?))) ')
         field_values.extend([name, name])
 
     # Left outer join is used here instead of join, because the job_info does
@@ -707,7 +723,7 @@ def get_nonterminal_job_ids_by_name(name: Optional[str]) -> List[int]:
             ON spot.spot_job_id=job_info.spot_job_id
             WHERE status NOT IN
             ({statuses})
-            {name_filter}
+            {job_filter}
             ORDER BY spot.spot_job_id DESC""", field_values).fetchall()
         job_ids = [row[0] for row in rows if row[0] is not None]
         return job_ids
@@ -903,6 +919,9 @@ def get_managed_jobs(job_id: Optional[int] = None) -> List[Dict[str, Any]]:
     # existing controller before #1982, the job_info table may not exist,
     # and all the managed jobs created before will not present in the
     # job_info.
+    # Note: we will get the user_hash here, but don't try to call
+    # global_user_state.get_user() on it. This runs on the controller, which may
+    # not have the user info. Prefer to do it on the API server side.
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = cursor.execute(f"""\
             SELECT *
@@ -975,14 +994,17 @@ def get_local_log_file(job_id: int, task_id: Optional[int]) -> Optional[str]:
 # scheduler lock to work correctly.
 
 
-def scheduler_set_waiting(job_id: int, dag_yaml_path: str) -> None:
+def scheduler_set_waiting(job_id: int, dag_yaml_path: str, env_file_path: str,
+                          user_hash: str) -> None:
     """Do not call without holding the scheduler lock."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         updated_count = cursor.execute(
             'UPDATE job_info SET '
-            'schedule_state = (?), dag_yaml_path = (?) '
+            'schedule_state = (?), dag_yaml_path = (?), env_file_path = (?), '
+            '  user_hash = (?) '
             'WHERE spot_job_id = (?) AND schedule_state = (?)',
-            (ManagedJobScheduleState.WAITING.value, dag_yaml_path, job_id,
+            (ManagedJobScheduleState.WAITING.value, dag_yaml_path,
+             env_file_path, user_hash, job_id,
              ManagedJobScheduleState.INACTIVE.value)).rowcount
         assert updated_count == 1, (job_id, updated_count)
 
@@ -1082,7 +1104,7 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
     """
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         row = cursor.execute(
-            'SELECT spot_job_id, schedule_state, dag_yaml_path '
+            'SELECT spot_job_id, schedule_state, dag_yaml_path, env_file_path '
             'FROM job_info '
             'WHERE schedule_state in (?, ?) '
             'ORDER BY spot_job_id LIMIT 1',
@@ -1092,4 +1114,5 @@ def get_waiting_job() -> Optional[Dict[str, Any]]:
             'job_id': row[0],
             'schedule_state': ManagedJobScheduleState(row[1]),
             'dag_yaml_path': row[2],
+            'env_file_path': row[3],
         } if row is not None else None

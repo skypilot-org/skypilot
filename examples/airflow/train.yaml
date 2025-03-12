@@ -1,0 +1,32 @@
+resources:
+  cpus: 1
+  # Add GPUs here
+
+envs:
+  DATA_BUCKET_NAME: sky-demo-data-test
+  DATA_BUCKET_STORE_TYPE: s3
+  NUM_EPOCHS: 2
+
+file_mounts:
+  /data:
+    name: $DATA_BUCKET_NAME
+    store: $DATA_BUCKET_STORE_TYPE
+
+setup: |
+  echo "Setting up dependencies for training..."
+
+run: |
+  echo "Running training..."
+  
+  # Run a mock training job that loops through the files in /data starting with 'file_'
+  for (( i=1; i<=NUM_EPOCHS; i++ )); do
+    for file in /data/file_*; do
+      echo "Epoch $i: Training on $file"
+      sleep 2
+    done
+  done
+  
+  # Mock checkpointing the trained model to the data bucket
+  echo "Trained model" > /data/trained_model.txt
+  
+  echo "Training completed, model written to to $DATA_BUCKET_NAME"

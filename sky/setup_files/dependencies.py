@@ -5,6 +5,7 @@ This file is imported by setup.py, so:
   correct.
 - It should not import any dependencies, as they may not be installed yet.
 """
+import sys
 from typing import Dict, List
 
 install_requires = [
@@ -40,6 +41,18 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    'fastapi',
+    'uvicorn[standard]',
+    # Some pydantic versions are not compatible with ray. Adopted from ray's
+    # setup.py:
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
+    # We need pydantic>=2.0.0 for API server and client.
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3,>2',
+    # Required for Form data by pydantic
+    'python-multipart',
+    'aiofiles',
+    'httpx',
+    'setproctitle',
 ]
 
 local_ray = [
@@ -52,22 +65,15 @@ local_ray = [
 
 remote = [
     # Adopted from ray's setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.4.0/python/setup.py
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L251-L252
     # SkyPilot: != 1.48.0 is required to avoid the error where ray dashboard
     # fails to start when ray start is called (#2054).
     # Tracking issue: https://github.com/ray-project/ray/issues/30984
-    'grpcio >= 1.32.0, <= 1.49.1, != 1.48.0; python_version < \'3.10\' and sys_platform == \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
-    'grpcio >= 1.42.0, <= 1.49.1, != 1.48.0; python_version >= \'3.10\' and sys_platform == \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
-    # Original issue: https://github.com/ray-project/ray/issues/33833
-    'grpcio >= 1.32.0, <= 1.51.3, != 1.48.0; python_version < \'3.10\' and sys_platform != \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
-    'grpcio >= 1.42.0, <= 1.51.3, != 1.48.0; python_version >= \'3.10\' and sys_platform != \'darwin\'',  # noqa:E501 pylint: disable=line-too-long
+    'grpcio >= 1.32.0, != 1.48.0; python_version < \'3.10\'',
+    'grpcio >= 1.42.0, != 1.48.0; python_version >= \'3.10\'',
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
-    # Some pydantic versions are not compatible with ray. Adopted from ray's
-    # setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
-    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
@@ -117,7 +123,7 @@ extras_require: Dict[str, List[str]] = {
         'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
     ] + local_ray,
     'docker': ['docker'] + local_ray,
-    'lambda': local_ray,
+    'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
@@ -141,6 +147,13 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'nebius': ['nebius>=0.2.0',]
 }
 
-extras_require['all'] = sum(extras_require.values(), [])
+# Nebius needs python3.10. If python 3.9 [all] will not install nebius
+if sys.version_info < (3, 10):
+    filtered_keys = [k for k in extras_require if k != 'nebius']
+    extras_require['all'] = sum(
+        [v for k, v in extras_require.items() if k != 'nebius'], [])
+else:
+    extras_require['all'] = sum(extras_require.values(), [])
