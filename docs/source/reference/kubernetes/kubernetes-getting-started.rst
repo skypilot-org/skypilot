@@ -275,6 +275,8 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 
     To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
 
+.. _kubernetes-custom-pod-config:
+
 Customizing SkyPilot Pods
 -------------------------
 
@@ -316,32 +318,106 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
            pod_config:
              ...
 
+.. _kubernetes-using-volumes:
 
-Mounting volumes
-----------------
+Mounting NFS and other volumes
+------------------------------
 
-Using the ``pod_config`` field, you can also attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) to your SkyPilot pods directly from the task YAML:
+Using the ``pod_config`` field, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ to your SkyPilot pods directly from the task YAML. 
 
-.. code-block:: yaml
+Some examples:
 
-    # task.yaml
-    run: |
-      echo "Hello, world!" > /nfs/hello.txt
+.. tab-set::
 
-    experimental:
-      config_overrides:
-        pod_config:
-          spec:
-            containers:
-              - volumeMounts:       # Custom volume mounts for the pod
-                  - mountPath: /data
-                    name: nfs-volume
-            volumes:
-              - name: nfs-volume
-                nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
-                  server: nfs.example.com
-                  path: /nfs
+    .. tab-item:: NFS using hostPath
+       :name: kubernetes-volumes-hostpath-nfs
+    
+       Mount an NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_:
+       
+       .. code-block:: yaml
+       
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+           
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: my-host-nfs
+                   volumes:
+                     - name: my-host-nfs
+                       hostPath:
+                         path: /path/on/host/nfs
+                         type: Directory
 
+    .. tab-item:: NFS using native volume
+       :name: kubernetes-volumes-native-nfs
+    
+       Mount an NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support:
+       
+       .. code-block:: yaml
+       
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+           
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: nfs-volume
+                   volumes:
+                     - name: nfs-volume
+                       nfs:
+                         server: nfs.example.com
+                         path: /shared
+                         readOnly: false
+    
+    .. tab-item:: NVMe using hostPath
+       :name: kubernetes-volumes-hostpath-nvme
+    
+       Mount local NVMe storage that's already mounted on the Kubernetes nodes:
+       
+       .. code-block:: yaml
+       
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nvme/hello.txt
+             ls -la /mnt/nvme
+           
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nvme
+                           name: nvme
+                   volumes:
+                     - name: nvme
+                       hostPath:
+                         path: /path/on/host/nvme
+                         type: Directory
+
+.. note::
+   
+  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled. 
+   
+  For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
+
+.. tip::
+
+  You can configure volumes to be :ref:`mounted globally to all pods <kubernetes-custom-pod-config>` by setting the :code:`pod_config` field in :code:`~/.sky/config.yaml`.
+  
 
 FAQs
 ----

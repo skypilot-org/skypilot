@@ -276,6 +276,19 @@ You can also check the GPUs available on your nodes by running:
     my-cluster-5               H100      8           8
 
 
+Setting up NFS and other volumes
+--------------------------------
+
+SkyPilot supports attaching `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ to your SkyPilot pods. 
+
+If you have a shared NFS or other storage, you have multiple options to mount it to SkyPilot pods:
+
+1. Mount the NFS to all nodes in the cluster and then use :ref:`hostPath volumes <kubernetes-volumes-hostpath-nfs>` to mount it to SkyPilot pods.
+2. For local storage like :ref:`NVMe drives <kubernetes-volumes-hostpath-nvme>`, use hostPath volumes to make them available to pods.
+
+Refer to :ref:`Mounting NFS and other volumes <kubernetes-using-volumes>` for detailed examples.
+
+
 .. _kubernetes-observability:
 
 Observability for administrators
