@@ -323,14 +323,15 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
 Mounting NFS and other volumes
 ------------------------------
 
-Using the ``pod_config`` field, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ to your SkyPilot pods directly from the task YAML. 
+Using the ``pod_config`` field, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ to your SkyPilot pods.
 
-Some examples:
+This can be done directly from the task YAML on a per-task basis, or :ref:`globally for all tasks<kubernetes-custom-pod-config>` in :code:`~/.sky/config.yaml`.
+
+Some examples of adding in the task YAML:
 
 .. tab-set::
 
     .. tab-item:: NFS using hostPath
-       :name: kubernetes-volumes-hostpath-nfs
     
        Mount an NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_:
        
@@ -356,7 +357,6 @@ Some examples:
                          type: Directory
 
     .. tab-item:: NFS using native volume
-       :name: kubernetes-volumes-native-nfs
     
        Mount an NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support:
        
@@ -383,7 +383,6 @@ Some examples:
                          readOnly: false
     
     .. tab-item:: NVMe using hostPath
-       :name: kubernetes-volumes-hostpath-nvme
     
        Mount local NVMe storage that's already mounted on the Kubernetes nodes:
        
@@ -413,11 +412,6 @@ Some examples:
   When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled. 
    
   For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
-
-.. tip::
-
-  You can configure volumes to be :ref:`mounted globally to all pods <kubernetes-custom-pod-config>` by setting the :code:`pod_config` field in :code:`~/.sky/config.yaml`.
-  
 
 FAQs
 ----
