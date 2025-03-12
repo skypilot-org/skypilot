@@ -55,7 +55,7 @@ ALLOWED_TERMS = {
 # Add multi-word terms that should be treated as a single entity
 MULTI_WORD_TERMS = {
     'Lambda Cloud', 'Weights & Biases', 'Rancher Kubernetes Engine',
-    'Google Cloud', 'LoadBalancer Service', 'dynamic Workload Scheduler',
+    'Google Cloud', 'LoadBalancer Service', 'Dynamic Workload Scheduler',
     'Sky Computing', 'VS Code', 'GCP Service Account', 'Cudo Compute',
     'Samsung Cloud Platform'
 }
