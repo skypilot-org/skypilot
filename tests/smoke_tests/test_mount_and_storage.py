@@ -915,7 +915,7 @@ class TestStorageWithCredentials:
                     'wc -l')
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
-            return f'aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
+            return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH}  aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
         elif store_type == storage_lib.StoreType.NEBIUS:
             endpoint_url = nebius.create_endpoint()
             return f'aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
