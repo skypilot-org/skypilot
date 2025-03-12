@@ -44,6 +44,7 @@ extensions = [
     'myst_parser',
     'notfound.extension',
     'sphinx.ext.autosectionlabel',
+    'extension.linting',
 ]
 # Needed for admonitions in markdown:
 # https://myst-parser.readthedocs.io/en/latest/syntax/admonitions.html

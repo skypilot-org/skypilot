@@ -238,8 +238,8 @@ workers running on different nodes.
 
 
 
-Using SkyPilot Storage CLI
---------------------------------
+Using SkyPilot storage CLI
+--------------------------
 
 To manage buckets created by SkyPilot, the sky CLI provides two commands:
 :code:`sky storage ls` and :code:`sky storage delete`.
