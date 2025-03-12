@@ -229,47 +229,33 @@ class Kubernetes(clouds.Cloud):
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
         # kubernetes cluster/context).
-        regions_to_return = []
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if (autoscaler_type in kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR
-                or autoscaler_type is None) and instance_type is not None:
-            # If autoscaler is not set, or we have a way to interface with the
-            # autoscaler to determine if the instance type fits in the cluster,
-            # check if the instance type fits in the cluster. Else, rely on the
-            # autoscaler to provision the right instance type without running
-            # checks. Worst case, if autoscaling fails, the pod will be stuck in
-            # pending state until provision_timeout,
-            # after which failover will be triggered.
-            for r in regions:
-                context = r.name
-                try:
-                    fits, reason = kubernetes_utils.check_instance_fits(
-                        context, instance_type)
-                except exceptions.KubeAPIUnreachableError as e:
-                    cls._log_unreachable_context(context, str(e))
-                    continue
-                if fits:
-                    regions_to_return.append(r)
-                else:
-                    if autoscaler_type is not None:
-                        autoscale_detector = \
-                            kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR \
-                            .get(autoscaler_type)
-                        # autoscaler_type was verified to have a
-                        # detector above if autoscaler_type is not None.
-                        assert autoscale_detector is not None, \
-                            f'Unsupported autoscaler type: {autoscaler_type}'
-                        if autoscale_detector.may_autoscale(
-                                context, instance_type):
-                            regions_to_return.append(r)
-                        else:
-                            logger.debug(f'Instance type {instance_type} does '
-                                         'not fit in the Kubernetes cluster '
-                                         'with context: '
-                                         f'{context}. Reason: {reason}')
-        else:
-            regions_to_return = regions
+        if instance_type is None:
+            return regions
 
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        regions_to_return = []
+        for r in regions:
+            context = r.name
+            try:
+                fits, reason = kubernetes_utils.check_instance_fits(
+                    context, instance_type)
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
+                continue
+            if fits:
+                regions_to_return.append(r)
+            else:
+                if autoscaler_type is not None:
+                    autoscale_detector = kubernetes_utils. \
+                        get_autoscaler_detector(autoscaler_type)
+                    if autoscale_detector.can_create_new_instance_of_type(
+                            context, instance_type):
+                        regions_to_return.append(r)
+                    else:
+                        logger.debug(f'Instance type {instance_type} does '
+                                     'not fit in the Kubernetes cluster '
+                                     'with context: '
+                                     f'{context}. Reason: {reason}')
         return regions_to_return
 
     def instance_type_to_hourly_cost(self,
