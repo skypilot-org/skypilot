@@ -332,10 +332,11 @@ Some examples of adding in the task YAML:
 .. tab-set::
 
     .. tab-item:: NFS using hostPath
+      :name: kubernetes-volumes-hostpath-nfs
     
-       Mount an NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_:
+      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_:
        
-       .. code-block:: yaml
+      .. code-block:: yaml
        
            # task.yaml
            run: |
@@ -356,11 +357,13 @@ Some examples of adding in the task YAML:
                          path: /path/on/host/nfs
                          type: Directory
 
+
     .. tab-item:: NFS using native volume
+      :name: kubernetes-volumes-native-nfs
     
-       Mount an NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support:
+      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support:
        
-       .. code-block:: yaml
+      .. code-block:: yaml
        
            # task.yaml
            run: |
@@ -383,10 +386,11 @@ Some examples of adding in the task YAML:
                          readOnly: false
     
     .. tab-item:: NVMe using hostPath
+      :name: kubernetes-volumes-hostpath-nvme
     
-       Mount local NVMe storage that's already mounted on the Kubernetes nodes:
+      Mount local NVMe storage that's already mounted on the Kubernetes nodes:
        
-       .. code-block:: yaml
+      .. code-block:: yaml
        
            # task.yaml
            run: |
