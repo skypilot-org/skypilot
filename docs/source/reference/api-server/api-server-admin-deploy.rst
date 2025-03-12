@@ -53,7 +53,7 @@ Following tabs describe how to configure credentials for different clouds on the
         :sync: kubernetes-creds-tab
 
         By default, SkyPilot will automatically use the same Kubernetes cluster as the API server:
-        
+
         * To disable this behavior, set ``kubernetesCredentials.useApiServerCluster=false`` in the Helm chart values.
         * When running in the same cluster, tasks are launched in the same namespace as the API server. To use a different namespace for tasks, set ``kubernetesCredentials.inclusterNamespace=<namespace>`` when deploying the API server.
 
@@ -94,7 +94,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             You can also set both ``useKubeconfig`` and ``useApiServerCluster`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
 
-    
+
     .. tab-item:: AWS
         :sync: aws-creds-tab
 
@@ -117,7 +117,7 @@ Following tabs describe how to configure credentials for different clouds on the
         .. code-block:: bash
 
             helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
-    
+
     .. tab-item:: GCP
         :sync: gcp-creds-tab
 
@@ -141,7 +141,7 @@ Following tabs describe how to configure credentials for different clouds on the
               --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
         Replace ``YOUR_PROJECT_ID`` with your actual GCP project ID.
-    
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
@@ -152,7 +152,7 @@ Following tabs describe how to configure credentials for different clouds on the
         Support for configuring other clouds through secrets is coming soon!
 
 
-Step 3: Deploy the API Server Helm Chart
+Step 3: Deploy the API server Helm chart
 ----------------------------------------
 
 Install the SkyPilot Helm chart with the following command:
@@ -221,9 +221,9 @@ Our default of using a NodePort service is the recommended way to expose the API
             http://skypilot:yourpassword@1.1.1.1:30050
 
         .. tip::
-            
-            You can customize the node ports with ``--set ingress.httpNodePort=<port> --set ingress.httpsNodePort=<port>`` to the helm upgrade command. 
-            
+
+            You can customize the node ports with ``--set ingress.httpNodePort=<port> --set ingress.httpsNodePort=<port>`` to the helm upgrade command.
+
             If set to null, Kubernetes will assign random ports in the NodePort range (default 30000-32767). Make sure to open these ports on your nodes.
 
         .. tip::
@@ -285,13 +285,13 @@ To uninstall the API server, run:
 
 This will delete the API server and all associated resources.
 
-Other Notes
+Other notes
 -----------
 
-Fault Tolerance and State Persistence
+Fault tolerance and state persistence
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The skypilot API server is designed to be fault tolerant. If the API server pod is terminated, the Kubernetes will automatically create a new pod to replace it. 
+The skypilot API server is designed to be fault tolerant. If the API server pod is terminated, the Kubernetes will automatically create a new pod to replace it.
 
 To retain state during pod termination, we use a persistent volume claim. The persistent volume claim is backed by a PersistentVolume that is created by the Helm chart.
 
@@ -353,7 +353,7 @@ Once the EBS CSI driver is installed, the default ``gp2`` storage class will be 
 
 .. _sky-api-server-config:
 
-Setting the SkyPilot Config
+Setting the SkyPilot config
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
@@ -365,16 +365,16 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
     # Create the config.yaml file
     cat <<EOF > config.yaml
     admin_policy: admin_policy_examples.AddLabelsPolicy
-    
+
     jobs:
       controller:
         resources:
             cpus: 2+
-    
+
     allowed_clouds:
       - aws
       - kubernetes
-    
+
     kubernetes:
       allowed_contexts:
         - my-context
@@ -387,7 +387,7 @@ To set the config file, pass ``--set-file apiService.config=path/to/your/config.
 
 You can also directly set config values in the ``values.yaml`` file.
 
-Setting an Admin Policy
+Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 The Helm chart supports installing an admin policy before the API server starts.

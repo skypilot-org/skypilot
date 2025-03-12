@@ -29,7 +29,7 @@ Use one command to quickly get TPU nodes for development:
 
 After the command finishes, you will be dropped into a TPU host VM and can start developing code right away.
 
-Below, we show examples of using SkyPilot to (1) train LLMs on TPU VMs/Pods and (2) train MNIST on TPU Nodes (legacy).
+Below, we show examples of using SkyPilot to (1) train LLMs on TPU VMs/Pods and (2) train MNIST on TPU nodes (legacy).
 
 TPU architectures
 =================
@@ -244,7 +244,7 @@ To submit more jobs to  the same TPU Pod, use :code:`sky exec`:
 
 
 
-TPU Nodes (Legacy)
+TPU nodes (legacy)
 ------------------
 
 In a TPU Node, a normal CPU VM (an `n1` instance) needs to be provisioned to communicate with the TPU host/device.
@@ -337,9 +337,3 @@ This YAML lives under the `SkyPilot repo <https://github.com/skypilot-org/skypil
    (mnist-tpu-node pid=28961) 58/58 [==============================] - 1s 20ms/step - loss: 0.1139 - sparse_categorical_accuracy: 0.9655 - val_loss: 0.0831 - val_sparse_categorical_accuracy: 0.9742
    ...
    (mnist-tpu-node pid=28961) {'accuracy_top_1': 0.9741753339767456, 'eval_loss': 0.0831054300069809, 'loss': 0.11388632655143738, 'training_accuracy_top_1': 0.9654667377471924}
-
-
-
-
-
-
