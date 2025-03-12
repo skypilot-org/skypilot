@@ -4664,11 +4664,13 @@ def serve_down(
     help=('Follow the logs of the job. [default: --follow] '
           'If --no-follow is specified, print the log so far and exit.'))
 @click.option('--controller',
+              '-c',
               is_flag=True,
               default=False,
               required=False,
               help='Show the controller logs of this service.')
 @click.option('--load-balancer',
+              '--lb',
               is_flag=True,
               default=False,
               required=False,

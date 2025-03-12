@@ -1,5 +1,6 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
+import copy
 import logging
 import threading
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar
@@ -99,6 +100,10 @@ class ClientPool:
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
         self._lock: threading.Lock = threading.Lock()
+
+    def active_requests(self) -> Dict[str, int]:
+        with self._lock:
+            return copy.copy(self._active_requests)
 
     async def refresh_with_new_urls(
             self, ready_urls: List[str]) -> List[asyncio.Task]:
@@ -205,6 +210,9 @@ class SkyServeLoadBalancer:
         self._region: Optional[str] = region
         self._tls_credential: Optional[serve_utils.TLSCredential] = (
             tls_credential)
+        self._max_concurrent_requests: int = max_concurrent_requests
+        self._load_balancing_policy_name: Optional[str] = (
+            load_balancing_policy_name)
         self._replica_pool: ClientPool = ClientPool(load_balancing_policy_name,
                                                     max_concurrent_requests)
         self._lb_pool: ClientPool = ClientPool(meta_load_balancing_policy_name,
@@ -576,6 +584,26 @@ class SkyServeLoadBalancer:
             status_code=200,
             content={'queue_size': await self._request_queue.qsize()})
 
+    async def _replica_queue(self) -> fastapi.responses.Response:
+        """Return the request queue for each replica."""
+        assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={'replica_queue': self._replica_pool.active_requests()})
+
+    async def _configuration(self) -> fastapi.responses.Response:
+        """Return the configuration of the load balancer."""
+        assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={
+                'queue_size': await self._request_queue.qsize(),
+                'replica_queue': self._replica_pool.active_requests(),
+                'max_queue_size': self._max_queue_size,
+                'max_concurrent_requests': self._max_concurrent_requests,
+                'load_balancing_policy_name': self._load_balancing_policy_name
+            })
+
     async def _steal_request(
             self, steal_request: fastapi.Request) -> fastapi.responses.Response:
         """Let other LBs steal requests from this LB."""
@@ -627,6 +655,14 @@ class SkyServeLoadBalancer:
 
         self._app.add_api_route('/raw-queue-size',
                                 self._raw_queue_size,
+                                methods=['GET'])
+
+        self._app.add_api_route('/replica-queue',
+                                self._replica_queue,
+                                methods=['GET'])
+
+        self._app.add_api_route('/configuration',
+                                self._configuration,
                                 methods=['GET'])
 
         self._app.add_api_route('/steal-request',

@@ -511,7 +511,7 @@ def update(
     # TODO(tian): Hack to update the load balancer code on the controller.
     # Remove this on production.
     os.system('rm -rf ~/.sky/wheels')
-    sky.core.start(controller_name)
+    sky.core.start(controller_name, force=True)
     with tempfile.NamedTemporaryFile(
             prefix=f'{service_name}-v{current_version}',
             mode='w') as service_file:
