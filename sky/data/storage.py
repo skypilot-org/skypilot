@@ -25,7 +25,6 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
-from sky.clouds.utils import oci_utils
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
