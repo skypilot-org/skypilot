@@ -218,7 +218,6 @@ class Kubernetes(clouds.Cloud):
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators, zone, use_spot  # unused
-        print("calling regions_with_offering")
         existing_contexts = cls.existing_allowed_contexts()
 
         regions = []
@@ -250,9 +249,6 @@ class Kubernetes(clouds.Cloud):
                 if fits:
                     regions_to_return.append(r)
                 else:
-                    # for testing
-                    autoscaler_type = kubernetes_enums.KubernetesAutoscalerType.GKE
-                    print("calling check_can_autoscale")
                     if autoscaler_type is not None and cls.check_can_autoscale(context, instance_type, autoscaler_type):
                         regions_to_return.append(r)
                     else:
