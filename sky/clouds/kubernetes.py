@@ -232,7 +232,8 @@ class Kubernetes(clouds.Cloud):
         # kubernetes cluster/context).
         regions_to_return = []
         autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if autoscaler_type in [kubernetes_enums.KubernetesAutoscalerType.GKE, None] and instance_type is not None:
+        if (autoscaler_type in kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR.keys() or
+        autoscaler_type is None) and instance_type is not None:
             # If autoscaler is not set, check if the instance type fits in the
             # cluster. Else, rely on the autoscaler to provision the right
             # instance type without running checks. Worst case, if autoscaling
@@ -250,7 +251,9 @@ class Kubernetes(clouds.Cloud):
                     regions_to_return.append(r)
                 else:
                     if autoscaler_type is not None:
-                        autoscale_detector = kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR[autoscaler_type]
+                        autoscale_detector = kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR.get(autoscaler_type)
+                        # autoscaler_type was verified to have a detector above if autoscaler_type is not None.
+                        assert autoscale_detector is not None, f'Unsupported autoscaler type: {autoscaler_type}'
                         if autoscale_detector.may_autoscale(context, instance_type):
                             regions_to_return.append(r)
                         else:
