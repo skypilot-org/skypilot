@@ -630,7 +630,7 @@ class GKEAutoscaleDetector(AutoscaleDetector):
 
         # check if there are any spare capacity in the autoscaler.
         node_count = 0
-        if 'initialNodeCount' in node_pool.keys():
+        if 'initialNodeCount' in node_pool:
             node_count = node_pool['initialNodeCount']
         max_node_count = node_pool['autoscaling']['maxNodeCount']
         free_node_count = max_node_count - node_count
@@ -642,23 +642,24 @@ class GKEAutoscaleDetector(AutoscaleDetector):
             from_instance_type(instance_type)
 
         # Accelerator check
-        acc_type = k8s_instance_type.accelerator_type
-        acc_count = k8s_instance_type.accelerator_count
-        if acc_type is not None:
-            assert acc_count is not None
-            if 'accelerators' in node_pool['config'].keys():
-                accelerator_type = GKELabelFormatter. \
-                    get_accelerator_from_label_value(
-                    node_pool['config']['accelerators'][0]['acceleratorType'])
-                accelerator_count = node_pool['config']['accelerators'][0][
-                    'acceleratorCount']
-                if accelerator_type != acc_type or int(
-                        accelerator_count) < acc_count:
-                    return False
-            else:
+        requested_acc_type = k8s_instance_type.accelerator_type
+        requested_acc_count = k8s_instance_type.accelerator_count
+        if requested_acc_type is not None:
+            assert requested_acc_count is not None
+            suitable_accelerator_exists = False
+            if 'accelerators' in node_pool['config']:
+                for accelerator in node_pool['config']['accelerators']:
+                    node_accelerator_type = GKELabelFormatter. \
+                        get_accelerator_from_label_value(
+                            accelerator['acceleratorType'])
+                    node_accelerator_count = accelerator['acceleratorCount']
+                    if node_accelerator_type == requested_acc_type and int(
+                            node_accelerator_count) >= requested_acc_count:
+                        suitable_accelerator_exists = True
+            if not suitable_accelerator_exists:
                 return False
 
-        # VCPU and memory check
+        # vcpu and memory check
         machine_type = node_pool['config']['machineType']
         vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
         if (vcpus is None or vcpus < k8s_instance_type.cpus or mem is None or
