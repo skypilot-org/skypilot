@@ -45,7 +45,7 @@ Now it's time to run deepseek with SkyPilot. The instruction can be dependent on
 8B: 
 ```
 sky launch gemma3.yaml \
-  -c deepseek \
+  -c gemma-3 \
   --env MODEL_NAME= google/gemma-3-4b-it \
   --gpus L4:1
   --env HF_TOKEN=xxxx
