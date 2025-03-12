@@ -163,7 +163,7 @@ def session():
 
 
 @annotations.lru_cache(scope='global')
-def resource(resource_name: str, **kwargs):
+def resource(resource_name: str, region: str = DEFAULT_REGION, **kwargs):
     """Create a Nebius resource.
 
     Args:
@@ -177,14 +177,14 @@ def resource(resource_name: str, **kwargs):
 
     session_ = session()
     nebius_credentials = get_nebius_credentials(session_)
-    endpoint = create_endpoint()
+    endpoint = create_endpoint(region)
 
     return session_.resource(
         resource_name,
         endpoint_url=endpoint,
         aws_access_key_id=nebius_credentials.access_key,
         aws_secret_access_key=nebius_credentials.secret_key,
-        region_name='auto',
+        region_name=region,
         **kwargs)
 
 
@@ -222,4 +222,5 @@ def botocore_exceptions():
 
 def create_endpoint(region: Optional[str] = DEFAULT_REGION) -> str:
     """Reads accountid necessary to interact with Nebius Object Storage"""
+
     return f'https://storage.{region}.nebius.cloud:443'

@@ -320,7 +320,7 @@ def create_r2_client(region: str = 'auto') -> Client:
     return cloudflare.client('s3', region)
 
 
-def create_nebius_client(region: str = 'auto') -> Client:
+def create_nebius_client(region: Optional[str]) -> Client:
     """Helper method that connects to Boto3 client for Nebius Object Storage
 
     Args:

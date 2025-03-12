@@ -25,6 +25,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.clouds.utils import oci_utils
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
@@ -4591,7 +4592,8 @@ class NebiusStore(AbstractStore):
                  _bucket_sub_path: Optional[str] = None):
         self.client: 'boto3.client.Client'
         self.bucket: 'StorageHandle'
-        self.region = region if region is not None else nebius.DEFAULT_REGION
+        if region is None:
+            self.region = nebius.DEFAULT_REGION
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
 
@@ -4647,7 +4649,7 @@ class NebiusStore(AbstractStore):
         if not _is_storage_cloud_enabled(str(clouds.Nebius())):
             with ux_utils.print_exception_no_traceback():
                 raise exceptions.ResourcesUnavailableError((
-                    'Storage \'store: s3\' specified, but '
+                    'Storage \'store: nebius\' specified, but '
                     'Nebius access is disabled. To fix, enable '
                     'Nebius by running `sky check`. More info: '
                     'https://docs.skypilot.co/en/latest/getting-started/installation.html.'  # pylint: disable=line-too-long
