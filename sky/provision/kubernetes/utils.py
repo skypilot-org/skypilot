@@ -21,7 +21,8 @@ from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import kubernetes,gcp
+from sky.adaptors import gcp
+from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
 from sky.provision.kubernetes import constants as kubernetes_constants
 from sky.provision.kubernetes import network_utils
@@ -556,6 +557,7 @@ def detect_gpu_label_formatter(
 
     return label_formatter, node_labels
 
+
 class AutoscaleDetector:
     """Base class to define a autoscale detector for a Kubernetes cluster.
     An autoscale detector is a class that defines how to detect if a Kubernetes
@@ -564,18 +566,19 @@ class AutoscaleDetector:
 
     @classmethod
     def may_autoscale(cls, context: str, instance_type: str) -> bool:
-        """Returns if the Kubernetes context has an autoscaler that can scale to accommodate the 
-            instance type.
+        """Returns if the Kubernetes context has an autoscaler
+        that can scale to accommodate the instance type.
         Args:
             context: The Kubernetes context to check.
             instance_type: The instance type to check.
         Returns:
             bool: True if the Kubernetes context has an autoscaler that can
                 scale to accommodate the instance type, or if such determination
-                is not possible. False if the Kubernetes context cannot autoscale
-                to accommodate the instance type.
+                is not possible. False if the Kubernetes context cannot
+                autoscale to accommodate the instance type.
         """
         raise NotImplementedError
+
 
 class GKEAutoscaleDetector(AutoscaleDetector):
     """GKE autoscale detector
@@ -583,12 +586,14 @@ class GKEAutoscaleDetector(AutoscaleDetector):
 
     @classmethod
     def may_autoscale(cls, context: str, instance_type: str) -> bool:
-        """Looks at each node pool in the cluster and checks if it can autoscale to accommodate the instance type.
-            If the context does not match standard GKE context naming convention, or GKE credential is not set,
-            this function returns True for optimistic pod scheduling.
+        """Looks at each node pool in the cluster and checks if
+        it can autoscale to accommodate the instance type.
+        If the context does not match standard GKE context naming convention,
+        or GKE credential is not set, this function returns True
+        for optimistic pod scheduling.
         """
         # assume context naming convention of gke_PROJECT-ID_ZONE_CLUSTER-NAME
-        context_components = context.split("_")
+        context_components = context.split('_')
         if len(context_components) != 4:
             # cannot determine if the context can autoscale
             # return True for optimistic pod scheduling.
@@ -600,31 +605,36 @@ class GKEAutoscaleDetector(AutoscaleDetector):
         import google.auth
         credentials, _ = google.auth.default()
         container_service = gcp.build('container',
-                                    'v1',
-                                    credentials=credentials)
+                                      'v1',
+                                      credentials=credentials)
         cluster = container_service.projects().locations().clusters() \
-            .get(name=f"projects/{project_id}/locations/{location}/clusters/{cluster_name}").execute()
+            .get(name=
+                 f'projects/{project_id}'
+                 f'/locations/{location}'
+                 f'/clusters/{cluster_name}').execute()
         # get node pools
         for node_pool in cluster['nodePools']:
             if node_pool['autoscaling'] is not None \
                 and 'enabled' in node_pool['autoscaling'] \
                 and node_pool['autoscaling']['enabled']:
 
-                if cls._check_instance_fits_gke_autoscaler_node_pool(instance_type, node_pool):
+                if cls._check_instance_fits_gke_autoscaler_node_pool(
+                        instance_type, node_pool):
                     return True
         return False
 
-    @classmethod   
-    def _check_instance_fits_gke_autoscaler_node_pool(cls, instance_type: str, node_pool: dict) -> bool:
-        print(f"Node pool", node_pool['name'])   
+    @classmethod
+    def _check_instance_fits_gke_autoscaler_node_pool(cls, instance_type: str,
+                                                      node_pool: dict) -> bool:
+        print('Node pool', node_pool['name'])
 
-        # check if there are any spare capacity in the autoscaler.   
+        # check if there are any spare capacity in the autoscaler.
         node_count = 0
         if 'initialNodeCount' in node_pool.keys():
             node_count = node_pool['initialNodeCount']
         max_node_count = node_pool['autoscaling']['maxNodeCount']
         free_node_count = max_node_count - node_count
-        print(f"free node count: {free_node_count}")
+        print(f'free node count: {free_node_count}')
         if free_node_count == 0:
             return False
 
@@ -634,12 +644,16 @@ class GKEAutoscaleDetector(AutoscaleDetector):
         # Accelerator check
         acc_type = k8s_instance_type.accelerator_type
         acc_count = k8s_instance_type.accelerator_count
-        if acc_type is not None:   
+        if acc_type is not None:
+            assert acc_count is not None
             if 'accelerators' in node_pool['config'].keys():
-                accelerator_type = GKELabelFormatter.get_accelerator_from_label_value(
+                accelerator_type = GKELabelFormatter. \
+                    get_accelerator_from_label_value(
                     node_pool['config']['accelerators'][0]['acceleratorType'])
-                accelerator_count = node_pool['config']['accelerators'][0]['acceleratorCount']
-                if accelerator_type != acc_type or int(accelerator_count) < acc_count:
+                accelerator_count = node_pool['config']['accelerators'][0][
+                    'acceleratorCount']
+                if accelerator_type != acc_type or int(
+                        accelerator_count) < acc_count:
                     return False
             else:
                 return False
@@ -647,17 +661,20 @@ class GKEAutoscaleDetector(AutoscaleDetector):
         # VCPU and memory check
         machine_type = node_pool['config']['machineType']
         vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
-        if vcpus < k8s_instance_type.cpus or mem < k8s_instance_type.memory:
+        if (vcpus is None or vcpus < k8s_instance_type.cpus or mem is None or
+                mem < k8s_instance_type.memory):
             return False
 
         # disk_size = node_pool['config']['diskSizeGb']
-        # print(f"vcpus: {vcpus}, mem: {mem}, diskSizeGb: {disk_size}, maxNodeCount: {max_node_count}") 
+        # print(f"diskSizeGb: {disk_size}")
         return True
+
 
 # Mapping of autoscaler type to autoscaler detector
 AUTOSCALER_TO_AUTOSCALE_DETECTOR = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaleDetector,
 }
+
 
 @annotations.lru_cache(scope='request', maxsize=10)
 def detect_accelerator_resource(

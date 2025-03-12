@@ -8,7 +8,7 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
-from sky.adaptors import kubernetes,gcp
+from sky.adaptors import kubernetes
 from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
@@ -16,7 +16,6 @@ from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import kubernetes_enums
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
@@ -232,14 +231,15 @@ class Kubernetes(clouds.Cloud):
         # kubernetes cluster/context).
         regions_to_return = []
         autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if (autoscaler_type in kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR.keys() or
-        autoscaler_type is None) and instance_type is not None:
-            # If autoscaler is not set, or we have a way to interface with the autoscaler
-            # to determine if the instance type fits in the cluster, check if the 
-            # instance type fits in the cluster. Else, rely on the autoscaler to 
-            # provision the right instance type without running checks. Worst case, 
-            # if autoscaling fails, the pod will be stuck in pending state until
-            # provision_timeout, after which failover will be triggered.
+        if (autoscaler_type in kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR
+                or autoscaler_type is None) and instance_type is not None:
+            # If autoscaler is not set, or we have a way to interface with the
+            # autoscaler to determine if the instance type fits in the cluster,
+            # check if the instance type fits in the cluster. Else, rely on the
+            # autoscaler to provision the right instance type without running
+            # checks. Worst case, if autoscaling fails, the pod will be stuck in
+            # pending state until provision_timeout,
+            # after which failover will be triggered.
             for r in regions:
                 context = r.name
                 try:
@@ -252,16 +252,21 @@ class Kubernetes(clouds.Cloud):
                     regions_to_return.append(r)
                 else:
                     if autoscaler_type is not None:
-                        autoscale_detector = kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR.get(autoscaler_type)
-                        # autoscaler_type was verified to have a detector above if autoscaler_type is not None.
-                        assert autoscale_detector is not None, f'Unsupported autoscaler type: {autoscaler_type}'
-                        if autoscale_detector.may_autoscale(context, instance_type):
+                        autoscale_detector = \
+                            kubernetes_utils.AUTOSCALER_TO_AUTOSCALE_DETECTOR \
+                            .get(autoscaler_type)
+                        # autoscaler_type was verified to have a
+                        # detector above if autoscaler_type is not None.
+                        assert autoscale_detector is not None, \
+                            f'Unsupported autoscaler type: {autoscaler_type}'
+                        if autoscale_detector.may_autoscale(
+                                context, instance_type):
                             regions_to_return.append(r)
                         else:
-                            logger.debug(
-                                f'Instance type {instance_type} does '
-                                'not fit in the Kubernetes cluster with context: '
-                                f'{context}. Reason: {reason}')
+                            logger.debug(f'Instance type {instance_type} does '
+                                         'not fit in the Kubernetes cluster '
+                                         'with context: '
+                                         f'{context}. Reason: {reason}')
         else:
             regions_to_return = regions
 
