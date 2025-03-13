@@ -49,7 +49,6 @@ from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import types
@@ -221,6 +220,10 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
     os.close(original_stderr)
 
 
+def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
+    raise KeyboardInterrupt
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
@@ -232,12 +235,8 @@ def _request_execution_wrapper(request_id: str,
     3. Redirect the stdout and stderr of the execution to log file;
     4. Handle the SIGTERM signal to abort the request gracefully.
     """
-
-    def sigterm_handler(signum: int,
-                        frame: Optional['types.FrameType']) -> None:
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGTERM, sigterm_handler)
+    # Handle the SIGTERM signal to abort the request processing gracefully.
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
@@ -355,6 +354,8 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
     Args:
         max_parallel_size: Maximum number of parallel jobs this worker can run.
     """
+    # Handle the SIGTERM signal to abort the executor process gracefully.
+    signal.signal(signal.SIGTERM, _sigterm_handler)
     proc_group = f'{worker.schedule_type.value}-{worker.id}'
     setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
     queue = _get_queue(worker.schedule_type)
@@ -388,19 +389,11 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
                 logger.info(f'[{worker}] Finished request: {request_id}')
             else:
                 logger.info(f'[{worker}] Submitted request: {request_id}')
-        except KeyboardInterrupt:
-            # Interrupt the worker process will stop request execution, but
-            # the SIGTERM request should be respected anyway since it might
-            # be explicitly sent by user.
-            # TODO(aylei): crash the API server or recreate the worker process
-            # to avoid broken state.
-            logger.error(f'[{worker}] Worker process interrupted')
-            with ux_utils.print_exception_no_traceback():
-                raise
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
             # Catch any other exceptions to avoid crashing the worker process.
             logger.error(
-                f'[{worker}] Error processing request {request_id}: '
+                f'[{worker}] Error processing request: '
+                f'{request_id if "request_id" in locals() else ""} '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
     # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
@@ -409,12 +402,33 @@ def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
     # We use executor instead of individual multiprocessing.Process to avoid
     # the overhead of forking a new process for each request, which can be about
     # 1s delay.
-    with concurrent.futures.ProcessPoolExecutor(
+    try:
+        executor = concurrent.futures.ProcessPoolExecutor(
             max_workers=max_parallel_size,
             initializer=executor_initializer,
-            initargs=(proc_group,)) as executor:
+            initargs=(proc_group,))
         while True:
             process_request(executor)
+    # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
+    except KeyboardInterrupt:
+        pass
+    finally:
+        # In most cases, here we receive either ctrl-c in foreground execution
+        # or SIGTERM on server exiting. Gracefully exit the worker process and
+        # the executor.
+        # TODO(aylei): worker may also be killed by system daemons like OOM
+        # killer, crash the API server or recreate the worker process to avoid
+        # broken state in such cases.
+        logger.info(f'[{worker}] Worker process interrupted')
+        executor_processes = list(executor._processes.values())  # pylint: disable=protected-access,line-too-long
+        # Shutdown the executor so that executor process can exit once the
+        # running task is finished or interrupted.
+        executor.shutdown(wait=False)
+        # Proactively interrupt the running task to avoid indefinite waiting.
+        subprocess_utils.run_in_parallel(
+            subprocess_utils.kill_process_with_grace_period,
+            executor_processes,
+            num_threads=len(executor_processes))
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
