@@ -49,7 +49,12 @@ To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 1. :ref:`Deploy a cluster <kubernetes-setup-deploy>` running Kubernetes v1.20 or later.
 2. Set up :ref:`GPU support <kubernetes-setup-gpusupport>`.
 
-After these required steps, you may also want to explore the :ref:`optional steps <kubernetes-optional-steps>` to configure ports, service accounts, volumes and more.
+After these required steps, perform optional setup steps as needed:
+
+* :ref:`kubernetes-setup-ports`
+* :ref:`kubernetes-setup-serviceaccount`
+* :ref:`kubernetes-setup-volumes`
+* :ref:`kubernetes-setup-priority`
 
 Once completed, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
@@ -229,15 +234,15 @@ You can also check the GPUs available on your nodes by running:
 
 .. _kubernetes-optional-steps:
 
-Optional steps
--------------
+Optional setup
+--------------
 
-The following steps are optional and can be performed based on your specific requirements.
+The following setup steps are optional and can be performed based on your specific requirements.
 
 .. _kubernetes-setup-ports:
 
-Set up for exposing services
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Setup for exposing services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
 
@@ -253,8 +258,8 @@ Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more deta
 
 .. _kubernetes-setup-serviceaccount:
 
-Namespace and service account setup
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Setup Namespaces and service accounts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
 
@@ -281,8 +286,10 @@ To simplify the setup, we provide a `script <https://github.com/skypilot-org/sky
 
 You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
 
-Set up NFS and other volumes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _kubernetes-setup-volumes:
+
+Setup NFS and other volumes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
@@ -453,8 +460,8 @@ Examples:
 
 .. _kubernetes-setup-priority:
 
-Set up priority and preemption
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Setup priority and preemption
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
 

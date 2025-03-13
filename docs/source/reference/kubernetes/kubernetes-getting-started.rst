@@ -325,7 +325,7 @@ Mounting NFS and other volumes
 
 `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-Refer to :ref:`kubernetes-setup-volumes` for more details.
+Refer to :ref:`kubernetes-setup-volumes` for details and examples.
 
 FAQs
 ----
