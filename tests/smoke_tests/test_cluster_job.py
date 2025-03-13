@@ -412,10 +412,14 @@ def test_docker_preinstalled_package(generic_cloud: str):
 @pytest.mark.resource_heavy
 def test_multi_echo(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
+    use_spot = True
+    # EKS does not support spot instances
+    if generic_cloud == 'kubernetes':
+        use_spot = not smoke_tests_utils.is_eks_cluster()
     test = smoke_tests_utils.Test(
         'multi_echo',
         [
-            f'python examples/multi_echo.py {name} {generic_cloud}',
+            f'python examples/multi_echo.py {name} {generic_cloud} {int(use_spot)}',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',
             'sleep 10',
             f's=$(sky queue {name}); echo "$s"; echo; echo; echo "$s" | grep "FAILED" && exit 1 || true',

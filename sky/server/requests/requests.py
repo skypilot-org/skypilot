@@ -447,7 +447,7 @@ def init_db(func):
 
 def reset_db_and_logs():
     """Create the database."""
-    common_utils.remove_file_if_exists(_DB_PATH)
+    server_common.clear_local_api_server_database()
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),
