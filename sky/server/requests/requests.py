@@ -428,6 +428,9 @@ def create_table(cursor, conn):
         {COL_USER_ID} TEXT,
         {COL_STATUS_MSG} TEXT)""")
 
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
+                                 'TEXT')
+
 
 _DB = None
 

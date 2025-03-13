@@ -3630,8 +3630,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # should be higher priority than the cluster requests, and we should
             # release the lock from other requests.
             exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
-            requests_lib.kill_cluster_requests(handle.cluster_name,
-                                               exclude_request_to_kill)
+            try:
+                requests_lib.kill_cluster_requests(handle.cluster_name,
+                                                   exclude_request_to_kill)
+            except Exception as e:  # pylint: disable=broad-except
+                # We allow the failure to kill other launch requests, because
+                # it is not critical to the cluster teardown.
+                logger.warning(
+                    'Failed to kill other launch requests for the '
+                    f'cluster {handle.cluster_name}: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
             try:
                 with filelock.FileLock(
                         lock_path,
@@ -4028,8 +4036,16 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # the cluster is terminated/stopped. Otherwise, it will be quite
         # confusing to see the cluster restarted immediately after it is
         # terminated/stopped, when there is a pending launch request.
-        requests_lib.kill_cluster_requests(handle.cluster_name,
-                                           exclude_request_to_kill)
+        try:
+            requests_lib.kill_cluster_requests(handle.cluster_name,
+                                               exclude_request_to_kill)
+        except Exception as e:  # pylint: disable=broad-except
+            # We allow the failure to kill other launch requests, because
+            # it is not critical to the cluster teardown.
+            logger.warning(
+                'Failed to kill other launch requests for the '
+                f'cluster {handle.cluster_name}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
