@@ -105,7 +105,7 @@ class TestBackwardCompatibility:
         need_launch = request.config.getoption("--need-launch")
         need_launch_cmd = 'echo "skipping launch"'
         if need_launch:
-            need_launch_cmd = f'sky launch --cloud ${generic_cloud} -y -c ${cluster_name}'
+            need_launch_cmd = f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -y -c {cluster_name}'
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
