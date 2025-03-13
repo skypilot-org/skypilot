@@ -232,8 +232,17 @@ class Kubernetes(clouds.Cloud):
         if instance_type is None:
             return regions
 
-        regions_to_return = []
         autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if (autoscaler_type is not None and autoscaler_type
+                not in kubernetes_utils.AUTOSCALER_TYPE_TO_AUTOSCALER):
+            # Unsupported autoscaler type. Rely on the autoscaler to
+            # provision the right instance type without running checks.
+            # Worst case, if autoscaling fails, the pod will be stuck in
+            # pending state until provision_timeout, after which failover
+            # will be triggered.
+            return regions
+
+        regions_to_return = []
         for r in regions:
             context = r.name
             try:
@@ -245,19 +254,20 @@ class Kubernetes(clouds.Cloud):
             if fits:
                 regions_to_return.append(r)
                 continue
-            debug_msg = (f'Instance type {instance_type} does '
-                         'not fit in the Kubernetes cluster '
+            logger.debug(f'Instance type {instance_type} does '
+                         'not fit in the existing Kubernetes cluster '
                          'with context: '
                          f'{context}. Reason: {reason}')
             if autoscaler_type is None:
-                logger.debug(debug_msg)
                 continue
             autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
             if autoscaler.can_create_new_instance_of_type(
                     context, instance_type):
+                logger.debug(f'Kubernetes cluster {context} can be '
+                             'autoscaled to create instance type '
+                             f'{instance_type}. Including {context} '
+                             'in the list of regions to return.')
                 regions_to_return.append(r)
-            else:
-                logger.debug(debug_msg)
         return regions_to_return
 
     def instance_type_to_hourly_cost(self,
