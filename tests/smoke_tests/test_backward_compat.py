@@ -1,5 +1,8 @@
+import os
 import pathlib
 import subprocess
+import tempfile
+import time
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -7,23 +10,18 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.backends.backend_utils import SKY_REMOTE_PATH
 
+# Global temp directory
+TEMP_DIR = pathlib.Path(tempfile.gettempdir())
+
+# Add a pytest mark to limit concurrency to 1
+pytestmark = pytest.mark.xdist_group(name="backward_compat")
+
 
 class TestBackwardCompatibility:
     # Constants
-    BASE_BRANCH = 'master'
     MANAGED_JOB_PREFIX = 'test-back-compat'
     SERVE_PREFIX = 'test-back-compat'
     TEST_TIMEOUT = 1800  # 30 minutes
-    GCLOUD_INSTALL_CMD = """
-    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-424.0.0-linux-x86_64.tar.gz &&
-    tar xzf google-cloud-sdk-424.0.0-linux-x86_64.tar.gz &&
-    rm -rf ~/google-cloud-sdk &&
-    mv google-cloud-sdk ~/ &&
-    ~/google-cloud-sdk/install.sh -q &&
-    echo "source ~/google-cloud-sdk/path.bash.inc" >> ~/.bashrc &&
-    . ~/google-cloud-sdk/path.bash.inc
-    """
-    UV_INSTALL_CMD = 'curl -LsSf https://astral.sh/uv/install.sh | sh'
 
     # Environment paths
     BASE_ENV_DIR = pathlib.Path(
@@ -38,74 +36,56 @@ class TestBackwardCompatibility:
     ACTIVATE_BASE = f'rm -r  {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r  {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
-    # TODO:(zeping): Remove this after #4867 merged, without this the backward
-    # compatibility test is highly flaky.
-    WAIT_UNTIL_CLUSTER_UP = (
-        'start_time=$SECONDS; '
-        'while true; do '
-        'if (( $SECONDS - $start_time > 60 )); then '
-        '  echo "Timeout after 60 seconds waiting for cluster to be UP"; exit 1; '
-        'fi; '
-        'if sky status {cluster_name} | grep UP; then '
-        '  echo "Cluster {cluster_name} is UP."; break; '
-        'fi; '
-        'echo "Waiting for cluster {cluster_name} to be UP..."; '
-        'sleep 10; '
-        'done')
 
-    @pytest.fixture(scope="session")
-    def session_cloud(self, request):
-        """Session-scoped cloud fixture using command-line argument."""
-        return request.config.getoption("--generic-cloud")
+    def _run_cmd(self, cmd: str):
+        subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
 
-    @pytest.fixture(scope='session', autouse=True)
-    def class_setup(self, session_cloud):
-        """Class-wide setup fixture for environment preparation"""
-        self.generic_cloud = session_cloud
+    @pytest.fixture(scope="session", autouse=True)
+    def session_setup(self, request):
+        """Session-wide setup that runs exactly once (concurrency limited to 1)."""
+        # No locking mechanism needed since concurrency is limited to 1
+        base_branch = request.config.getoption("--base-branch")
 
-        def _run_cmd(cmd: str):
-            subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
-
-        # Install gcloud if missing
+        # Check if gcloud is installed
         if subprocess.run('gcloud --version', shell=True).returncode != 0:
-            _run_cmd(self.GCLOUD_INSTALL_CMD)
+            raise Exception('gcloud not found')
 
-        # Install uv if missing
+        # Check if uv is installed
         if subprocess.run('~/.local/bin/uv --version', shell=True,
                           check=False).returncode != 0:
-            _run_cmd(self.UV_INSTALL_CMD)
+            raise Exception('uv not found')
 
         # Clone base SkyPilot version
         if self.BASE_SKY_DIR.exists():
-            _run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
+            self._run_cmd(f'rm -rf {self.BASE_SKY_DIR}')
 
-        _run_cmd(
-            f'git clone -b {self.BASE_BRANCH} '
+        self._run_cmd(
+            f'git clone -b {base_branch} '
             f'https://github.com/skypilot-org/skypilot.git {self.BASE_SKY_DIR}',
         )
 
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
             if not env_dir.exists():
-                _run_cmd(f'~/.local/bin/uv venv --seed --python=3.9 {env_dir}',)
+                self._run_cmd(
+                    f'~/.local/bin/uv venv --seed --python=3.9 {env_dir}',)
 
         # Install dependencies in base environment
-        _run_cmd(
+        self._run_cmd(
             f'{self.ACTIVATE_BASE} && '
             '~/.local/bin/uv pip uninstall skypilot && '
             '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
             '~/.local/bin/uv pip install -e .[all]',)
 
         # Install current version in current environment
-        _run_cmd(
+        self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
             '~/.local/bin/uv pip uninstall skypilot && '
             '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
             '~/.local/bin/uv pip install -e .[all]',)
 
-        # Teardown function to stop sky api at the end of the session
-        yield
-        _run_cmd(f'cd {self.CURRENT_SKY_DIR} && sky api stop',)
+        yield  # Optional teardown logic
+        self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
 
     def run_compatibility_test(self, test_name: str, commands: list,
                                teardown: str):
@@ -118,9 +98,13 @@ class TestBackwardCompatibility:
         )
         smoke_tests_utils.run_one_test(test)
 
-    def test_cluster_launch_and_exec(self, generic_cloud: str):
+    def test_cluster_launch_and_exec(self, request, generic_cloud: str):
         """Test basic cluster launch and execution across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
+        need_launch = request.config.getoption("--need-launch")
+        need_launch_cmd = 'echo "skipping launch"'
+        if need_launch:
+            need_launch_cmd = f'sky launch --cloud ${generic_cloud} -y -c ${cluster_name}'
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
@@ -128,6 +112,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 100',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
             f'{self.ACTIVATE_CURRENT} && result="$(sky status -r {cluster_name})"; echo "$result"; echo "$result" | grep UP',
+            need_launch_cmd,
             f'{self.ACTIVATE_CURRENT} && sky exec -d --cloud {generic_cloud} {cluster_name} sleep 50',
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue -u {cluster_name})"; echo "$result"; echo "$result" | grep RUNNING | wc -l | grep 2',
             f'{self.ACTIVATE_CURRENT} && s=$(sky launch --cloud {generic_cloud} -d -c {cluster_name} examples/minimal.yaml) && '
@@ -157,7 +142,6 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky start -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && {self.WAIT_UNTIL_CLUSTER_UP.format(cluster_name=cluster_name)}',
             f'{self.ACTIVATE_CURRENT} && s=$(sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml) && '
             'echo "$s" | sed -r "s/\\x1B\\[([0-9]{1,3}(;[0-9]{1,2})?)?[mGK]//g" | grep "Job submitted, ID: 2"',
         ]
@@ -206,7 +190,6 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && {self.WAIT_UNTIL_CLUSTER_UP.format(cluster_name=cluster_name)}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
@@ -226,7 +209,6 @@ class TestBackwardCompatibility:
             f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/multi_hostname.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
-            f'{self.ACTIVATE_CURRENT} && {self.WAIT_UNTIL_CLUSTER_UP.format(cluster_name=cluster_name)}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1 --status',
             f'{self.ACTIVATE_CURRENT} && sky logs {cluster_name} 1',
