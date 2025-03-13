@@ -106,3 +106,30 @@ Get response
   "prompt_logprobs": null
 }
 ```
+
+
+
+## Deploy the Service with Multiple Replicas
+
+The launching command above only starts a single replica (with 2 nodes) for the service. SkyServe helps deploy the service with multiple replicas with out-of-the-box load balancing, autoscaling and automatic recovery.
+Importantly, it also enables serving on spot instances resulting in 30\% lower cost.
+
+The only change needed is to add a service section for serving specific configuration:
+
+```yaml
+service:
+  replicas: 2
+  readiness_probe:
+    path: /v1/chat/completions
+    post_data:
+      model: $MODEL_NAME
+      messages:
+        - role: user
+          content: Hello! What is your name?
+      max_tokens: 1
+```
+
+And run the [SkyPilot YAML](https://github.com/skypilot-org/skypilot/blob/master/llm/deepseek-r1/deepseek-r1-671B.yaml) with a single command:
+```bash
+sky serve up -n gemma-serve gemma.yaml
+```
