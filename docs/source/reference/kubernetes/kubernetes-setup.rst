@@ -432,7 +432,7 @@ Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more deta
 
 .. _kubernetes-setup-serviceaccount:
 
-Setup Namespaces and service accounts
+Setup namespaces and service accounts
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
