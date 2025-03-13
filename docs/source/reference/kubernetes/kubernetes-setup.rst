@@ -294,21 +294,21 @@ Examples:
 
     .. tab-item:: NFS using hostPath
       :name: kubernetes-volumes-hostpath-nfs
-    
+
       Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_:
-      
+
       .. tab-set::
-      
+
           .. tab-item:: Task YAML (per-task)
              :name: kubernetes-volumes-hostpath-nfs-task
-          
+
              .. code-block:: yaml
-             
+
                   # task.yaml
                   run: |
                     echo "Hello, world!" > /mnt/nfs/hello.txt
                     ls -la /mnt/nfs
-                  
+
                   experimental:
                     config_overrides:
                       pod_config:
@@ -322,12 +322,12 @@ Examples:
                               hostPath:
                                 path: /path/on/host/nfs
                                 type: Directory
-          
+
           .. tab-item:: Config YAML (global)
              :name: kubernetes-volumes-hostpath-nfs-global
-          
+
              .. code-block:: yaml
-             
+
                   # ~/.sky/config.yaml
                   kubernetes:
                     pod_config:
@@ -345,21 +345,21 @@ Examples:
 
     .. tab-item:: NFS using native volume
       :name: kubernetes-volumes-native-nfs
-    
+
       Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support:
-      
+
       .. tab-set::
-      
+
           .. tab-item:: Task YAML (per-task)
              :name: kubernetes-volumes-native-nfs-task
-             
+
              .. code-block:: yaml
-             
+
                   # task.yaml
                   run: |
                     echo "Hello, world!" > /mnt/nfs/hello.txt
                     ls -la /mnt/nfs
-                  
+
                   experimental:
                     config_overrides:
                       pod_config:
@@ -374,12 +374,12 @@ Examples:
                                 server: nfs.example.com
                                 path: /shared
                                 readOnly: false
-                                
+
           .. tab-item:: Config YAML (global)
              :name: kubernetes-volumes-native-nfs-global
-             
+
              .. code-block:: yaml
-             
+
                   # ~/.sky/config.yaml
                   kubernetes:
                     pod_config:
@@ -394,24 +394,24 @@ Examples:
                               server: nfs.example.com
                               path: /shared
                               readOnly: false
-    
+
     .. tab-item:: NVMe using hostPath
       :name: kubernetes-volumes-hostpath-nvme
-    
+
       Mount local NVMe storage that's already mounted on the Kubernetes nodes:
-      
+
       .. tab-set::
-      
+
           .. tab-item:: Task YAML (per-task)
              :name: kubernetes-volumes-hostpath-nvme-task
-             
+
              .. code-block:: yaml
-             
+
                   # task.yaml
                   run: |
                     echo "Hello, world!" > /mnt/nvme/hello.txt
                     ls -la /mnt/nvme
-                  
+
                   experimental:
                     config_overrides:
                       pod_config:
@@ -425,12 +425,12 @@ Examples:
                               hostPath:
                                 path: /path/on/host/nvme
                                 type: Directory
-                                
+
           .. tab-item:: Config YAML (global)
              :name: kubernetes-volumes-hostpath-nvme-global
-             
+
              .. code-block:: yaml
-             
+
                   # ~/.sky/config.yaml
                   kubernetes:
                     pod_config:
@@ -446,10 +446,20 @@ Examples:
                               type: Directory
 
 .. note::
-   
-  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled. 
-   
+
+  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.
+
   For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
+
+.. _kubernetes-setup-priority:
+
+Set up priority and preemption
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
+
+To assign priorities to SkyPilot pods and enable preemption to prioritize critical jobs, refer to :ref:`kubernetes-priorities`.
+
 
 .. _kubernetes-observability:
 
