@@ -26,19 +26,19 @@ Welcome to SkyPilot!
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
 
-
 SkyPilot is an open-source framework for running AI and batch workloads on any infra.
 
-SkyPilot is **easy to use for AI users**:
+SkyPilot **is easy to use for AI users**:
 
-- Launch clusters, jobs, and serving with one command
+- Quickly spin up compute on your own infra
+- Environment and job as code --- simple and portable
 - Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **unifies your compute --- multiple clusters, clouds, and hardware**:
+SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
 - One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
-- :ref:`Team deployment <sky-api-server>`  and resource sharing
+- :ref:`Team deployment <sky-api-server>` and resource sharing
 
 SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
