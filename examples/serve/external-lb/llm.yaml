@@ -1,7 +1,8 @@
 name: multi-lb-llm
 
 envs:
-  MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
+  # MODEL_NAME: meta-llama/Llama-3.2-3B-Instruct
+  MODEL_NAME: meta-llama/Llama-3.1-8B-Instruct
   HF_TOKEN:
 
 service:
@@ -13,7 +14,7 @@ service:
         - role: user
           content: Hello! What is your name?
       max_tokens: 1
-  replicas: 4
+  replicas: 8
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
@@ -27,7 +28,7 @@ service:
         cloud: aws
         region: ap-northeast-1
       load_balancing_policy: consistent_hashing
-  max_concurrent_requests: 30
+  max_concurrent_requests: 50
   max_queue_size: 10000
 
 resources:

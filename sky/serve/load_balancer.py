@@ -24,6 +24,9 @@ RequestQueueEntry = Tuple[fastapi.Request, asyncio.Event,
 
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
+# Whether to use "whether the inference engine queue is full or not" as an
+# indicator for available replicas.
+_USE_IE_QUEUE_INDICATOR = False
 
 
 class QueueSizeFilter(logging.Filter):
@@ -153,6 +156,8 @@ class ClientPool:
             logger.info(f'Active requests: {self._active_requests}, '
                         f'Available replicas: {self._available_replicas}')
             self._load_balancing_policy.pre_execute_hook(url, request)
+            if _USE_IE_QUEUE_INDICATOR:
+                return
             self._active_requests[url] = self._active_requests.get(url, 0) + 1
             if self._active_requests[url] >= self._max_concurrent_requests:
                 if url in self._available_replicas:
@@ -161,6 +166,8 @@ class ClientPool:
     def post_execute_hook(self, url: str, request: fastapi.Request) -> None:
         with self._lock:
             self._load_balancing_policy.post_execute_hook(url, request)
+            if _USE_IE_QUEUE_INDICATOR:
+                return
             if url in self._active_requests and self._active_requests[url] > 0:
                 self._active_requests[url] -= 1
                 if self._active_requests[url] < self._max_concurrent_requests:
@@ -661,9 +668,7 @@ class SkyServeLoadBalancer:
                                 self._replica_queue,
                                 methods=['GET'])
 
-        self._app.add_api_route('/configuration',
-                                self._configuration,
-                                methods=['GET'])
+        self._app.add_api_route('/conf', self._configuration, methods=['GET'])
 
         self._app.add_api_route('/steal-request',
                                 self._steal_request,
