@@ -96,6 +96,7 @@ class TestBackwardCompatibility:
             commands,
             teardown=teardown,
             timeout=self.TEST_TIMEOUT,
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -108,7 +109,7 @@ class TestBackwardCompatibility:
             need_launch_cmd = f'{self.ACTIVATE_CURRENT} && sky launch --cloud {generic_cloud} -y -c {cluster_name}'
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky autostop -i 10 -y {cluster_name}',
             f'{self.ACTIVATE_BASE} && sky exec -d --cloud {generic_cloud} --num-nodes 2 {cluster_name} sleep 100',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && result="$(sky status {cluster_name})"; echo "$result"; echo "$result" | grep UP',
@@ -140,7 +141,7 @@ class TestBackwardCompatibility:
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && s=$(sky exec --cloud {generic_cloud} -d {cluster_name} examples/minimal.yaml) && '
@@ -154,7 +155,7 @@ class TestBackwardCompatibility:
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky autostop -y -i0 {cluster_name}',
             f"""
             {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -171,7 +172,7 @@ class TestBackwardCompatibility:
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky launch --cloud {generic_cloud} -y --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
@@ -188,7 +189,7 @@ class TestBackwardCompatibility:
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/minimal.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
@@ -207,7 +208,7 @@ class TestBackwardCompatibility:
         cluster_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky launch --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -c {cluster_name} examples/multi_hostname.yaml',
+            f'sky launch --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -c {cluster_name} examples/multi_hostname.yaml',
             f'{self.ACTIVATE_BASE} && sky stop -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && sky start -y {cluster_name}',
             f'{self.ACTIVATE_CURRENT} && sky queue {cluster_name}',
@@ -226,8 +227,8 @@ class TestBackwardCompatibility:
         managed_job_name = smoke_tests_utils.get_cluster_name()
         commands = [
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
-            f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y --cpus 2 --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
+            f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
+            f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
             f"""
             {self.ACTIVATE_BASE} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=f"{managed_job_name}-0",
@@ -275,7 +276,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && sky serve logs {serve_name}-0 2 --no-follow',
             f'{self.ACTIVATE_CURRENT} && sky serve logs --controller {serve_name}-0 --no-follow',
             f'{self.ACTIVATE_CURRENT} && sky serve logs --load-balancer {serve_name}-0 --no-follow',
-            f'{self.ACTIVATE_CURRENT} && sky serve update {serve_name}-0 -y --cloud {generic_cloud} --cpus 2 --num-nodes 4 examples/serve/http_server/task.yaml',
+            f'{self.ACTIVATE_CURRENT} && sky serve update {serve_name}-0 -y --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 4 examples/serve/http_server/task.yaml',
             f'{self.ACTIVATE_CURRENT} && sky serve up --cloud {generic_cloud} -y -n {serve_name}-1 examples/serve/http_server/task.yaml',
             f'{self.ACTIVATE_CURRENT} && sky serve status {serve_name}-1',
             f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}-0 -y',
