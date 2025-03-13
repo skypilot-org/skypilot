@@ -51,9 +51,9 @@ To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 
 After these required steps, perform optional setup steps as needed:
 
+* :ref:`kubernetes-setup-volumes`
 * :ref:`kubernetes-setup-ports`
 * :ref:`kubernetes-setup-serviceaccount`
-* :ref:`kubernetes-setup-volumes`
 * :ref:`kubernetes-setup-priority`
 
 Once completed, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
@@ -239,52 +239,6 @@ Optional setup
 
 The following setup steps are optional and can be performed based on your specific requirements.
 
-.. _kubernetes-setup-ports:
-
-Setup for exposing services
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. tip::
-
-    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
-
-Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
-SkyPilot supports either of two modes to expose ports:
-
-* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
-* :ref:`Nginx Ingress <kubernetes-ingress>`
-
-Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
-
-.. _kubernetes-setup-serviceaccount:
-
-Setup Namespaces and service accounts
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. tip::
-
-    By default, SkyPilot runs in the namespace configured in current `kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_ and creates a service account named ``skypilot-service-account`` to run tasks.
-    **This step is not required if you use these defaults.**
-
-If your cluster requires isolating SkyPilot tasks to a specific namespace and restricting the permissions granted to users,
-you can create a new namespace and service account for SkyPilot to use.
-
-The minimal permissions required for the service account can be found on the :ref:`Minimal Kubernetes Permissions <cloud-permissions-kubernetes>` page.
-
-To simplify the setup, we provide a `script <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/kubernetes/generate_kubeconfig.sh>`_ that creates a namespace and service account with the necessary permissions for a given service account name and namespace.
-
-.. code-block:: bash
-
-    # Download the script
-    wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
-    chmod +x generate_kubeconfig.sh
-
-    # Execute the script to generate a kubeconfig file with the service account and namespace
-    # Replace my-sa and my-namespace with your desired service account name and namespace
-    # The script will create the namespace if it does not exist and create a service account with the necessary permissions.
-    SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
-
-You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
 
 .. _kubernetes-setup-volumes:
 
@@ -457,6 +411,54 @@ Examples:
   When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.
 
   For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
+
+
+.. _kubernetes-setup-ports:
+
+Setup for exposing services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. tip::
+
+    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
+
+Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
+SkyPilot supports either of two modes to expose ports:
+
+* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
+* :ref:`Nginx Ingress <kubernetes-ingress>`
+
+Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
+
+.. _kubernetes-setup-serviceaccount:
+
+Setup Namespaces and service accounts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. tip::
+
+    By default, SkyPilot runs in the namespace configured in current `kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_ and creates a service account named ``skypilot-service-account`` to run tasks.
+    **This step is not required if you use these defaults.**
+
+If your cluster requires isolating SkyPilot tasks to a specific namespace and restricting the permissions granted to users,
+you can create a new namespace and service account for SkyPilot to use.
+
+The minimal permissions required for the service account can be found on the :ref:`Minimal Kubernetes Permissions <cloud-permissions-kubernetes>` page.
+
+To simplify the setup, we provide a `script <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/kubernetes/generate_kubeconfig.sh>`_ that creates a namespace and service account with the necessary permissions for a given service account name and namespace.
+
+.. code-block:: bash
+
+    # Download the script
+    wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
+    chmod +x generate_kubeconfig.sh
+
+    # Execute the script to generate a kubeconfig file with the service account and namespace
+    # Replace my-sa and my-namespace with your desired service account name and namespace
+    # The script will create the namespace if it does not exist and create a service account with the necessary permissions.
+    SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
+
+You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
 
 .. _kubernetes-setup-priority:
 
