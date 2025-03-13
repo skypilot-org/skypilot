@@ -845,7 +845,7 @@ class GCP(clouds.Cloud):
                                                     body=permissions)
         try:
             ret_permissions = request.execute().get('permissions', [])
-        except Exception as e:
+        except gcp.gcp_auth_refresh_error_exception() as e:  #
             return False, common_utils.format_exception(e, use_bracket=True)
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
