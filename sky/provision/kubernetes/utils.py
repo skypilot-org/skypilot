@@ -623,9 +623,9 @@ class GKEAutoscaler(Autoscaler):
             f'/clusters/{cluster_name}').execute()
         # get node pools
         for node_pool in cluster['nodePools']:
-            if node_pool['autoscaling'] is not None \
-                and 'enabled' in node_pool['autoscaling'] \
-                and node_pool['autoscaling']['enabled']:
+            if (node_pool['autoscaling'] is not None and
+                    'enabled' in node_pool['autoscaling'] and
+                    node_pool['autoscaling']['enabled']):
 
                 if cls._check_instance_fits_gke_autoscaler_node_pool(
                         instance_type, node_pool):
