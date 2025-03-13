@@ -309,7 +309,7 @@ Job statuses can be checked via ``sky jobs queue``:
   ...
 
 
-With Config Files
+With config files
 ~~~~~~~~~~~~~~~~~
 
 For more control, you can also create specific env var config files.

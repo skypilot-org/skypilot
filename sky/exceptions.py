@@ -28,12 +28,19 @@ GIT_FATAL_EXIT_CODE = 128
 ARCH_NOT_SUPPORTED_EXIT_CODE = 133
 
 
-def is_safe_exception(exc: Exception) -> bool:
+def is_safe_exception(exc: BaseException) -> bool:
     """Returns True if the exception is safe to send to clients.
 
     Safe exceptions are:
     1. Built-in exceptions
     2. SkyPilot's own exceptions
+
+    Args:
+        exc: The exception to check, accept BaseException to handle SystemExit
+            and KeyboardInterrupt.
+
+    Returns:
+        True if the exception is safe to send to clients, False otherwise.
     """
     module = type(exc).__module__
 
@@ -48,7 +55,7 @@ def is_safe_exception(exc: Exception) -> bool:
     return False
 
 
-def wrap_exception(exc: Exception) -> Exception:
+def wrap_exception(exc: BaseException) -> BaseException:
     """Wraps non-safe exceptions into SkyPilot exceptions
 
     This is used to wrap exceptions that are not safe to deserialize at clients.
@@ -64,7 +71,8 @@ def wrap_exception(exc: Exception) -> Exception:
                       error_type=type(exc).__name__)
 
 
-def serialize_exception(e: Exception) -> Dict[str, Any]:
+# Accept BaseException to handle SystemExit and KeyboardInterrupt
+def serialize_exception(e: BaseException) -> Dict[str, Any]:
     """Serialize the exception.
 
     This function also wraps any unsafe exceptions (e.g., cloud exceptions)
@@ -154,6 +162,15 @@ class ResourcesUnavailableError(Exception):
         # Copy the list to avoid modifying from outside.
         self.failover_history = list(failover_history)
         return self
+
+
+class KubeAPIUnreachableError(ResourcesUnavailableError):
+    """Raised when the Kubernetes API is currently unreachable.
+
+    This is a subclass of ResourcesUnavailableError to trigger same failover
+    behavior as other ResourcesUnavailableError.
+    """
+    pass
 
 
 class InvalidCloudConfigs(Exception):

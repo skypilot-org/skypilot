@@ -6,8 +6,9 @@ import random
 import resource
 import shlex
 import subprocess
+import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
 import colorama
 import psutil
@@ -16,6 +17,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
 
@@ -194,16 +196,16 @@ def kill_children_processes(parent_pids: Optional[Union[
     for parent_process in parent_processes:
         child_processes = parent_process.children(recursive=True)
         if parent_pids is not None:
-            kill_process_with_grace(parent_process, force=force)
+            kill_process_with_grace_period(parent_process, force=force)
         logger.debug(f'Killing child processes: {child_processes}')
         for child in child_processes:
-            kill_process_with_grace(child, force=force)
+            kill_process_with_grace_period(child, force=force)
 
 
 def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
-                                        psutil.Process],
-                            force: bool = False,
-                            grace_period: int = 10) -> None:
+                                               psutil.Process],
+                                   force: bool = False,
+                                   grace_period: int = 10) -> None:
     """Kill a process with SIGTERM and wait for it to exit.
 
     Args:
@@ -241,7 +243,7 @@ def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
         if not force:
             logger.debug(f'Force killing process {proc.pid}')
             # Shorter timeout after force kill
-            kill_process_with_grace(proc, force=True, grace_period=5)
+            kill_process_with_grace_period(proc, force=True, grace_period=5)
 
 
 def run_with_retries(
@@ -375,3 +377,56 @@ def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
                           text=True)
     # Get the PID of the detached process
     return int(proc.stdout.strip())
+
+
+# A protocol for objects that can be started, designed to be used with
+# slow_start_processes() so that we can handle different wrappers of
+# multiprocessing.Process in a uniform way.
+class Startable(Protocol):
+
+    def start(self) -> None:
+        ...
+
+
+OnStartFn = Callable[[Startable], None]
+
+
+def slow_start_processes(processes: List[Startable],
+                         delay: float = 2.0,
+                         on_start: Optional[OnStartFn] = None,
+                         should_exit: Optional[threading.Event] = None) -> None:
+    """Start processes with slow start.
+
+    Profile shows that it takes 1~2 seconds to start a worker process when
+    CPU is relatively idle. However, starting all workers simultaneously will
+    overwhelm the CPU and cause the time for the first worker to be ready to
+    be delayed. Slow start start a group of workers slowly to accelerate the
+    start time (i.e. the time for the first worker to be ready), while
+    gradually increasing the batch size in exponential manner to make the
+    time of achieving full parallelism as short as possible.
+
+    Args:
+        processes: The list of processes to start.
+        delay: The delay between starting each process, default to 2.0 seconds,
+            based on profile.
+        on_start: An optional function to callback when a process starts.
+        should_exit: An optional event to check if the function should exit
+            before starting all the processes.
+    """
+    max_batch_size = max(1, int(common_utils.get_cpu_count() / 2))
+    batch_size = 1
+    left = len(processes)
+    while left > 0:
+        if should_exit and should_exit.is_set():
+            break
+        current_batch = min(batch_size, left)
+        for i in range(current_batch):
+            worker_idx = len(processes) - left + i
+            processes[worker_idx].start()
+            if on_start:
+                on_start(processes[worker_idx])
+        left -= current_batch
+        if left <= 0:
+            break
+        batch_size = min(batch_size * 2, max_batch_size)
+        time.sleep(delay)

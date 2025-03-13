@@ -5,7 +5,6 @@ service:
   replicas: 2
 
 resources:
-  cpus: 2
   ports: 8081
 
 run: |

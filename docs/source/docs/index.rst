@@ -22,7 +22,6 @@ Welcome to SkyPilot!
    <p style="text-align:center">
    <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
    <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
-   <a class="github-button" href="https://github.com/skypilot-org/skypilot/fork" data-icon="octicon-repo-forked" data-size="large" aria-label="Fork skypilot-org/skypilot on GitHub">Fork</a>
    <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
    <script async defer src="https://buttons.github.io/buttons.js"></script>
    </p>
@@ -30,26 +29,28 @@ Welcome to SkyPilot!
 
 SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
 
-SkyPilot **abstracts away infra burdens**:
+SkyPilot **abstracts away AI infra burden**:
 
-- Launch :ref:`clusters <dev-cluster>`, :ref:`jobs <managed-jobs>`, and :ref:`serving <sky-serve>` on any infra
+- Launch clusters, jobs, and serving on any infra
 - Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **supports multiple clusters, clouds, and hardware** (`the Sky <https://arxiv.org/abs/2205.07147>`_):
+SkyPilot **supports multiple clusters, clouds, and hardware**:
 
-- Bring your reserved GPUs, Kubernetes clusters, or 12+ clouds
+- Bring reserved GPUs, Kubernetes clusters, or 15+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with auto-retry
 
 SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 
-* :ref:`Autostop <auto-stop>`: automatic cleanup of idle resources
+* Autostop: automatic cleanup of idle resources
 * :ref:`Managed Spot <managed-jobs>`: 3-6x cost savings using spot instances, with preemption auto-recovery
-* :ref:`Optimizer <auto-failover>`: 2x cost savings by auto-picking the cheapest & most available infra
+* Optimizer: 2x cost savings by auto-picking the cheapest & most available infra
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 
-:ref:`Current supported infra <installation>` (Kubernetes; AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack, RunPod, Cudo, Paperspace, Digital Ocean, Cloudflare, Samsung, IBM, Vast.ai, VMware vSphere):
+Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
+RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
+VMware vSphere, Nebius.
 
 .. raw:: html
 
@@ -111,6 +112,7 @@ Read the research:
    :caption: Clusters
 
    Start a Cluster <../examples/interactive-development>
+   Cluster Jobs <../reference/job-queue>
    ../examples/auto-failover
    ../reference/auto-stop
 
@@ -119,7 +121,6 @@ Read the research:
    :maxdepth: 1
    :caption: Jobs
 
-   Cluster Jobs <../reference/job-queue>
    ../examples/managed-jobs
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>

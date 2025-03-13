@@ -125,7 +125,7 @@ Deploying SkyPilot
 
    .. tip::
 
-     You can also use ``kubectl`` to interact and perform administrative operations on the cluster.
+      To enable shared access to a Kubernetes cluster, you can deploy a :ref:`SkyPilot API server <sky-api-server>`.
 
 What happens behind the scenes?
 -------------------------------
@@ -153,7 +153,7 @@ To clean up all state created by SkyPilot on your machines, use the ``--cleanup`
 This will stop all Kubernetes services on the remote machines.
 
 
-Setting up Multiple Clusters
+Setting up multiple clusters
 ----------------------------
 
 You can set up multiple Kubernetes clusters with SkyPilot by using different ``context-name`` values for each cluster:
