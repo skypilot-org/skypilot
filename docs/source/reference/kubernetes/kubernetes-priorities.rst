@@ -68,7 +68,7 @@ We use two simple counter jobs in this example:
 
 .. code-block:: yaml
 
-  # high-priority-task.yaml
+  # high-priority-job.yaml
   resources:
     cloud: kubernetes
     cpus: 4
@@ -90,7 +90,7 @@ We use two simple counter jobs in this example:
 
 .. code-block:: yaml
 
-  # low-priority-task.yaml
+  # low-priority-job.yaml
   resources:
     cloud: kubernetes
     cpus: 4
@@ -111,7 +111,7 @@ We use two simple counter jobs in this example:
             priorityClassName: low-priority
 
 .. tip::
-  For this example, resource contention is necessary to see the preemption behavior. Be sure to set the ``resources.cpu`` field such that once one job is running, there are no CPUs left for the other job in the cluster. 
+  To see the preemption behavior, be sure to set the ``resources.cpu`` field such that once one job is running, there are no CPUs left for the other job in the cluster.
    
   You can inspect the total number of CPUs in the cluster using ``kubectl get nodes``.
 
@@ -122,13 +122,13 @@ Use ``sky jobs launch`` to launch your jobs as managed jobs. First, we launch th
 
 .. code-block:: console
 
-  $ sky jobs launch low-priority-task.yaml
+  $ sky jobs launch low-priority-job.yaml
 
 Then launch the high priority job:
 
 .. code-block:: console
 
-  $ sky jobs launch high-priority-task.yaml
+  $ sky jobs launch high-priority-job.yaml
 
 Use ``sky jobs queue`` to see the status of your jobs. You will see that the high priority job starts running immediately and the low priority job is preempted.
 

@@ -246,8 +246,9 @@ You may distribute the generated kubeconfig file to users who can then use it to
 
 
 .. _kubernetes-setup-priority:
+
 [Optional] Step 5 - Set up priority and preemption
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
 
