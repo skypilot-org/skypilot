@@ -200,7 +200,7 @@ def kill_children_processes(parent_pids: Optional[Union[
             kill_process_with_grace(child, force=force)
 
 
-def kill_process_with_grace(proc: Union[multiprocessing.Process,
+def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
                                         psutil.Process],
                             force: bool = False,
                             grace_period: int = 10) -> None:
