@@ -51,7 +51,7 @@ class TestBackwardCompatibility:
             raise Exception('gcloud not found')
 
         # Check if uv is installed
-        if subprocess.run('~/.local/bin/uv --version', shell=True,
+        if subprocess.run('uv --version', shell=True,
                           check=False).returncode != 0:
             raise Exception('uv not found')
 
@@ -67,22 +67,23 @@ class TestBackwardCompatibility:
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
             if not env_dir.exists():
-                self._run_cmd(
-                    f'~/.local/bin/uv venv --seed --python=3.9 {env_dir}',)
+                self._run_cmd(f'uv venv --seed --python=3.9 {env_dir}',)
 
         # Install dependencies in base environment
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && '
-            '~/.local/bin/uv pip uninstall skypilot && '
-            '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
-            '~/.local/bin/uv pip install -e .[all]',)
+            'pip install uv && '
+            'uv pip uninstall skypilot && '
+            'uv pip install --prerelease=allow azure-cli && '
+            'uv pip install -e .[all]',)
 
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
-            '~/.local/bin/uv pip uninstall skypilot && '
-            '~/.local/bin/uv pip install --prerelease=allow azure-cli && '
-            '~/.local/bin/uv pip install -e .[all]',)
+            'pip install uv && '
+            'uv pip uninstall skypilot && '
+            'uv pip install --prerelease=allow azure-cli && '
+            'uv pip install -e .[all]',)
 
         yield  # Optional teardown logic
         self._run_cmd(f'{self.ACTIVATE_CURRENT} && sky api stop',)
