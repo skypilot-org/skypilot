@@ -602,25 +602,32 @@ class GKEAutoscaler(Autoscaler):
         or GKE credential is not set, this function returns True
         for optimistic pod scheduling.
         """
-        # assume context naming convention of gke_PROJECT-ID_ZONE_CLUSTER-NAME
-        context_components = context.split('_')
-        if len(context_components) != 4:
-            # cannot determine if the context can autoscale
+        # assume context naming convention of
+        # gke_PROJECT-ID_LOCATION_CLUSTER-NAME
+        valid, project_id, location, cluster_name = cls._validate_context_name(
+            context)
+        if not valid:
+            # Context name is not in the format of
+            # gke_PROJECT-ID_LOCATION_CLUSTER-NAME.
+            # Cannot determine if the context can autoscale
             # return True for optimistic pod scheduling.
             return True
-        project_id = context_components[1]
-        location = context_components[2]
-        cluster_name = context_components[3]
         # pylint: disable=import-outside-toplevel
-        import google.auth
-        credentials, _ = google.auth.default()
-        container_service = gcp.build('container',
-                                      'v1',
-                                      credentials=credentials)
-        cluster = container_service.projects().locations().clusters().get(
-            name=f'projects/{project_id}'
-            f'/locations/{location}'
-            f'/clusters/{cluster_name}').execute()
+        try:
+            import google.auth
+            credentials, _ = google.auth.default()
+            container_service = gcp.build('container',
+                                          'v1',
+                                          credentials=credentials)
+            cluster = container_service.projects().locations().clusters().get(
+                name=f'projects/{project_id}'
+                f'/locations/{location}'
+                f'/clusters/{cluster_name}').execute()
+        except gcp.http_error_exception():
+            # Cluster information is not available.
+            # return True for optimistic pod scheduling.
+            return True
+
         # get node pools
         for node_pool in cluster['nodePools']:
             if (node_pool['autoscaling'] is not None and
@@ -631,6 +638,24 @@ class GKEAutoscaler(Autoscaler):
                         instance_type, node_pool):
                     return True
         return False
+
+    @classmethod
+    def _validate_context_name(cls, context: str) -> Tuple[bool, str, str, str]:
+        """Validates the context name is in the format of
+        gke_PROJECT-ID_LOCATION_CLUSTER-NAME
+        Returns:
+            bool: True if the context name is in the format of
+                gke_PROJECT-ID_LOCATION_CLUSTER-NAME
+            str: project id
+            str: location
+            str: cluster name
+        """
+        context_components = context.split('_')
+        if len(context_components) != 4 or context_components[0] != 'gke':
+            return False, '', '', ''
+
+        return True, context_components[1], context_components[
+            2], context_components[3]
 
     @classmethod
     def _check_instance_fits_gke_autoscaler_node_pool(cls, instance_type: str,
