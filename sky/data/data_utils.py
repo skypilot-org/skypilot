@@ -95,13 +95,13 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
     return bucket, key
 
 
-def split_nebius_path(r2_path: str) -> Tuple[str, str]:
+def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
     """Splits Nebius Path into Bucket name and Relative Path to Bucket
 
     Args:
       nebius_path: str; Nebius Path, e.g. nebius://imagenet/train/
     """
-    path_parts = r2_path.replace('nebius://', '').split('/')
+    path_parts = nebius_path.replace('nebius://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
