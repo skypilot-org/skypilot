@@ -28,7 +28,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const newItems = [
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
         { selector: '.toctree-l1 > a', text: 'Admin Policies' },
-        { selector: '.toctree-l2 > a', text: 'Multiple Kubernetes Clusters' },
         { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
         { selector: '.toctree-l1 > a', text: 'Asynchronous Execution' },
         { selector: '.toctree-l1 > a', text: 'Team Deployment' },

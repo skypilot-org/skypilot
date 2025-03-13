@@ -50,6 +50,7 @@ To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 2. Set up :ref:`GPU support <kubernetes-setup-gpusupport>`.
 3. [Optional] :ref:`Set up ports <kubernetes-setup-ports>` for exposing services.
 4. [Optional] :ref:`Set up permissions <kubernetes-setup-serviceaccount>`: create a namespace for your users and/or create a service account with minimal permissions for SkyPilot.
+5. [Optional] :ref:`Set up priority and preemption <kubernetes-setup-priority>`: assign priorities to SkyPilot pods and enable preemption to prioritize critical jobs.
 
 After these steps, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
@@ -242,6 +243,15 @@ To simplify the setup, we provide a `script <https://github.com/skypilot-org/sky
     SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
 
 You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
+
+
+.. _kubernetes-setup-priority:
+[Optional] Step 5 - Set up priority and preemption
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
+
+To assign priorities to SkyPilot pods and enable preemption to prioritize critical jobs, refer to :ref:`kubernetes-priorities`.
 
 .. _kubernetes-setup-verify:
 
