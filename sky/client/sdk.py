@@ -32,7 +32,6 @@ from sky import sky_logging
 from sky import skypilot_config
 from sky.client import common as client_common
 from sky.server import common as server_common
-from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
@@ -1707,14 +1706,8 @@ def api_stop() -> None:
                                                      force=True)
             found = True
 
-    # Remove the database for requests including any files starting with
-    # api.constants.API_SERVER_REQUEST_DB_PATH
-    db_path = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
-    for extension in ['', '-shm', '-wal']:
-        try:
-            os.remove(f'{db_path}{extension}')
-        except FileNotFoundError:
-            logger.debug(f'Database file {db_path}{extension} not found.')
+    # Remove the database for requests.
+    server_common.clear_local_api_server_database()
 
     if found:
         logger.info(f'{colorama.Fore.GREEN}SkyPilot API server stopped.'
