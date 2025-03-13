@@ -52,9 +52,9 @@ To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 After these required steps, perform optional setup steps as needed:
 
 * :ref:`kubernetes-setup-volumes`
-* :ref:`kubernetes-setup-ports`
-* :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-priority`
+* :ref:`kubernetes-setup-serviceaccount`
+* :ref:`kubernetes-setup-ports`
 
 Once completed, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
@@ -237,13 +237,18 @@ You can also check the GPUs available on your nodes by running:
 Optional setup
 --------------
 
-The following setup steps are optional and can be performed based on your specific requirements.
+The following setup steps are optional and can be performed based on your specific requirements:
+
+* :ref:`kubernetes-setup-volumes`
+* :ref:`kubernetes-setup-priority`
+* :ref:`kubernetes-setup-serviceaccount`
+* :ref:`kubernetes-setup-ports`
 
 
 .. _kubernetes-setup-volumes:
 
-Setup NFS and other volumes
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Set up NFS and other volumes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
@@ -256,155 +261,142 @@ Examples:
     .. tab-item:: NFS using hostPath
       :name: kubernetes-volumes-hostpath-nfs
 
-      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_:
+      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_.
 
-      .. tab-set::
+      **Per-task configuration:**
 
-          .. tab-item:: Task YAML (per-task)
-             :name: kubernetes-volumes-hostpath-nfs-task
+      .. code-block:: yaml
 
-             .. code-block:: yaml
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
 
-                  # task.yaml
-                  run: |
-                    echo "Hello, world!" > /mnt/nfs/hello.txt
-                    ls -la /mnt/nfs
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: my-host-nfs
+                   volumes:
+                     - name: my-host-nfs
+                       hostPath:
+                         path: /path/on/host/nfs
+                         type: Directory
 
-                  experimental:
-                    config_overrides:
-                      pod_config:
-                        spec:
-                          containers:
-                            - volumeMounts:
-                                - mountPath: /mnt/nfs
-                                  name: my-host-nfs
-                          volumes:
-                            - name: my-host-nfs
-                              hostPath:
-                                path: /path/on/host/nfs
-                                type: Directory
+      **Global configuration:**
 
-          .. tab-item:: Config YAML (global)
-             :name: kubernetes-volumes-hostpath-nfs-global
+      .. code-block:: yaml
 
-             .. code-block:: yaml
-
-                  # ~/.sky/config.yaml
-                  kubernetes:
-                    pod_config:
-                      spec:
-                        containers:
-                          - volumeMounts:
-                              - mountPath: /mnt/nfs
-                                name: my-host-nfs
-                        volumes:
-                          - name: my-host-nfs
-                            hostPath:
-                              path: /path/on/host/nfs
-                              type: Directory
-
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nfs
+                         name: my-host-nfs
+                 volumes:
+                   - name: my-host-nfs
+                     hostPath:
+                       path: /path/on/host/nfs
+                       type: Directory
 
     .. tab-item:: NFS using native volume
       :name: kubernetes-volumes-native-nfs
 
-      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support:
+      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support.
 
-      .. tab-set::
+      **Per-task configuration:**
 
-          .. tab-item:: Task YAML (per-task)
-             :name: kubernetes-volumes-native-nfs-task
+      .. code-block:: yaml
 
-             .. code-block:: yaml
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
 
-                  # task.yaml
-                  run: |
-                    echo "Hello, world!" > /mnt/nfs/hello.txt
-                    ls -la /mnt/nfs
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: nfs-volume
+                   volumes:
+                     - name: nfs-volume
+                       nfs:
+                         server: nfs.example.com
+                         path: /shared
+                         readOnly: false
 
-                  experimental:
-                    config_overrides:
-                      pod_config:
-                        spec:
-                          containers:
-                            - volumeMounts:
-                                - mountPath: /mnt/nfs
-                                  name: nfs-volume
-                          volumes:
-                            - name: nfs-volume
-                              nfs:
-                                server: nfs.example.com
-                                path: /shared
-                                readOnly: false
+      **Global configuration:**
 
-          .. tab-item:: Config YAML (global)
-             :name: kubernetes-volumes-native-nfs-global
+      .. code-block:: yaml
 
-             .. code-block:: yaml
-
-                  # ~/.sky/config.yaml
-                  kubernetes:
-                    pod_config:
-                      spec:
-                        containers:
-                          - volumeMounts:
-                              - mountPath: /mnt/nfs
-                                name: nfs-volume
-                        volumes:
-                          - name: nfs-volume
-                            nfs:
-                              server: nfs.example.com
-                              path: /shared
-                              readOnly: false
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nfs
+                         name: nfs-volume
+                 volumes:
+                   - name: nfs-volume
+                     nfs:
+                       server: nfs.example.com
+                       path: /shared
+                       readOnly: false
 
     .. tab-item:: NVMe using hostPath
       :name: kubernetes-volumes-hostpath-nvme
 
-      Mount local NVMe storage that's already mounted on the Kubernetes nodes:
+      Mount local NVMe storage that's already mounted on the Kubernetes nodes.
 
-      .. tab-set::
+      **Per-task configuration:**
 
-          .. tab-item:: Task YAML (per-task)
-             :name: kubernetes-volumes-hostpath-nvme-task
+      .. code-block:: yaml
 
-             .. code-block:: yaml
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nvme/hello.txt
+             ls -la /mnt/nvme
 
-                  # task.yaml
-                  run: |
-                    echo "Hello, world!" > /mnt/nvme/hello.txt
-                    ls -la /mnt/nvme
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nvme
+                           name: nvme
+                   volumes:
+                     - name: nvme
+                       hostPath:
+                         path: /path/on/host/nvme
+                         type: Directory
 
-                  experimental:
-                    config_overrides:
-                      pod_config:
-                        spec:
-                          containers:
-                            - volumeMounts:
-                                - mountPath: /mnt/nvme
-                                  name: nvme
-                          volumes:
-                            - name: nvme
-                              hostPath:
-                                path: /path/on/host/nvme
-                                type: Directory
+      **Global configuration:**
 
-          .. tab-item:: Config YAML (global)
-             :name: kubernetes-volumes-hostpath-nvme-global
+      .. code-block:: yaml
 
-             .. code-block:: yaml
-
-                  # ~/.sky/config.yaml
-                  kubernetes:
-                    pod_config:
-                      spec:
-                        containers:
-                          - volumeMounts:
-                              - mountPath: /mnt/nvme
-                                name: nvme
-                        volumes:
-                          - name: nvme
-                            hostPath:
-                              path: /path/on/host/nvme
-                              type: Directory
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nvme
+                         name: nvme
+                 volumes:
+                   - name: nvme
+                     hostPath:
+                       path: /path/on/host/nvme
+                       type: Directory
 
 .. note::
 
@@ -413,27 +405,20 @@ Examples:
   For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
 
 
-.. _kubernetes-setup-ports:
+.. _kubernetes-setup-priority:
 
-Setup for exposing services
-^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Set up priority and preemption
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-.. tip::
+By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
 
-    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
+To assign priorities to SkyPilot pods and enable preemption to prioritize critical jobs, refer to :ref:`kubernetes-priorities`.
 
-Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
-SkyPilot supports either of two modes to expose ports:
-
-* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
-* :ref:`Nginx Ingress <kubernetes-ingress>`
-
-Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
 
 .. _kubernetes-setup-serviceaccount:
 
-Setup namespaces and service accounts
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+Set up namespaces and service accounts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
 
@@ -460,14 +445,23 @@ To simplify the setup, we provide a `script <https://github.com/skypilot-org/sky
 
 You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
 
-.. _kubernetes-setup-priority:
 
-Setup priority and preemption
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+.. _kubernetes-setup-ports:
 
-By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
+Set up for exposing services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-To assign priorities to SkyPilot pods and enable preemption to prioritize critical jobs, refer to :ref:`kubernetes-priorities`.
+.. tip::
+
+    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
+
+Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
+SkyPilot supports either of two modes to expose ports:
+
+* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
+* :ref:`Nginx Ingress <kubernetes-ingress>`
+
+Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
 
 
 .. _kubernetes-observability:
