@@ -293,6 +293,17 @@ def get_cluster_name() -> str:
     return f'{test_name}-{test_id}'
 
 
+def is_eks_cluster() -> bool:
+    cmd = 'kubectl config view --minify -o jsonpath='\
+          '{.clusters[0].cluster.server}' \
+          ' | grep -q "eks\.amazonaws\.com"'
+    result = subprocess.run(cmd,
+                            shell=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     name_on_cloud = common_utils.make_cluster_name_on_cloud(

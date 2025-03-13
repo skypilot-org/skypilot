@@ -8,11 +8,9 @@ from typing import Optional
 import sky
 
 
-def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
-    use_spot = True
-    if cloud == 'kubernetes':
-        # EKS does not support spot instances.
-        use_spot = False
+def run(cluster: Optional[str] = None,
+        cloud: Optional[str] = None,
+        use_spot: bool = True):
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
@@ -59,9 +57,13 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 if __name__ == '__main__':
     cluster = None
     cloud = None
+    use_spot = True
     if len(sys.argv) > 1:
         # For smoke test passing in a cluster name.
         cluster = sys.argv[1]
     if len(sys.argv) > 2:
         cloud = sys.argv[2]
-    run(cluster, cloud)
+    if len(sys.argv) > 3:
+        use_spot = sys.argv[3] == '1'
+
+    run(cluster, cloud, use_spot)
