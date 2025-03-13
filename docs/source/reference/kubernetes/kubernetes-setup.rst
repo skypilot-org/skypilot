@@ -408,7 +408,7 @@ Examples:
 .. _kubernetes-setup-priority:
 
 Set up priority and preemption
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
 
