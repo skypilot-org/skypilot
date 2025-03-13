@@ -120,10 +120,13 @@ extras_require: Dict[str, List[str]] = {
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
     'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
-        'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
+        'ibm-cloud-sdk-core',
+        'ibm-vpc',
+        'ibm-platform-services>=0.48.0',
+        'ibm-cos-sdk',
     ] + local_ray,
     'docker': ['docker'] + local_ray,
-    'lambda': local_ray,
+    'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,

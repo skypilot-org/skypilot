@@ -7,6 +7,7 @@ resources:
   cloud: gcp
   zone: us-east4-b
   cpus: 2+
+  memory: 4+
 
 run: |
   echo train starts
@@ -18,6 +19,11 @@ run: |
 
 ---
 name: b
+
+resources:
+  cloud: gcp
+  cpus: 2+
+  memory: 4+
 
 setup: |
   echo setup for train
@@ -32,6 +38,11 @@ run: |
 
 name: eval1
 
+resources:
+  cloud: gcp
+  cpus: 2+
+  memory: 4+
+
 setup: |
   echo setup for eval
   sleep 20
@@ -44,6 +55,11 @@ run: |
 ---
 
 name: eval2
+
+resources:
+  cloud: gcp
+  cpus: 2+
+  memory: 4+
 
 setup: |
   echo setup for eval

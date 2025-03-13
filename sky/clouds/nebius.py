@@ -15,7 +15,9 @@ if typing.TYPE_CHECKING:
 _CREDENTIAL_FILES = [
     # credential files for Nebius
     nebius.NEBIUS_TENANT_ID_FILENAME,
-    nebius.NEBIUS_IAM_TOKEN_FILENAME
+    nebius.NEBIUS_IAM_TOKEN_FILENAME,
+    nebius.NEBIUS_PROJECT_ID_FILENAME,
+    nebius.NEBIUS_CREDENTIALS_FILENAME
 ]
 
 
@@ -251,13 +253,16 @@ class Nebius(clouds.Cloud):
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """ Verify that the user has valid credentials for Nebius. """
         logging.debug('Nebius cloud check credentials')
-        token = nebius.get_iam_token()
-        token_msg = ('    Credentials can be set up by running: \n'\
-                    f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n')  # pylint: disable=line-too-long
+        token_cred_msg = ('    Credentials can be set up by running: \n'\
+                    f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'\
+                          '    or generate  ~/.nebius/credentials.json')  # pylint: disable=line-too-long
+
         tenant_msg = ('   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+                      f'        $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
+                      '   Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
                       f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
-        if token is None:
-            return False, f'{token_msg}'
+        if not nebius.is_token_or_cred_file_exist():
+            return False, f'{token_cred_msg}'
         sdk = nebius.sdk()
         tenant_id = nebius.get_tenant_id()
         if tenant_id is None:
@@ -269,7 +274,7 @@ class Nebius(clouds.Cloud):
         except nebius.request_error() as e:
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
-                f'{token_msg}'
+                f'{token_cred_msg}'
                 f'{tenant_msg}')
         return True, None
 
