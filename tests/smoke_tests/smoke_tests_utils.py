@@ -273,6 +273,29 @@ def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
 
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
+class PrefixedStderr:
+    def __init__(self, prefix):
+        self.prefix = prefix
+        self.buffer = ""
+        
+    def write(self, data):
+        self.buffer += data
+        lines = self.buffer.split('\n')
+        # Process all complete lines
+        for line in lines[:-1]:
+            sys.stderr.write(f"{self.prefix} {line}\n")
+        # Keep the last incomplete line in buffer
+        self.buffer = lines[-1]
+        
+    def flush(self):
+        if self.buffer:
+            sys.stderr.write(f"{self.prefix} {self.buffer}\n")
+            self.buffer = ""
+        sys.stderr.flush()
+        
+    def fileno(self):
+        return sys.stderr.fileno()
+
 
 class Test(NamedTuple):
     name: str
@@ -284,14 +307,32 @@ class Test(NamedTuple):
     timeout: int = DEFAULT_CMD_TIMEOUT
     # Environment variables to set for each command.
     env: Optional[Dict[str, str]] = None
+    # Optional identifier for test that belongs to a parametrized test suite.
+    parametrized: bool = False
 
     def echo(self, message: str):
-        # pytest's xdist plugin captures stdout; print to stderr so that the
-        # logs are streaming while the tests are running.
-        prefix = f'[{self.name}]'
+        if self.parametrized:
+            # Distinguish logs from different parametrized tests.
+            prefix = f'[{self.name}-{test_id}]'
+        else:
+            prefix = f'[{self.name}]'
         message = f'{prefix} {message}'
         message = message.replace('\n', f'\n{prefix} ')
+        # pytest's xdist plugin captures stdout; print to stderr so that the
+        # logs are streaming while the tests are running.
         print(message, file=sys.stderr, flush=True)
+    
+    def get_terminal_output(self):
+        """Get a stream that prefixes all output with the test name and id."""
+        if self.parametrized:
+            # If parametrized, use the test id to distinguish logs from
+            # different parametrized tests.
+            prefix = f'[{self.name}-{test_id}]'
+            return PrefixedStderr(prefix=prefix)
+        else:
+            # If not parametrized, just return the original stderr to keep
+            # the existing behavior.
+            return sys.stderr
 
 
 def get_timeout(generic_cloud: str,
@@ -344,7 +385,7 @@ def run_one_test(test: Test) -> None:
     if log_to_stdout:
         write = test.echo
         flush = lambda: None
-        subprocess_out = sys.stderr
+        subprocess_out = test.get_terminal_output()
         test.echo(f'Test started. Log to stdout')
     else:
         log_file = tempfile.NamedTemporaryFile('a',

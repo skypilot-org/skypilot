@@ -143,6 +143,7 @@ def test_job_queue_with_docker(generic_cloud: str, image_id: str,
         ],
         f'sky down -y {name}',
         timeout=total_timeout_minutes * 60,
+        parametrized=True,
     )
     smoke_tests_utils.run_one_test(test)
 
