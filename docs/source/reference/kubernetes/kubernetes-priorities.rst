@@ -62,7 +62,7 @@ Apply these priority classes to your cluster:
 Step 2: Setting priorities in SkyPilot jobs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To assign priorities to your SkyPilot tasks, use the ``experimental.config_overrides.kubernetes.pod_config`` field in your task YAML. 
+To assign priorities to your SkyPilot jobs, use the ``experimental.config_overrides.kubernetes.pod_config`` field in your SkyPilot YAML.
 
 We use two simple counter jobs in this example:
 
