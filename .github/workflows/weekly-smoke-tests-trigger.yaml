@@ -28,7 +28,7 @@ jobs:
             data='{
               "commit": "HEAD",
               "branch": "master",
-              "message": "Manual Smoke Tests",
+              "message": "Manual Smoke Tests: ${{ github.event.inputs.param }}",
               "ignore_pipeline_branch_filters": true,
               "env": {
                 "ARGS": "${{ github.event.inputs.param }}"
