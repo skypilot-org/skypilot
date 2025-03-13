@@ -65,5 +65,4 @@ if __name__ == '__main__':
         cloud = sys.argv[2]
     if len(sys.argv) > 3:
         use_spot = sys.argv[3] == '1'
-
     run(cluster, cloud, use_spot)
