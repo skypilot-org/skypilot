@@ -31,8 +31,8 @@ SkyPilot API server. The benefits include:
 - **Deploy once & onboard seamlessly**: Set up one SkyPilot API server (in the cloud or on Kubernetes), and team members can onboard with a single endpoint.
 - **Multi-tenancy**: Share clusters, jobs, and services securely among teammates.
 - **Unified view and management**: Get a single view of all running clusters and jobs across the organization and all infra you have.
-- **Fault-tolerant and cloud-native deployment**: SkyPilot API server can be cloud-native, and it is fully fault tolerant, without losing your team’s workloads.
-- **Integrate with workflow orchestrators**: Schedule workflow with orchestrators, like Airflow, Temporal, etc., while SkyPilot manages diverse infrastructure – no cumbersome SkyPilot state management.
+- **Fault-tolerant and cloud-native**: SkyPilot API server deployment is cloud-native and fully fault-tolerant, eliminating the risk of workload loss.
+- **Integrate with workflow orchestrators**: Schedule workflows with orchestrators (like Airflow or Temporal), and let SkyPilot manage your diverse infrastructure.
 
 .. image:: ../../images/client-server/remote.png
     :alt: SkyPilot API server remote mode
