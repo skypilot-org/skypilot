@@ -277,6 +277,22 @@ fi
 
 if [ "$start_from" -le 7 ]; then
 activate_env "base"
+# Cover jobs launched in the old version and ran to terminal states
+sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-cancel-in-old "echo hi; sleep 1000"
+sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-succeed-in-old "echo hi;"
+# Wait for the short job complete
+s=$(sky jobs logs -n ${MANAGED_JOB_JOB_NAME}-7-succeed-in-old)
+echo "$s"
+echo "$s" | grep " hi" || exit 1
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
+echo "$s"
+echo "$s" | grep "RUNNING" | wc -l | grep 1 || exit 1
+echo "$s" | grep "SUCCEEDED" | wc -l | grep 1 || exit 1
+sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-cancel-in-old
+s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
+echo "$s"
+echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
+# Cover jobs launched in the new version and still running after upgrade
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
 deactivate_env
@@ -286,18 +302,21 @@ s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
 sky jobs launch -d --cloud ${CLOUD} --num-nodes 2 -y -n ${MANAGED_JOB_JOB_NAME}-7-2 "echo hi; sleep 40"
+# Cover cancelling jobs launched in the new version
+sky jobs launch -d --cloud ${CLOUD} --num-nodes 2 -y -n ${MANAGED_JOB_JOB_NAME}-7-3 "echo hi; sleep 1000"
 s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-2)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
-echo "$s" | grep "RUNNING" | wc -l | grep 3 || exit 1
+echo "$s" | grep "RUNNING" | wc -l | grep 4 || exit 1
 sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-0
+sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-3
 sky jobs logs -n "${MANAGED_JOB_JOB_NAME}-7-1" || exit 1
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
-echo "$s" | grep "SUCCEEDED" | wc -l | grep 2 || exit 1
-echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
+echo "$s" | grep "SUCCEEDED" | wc -l | grep 3 || exit 1
+echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 3 || exit 1
 deactivate_env
 fi
 
