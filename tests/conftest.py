@@ -107,6 +107,19 @@ def pytest_addoption(parser):
                      dest='terminate_on_failure',
                      action='store_false',
                      help='Do not terminate test VMs on failure.')
+    # Custom options for backward compatibility tests
+    parser.addoption(
+        '--need-launch',
+        action='store_true',
+        default=False,
+        help='Whether to launch clusters in tests',
+    )
+    parser.addoption(
+        '--base-branch',
+        type=str,
+        default='master',
+        help='Base branch to test backward compatibility against',
+    )
 
 
 def pytest_configure(config):
