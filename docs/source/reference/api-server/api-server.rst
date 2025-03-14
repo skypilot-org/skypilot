@@ -28,10 +28,11 @@ For multi-user teams, SkyPilot can be deployed as a remote
 service. Multiple users in an organization can share the same
 SkyPilot API server. The benefits include:
 
-- **Deploy once and use anywhere**: Deploy a SkyPilot API server in Kubernetes or on a cloud VM and access it anywhere.
-- **Resource sharing in a team**: Team members can share resources with each other.
-- **Easy onboarding for new members**: Users can run SkyPilot commands without setting up local cloud credentials.
-- **Global view and control**: Admins obtain a single pane of glass for the entire team's compute resources---across clusters and regions.
+- **Deploy once & onboard seamlessly**: Set up one SkyPilot API server (in the cloud or on Kubernetes), and team members can onboard with a single endpoint.
+- **Multi-tenancy**: Share clusters, jobs, and services securely among teammates.
+- **Unified view and management**: Get a single view of all running clusters and jobs across the organization and all infra you have.
+- **Fault-tolerant and cloud-native**: SkyPilot API server deployment is cloud-native and fully fault-tolerant, eliminating the risk of workload loss.
+- **Integrate with workflow orchestrators**: Schedule workflows with orchestrators (like Airflow or Temporal), and let SkyPilot manage your diverse infrastructure.
 
 .. image:: ../../images/client-server/remote.png
     :alt: SkyPilot API server remote mode
