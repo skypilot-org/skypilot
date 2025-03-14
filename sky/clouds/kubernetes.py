@@ -631,7 +631,6 @@ class Kubernetes(clouds.Cloud):
             chosen_instance_type = (
                 kubernetes_utils.KubernetesInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
-
         # Check the availability of the specified instance type in all contexts.
         available_regions = self.regions_with_offering(
             chosen_instance_type,

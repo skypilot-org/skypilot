@@ -592,6 +592,7 @@ class Autoscaler:
 class GKEAutoscaler(Autoscaler):
     """GKE autoscaler
     """
+    pip_install_gcp_hint_last_sent = 0.0
 
     @classmethod
     def can_create_new_instance_of_type(cls, context: str,
@@ -611,18 +612,32 @@ class GKEAutoscaler(Autoscaler):
             # gke_PROJECT-ID_LOCATION_CLUSTER-NAME.
             # Cannot determine if the context can autoscale
             # return True for optimistic pod scheduling.
+            logger.debug(f'context {context} is not in the format of '
+                         f'gke_PROJECT-ID_LOCATION_CLUSTER-NAME. '
+                         'reporting context as potentially capable of '
+                         'provisioning resources without further check')
             return True
-        # pylint: disable=import-outside-toplevel
         try:
-            import google.auth
-            credentials, _ = google.auth.default()
             container_service = gcp.build('container',
                                           'v1',
-                                          credentials=credentials)
+                                          credentials=None,
+                                          cache_discovery=False)
             cluster = container_service.projects().locations().clusters().get(
                 name=f'projects/{project_id}'
                 f'/locations/{location}'
                 f'/clusters/{cluster_name}').execute()
+        except ImportError:
+            # If the gcp module is not installed, return True for
+            # optimistic pod scheduling.
+            # Remind the user once per day to install the gcp module for better
+            # pod scheduling with GKE autoscaler.
+            if time.time() - cls.pip_install_gcp_hint_last_sent > 60 * 60 * 24:
+                logger.info(
+                    'Could not fetch autoscaler information from GKE. '
+                    'Run pip install "skypilot[gcp]" for more intelligent pod '
+                    'scheduling with GKE autoscaler.')
+                cls.pip_install_gcp_hint_last_sent = time.time()
+            return True
         except gcp.http_error_exception():
             # Cluster information is not available.
             # return True for optimistic pod scheduling.
@@ -677,11 +692,13 @@ class GKEAutoscaler(Autoscaler):
         # Accelerator check
         requested_acc_type = k8s_instance_type.accelerator_type
         requested_acc_count = k8s_instance_type.accelerator_count
+        acc_is_tpu = (requested_acc_type is not None and
+                      is_tpu_on_gke(requested_acc_type))
         if requested_acc_type is not None:
             assert requested_acc_count is not None, (requested_acc_type,
                                                      requested_acc_count)
             accelerator_exists = False
-            if is_tpu_on_gke(requested_acc_type):
+            if acc_is_tpu:
                 # Accelerator type is a TPU.
                 if 'resourceLabels' in node_config:
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
@@ -697,9 +714,9 @@ class GKEAutoscaler(Autoscaler):
             if not accelerator_exists:
                 return False
 
+        # vcpu and memory check is not supported for TPU instances.
         # TODO(seungjin): Correctly account for vcpu/memory for TPUs.
-        if (requested_acc_type is None or
-                not is_tpu_on_gke(requested_acc_type)):
+        if not acc_is_tpu:
             # vcpu and memory check
             vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(
                 machine_type)
@@ -736,7 +753,7 @@ class GKEAutoscaler(Autoscaler):
         if 'goog-gke-tpu-node-pool-type' not in node_pool_resource_labels:
             # This node does not have TPUs.
             return False
-        if cls._is_node_tpu_multi_host(node_pool_resource_labels):
+        if cls._is_node_multi_host_tpu(node_pool_resource_labels):
             # This node is a multi-host TPU.
             # multi-host TPUs are not supported in SkyPilot yet.
             return False
@@ -767,7 +784,7 @@ class GKEAutoscaler(Autoscaler):
         return int(machine_type_parts[2].strip('t'))
 
     @classmethod
-    def _is_node_tpu_multi_host(cls, resource_labels: dict) -> bool:
+    def _is_node_multi_host_tpu(cls, resource_labels: dict) -> bool:
         """Check if the node pool is a multi-host TPU."""
         return ('goog-gke-tpu-node-pool-type' in resource_labels and
                 resource_labels['goog-gke-tpu-node-pool-type'] == 'multi-host')
