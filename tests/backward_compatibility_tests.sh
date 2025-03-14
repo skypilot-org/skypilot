@@ -291,7 +291,7 @@ echo "$s" | grep "SUCCEEDED" | wc -l | grep 1 || exit 1
 sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-cancel-in-old
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
-echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep $cancel_count || exit 1
+echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
 # Covering jobs launched in the new version and still running after upgrade
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
