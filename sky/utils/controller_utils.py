@@ -805,6 +805,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     else:
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
+        cloud_str = store_type.to_cloud()
+        if (cloud_str not in
+                storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'`{task_type}.bucket` is specified in SkyPilot config '
+                    f'with {bucket_wth_prefix}, but {cloud_str} is not '
+                    'enabled. Please avoid specifying the bucket or enable the '
+                    f'cloud by: sky check {cloud_str}')
+
         if storage_account_name is not None:
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:

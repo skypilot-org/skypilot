@@ -428,3 +428,19 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # necessary because the logger is initialized before the environment
     # variables are set, such as SKYPILOT_DEBUG.
     sky_logging.reload_logger()
+
+
+def clear_local_api_server_database() -> None:
+    """Removes the local API server database.
+
+    The CLI can call this during cleanup of a local API server, or the API
+    server can call it during startup.
+    """
+    # Remove the database for requests including any files starting with
+    # api.constants.API_SERVER_REQUEST_DB_PATH
+    db_path = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
+    for extension in ['', '-shm', '-wal']:
+        try:
+            os.remove(f'{db_path}{extension}')
+        except FileNotFoundError:
+            logger.debug(f'Database file {db_path}{extension} not found.')
