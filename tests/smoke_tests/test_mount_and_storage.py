@@ -1173,7 +1173,7 @@ class TestStorageWithCredentials:
         subprocess.check_call(
             f'aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
             shell=True)
-        yield tmp_bucket_name, bucket_uri
+        yield tmp_bucket_name, f'nebius://{tmp_bucket_name}'
         subprocess.check_call(
             f'aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
             shell=True)
