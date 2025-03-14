@@ -3631,6 +3631,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # release the lock from other requests.
             exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
             try:
+                # TODO(zhwu): we should get rid of this when it is being called
+                # internally without involving an API server, e.g., when a
+                # controller is trying to terminate a cluster.
                 requests_lib.kill_cluster_requests(handle.cluster_name,
                                                    exclude_request_to_kill)
             except Exception as e:  # pylint: disable=broad-except
@@ -4037,6 +4040,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # confusing to see the cluster restarted immediately after it is
         # terminated/stopped, when there is a pending launch request.
         try:
+            # TODO(zhwu): we should get rid of this when it is being called
+            # internally without involving an API server, e.g., when a
+            # controller is trying to terminate a cluster.
             requests_lib.kill_cluster_requests(handle.cluster_name,
                                                exclude_request_to_kill)
         except Exception as e:  # pylint: disable=broad-except
