@@ -39,7 +39,7 @@ ABSOLUTE_BASE_VERSION_DIR=$(cd "$(dirname "$BASE_VERSION_DIR")" 2>/dev/null && p
 rm -rf $ABSOLUTE_BASE_VERSION_DIR
 
 need_launch=${1:-0}
-start_from=7
+start_from=${2:-0}
 base_branch=${3:-master}
 
 CLUSTER_NAME="test-back-compat-$(whoami)"
@@ -277,7 +277,7 @@ fi
 
 if [ "$start_from" -le 7 ]; then
 activate_env "base"
-# Covering jobs launched in the old version and ran to terminal states
+# Cover jobs launched in the old version and ran to terminal states
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-cancel-in-old "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-succeed-in-old "echo hi;"
 # Wait for the short job complete
@@ -292,7 +292,7 @@ sky jobs cancel -y -n ${MANAGED_JOB_JOB_NAME}-7-cancel-in-old
 s=$(sky jobs queue | grep ${MANAGED_JOB_JOB_NAME}-7)
 echo "$s"
 echo "$s" | grep "CANCELLING\|CANCELLED" | wc -l | grep 1 || exit 1
-# Covering jobs launched in the new version and still running after upgrade
+# Cover jobs launched in the new version and still running after upgrade
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-0 "echo hi; sleep 1000"
 sky jobs launch -d --cloud ${CLOUD} -y --cpus 2 --num-nodes 2 -n ${MANAGED_JOB_JOB_NAME}-7-1 "echo hi; sleep 400"
 deactivate_env
@@ -302,6 +302,7 @@ s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-1)
 echo "$s"
 echo "$s" | grep " hi" || exit 1
 sky jobs launch -d --cloud ${CLOUD} --num-nodes 2 -y -n ${MANAGED_JOB_JOB_NAME}-7-2 "echo hi; sleep 40"
+# Cover cancelling jobs launched in the new version
 sky jobs launch -d --cloud ${CLOUD} --num-nodes 2 -y -n ${MANAGED_JOB_JOB_NAME}-7-3 "echo hi; sleep 1000"
 s=$(sky jobs logs --no-follow -n ${MANAGED_JOB_JOB_NAME}-7-2)
 echo "$s"
@@ -320,7 +321,7 @@ deactivate_env
 fi
 
 # sky serve
-if [ "$start_from" -le 6 ]; then
+if [ "$start_from" -le 8 ]; then
 activate_env "base"
 sky serve up --cloud ${CLOUD} -y --cpus 2 -y -n ${CLUSTER_NAME}-8-0 examples/serve/http_server/task.yaml
 sky serve status ${CLUSTER_NAME}-8-0
