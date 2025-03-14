@@ -63,6 +63,10 @@ SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code change
       <source src="../_static/intro.mp4" type="video/mp4" />
    </video>
 
+   </script>
+   <video style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
+      <source src="../_static/intro-with-badge.mp4" type="video/mp4" />
+   </video>
 
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
