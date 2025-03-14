@@ -1,0 +1,55 @@
+envs:
+ NFS_USERNAME: 
+
+setup: |
+  OLD_HOME=/home/$(whoami)
+  NEW_HOME=/mnt/nfs/$NFS_USERNAME
+
+  # Copy ssh authorized_keys to new home directory
+  cp -r $OLD_HOME/.ssh $NEW_HOME
+
+  # Change home directory to new home directory.
+  sudo usermod -d $NEW_HOME $(whoami)
+  
+  # For immediate effect in the current session
+  export HOME=$NEW_HOME
+
+  # Update .bashrc idempotently
+  if ! grep -q "export HOME=$NEW_HOME" $OLD_HOME/.bashrc; then
+    # Create backup of original .bashrc if it doesn't exist
+    if [ ! -f $OLD_HOME/.bashrc.orig ]; then
+      cp $OLD_HOME/.bashrc $OLD_HOME/.bashrc.orig
+    fi
+    
+    # Update .bashrc with the HOME export if not already present
+    sed -i "s|\$HOME|$OLD_HOME|g" $OLD_HOME/.bashrc
+    echo "export HOME=$NEW_HOME" | cat - $OLD_HOME/.bashrc > $OLD_HOME/.bashrc.tmp
+    mv $OLD_HOME/.bashrc.tmp $OLD_HOME/.bashrc
+  fi
+
+  # Always ensure NEW_HOME has the updated .bashrc
+  cp $OLD_HOME/.bashrc $NEW_HOME/.bashrc
+
+  echo $HOME
+  # Print current user.
+  echo $(whoami)
+
+run: |
+  cd ~
+  pwd
+  ls -la ~
+
+experimental:
+  config_overrides:
+    kubernetes:
+      pod_config:
+        spec:
+          containers:
+            - volumeMounts:
+                - mountPath: /mnt/nfs
+                  name: my-host-nfs
+          volumes:
+            - name: my-host-nfs
+              hostPath:
+                path: /path/to/nfs/on/host/machine
+                type: Directory
