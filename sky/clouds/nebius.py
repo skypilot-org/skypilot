@@ -279,10 +279,13 @@ class Nebius(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
+        credential_file_mounts = {
             f'~/.nebius/{filename}': f'~/.nebius/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
+
+        return credential_file_mounts
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

@@ -20,6 +20,7 @@ from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import gcp
 from sky.adaptors import ibm
+from sky.adaptors import nebius
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import ux_utils
@@ -89,6 +90,18 @@ def split_r2_path(r2_path: str) -> Tuple[str, str]:
       r2_path: str; R2 Path, e.g. r2://imagenet/train/
     """
     path_parts = r2_path.replace('r2://', '').split('/')
+    bucket = path_parts.pop(0)
+    key = '/'.join(path_parts)
+    return bucket, key
+
+
+def split_nebius_path(nebius_path: str) -> Tuple[str, str]:
+    """Splits Nebius Path into Bucket name and Relative Path to Bucket
+
+    Args:
+      nebius_path: str; Nebius Path, e.g. nebius://imagenet/train/
+    """
+    path_parts = nebius_path.replace('nebius://', '').split('/')
     bucket = path_parts.pop(0)
     key = '/'.join(path_parts)
     return bucket, key
@@ -307,6 +320,16 @@ def create_r2_client(region: str = 'auto') -> Client:
     return cloudflare.client('s3', region)
 
 
+def create_nebius_client(region: Optional[str]) -> Client:
+    """Helper method that connects to Boto3 client for Nebius Object Storage
+
+    Args:
+      region: str; Region for Nebius Object Storage
+    """
+    region = region if region is not None else nebius.DEFAULT_REGION
+    return nebius.client('s3', region)
+
+
 def verify_r2_bucket(name: str) -> bool:
     """Helper method that checks if the R2 bucket exists
 
@@ -316,6 +339,17 @@ def verify_r2_bucket(name: str) -> bool:
     r2 = cloudflare.resource('s3')
     bucket = r2.Bucket(name)
     return bucket in r2.buckets.all()
+
+
+def verify_nebius_bucket(name: str) -> bool:
+    """Helper method that checks if the Nebius bucket exists
+
+    Args:
+      name: str; Name of Nebius Object Storage (without nebius:// prefix)
+    """
+    nebius_s = nebius.resource('s3')
+    bucket = nebius_s.Bucket(name)
+    return bucket in nebius_s.buckets.all()
 
 
 def verify_ibm_cos_bucket(name: str) -> bool:
