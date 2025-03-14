@@ -455,6 +455,11 @@ def shared_controller_vars_to_fill(
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
         # Disable minimize logging to get more details on the controller.
         env_options.Options.MINIMIZE_LOGGING.env_key: '0',
+        # Make sure the clusters launched by the controller are marked as
+        # launched with a remote API server if the controller is launched
+        # with a remote API server.
+        constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
+            common_utils.get_using_remote_api_server()),
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
@@ -824,6 +829,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     else:
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
+        cloud_str = store_type.to_cloud()
+        if (cloud_str not in
+                storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'`{task_type}.bucket` is specified in SkyPilot config '
+                    f'with {bucket_wth_prefix}, but {cloud_str} is not '
+                    'enabled. Please avoid specifying the bucket or enable the '
+                    f'cloud by: sky check {cloud_str}')
+
         if storage_account_name is not None:
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:

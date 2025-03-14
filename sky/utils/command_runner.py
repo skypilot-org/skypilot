@@ -532,8 +532,8 @@ class SSHCommandRunner(CommandRunner):
         if port_forward is not None:
             for local, remote in port_forward:
                 logger.info(
-                    f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-NL', f'{remote}:localhost:{local}']
+                    f'Forwarding local port {local} to remote port {remote}.')
+                ssh += ['-NL', f'{local}:localhost:{remote}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:

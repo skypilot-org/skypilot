@@ -40,7 +40,7 @@ Cluster CLI
 Jobs CLI
 --------
 
-Cluster Jobs CLI
+Cluster jobs CLI
 ~~~~~~~~~~~~~~~~
 
 .. _sky-exec:
@@ -63,7 +63,7 @@ Cluster Jobs CLI
    :prog: sky logs
    :nested: full
 
-Managed Jobs CLI
+Managed jobs CLI
 ~~~~~~~~~~~~~~~~~
 
 .. _sky-job-launch:
@@ -126,7 +126,7 @@ Storage CLI
 
 .. _sky-api-cli:
 
-API Request CLI
+API request CLI
 ---------------
 
 .. _sky-api-login:

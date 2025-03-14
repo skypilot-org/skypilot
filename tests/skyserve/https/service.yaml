@@ -11,7 +11,6 @@ service:
 
 resources:
   ports: 8081
-  cpus: 2+
 
 workdir: examples/serve/http_server
 

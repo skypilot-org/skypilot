@@ -268,6 +268,12 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
 
+# Internal: Env var indicating the system is running with a remote API server.
+# It is used for internal purposes, including the jobs controller to mark
+# clusters as launched with a remote API server.
+USING_REMOTE_API_SERVER_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}USING_REMOTE_API_SERVER')
+
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.
 CLUSTER_NAME_VALID_REGEX = '[a-zA-Z]([-_.a-zA-Z0-9]*[a-zA-Z0-9])?'

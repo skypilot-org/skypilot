@@ -69,7 +69,7 @@ Why use SkyPilot on Kubernetes?
                 Reduce operational overhead by letting your teams provision their own resources, while you retain control over the Kubernetes cluster.
 
 
-Table of Contents
+Table of contents
 -----------------
 
 .. grid:: 1 1 3 3
@@ -102,6 +102,8 @@ Table of Contents
 
    Getting Started <kubernetes-getting-started>
    kubernetes-setup
-   kubernetes-troubleshooting
+   kubernetes-priorities
    multi-kubernetes
    SkyPilot vs. Vanilla Kubernetes <skypilot-and-vanilla-k8s>
+   Examples <examples/index>
+   kubernetes-troubleshooting

@@ -773,32 +773,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
-                        launchable_resources: 'resources_lib.Resources',
-                        region: 'clouds.Region',
-                        zones: Optional[List['clouds.Zone']], stdout: str,
-                        stderr: str):
-        del region, zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
-        messages = '\n  '.join(errors)
-        style = colorama.Style
-        logger.warning(f'  {style.DIM}{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, LambdaCloudError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('lambda'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -845,32 +819,6 @@ class FailoverCloudErrorHandlerV1:
         for zone in zones:  # type: ignore[union-attr]
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
-
-    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-    @staticmethod
-    def _oci_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        known_service_errors = [
-            'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
-            'LimitExceeded', 'NotAuthenticated'
-        ]
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
-            ('oci.exceptions.ServiceError' in x.strip() and any(
-                known_err in x.strip() for known_err in known_service_errors)))
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-
-        if zones is not None:
-            for zone in zones:
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -1122,6 +1070,23 @@ class FailoverCloudErrorHandlerV2:
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
+
+    @staticmethod
+    def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
+                        launchable_resources: 'resources_lib.Resources',
+                        region: 'clouds.Region',
+                        zones: Optional[List['clouds.Zone']], error: Exception):
+        output = str(error)
+        # Sometimes, lambda cloud error will list available regions.
+        if output.find('Regions with capacity available:') != -1:
+            for r in service_catalog.regions('lambda'):
+                if output.find(r.name) == -1:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(region=r.name, zone=None))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
