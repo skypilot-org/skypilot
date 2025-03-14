@@ -233,8 +233,8 @@ class Kubernetes(clouds.Cloud):
             return regions
 
         autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if (autoscaler_type is not None and autoscaler_type
-                not in kubernetes_utils.AUTOSCALER_TYPE_TO_AUTOSCALER):
+        if (autoscaler_type is not None and not kubernetes_utils.get_autoscaler(
+                autoscaler_type).supports_intelligent_scheduling):
             # Unsupported autoscaler type. Rely on the autoscaler to
             # provision the right instance type without running checks.
             # Worst case, if autoscaling fails, the pod will be stuck in

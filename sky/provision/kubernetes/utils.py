@@ -518,13 +518,6 @@ LABEL_FORMATTER_REGISTRY = [
     GFDLabelFormatter, CoreWeaveLabelFormatter
 ]
 
-# Mapping of autoscaler type to label formatter
-AUTOSCALER_TO_LABEL_FORMATTER = {
-    kubernetes_enums.KubernetesAutoscalerType.GKE: GKELabelFormatter,
-    kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterLabelFormatter,  # pylint: disable=line-too-long
-    kubernetes_enums.KubernetesAutoscalerType.GENERIC: SkyPilotLabelFormatter,
-}
-
 
 @annotations.lru_cache(scope='request')
 def detect_gpu_label_formatter(
@@ -564,6 +557,9 @@ class Autoscaler:
     context can autoscale to meet the resource requirements of a task.
     """
 
+    label_formatter: Any = None
+    supports_intelligent_scheduling: bool = False
+
     @classmethod
     # pylint: disable=unused-argument
     def can_create_new_instance_of_type(cls, context: str,
@@ -592,7 +588,11 @@ class Autoscaler:
 class GKEAutoscaler(Autoscaler):
     """GKE autoscaler
     """
-    pip_install_gcp_hint_last_sent = 0.0
+
+    label_formatter: Any = GKELabelFormatter
+    supports_intelligent_scheduling: bool = True
+
+    _pip_install_gcp_hint_last_sent = 0.0
 
     @classmethod
     def can_create_new_instance_of_type(cls, context: str,
@@ -631,12 +631,12 @@ class GKEAutoscaler(Autoscaler):
             # optimistic pod scheduling.
             # Remind the user once per day to install the gcp module for better
             # pod scheduling with GKE autoscaler.
-            if time.time() - cls.pip_install_gcp_hint_last_sent > 60 * 60 * 24:
+            if time.time() - cls._pip_install_gcp_hint_last_sent > 60 * 60 * 24:
                 logger.info(
                     'Could not fetch autoscaler information from GKE. '
                     'Run pip install "skypilot[gcp]" for more intelligent pod '
                     'scheduling with GKE autoscaler.')
-                cls.pip_install_gcp_hint_last_sent = time.time()
+                cls._pip_install_gcp_hint_last_sent = time.time()
             return True
         except gcp.http_error_exception():
             # Cluster information is not available.
@@ -790,9 +790,27 @@ class GKEAutoscaler(Autoscaler):
                 resource_labels['goog-gke-tpu-node-pool-type'] == 'multi-host')
 
 
+class KarpenterAutoscaler(Autoscaler):
+    """Karpenter autoscaler
+    """
+
+    label_formatter: Any = KarpenterLabelFormatter
+    supports_intelligent_scheduling: bool = False
+
+
+class GenericAutoscaler(Autoscaler):
+    """Generic autoscaler
+    """
+
+    label_formatter: Any = SkyPilotLabelFormatter
+    supports_intelligent_scheduling: bool = False
+
+
 # Mapping of autoscaler type to autoscaler
 AUTOSCALER_TYPE_TO_AUTOSCALER = {
     kubernetes_enums.KubernetesAutoscalerType.GKE: GKEAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.KARPENTER: KarpenterAutoscaler,
+    kubernetes_enums.KubernetesAutoscalerType.GENERIC: GenericAutoscaler,
 }
 
 
@@ -1039,9 +1057,10 @@ def get_accelerator_label_key_value(
             # early since we assume the cluster autoscaler will handle GPU
             # node provisioning.
             return None, None, None, None
-        formatter = AUTOSCALER_TO_LABEL_FORMATTER.get(autoscaler_type)
-        assert formatter is not None, ('Unsupported autoscaler type:'
-                                       f' {autoscaler_type}')
+        autoscaler = AUTOSCALER_TYPE_TO_AUTOSCALER.get(autoscaler_type)
+        assert autoscaler is not None, ('Unsupported autoscaler type:'
+                                        f' {autoscaler_type}')
+        formatter = autoscaler.label_formatter
         tpu_topology_label_key = None
         tpu_topology_label_value = None
         if is_tpu_on_gke(acc_type):
