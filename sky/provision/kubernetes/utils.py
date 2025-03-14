@@ -628,12 +628,12 @@ class GKEAutoscaler(Autoscaler):
             # return True for optimistic pod scheduling.
             return True
 
-        # get node pools
+        # Check if any node pool with autoscaling enabled can
+        # fit the instance type.
         for node_pool in cluster['nodePools']:
             if (node_pool['autoscaling'] is not None and
                     'enabled' in node_pool['autoscaling'] and
                     node_pool['autoscaling']['enabled']):
-
                 if cls._check_instance_fits_gke_autoscaler_node_pool(
                         instance_type, node_pool):
                     return True
@@ -658,51 +658,119 @@ class GKEAutoscaler(Autoscaler):
             2], context_components[3]
 
     @classmethod
-    def _check_instance_fits_gke_autoscaler_node_pool(cls, instance_type: str,
-                                                      node_pool: dict) -> bool:
-        print('Node pool', node_pool['name'])
-
-        # check if there are any spare capacity in the autoscaler.
+    def _check_instance_fits_gke_autoscaler_node_pool(
+        cls, instance_type: str, node_pool: dict
+    ) -> bool:  # check if there are any spare capacity in the autoscaler.
         node_count = 0
         if 'initialNodeCount' in node_pool:
             node_count = node_pool['initialNodeCount']
         max_node_count = node_pool['autoscaling']['maxNodeCount']
         free_node_count = max_node_count - node_count
-        print(f'free node count: {free_node_count}')
         if free_node_count == 0:
             return False
 
         k8s_instance_type = KubernetesInstanceType.\
             from_instance_type(instance_type)
+        node_config = node_pool['config']
+        machine_type = node_config['machineType']
 
         # Accelerator check
         requested_acc_type = k8s_instance_type.accelerator_type
         requested_acc_count = k8s_instance_type.accelerator_count
         if requested_acc_type is not None:
-            assert requested_acc_count is not None
-            suitable_accelerator_exists = False
-            if 'accelerators' in node_pool['config']:
-                for accelerator in node_pool['config']['accelerators']:
-                    node_accelerator_type = GKELabelFormatter. \
-                        get_accelerator_from_label_value(
-                            accelerator['acceleratorType'])
-                    node_accelerator_count = accelerator['acceleratorCount']
-                    if node_accelerator_type == requested_acc_type and int(
-                            node_accelerator_count) >= requested_acc_count:
-                        suitable_accelerator_exists = True
-            if not suitable_accelerator_exists:
+            assert requested_acc_count is not None, (requested_acc_type,
+                                                     requested_acc_count)
+            accelerator_exists = False
+            if is_tpu_on_gke(requested_acc_type):
+                # Accelerator type is a TPU.
+                if 'resourceLabels' in node_config:
+                    accelerator_exists = cls._node_pool_has_tpu_capacity(
+                        node_config['resourceLabels'], machine_type,
+                        requested_acc_type, requested_acc_count)
+            else:
+                # Accelerator type is a GPU.
+                if 'accelerators' in node_config:
+                    accelerator_exists = cls._node_pool_has_gpu_capacity(
+                        node_config['accelerators'], requested_acc_type,
+                        requested_acc_count)
+
+            if not accelerator_exists:
                 return False
 
-        # vcpu and memory check
-        machine_type = node_pool['config']['machineType']
-        vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
-        if (vcpus is None or vcpus < k8s_instance_type.cpus or mem is None or
-                mem < k8s_instance_type.memory):
-            return False
+        # TODO(seungjin): Correctly account for vcpu/memory for TPUs.
+        if (requested_acc_type is None or
+                not is_tpu_on_gke(requested_acc_type)):
+            # vcpu and memory check
+            vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(
+                machine_type)
+            if (vcpus is None or vcpus < k8s_instance_type.cpus or
+                    mem is None or mem < k8s_instance_type.memory):
+                return False
 
-        # disk_size = node_pool['config']['diskSizeGb']
-        # print(f"diskSizeGb: {disk_size}")
         return True
+
+    @classmethod
+    def _node_pool_has_gpu_capacity(cls, node_pool_accelerators: List[dict],
+                                    requested_gpu_type: str,
+                                    requested_gpu_count: int) -> bool:
+        """Check if the node pool has enough GPU capacity
+        to fit the instance type.
+        """
+        for accelerator in node_pool_accelerators:
+            node_accelerator_type = GKELabelFormatter. \
+                get_accelerator_from_label_value(
+                    accelerator['acceleratorType'])
+            node_accelerator_count = accelerator['acceleratorCount']
+            if node_accelerator_type == requested_gpu_type and int(
+                    node_accelerator_count) >= requested_gpu_count:
+                return True
+        return False
+
+    @classmethod
+    def _node_pool_has_tpu_capacity(cls, node_pool_resource_labels: dict,
+                                    machine_type: str, requested_tpu_type: str,
+                                    requested_tpu_count: int) -> bool:
+        """Check if the node pool has enough TPU capacity
+        to fit the instance type.
+        """
+        if 'goog-gke-tpu-node-pool-type' not in node_pool_resource_labels:
+            # This node does not have TPUs.
+            return False
+        if cls._is_node_tpu_multi_host(node_pool_resource_labels):
+            # This node is a multi-host TPU.
+            # multi-host TPUs are not supported in SkyPilot yet.
+            return False
+        node_tpu_type = node_pool_resource_labels['goog-gke-accelerator-type']
+        # infer chip count from instance type
+        tpu_chip_count = cls._tpu_chip_count_from_instance_type(machine_type)
+
+        # For TPUs, the number of requested TPU count
+        # must exactly match the TPU count in the instance.
+        return (node_tpu_type == requested_tpu_type and
+                tpu_chip_count == requested_tpu_count)
+
+    @classmethod
+    def _tpu_chip_count_from_instance_type(cls, machine_type: str) -> int:
+        """Infer the number of TPU chips from the instance type."""
+        machine_type_parts = machine_type.split('-')
+        # according to
+        # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
+        # GKE TPU machine types have the format of
+        # ct<version>-hightpu-<node-chip-count>t
+        if (len(machine_type_parts) != 3 or
+                not machine_type_parts[0].startswith('ct') or
+                machine_type_parts[1] != 'hightpu' or
+                not machine_type_parts[2].endswith('t') or
+                not machine_type_parts[2].strip('t').isdigit()):
+            return 0
+
+        return int(machine_type_parts[2].strip('t'))
+
+    @classmethod
+    def _is_node_tpu_multi_host(cls, resource_labels: dict) -> bool:
+        """Check if the node pool is a multi-host TPU."""
+        return ('goog-gke-tpu-node-pool-type' in resource_labels and
+                resource_labels['goog-gke-tpu-node-pool-type'] == 'multi-host')
 
 
 # Mapping of autoscaler type to autoscaler
