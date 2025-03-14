@@ -22,4 +22,5 @@ sky launch -c nfs_cluster examples/nfs_slurm/task.yaml --env NFS_USERNAME=<your_
 
 ## Limitations
 
+* SkyPilot's workdir and any file mounts to `~` will not be synced to the NFS. They will be in the original home directory (typically `/home/$(whoami)`).
 * Does not support custom .bashrc files present in the user's shared NFS directory.
