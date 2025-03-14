@@ -277,9 +277,24 @@ def test_kubernetes_storage_mounts():
     # built for x86_64 only.
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    ls_hello_command = (f'aws s3 ls {storage_name}/hello.txt || {{ '
-                        f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
-                        f'ls gs://{storage_name}/hello.txt; }}')
+
+    s3_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(storage_lib.StoreType.S3,
+                                                      storage_name, 'hello.txt')
+    gcs_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.GCS, storage_name, 'hello.txt')
+    azure_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.AZURE, storage_name, 'hello.txt')
+
+    # For Azure, we need to check if the output is empty list, as it returns []
+    # instead of a non-zero exit code when the file doesn't exist
+    azure_check_cmd = (f'output=$({azure_ls_cmd}); '
+                       f'exit_code=$?; '
+                       f'[ "$output" != "[]" ] && '
+                       f'[ $exit_code -eq 0 ]')
+
+    ls_hello_command = (f'{s3_ls_cmd} || {{ '
+                        f'{gcs_ls_cmd}; }} || {{ '
+                        f'{azure_check_cmd}; }}')
     cloud_cmd_cluster_setup_cmd_list = controller_utils._get_cloud_dependencies_installation_commands(
         controller_utils.Controllers.JOBS_CONTROLLER)
     cloud_cmd_cluster_setup_cmd = ' && '.join(cloud_cmd_cluster_setup_cmd_list)

@@ -141,6 +141,32 @@ _WAIT_PROVISION_REPR = (
     'echo "Provisioning complete. PROVISIONING: $num_provisioning, vCPU=2: $num_vcpu_in_provision"'
 )
 
+# Shell script snippet to monitor and wait for resolution of NOT_READY status:
+# EKS clusters and services can be slow to initialize, causing both the service and replicas
+# to remain in NOT_READY status for extended periods. This script:
+# 1. Runs for max 5 minutes
+# 2. Specifically checks 10th column (STATUS) for "NOT_READY"
+# 3. Ignores other states like SHUTTING_DOWN/STARTING
+# 4. Exits successfully when zero NOT_READY services/replicas remain
+# 5. Fails immediately if timeout reached
+_WAIT_NO_NOT_READY = (
+    'start_time=$(date +%s); '
+    'timeout=300; '
+    'while true; do '
+    '    not_ready_count=$(sky serve status {name} | '
+    '        awk \'/{name}/ && $10 == "NOT_READY" {{print}}\' | '
+    '        wc -l); '
+    '    [ "$not_ready_count" -eq 0 ] && break; '
+    '    current_time=$(date +%s); '
+    '    elapsed=$((current_time - start_time)); '
+    '    if [ "$elapsed" -ge "$timeout" ]; then '
+    '        echo "Timeout: $not_ready_count service/replica(s) stuck in NOT_READY"; '
+    '        exit 1; '
+    '    fi; '
+    '    echo "Waiting for $not_ready_count NOT_READY service/replicas..."; '
+    '    sleep 10; '
+    'done')
+
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
     return (f'ip{replica_id}=$(echo "$s" | '
@@ -191,6 +217,7 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
                       f'grep "{status}" | wc -l | grep {count} || exit 1;')
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             f'{_WAIT_PROVISION_REPR.format(name=name)}; '
+            f'{_WAIT_NO_NOT_READY.format(name=name)}; '
             f'echo "$s"; {check_cmd}')
 
 
@@ -401,33 +428,39 @@ def test_skyserve_user_bug_restart(generic_cloud: str):
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
-    test = smoke_tests_utils.Test(
-        f'test-skyserve-user-bug-restart',
-        [
-            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/restart/user_bug.yaml',
-            f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
-            'do echo "Waiting for first service to be SHUTTING DOWN..."; '
-            f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
-            f's=$(sky serve status {name}); echo "$s";'
-            'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
-            'do echo "Waiting for first service to be FAILED..."; '
-            f'sleep 2; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
-            + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
-            # User bug failure will cause no further scaling.
-            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
-            f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
-            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/auto_restart.yaml',
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"; do sleep 1; done; sleep 2; '
-            + _check_replica_in_status(name, [(1, False, 'READY'),
-                                              (1, False, 'FAILED')]),
-        ],
-        _TEARDOWN_SERVICE.format(name=name),
-        env=env,
-        timeout=20 * 60,
-    )
-    smoke_tests_utils.run_one_test(test)
+    with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
+            generic_cloud) as increase_initial_delay_seconds:
+        test = smoke_tests_utils.Test(
+            f'test-skyserve-user-bug-restart',
+            [
+                increase_initial_delay_seconds(
+                    f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/restart/user_bug.yaml'
+                ),
+                f's=$(sky serve status {name}); echo "$s";'
+                'until echo "$s" | grep -A 100 "Service Replicas" | grep "SHUTTING_DOWN"; '
+                'do echo "Waiting for first service to be SHUTTING DOWN..."; '
+                f'sleep 5; s=$(sky serve status {name}); echo "$s"; done; ',
+                f's=$(sky serve status {name}); echo "$s";'
+                'until echo "$s" | grep -A 100 "Service Replicas" | grep "FAILED"; '
+                'do echo "Waiting for first service to be FAILED..."; '
+                f'sleep 2; s=$(sky serve status {name}); echo "$s"; done; echo "$s"; '
+                + _check_replica_in_status(name, [(1, True, 'FAILED')]) +
+                # User bug failure will cause no further scaling.
+                f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 1; '
+                f'echo "$s" | grep -B 100 "NO_REPLICA" | grep "0/0"',
+                increase_initial_delay_seconds(
+                    f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/auto_restart.yaml'
+                ),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'until curl --connect-timeout 10 --max-time 10 $endpoint | grep "Hi, SkyPilot here"; do sleep 1; done; sleep 2; '
+                + _check_replica_in_status(name, [(1, False, 'READY'),
+                                                  (1, False, 'FAILED')]),
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            env=env,
+            timeout=20 * 60,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_vast  # Vast doesn't support opening ports
@@ -667,7 +700,7 @@ def test_skyserve_rolling_update(generic_cloud: str):
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
             f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/new.yaml',
             # Make sure the traffic is mixed across two versions, the replicas
-            # with even id will sleep 60 seconds before being ready, so we
+            # with even id will sleep 120 seconds before being ready, so we
             # should be able to get observe the period that the traffic is mixed
             # across two versions.
             f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
@@ -744,37 +777,45 @@ def test_skyserve_update_autoscale(generic_cloud: str):
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
-    test = smoke_tests_utils.Test(
-        f'test-skyserve-update-autoscale',
-        [
-            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/num_min_two.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
-            _check_service_version(name, "1"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl $endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} --mode blue_green -y tests/skyserve/update/num_min_one.yaml',
-            # sleep before update is registered.
-            'sleep 20',
-            # Timeout will be triggered when update fails.
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) +
-            _check_service_version(name, "2"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl $endpoint | grep "Hi, SkyPilot here!"',
-            # Rolling Update
-            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/num_min_two.yaml',
-            # sleep before update is registered.
-            'sleep 20',
-            # Timeout will be triggered when update fails.
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
-            _check_service_version(name, "3"),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'curl $endpoint | grep "Hi, SkyPilot here!"',
-        ],
-        _TEARDOWN_SERVICE.format(name=name),
-        timeout=30 * 60,
-        env=env,
-    )
-    smoke_tests_utils.run_one_test(test)
+    with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
+            generic_cloud) as increase_initial_delay_seconds:
+        test = smoke_tests_utils.Test(
+            f'test-skyserve-update-autoscale',
+            [
+                increase_initial_delay_seconds(
+                    f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/num_min_two.yaml'
+                ),
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+                _check_service_version(name, "1"),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl $endpoint | grep "Hi, SkyPilot here"',
+                increase_initial_delay_seconds(
+                    f'sky serve update {name} --cloud {generic_cloud} {resource_arg} --mode blue_green -y tests/skyserve/update/num_min_one.yaml'
+                ),
+                # sleep before update is registered.
+                'sleep 20',
+                # Timeout will be triggered when update fails.
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=1) +
+                _check_service_version(name, "2"),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl $endpoint | grep "Hi, SkyPilot here!"',
+                # Rolling Update
+                increase_initial_delay_seconds(
+                    f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/num_min_two.yaml'
+                ),
+                # sleep before update is registered.
+                'sleep 20',
+                # Timeout will be triggered when update fails.
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2) +
+                _check_service_version(name, "3"),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'curl $endpoint | grep "Hi, SkyPilot here!"',
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            timeout=30 * 60,
+            env=env,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
@@ -857,48 +898,53 @@ def test_skyserve_failures(generic_cloud: str):
     resource_arg, env = smoke_tests_utils.get_cloud_specific_resource_config(
         generic_cloud)
     name = _get_service_name()
-
-    test = smoke_tests_utils.Test(
-        'test-skyserve-failures',
-        [
-            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/failures/initial_delay.yaml',
-            f's=$(sky serve status {name}); '
-            f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
-            'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done;',
-            'sleep 60',
-            f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
-            # Make sure no new replicas are started for early failure.
-            f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
-            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/failures/probing.yaml',
-            f's=$(sky serve status {name}); '
-            # Wait for replica to be ready.
-            f'until echo "$s" | grep "READY"; do '
-            'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done;',
-            # Wait for replica to change to FAILED_PROBING
-            f's=$(sky serve status {name}); '
-            f'until echo "$s" | grep "FAILED_PROBING"; do '
-            'echo "Waiting for replica to be failed..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done',
-            # Wait for the PENDING replica to appear.
-            'sleep 10',
-            # Wait until the replica is out of PENDING.
-            f's=$(sky serve status {name}); '
-            f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
-            'echo "Waiting for replica to be out of pending..."; sleep 5; '
-            f's=$(sky serve status {name}); echo "$s"; done; ' +
-            _check_replica_in_status(name, [
-                (1, False, 'FAILED_PROBING'),
-                (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
-            ]),
-            # TODO(zhwu): add test for FAILED_PROVISION
-        ],
-        _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
-        env=env,
-    )
-    smoke_tests_utils.run_one_test(test)
+    with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
+            generic_cloud) as increase_initial_delay_seconds:
+        test = smoke_tests_utils.Test(
+            'test-skyserve-failures',
+            [
+                increase_initial_delay_seconds(
+                    f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/failures/initial_delay.yaml'
+                ),
+                f's=$(sky serve status {name}); '
+                f'until echo "$s" | grep "FAILED_INITIAL_DELAY"; do '
+                'echo "Waiting for replica to be failed..."; sleep 5; '
+                f's=$(sky serve status {name}); echo "$s"; done;',
+                'sleep 60',
+                f'{_SERVE_STATUS_WAIT.format(name=name)}; echo "$s" | grep "{name}" | grep "FAILED_INITIAL_DELAY" | wc -l | grep 2; '
+                # Make sure no new replicas are started for early failure.
+                f'echo "$s" | grep -A 100 "Service Replicas" | grep "{name}" | wc -l | grep 2;',
+                increase_initial_delay_seconds(
+                    f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/failures/probing.yaml'
+                ),
+                f's=$(sky serve status {name}); '
+                # Wait for replica to be ready.
+                f'until echo "$s" | grep "READY"; do '
+                'echo "Waiting for replica to be failed..."; sleep 5; '
+                f's=$(sky serve status {name}); echo "$s"; done;',
+                # Wait for replica to change to FAILED_PROBING
+                f's=$(sky serve status {name}); '
+                f'until echo "$s" | grep "FAILED_PROBING"; do '
+                'echo "Waiting for replica to be failed..."; sleep 5; '
+                f's=$(sky serve status {name}); echo "$s"; done',
+                # Wait for the PENDING replica to appear.
+                'sleep 10',
+                # Wait until the replica is out of PENDING.
+                f's=$(sky serve status {name}); '
+                f'until ! echo "$s" | grep "PENDING" && ! echo "$s" | grep "Please wait for the controller to be ready."; do '
+                'echo "Waiting for replica to be out of pending..."; sleep 5; '
+                f's=$(sky serve status {name}); echo "$s"; done; ' +
+                _check_replica_in_status(name, [
+                    (1, False, 'FAILED_PROBING'),
+                    (1, False, _SERVICE_LAUNCHING_STATUS_REGEX + '\|READY')
+                ]),
+                # TODO(zhwu): add test for FAILED_PROVISION
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            timeout=20 * 60,
+            env=env,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_nebius  # Autodown and Autostop not supported
