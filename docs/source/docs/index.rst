@@ -49,6 +49,22 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 
+.. raw:: html
+
+   <script>
+   function pauseAndReplay(video) {
+   setTimeout(function() {
+      video.currentTime = 0;
+      video.play();
+   }, 10000); // 10 second gap
+   }
+   </script>
+   <video style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
+      <source src="../_static/intro.mp4" type="video/mp4" />
+   </video>
+
+
+
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
 VMware vSphere, Nebius.
