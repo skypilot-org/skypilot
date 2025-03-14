@@ -31,22 +31,6 @@ def _add_firewall_rule(scp_client: scp_utils.SCPClient, vpc_id: str,
                     time.sleep(10)
                     continue
 
-            attempts = 0
-            max_attempts = 300
-            while attempts < max_attempts:
-                try:
-                    rule_info = scp_client.add_new_firewall_rule(
-                        firewall_id, internal_ip, 'OUT', ports)
-                    if rule_info is not None:
-                        rule_id = rule_info['resourceId']
-                        scp_client.wait_firewall_rule_complete(
-                            firewall_id, rule_id)
-                    break
-                except Exception:  # pylint: disable=broad-except
-                    attempts += 1
-                    time.sleep(10)
-                    continue
-
 
 def open_ports(
     cluster_name_on_cloud: str,
@@ -55,21 +39,19 @@ def open_ports(
 ) -> None:
     """See sky/provision/__init__.py"""
 
-    del cluster_name_on_cloud
     del provider_config
 
     scp_client = scp_utils.SCPClient()
     vm_list = scp_client.list_instances()
 
     for vm in vm_list:
-        vm_info = scp_client.get_virtual_server_info(vm['virtualServerId'])
-        sg_id = vm_info['securityGroupIds'][0]['securityGroupId']
-        scp_client.add_new_security_group_rule(sg_id, 'IN', ports)
-        scp_client.add_new_security_group_rule(sg_id, 'OUT', ports)
-
-        vpc_id = vm_info['vpcId']
-        internal_ip = vm_info['ip']
-        _add_firewall_rule(scp_client, vpc_id, internal_ip, ports)
+        if vm['virtualServerName'] == cluster_name_on_cloud:
+            vm_info = scp_client.get_virtual_server_info(vm['virtualServerId'])
+            sg_id = vm_info['securityGroupIds'][0]['securityGroupId']
+            scp_client.add_new_security_group_rule(sg_id, 'IN', ports)
+            vpc_id = vm_info['vpcId']
+            internal_ip = vm_info['ip']
+            _add_firewall_rule(scp_client, vpc_id, internal_ip, ports)
 
 
 def cleanup_ports(  # pylint: disable=pointless-string-statement
