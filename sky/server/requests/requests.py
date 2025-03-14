@@ -396,7 +396,6 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
 def create_table(cursor, conn):
-    del conn
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
