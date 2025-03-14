@@ -802,7 +802,7 @@ def write_cluster_config(
         pod_config: Dict[str, Any] = yaml_obj['available_node_types'][
             'ray_head_default']['node_config']
 
-        # Check pod spec only. Read kubernetes-ray.yml.j2 for more details.
+        # Check pod spec only. For high availability controllers, we deploy pvc & deployment for the controller. Read kubernetes-ray.yml.j2 for more details.
         pod_config.pop('deployment_spec', None)
         pod_config.pop('pvc_spec', None)
         valid, message = kubernetes_utils.check_pod_config(pod_config)
