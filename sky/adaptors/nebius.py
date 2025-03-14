@@ -133,6 +133,7 @@ def sdk():
             credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
     return _sdk
 
+
 def get_nebius_credentials(boto3_session):
     """Gets the Nebius credentials from the boto3 session object.
 
