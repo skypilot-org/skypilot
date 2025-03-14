@@ -31,6 +31,7 @@ MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
 POLL_INTERVAL = 5
 
 _iam_token = None
+_sdk = None
 _tenant_id = None
 _project_id = None
 
@@ -123,11 +124,14 @@ def get_tenant_id():
 
 
 def sdk():
-    if get_iam_token() is not None:
-        return nebius.sdk.SDK(credentials=get_iam_token())
-    return nebius.sdk.SDK(
-        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
-
+    global _sdk
+    if _sdk is None:
+        if get_iam_token() is not None:
+            _sdk = nebius.sdk.SDK(credentials=get_iam_token())
+            return _sdk
+        _sdk = nebius.sdk.SDK(
+            credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
+    return _sdk
 
 def get_nebius_credentials(boto3_session):
     """Gets the Nebius credentials from the boto3 session object.
