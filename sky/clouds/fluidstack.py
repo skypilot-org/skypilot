@@ -53,6 +53,9 @@ class Fluidstack(clouds.Cloud):
         clouds.CloudImplementationFeatures.HOST_CONTROLLERS:
             'Host controllers'
             f' are not supported in {_REPR}.',
+        clouds.CloudImplementationFeatures.HIGH_AVAILABILITY_CONTROLLERS:
+            ('High availability controllers are not supported in '
+             f'{_REPR}.'),
     }
     # Using the latest SkyPilot provisioner API to provision and check status.
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
