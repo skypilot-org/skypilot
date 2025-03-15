@@ -549,13 +549,14 @@ class Task:
 
         # Experimental configs.
         experimental_configs = config.pop('experimental', None)
-        
+
         # Handle the top-level config field
         config_override = config.pop('config', None)
-        
+
         # Handle backward compatibility with experimental.config_overrides
         if experimental_configs is not None:
-            exp_config_override = experimental_configs.pop('config_overrides', None)
+            exp_config_override = experimental_configs.pop(
+                'config_overrides', None)
             if exp_config_override is not None:
                 if config_override is not None:
                     logger.warning(
@@ -565,10 +566,10 @@ class Task:
                 else:
                     config_override = exp_config_override
             logger.debug('Overriding skypilot config with task-level config: '
-                        f'{config_override}')
+                         f'{config_override}')
             assert not experimental_configs, ('Invalid task args: '
-                                          f'{experimental_configs.keys()}')
-                                          
+                                              f'{experimental_configs.keys()}')
+
         # Store the final config override for use in resource setup
         cluster_config_override = config_override
 
