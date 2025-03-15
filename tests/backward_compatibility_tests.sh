@@ -120,7 +120,13 @@ git clone -b ${base_branch} https://github.com/skypilot-org/skypilot.git $ABSOLU
 UV=~/.local/bin/uv
 
 # Create environment for compatibility tests
-source ~/.bashrc
+if [ -n "$ZSH_VERSION" ]; then
+  CONFIG_FILE="~/.zshrc"
+else
+  CONFIG_FILE="~/.bashrc"
+fi
+
+source "$CONFIG_FILE"
 $UV venv --seed --python=3.9 ~/sky-back-compat-base
 $UV venv --seed --python=3.9 ~/sky-back-compat-current
 
@@ -131,7 +137,7 @@ if ! gcloud --version; then
   rm -rf ~/google-cloud-sdk
   mv google-cloud-sdk ~/
   ~/google-cloud-sdk/install.sh -q
-  echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> ~/.bashrc
+  echo "source ~/google-cloud-sdk/path.bash.inc > /dev/null 2>&1" >> "$CONFIG_FILE"
   source ~/google-cloud-sdk/path.bash.inc
 fi
 
