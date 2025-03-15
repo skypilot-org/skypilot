@@ -558,7 +558,12 @@ class Autoscaler:
     """
 
     label_formatter: Any = None
-    supports_intelligent_scheduling: bool = False
+
+    # returns if the autoscaler backend can be queried for information.
+    # If True, SkyPilot will query the autoscaler backend to check if
+    # the Kubernetes context can autoscale to meet the resource requirements
+    # of a task.
+    can_query_backend: bool = False
 
     @classmethod
     # pylint: disable=unused-argument
@@ -590,7 +595,7 @@ class GKEAutoscaler(Autoscaler):
     """
 
     label_formatter: Any = GKELabelFormatter
-    supports_intelligent_scheduling: bool = True
+    can_query_backend: bool = True
 
     _pip_install_gcp_hint_last_sent = 0.0
 
@@ -618,6 +623,8 @@ class GKEAutoscaler(Autoscaler):
                          'provisioning resources without further check')
             return True
         try:
+            logger.debug(
+                f'attempting to get information about cluster {cluster_name}')
             container_service = gcp.build('container',
                                           'v1',
                                           credentials=None,
@@ -638,17 +645,24 @@ class GKEAutoscaler(Autoscaler):
                     'scheduling with GKE autoscaler.')
                 cls._pip_install_gcp_hint_last_sent = time.time()
             return True
-        except gcp.http_error_exception():
+        except gcp.http_error_exception() as e:
             # Cluster information is not available.
             # return True for optimistic pod scheduling.
+            logger.debug(f'{e.message}', exc_info=True)
             return True
 
         # Check if any node pool with autoscaling enabled can
         # fit the instance type.
         for node_pool in cluster['nodePools']:
+            logger.debug(f'checking if node pool {node_pool["name"]} '
+                         'has autoscaling enabled.')
             if (node_pool['autoscaling'] is not None and
                     'enabled' in node_pool['autoscaling'] and
                     node_pool['autoscaling']['enabled']):
+                logger.debug(
+                    f'node pool {node_pool["name"]} has autoscaling enabled. '
+                    'Checking if it can create a node '
+                    f'satisfying {instance_type}')
                 if cls._check_instance_fits_gke_autoscaler_node_pool(
                         instance_type, node_pool):
                     return True
@@ -667,8 +681,11 @@ class GKEAutoscaler(Autoscaler):
         """
         context_components = context.split('_')
         if len(context_components) != 4 or context_components[0] != 'gke':
+            logger.debug(
+                f'context {context} is not in valid GKE context format.')
             return False, '', '', ''
 
+        logger.debug(f'context {context} is in valid GKE context format.')
         return True, context_components[1], context_components[
             2], context_components[3]
 
@@ -676,14 +693,10 @@ class GKEAutoscaler(Autoscaler):
     def _check_instance_fits_gke_autoscaler_node_pool(
         cls, instance_type: str, node_pool: dict
     ) -> bool:  # check if there are any spare capacity in the autoscaler.
-        node_count = 0
-        if 'initialNodeCount' in node_pool:
-            node_count = node_pool['initialNodeCount']
-        max_node_count = node_pool['autoscaling']['maxNodeCount']
-        free_node_count = max_node_count - node_count
-        if free_node_count == 0:
-            return False
-
+        node_pool_name = node_pool['name']
+        logger.debug(
+            f'checking if autoscale-enabled node pool {node_pool_name} '
+            f'can create a node satisfying {instance_type}')
         k8s_instance_type = KubernetesInstanceType.\
             from_instance_type(instance_type)
         node_config = node_pool['config']
@@ -700,30 +713,49 @@ class GKEAutoscaler(Autoscaler):
             accelerator_exists = False
             if acc_is_tpu:
                 # Accelerator type is a TPU.
+                logger.debug(
+                    f'checking {node_pool_name} for TPU {requested_acc_type}:'
+                    f'{requested_acc_count}')
                 if 'resourceLabels' in node_config:
                     accelerator_exists = cls._node_pool_has_tpu_capacity(
                         node_config['resourceLabels'], machine_type,
                         requested_acc_type, requested_acc_count)
             else:
                 # Accelerator type is a GPU.
+                logger.debug(
+                    f'checking {node_pool_name} for GPU {requested_acc_type}:'
+                    f'{requested_acc_count}')
                 if 'accelerators' in node_config:
                     accelerator_exists = cls._node_pool_has_gpu_capacity(
                         node_config['accelerators'], requested_acc_type,
                         requested_acc_count)
 
             if not accelerator_exists:
+                logger.debug(f'{node_pool_name} does not have accelerators '
+                             f'{requested_acc_type}:{requested_acc_count}')
                 return False
 
         # vcpu and memory check is not supported for TPU instances.
         # TODO(seungjin): Correctly account for vcpu/memory for TPUs.
-        if not acc_is_tpu:
+        if acc_is_tpu:
             # vcpu and memory check
-            vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(
-                machine_type)
-            if (vcpus is None or vcpus < k8s_instance_type.cpus or
-                    mem is None or mem < k8s_instance_type.memory):
-                return False
+            logger.debug(f'vcpu and memory check is not supported for TPUs. '
+                         'Skipping vcpu and memory check for node pool '
+                         f'{node_pool_name}.')
+            return True
 
+        vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
+        if vcpus is not None and vcpus >= k8s_instance_type.cpus:
+            logger.debug(f'vcpu check failed for {machine_type} '
+                         f'on node pool {node_pool_name}')
+            return False
+        if mem is not None and mem >= k8s_instance_type.memory:
+            logger.debug(f'vcpu check failed for {machine_type} '
+                         f'on node pool {node_pool_name}')
+            return False
+
+        logger.debug(f'node pool {node_pool_name} can create a node '
+                     f'satisfying {instance_type}')
         return True
 
     @classmethod
@@ -774,14 +806,20 @@ class GKEAutoscaler(Autoscaler):
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
         # ct<version>-hightpu-<node-chip-count>t
+        logger.debug(
+            f'inferring TPU chip count from machine type: {machine_type}')
         if (len(machine_type_parts) != 3 or
                 not machine_type_parts[0].startswith('ct') or
                 machine_type_parts[1] != 'hightpu' or
                 not machine_type_parts[2].endswith('t') or
                 not machine_type_parts[2].strip('t').isdigit()):
+            logger.debug(f'machine type {machine_type} is not a '
+                         'valid TPU machine type format.')
             return 0
-
-        return int(machine_type_parts[2].strip('t'))
+        num_tpu_chips = int(machine_type_parts[2].strip('t'))
+        logger.debug(
+            f'machine type {machine_type} has {num_tpu_chips} TPU chips.')
+        return num_tpu_chips
 
     @classmethod
     def _is_node_multi_host_tpu(cls, resource_labels: dict) -> bool:
@@ -795,7 +833,7 @@ class KarpenterAutoscaler(Autoscaler):
     """
 
     label_formatter: Any = KarpenterLabelFormatter
-    supports_intelligent_scheduling: bool = False
+    can_query_backend: bool = False
 
 
 class GenericAutoscaler(Autoscaler):
@@ -803,7 +841,7 @@ class GenericAutoscaler(Autoscaler):
     """
 
     label_formatter: Any = SkyPilotLabelFormatter
-    supports_intelligent_scheduling: bool = False
+    can_query_backend: bool = False
 
 
 # Mapping of autoscaler type to autoscaler
