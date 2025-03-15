@@ -1328,13 +1328,17 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Style.RESET_ALL}')
                 else:
                     if resources.cpus is not None:
-                        logger.info('Try specifying a different CPU count, '
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different CPU count, '
                                     'or add "+" to the end of the CPU count '
-                                    'to allow for larger instances.')
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                     if resources.memory is not None:
-                        logger.info('Try specifying a different memory size, '
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different memory size, '
                                     'or add "+" to the end of the memory size '
-                                    'to allow for larger instances.')
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{repr(cloud)}: {hint}')
 
