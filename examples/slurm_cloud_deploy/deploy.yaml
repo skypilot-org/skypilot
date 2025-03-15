@@ -3,7 +3,7 @@ resources:
   cpus: 4+
   disk_size: 50
 
-num_nodes: 2
+num_nodes: 4
 
 run: |
   set -ex
@@ -59,6 +59,8 @@ run: |
   sudo systemctl enable munge
   sudo systemctl start munge
 
+  echo "Nodes: $SKYPILOT_NODE_IPS"
+
   # Create and distribute slurm.conf from controller
   if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
     sudo mkdir -p /var/spool/slurmctld
@@ -94,14 +96,15 @@ run: |
         node_cores_per_socket=$(lscpu | grep "Core(s) per socket:" | awk '{print $4}')
         node_threads_per_core=$(lscpu | grep "Thread(s) per core:" | awk '{print $4}')
       else
-        node_hostname=$(ssh -o StrictHostKeyChecking=no $node hostname)
+        node_hostname=$(ssh -o StrictHostKeyChecking=no $node hostname </dev/null)
         # Get actual CPU count for compute nodes
-        node_cpus=$(ssh -o StrictHostKeyChecking=no $node nproc)
+        node_cpus=$(ssh -o StrictHostKeyChecking=no $node nproc </dev/null)
         # Get more detailed CPU information
-        node_sockets=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Socket(s):\" | awk '{print \$2}'")
-        node_cores_per_socket=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Core(s) per socket:\" | awk '{print \$4}'")
-        node_threads_per_core=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Thread(s) per core:\" | awk '{print \$4}'")
+        node_sockets=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Socket(s):\" | awk '{print \$2}'" </dev/null)
+        node_cores_per_socket=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Core(s) per socket:\" | awk '{print \$4}'" </dev/null)
+        node_threads_per_core=$(ssh -o StrictHostKeyChecking=no $node "lscpu | grep \"Thread(s) per core:\" | awk '{print \$4}'" </dev/null)
       fi
+      echo "Adding node $RANK: $node_hostname with IP $node. All nodes: $SKYPILOT_NODE_IPS"
       sudo sh -c "printf 'NodeName=%s NodeAddr=%s CPUs=%s Sockets=%s CoresPerSocket=%s ThreadsPerCore=%s State=UNKNOWN\n' ${node_hostname} ${node} ${node_cpus} ${node_sockets} ${node_cores_per_socket} ${node_threads_per_core} >> /etc/slurm/slurm.conf"
       RANK=$((RANK+1))
     done <<< "$SKYPILOT_NODE_IPS"
