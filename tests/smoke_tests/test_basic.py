@@ -768,7 +768,7 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
     """Test if async launch and exec commands work correctly when cluster is shutdown"""
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('cancel_launch_and_exec_async', [
-        (f'sky launch -c {name} -y --async',
+        (f'sky launch -c {name} -y --cloud {generic_cloud} --async',
          f's=$(sky exec {name} echo --async) && '
          'echo "$s" && '
          'logs_cmd=$(echo "$s" | grep "Check logs with" | sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
