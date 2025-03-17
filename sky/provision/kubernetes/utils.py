@@ -597,6 +597,8 @@ class GKEAutoscaler(Autoscaler):
     label_formatter: Any = GKELabelFormatter
     can_query_backend: bool = True
 
+    # This variable is stored in memory in the server.
+    # The variable will reset if the server restarts.
     _pip_install_gcp_hint_last_sent = 0.0
 
     @classmethod
@@ -750,7 +752,7 @@ class GKEAutoscaler(Autoscaler):
                          f'on node pool {node_pool_name}')
             return False
         if mem is not None and mem >= k8s_instance_type.memory:
-            logger.debug(f'vcpu check failed for {machine_type} '
+            logger.debug(f'memory check failed for {machine_type} '
                          f'on node pool {node_pool_name}')
             return False
 
