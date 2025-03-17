@@ -717,6 +717,15 @@ def check_instance_fits(context: Optional[str],
             fits, reason = check_tpu_fits(k8s_instance_type, gpu_nodes)
             if reason is not None:
                 return fits, reason
+        else:
+            # Check if any of the GPU nodes have sufficient number of GPUs.
+            gpu_nodes = [
+                node for node in gpu_nodes if
+                get_node_accelerator_count(node.status.allocatable) >= acc_count
+            ]
+            if not gpu_nodes:
+                return False, (
+                    f'No GPU nodes found with {acc_count} or more GPUs.')
 
         candidate_nodes = gpu_nodes
         not_fit_reason_prefix = (

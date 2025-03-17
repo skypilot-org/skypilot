@@ -275,6 +275,8 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 
     To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
 
+.. _kubernetes-custom-pod-config:
+
 Customizing SkyPilot Pods
 -------------------------
 
@@ -316,32 +318,14 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
            pod_config:
              ...
 
+.. _kubernetes-using-volumes:
 
-Mounting volumes
-----------------
+Mounting NFS and other volumes
+------------------------------
 
-Using the ``pod_config`` field, you can also attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) to your SkyPilot pods directly from the task YAML:
+`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-.. code-block:: yaml
-
-    # task.yaml
-    run: |
-      echo "Hello, world!" > /nfs/hello.txt
-
-    experimental:
-      config_overrides:
-        pod_config:
-          spec:
-            containers:
-              - volumeMounts:       # Custom volume mounts for the pod
-                  - mountPath: /data
-                    name: nfs-volume
-            volumes:
-              - name: nfs-volume
-                nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
-                  server: nfs.example.com
-                  path: /nfs
-
+Refer to :ref:`kubernetes-setup-volumes` for details and examples.
 
 FAQs
 ----

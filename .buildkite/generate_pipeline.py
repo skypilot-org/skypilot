@@ -16,9 +16,9 @@ and use the generated pipeline to run the tests.
 2. pre-merge pipeline, which generates all smoke tests for all clouds,
    author should specify which clouds to run by setting env in the step.
 
-We only have credentials for aws/azure/gcp/kubernetes(CLOUD_QUEUE_MAP and
-SERVE_CLOUD_QUEUE_MAP) now, smoke tests for those clouds are generated, other
-clouds are not supported yet, smoke tests for those clouds are not generated.
+We only have credentials for aws/azure/gcp/kubernetes(CLOUD_QUEUE_MAP) now,
+smoke tests for those clouds are generated, other clouds are not supported yet,
+smoke tests for those clouds are not generated.
 """
 
 import argparse
@@ -37,7 +37,6 @@ DEFAULT_CLOUDS_TO_RUN = default_clouds_to_run
 PYTEST_TO_CLOUD_KEYWORD = {v: k for k, v in cloud_to_pytest_keyword.items()}
 
 QUEUE_GENERIC_CLOUD = 'generic_cloud'
-QUEUE_GENERIC_CLOUD_SERVE = 'generic_cloud_serve'
 QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
@@ -51,17 +50,6 @@ CLOUD_QUEUE_MAP = {
     'aws': QUEUE_GENERIC_CLOUD,
     'gcp': QUEUE_GENERIC_CLOUD,
     'azure': QUEUE_GENERIC_CLOUD,
-    'kubernetes': QUEUE_KUBERNETES
-}
-# Serve tests runs long, and different test steps usually requires locks.
-# Its highly likely to fail if multiple serve tests are running concurrently.
-# So we use a different queue that runs only one concurrent test at a time.
-SERVE_CLOUD_QUEUE_MAP = {
-    'aws': QUEUE_GENERIC_CLOUD_SERVE,
-    'gcp': QUEUE_GENERIC_CLOUD_SERVE,
-    'azure': QUEUE_GENERIC_CLOUD_SERVE,
-    # Now we run kubernetes on local cluster, so it should be find if we run
-    # serve tests on same queue as kubernetes.
     'kubernetes': QUEUE_KUBERNETES
 }
 
@@ -190,9 +178,8 @@ def _extract_marked_tests(
 
         clouds_to_include = (clouds_to_include
                              if clouds_to_include else default_clouds_to_run)
-        cloud_queue_map = SERVE_CLOUD_QUEUE_MAP if is_serve_test else CLOUD_QUEUE_MAP
         final_clouds_to_include = [
-            cloud for cloud in clouds_to_include if cloud in cloud_queue_map
+            cloud for cloud in clouds_to_include if cloud in CLOUD_QUEUE_MAP
         ]
         if clouds_to_include and not final_clouds_to_include:
             print(
@@ -218,7 +205,7 @@ def _extract_marked_tests(
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
             QUEUE_KUBE_BACKEND
-            if run_on_cloud_kube_backend else cloud_queue_map[cloud]
+            if run_on_cloud_kube_backend else CLOUD_QUEUE_MAP[cloud]
             for cloud in final_clouds_to_include
         ], param_list)
 
