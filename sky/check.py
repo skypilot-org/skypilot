@@ -34,7 +34,7 @@ def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capability: CloudCapability = CloudCapability.STORAGE,
+    capability: CloudCapability = CloudCapability.COMPUTE,
 ) -> List[str]:
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
@@ -43,21 +43,31 @@ def check(
     enabled_clouds = []
     disabled_clouds = []
 
-    functions_map = {
-        CloudCapability.COMPUTE: {
-            'check_credentials': lambda cloud: cloud.check_credentials(),
-            'get_cached_state': lambda: global_user_state.get_cached_enabled_clouds(),
-            'set_cached_state': lambda clouds: global_user_state.set_enabled_clouds(clouds),
-        },
-        CloudCapability.STORAGE: {
-            'check_credentials': lambda cloud: cloud.check_storage_credentials(),
-            'get_cached_state': lambda: global_user_state.get_cached_enabled_storage_clouds(),
-            'set_cached_state': lambda clouds: global_user_state.set_enabled_storage_clouds(clouds),
-        },
-    }
-    check_credentials = functions_map[capability]['check_credentials']
-    get_cached_state = functions_map[capability]['get_cached_state']
-    set_cached_state = functions_map[capability]['set_cached_state']
+    def check_credentials(
+        cloud: Union[sky_clouds.Cloud,
+                     ModuleType]) -> Tuple[bool, Optional[str]]:
+        if capability == CloudCapability.COMPUTE:
+            return cloud.check_credentials()
+        elif capability == CloudCapability.STORAGE:
+            return cloud.check_storage_credentials()
+        else:
+            raise ValueError(f'Invalid capability: {capability}')
+
+    def get_cached_state() -> List[sky_clouds.Cloud]:
+        if capability == CloudCapability.COMPUTE:
+            return global_user_state.get_cached_enabled_clouds()
+        elif capability == CloudCapability.STORAGE:
+            return global_user_state.get_cached_enabled_storage_clouds()
+        else:
+            raise ValueError(f'Invalid capability: {capability}')
+
+    def set_cached_state(clouds: List[str]) -> None:
+        if capability == CloudCapability.COMPUTE:
+            global_user_state.set_enabled_clouds(clouds)
+        elif capability == CloudCapability.STORAGE:
+            global_user_state.set_enabled_storage_clouds(clouds)
+        else:
+            raise ValueError(f'Invalid capability: {capability}')
 
     def check_one_cloud(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
@@ -226,6 +236,7 @@ def get_cached_enabled_clouds_or_refresh(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
     return cached_enabled_clouds
+
 
 def get_cached_enabled_storage_clouds_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:

@@ -847,8 +847,9 @@ def set_enabled_clouds(enabled_clouds: List[str]) -> None:
 
 
 def set_enabled_storage_clouds(enabled_storage_clouds: List[str]) -> None:
-    _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
-                       (_ENABLED_STORAGE_CLOUDS_KEY, json.dumps(enabled_storage_clouds)))
+    _DB.cursor.execute(
+        'INSERT OR REPLACE INTO config VALUES (?, ?)',
+        (_ENABLED_STORAGE_CLOUDS_KEY, json.dumps(enabled_storage_clouds)))
     _DB.conn.commit()
 
 
