@@ -719,6 +719,28 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has compute access credentials to this cloud."""
+        print('checking compute credentials')
+        return cls._check_credentials(  # Check APIs.
+            [
+                ('compute', 'Compute Engine'),
+                ('cloudresourcemanager', 'Cloud Resource Manager'),
+                ('iam', 'Identity and Access Management (IAM)'),
+                ('tpu', 'Cloud TPU'),  # Keep as final element.
+            ])
+
+    @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has compute access credentials to this cloud."""
+        print('checking storage credentials')
+        return cls._check_credentials(  # Check APIs.
+            [
+                ('storage', 'Cloud Storage'),
+            ])
+
+    @classmethod
+    def _check_credentials(
+            cls, apis: List[Tuple[str, str]]) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -783,13 +805,6 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        # Check APIs.
-        apis = (
-            ('compute', 'Compute Engine'),
-            ('cloudresourcemanager', 'Cloud Resource Manager'),
-            ('iam', 'Identity and Access Management (IAM)'),
-            ('tpu', 'Cloud TPU'),  # Keep as final element.
-        )
         enabled_api = False
         for endpoint, display_name in apis:
             if is_api_disabled(endpoint, project_id):

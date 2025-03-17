@@ -1,4 +1,5 @@
 """Credential checks: check cloud credentials and enable clouds."""
+import enum
 import os
 import traceback
 from types import ModuleType
@@ -20,10 +21,20 @@ CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
 
 
+class CloudCapability(enum.Enum):
+    # Filter for all cloud capabilities.
+    ALL = 'all'
+    # Compute capability.
+    COMPUTE = 'compute'
+    # Storage capability.
+    STORAGE = 'storage'
+
+
 def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
+    capability: CloudCapability = CloudCapability.STORAGE,
 ) -> List[str]:
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
@@ -32,13 +43,29 @@ def check(
     enabled_clouds = []
     disabled_clouds = []
 
+    functions_map = {
+        CloudCapability.COMPUTE: {
+            'check_credentials': lambda cloud: cloud.check_credentials(),
+            'get_cached_state': lambda: global_user_state.get_cached_enabled_clouds(),
+            'set_cached_state': lambda clouds: global_user_state.set_enabled_clouds(clouds),
+        },
+        CloudCapability.STORAGE: {
+            'check_credentials': lambda cloud: cloud.check_storage_credentials(),
+            'get_cached_state': lambda: global_user_state.get_cached_enabled_storage_clouds(),
+            'set_cached_state': lambda clouds: global_user_state.set_enabled_storage_clouds(clouds),
+        },
+    }
+    check_credentials = functions_map[capability]['check_credentials']
+    get_cached_state = functions_map[capability]['get_cached_state']
+    set_cached_state = functions_map[capability]['set_cached_state']
+
     def check_one_cloud(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
                                           ModuleType]]) -> None:
         cloud_repr, cloud = cloud_tuple
         with rich_utils.safe_status(f'Checking {cloud_repr}...'):
             try:
-                ok, reason = cloud.check_credentials()
+                ok, reason = check_credentials(cloud)
             except Exception:  # pylint: disable=broad-except
                 # Catch all exceptions to prevent a single cloud from blocking
                 # the check for other clouds.
@@ -113,7 +140,7 @@ def check(
         if not cloud.startswith('Cloudflare')
     }
     previously_enabled_clouds_set = {
-        repr(cloud) for cloud in global_user_state.get_cached_enabled_clouds()
+        repr(cloud) for cloud in get_cached_state()
     }
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
@@ -124,7 +151,7 @@ def check(
     all_enabled_clouds = (config_allowed_clouds_set & (
         (previously_enabled_clouds_set | enabled_clouds_set) -
         disabled_clouds_set))
-    global_user_state.set_enabled_clouds(list(all_enabled_clouds))
+    set_cached_state(list(all_enabled_clouds))
 
     disallowed_clouds_hint = None
     if disallowed_cloud_names:
@@ -199,6 +226,40 @@ def get_cached_enabled_clouds_or_refresh(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
     return cached_enabled_clouds
+
+def get_cached_enabled_storage_clouds_or_refresh(
+        raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
+    """Returns cached enabled storage clouds and if no cloud is enabled,
+    refresh.
+
+    This function will perform a refresh if no public cloud is enabled.
+
+    Args:
+        raise_if_no_cloud_access: if True, raise an exception if no public
+            cloud is enabled.
+
+    Raises:
+        exceptions.NoCloudAccessError: if no public cloud is enabled and
+            raise_if_no_cloud_access is set to True.
+    """
+    cached_enabled_storage_clouds = \
+        global_user_state.get_cached_enabled_storage_clouds()
+    if not cached_enabled_storage_clouds:
+        try:
+            check(quiet=True, capability=CloudCapability.STORAGE)
+        except SystemExit:
+            # If no cloud is enabled, check() will raise SystemExit.
+            # Here we catch it and raise the exception later only if
+            # raise_if_no_cloud_access is set to True.
+            pass
+        cached_enabled_storage_clouds = \
+            global_user_state.get_cached_enabled_storage_clouds()
+    if raise_if_no_cloud_access and not cached_enabled_storage_clouds:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.NoCloudAccessError(
+                'Cloud access is not set up. Run: '
+                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
+    return cached_enabled_storage_clouds
 
 
 def get_cloud_credential_file_mounts(

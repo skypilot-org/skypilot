@@ -443,6 +443,15 @@ class Cloud:
         """
         raise NotImplementedError
 
+    @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's storage.
+
+        Returns a boolean of whether the user can access this cloud's storage, 
+        and a string describing the reason if the user cannot access.
+        """
+        return cls.check_credentials()
+
     # TODO(zhwu): Make the return type immutable.
     @classmethod
     def get_user_identities(cls) -> Optional[List[List[str]]]:
