@@ -4,6 +4,7 @@ Responsible for autoscaling and replica management.
 """
 import contextlib
 import logging
+import sys
 import threading
 import time
 import traceback
@@ -219,7 +220,30 @@ class SkyServeController:
         async def validation_exception_handler(
                 request: fastapi.Request, exc: Exception) -> fastapi.Response:
             with ux_utils.enable_traceback():
+                exc_type, exc_value, exc_traceback = sys.exc_info()
+                tb_str = ''.join(
+                    traceback.format_exception(exc_type, exc_value,
+                                               exc_traceback))
+                request_info = f'Method: {request.method}, URL: {request.url}'
+                headers_info = f'Headers: {dict(request.headers)}'
+                client_info = (f'Client: {request.client.host}:'
+                               f'{request.client.port}')
+
                 logger.error(f'Error in controller: {exc!r}')
+                logger.error(f'Request details: {request_info}')
+                logger.error(f'Headers: {headers_info}')
+                logger.error(f'Client info: {client_info}')
+                if exc_type is not None:
+                    logger.error(f'Exception type: {exc_type.__name__}')
+                else:
+                    logger.error('Exception type: None')
+                logger.error(f'Full traceback:\n{tb_str}')
+
+                try:
+                    body = request.body()
+                    logger.error(f'Request body: {body}')
+                except Exception as body_exc:  # pylint: disable=broad-except
+                    logger.error(f'Could not get request body: {body_exc!r}')
             return responses.JSONResponse(
                 status_code=500,
                 content={
