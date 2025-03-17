@@ -773,7 +773,7 @@ def test_cancel_launch_and_exec_async(generic_cloud: str):
          'echo "$s" && '
          'logs_cmd=$(echo "$s" | grep "Check logs with" | sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
          'echo "Extracted logs command: $logs_cmd" && '
-         f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT], 30)} &&'
+         f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT, sky.ClusterStatus.UP], 30)} &&'
          f'sky down -y {name} && '
          'log_output=$(eval $logs_cmd || true) && '
          'echo "===logs===" && echo "$log_output" && '
