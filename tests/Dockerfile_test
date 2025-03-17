@@ -1,0 +1,127 @@
+FROM ubuntu:latest
+
+# Add build arguments
+ARG USERNAME=skytest
+ENV USERNAME=${USERNAME}
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt update -y && \
+    apt install -y \
+    wget \
+    sudo \
+    curl \
+    unzip \
+    htop \
+    vim \
+    git \
+    dnsutils \
+    expect \
+    netcat-traditional \
+    socat \
+    uuid-runtime \
+    docker.io \
+    rsync
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Add a custom user with sudo privileges
+RUN useradd -m ${USERNAME} && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to the new user
+USER ${USERNAME}
+
+# Set bash as the default shell
+SHELL ["/bin/bash", "-c"]
+
+# Set environment variables persistently
+ENV PATH="/home/${USERNAME}/miniconda3/bin:${PATH}"
+
+RUN mkdir -p ~/sky_workdir ~/log ~/tmp-workdir && \
+    touch ~/tmp-workdir/tmp\ file
+
+WORKDIR /home/${USERNAME}/sky_workdir
+
+# Install Miniconda
+RUN curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    chmod +x Miniconda3-latest-Linux-x86_64.sh && \
+    ./Miniconda3-latest-Linux-x86_64.sh -b -p ~/miniconda3 && \
+    rm Miniconda3-latest-Linux-x86_64.sh
+
+# Initialize conda & install Python
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda init bash && \
+    conda install -n base python=3.10 -y
+
+# Add conda initialization to .bashrc (for interactive shells)
+RUN echo "source /home/${USERNAME}/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc
+
+
+RUN git clone https://github.com/skypilot-org/skypilot.git ~/sky_workdir/skypilot
+
+WORKDIR /home/${USERNAME}/sky_workdir/skypilot
+
+# Activate the Conda environment before running pip commands
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    pip install uv && \
+    pip uninstall -y skypilot && \
+    uv pip install --prerelease=allow "azure-cli>=2.65.0" && \
+    uv pip install -r requirements-dev.txt && \
+    uv pip install -e ".[all]" && \
+    uv pip install httpx[socks]
+
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    conda install -c conda-forge google-cloud-sdk -y && \
+    gcloud components install gke-gcloud-auth-plugin --quiet
+
+# Fix the gsutil problem
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    uv pip install pyOpenSSL==23.1.1
+
+
+# Set the working directory to the home directory of user
+WORKDIR /home/${USERNAME}
+
+# Create entrypoint script
+RUN echo '#!/bin/bash\n\
+source ~/miniconda3/etc/profile.d/conda.sh\n\
+conda activate base\n\
+cd /skypilot\n\
+pip uninstall -y skypilot\n\
+uv pip install --prerelease=allow "azure-cli>=2.65.0"\n\
+uv pip install -r requirements-dev.txt\n\
+uv pip install -e ".[all]"\n\
+sky api start\n\
+exec /bin/bash\n'\
+> ~/entrypoint.sh && chmod +x ~/entrypoint.sh
+
+# Set the entrypoint
+ENTRYPOINT ["/bin/bash", "-c", "exec ~/entrypoint.sh"]
+
+# Command examples:
+# docker build --platform linux/amd64 -t sky-test-image --build-arg USERNAME=buildkite --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/Dockerfile_test .
+
+
+# Command with proxy
+# docker build --platform linux/amd64 --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -t buildkite-image .
+# docker run --platform linux/amd64 -it --name buildkite-container \
+# -e https_proxy=http://host.docker.internal:7890 \
+# -e http_proxy=http://host.docker.internal:7890 \
+# -e all_proxy=socks5://host.docker.internal:7890 \
+# -e no_proxy=localhost,127.0.0.1,0.0.0.0 \
+# --entrypoint /bin/bash buildkite-container
+
+# Command without proxy
+# docker build -t buildkite-image .
+# docker run -it --name buildkite-container -v ~/.kube/config:/tmp/.kube/config --entrypoint /bin/bash --add-host=host.docker.internal:host-gateway buildkite-container
+
+# docker start -ai buildkite-image
+# docker exec -it buildkite-container /bin/bash
