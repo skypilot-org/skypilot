@@ -747,11 +747,11 @@ class GKEAutoscaler(Autoscaler):
             return True
 
         vcpus, mem = clouds.GCP.get_vcpus_mem_from_instance_type(machine_type)
-        if vcpus is not None and vcpus >= k8s_instance_type.cpus:
+        if vcpus is not None and vcpus < k8s_instance_type.cpus:
             logger.debug(f'vcpu check failed for {machine_type} '
                          f'on node pool {node_pool_name}')
             return False
-        if mem is not None and mem >= k8s_instance_type.memory:
+        if mem is not None and mem < k8s_instance_type.memory:
             logger.debug(f'memory check failed for {machine_type} '
                          f'on node pool {node_pool_name}')
             return False
