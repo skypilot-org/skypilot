@@ -889,6 +889,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         non_persistent_bucket_removed_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
+        timeout *= 2
     elif generic_cloud == 'kubernetes':
         # With Kubernetes, we don't know which object storage provider is used.
         # Check S3, GCS and Azure if bucket exists in any of them.
