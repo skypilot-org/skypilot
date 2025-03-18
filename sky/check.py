@@ -220,8 +220,7 @@ def check(
         # Pretty print for UX.
         if not quiet:
             enabled_clouds_str = '\n  ' + '\n  '.join([
-                _format_enabled_cloud(cloud, enabled_clouds[cloud])
-                for cloud in sorted(enabled_clouds)
+                _format_enabled_cloud(cloud) for cloud in sorted(enabled_clouds)
             ])
             echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
                  f'Enabled clouds {PARTY_POPPER_EMOJI}'
@@ -344,20 +343,16 @@ def get_cloud_credential_file_mounts(
     return file_mounts
 
 
-def _format_enabled_cloud(cloud_name: str,
-                          capabilities: List[CloudCapability]) -> str:
+def _format_enabled_cloud(cloud_name: str) -> str:
 
-    def _green_color(cloud_name: str,
-                     capabilities: List[CloudCapability]) -> str:
-        capabilities_str = ', '.join(
-            [capability.value for capability in capabilities])
+    def _green_color(cloud_name: str) -> str:
         return f'{colorama.Fore.GREEN}{cloud_name}{colorama.Style.RESET_ALL}'
 
     if cloud_name == repr(sky_clouds.Kubernetes()):
         # Get enabled contexts for Kubernetes
         existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
         if not existing_contexts:
-            return _green_color(cloud_name, capabilities)
+            return _green_color(cloud_name)
 
         # Check if allowed_contexts is explicitly set in config
         allowed_contexts = skypilot_config.get_nested(
@@ -375,7 +370,7 @@ def _format_enabled_cloud(cloud_name: str,
         else:
             context_info = f'Active context: {existing_contexts[0]}'
 
-        return (f'{_green_color(cloud_name, capabilities)}\n'
+        return (f'{_green_color(cloud_name)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
                 f'{colorama.Style.RESET_ALL}')
-    return _green_color(cloud_name, capabilities)
+    return _green_color(cloud_name)
