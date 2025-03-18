@@ -274,17 +274,18 @@ Examples:
 
            experimental:
              config_overrides:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: my-host-nfs
-                   volumes:
-                     - name: my-host-nfs
-                       hostPath:
-                         path: /path/on/host/nfs
-                         type: Directory
+               kubernetes:
+                 pod_config:
+                   spec:
+                     containers:
+                       - volumeMounts:
+                           - mountPath: /mnt/nfs
+                             name: my-host-nfs
+                     volumes:
+                       - name: my-host-nfs
+                         hostPath:
+                           path: /path/on/host/nfs
+                           type: Directory
 
       **Global configuration:**
 
@@ -320,18 +321,19 @@ Examples:
 
            experimental:
              config_overrides:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nfs
-                           name: nfs-volume
-                   volumes:
-                     - name: nfs-volume
-                       nfs:
-                         server: nfs.example.com
-                         path: /shared
-                         readOnly: false
+               kubernetes:
+                 pod_config:
+                   spec:
+                     containers:
+                       - volumeMounts:
+                           - mountPath: /mnt/nfs
+                             name: nfs-volume
+                     volumes:
+                       - name: nfs-volume
+                         nfs:
+                           server: nfs.example.com
+                           path: /shared
+                           readOnly: false
 
       **Global configuration:**
 
@@ -368,17 +370,18 @@ Examples:
 
            experimental:
              config_overrides:
-               pod_config:
-                 spec:
-                   containers:
-                     - volumeMounts:
-                         - mountPath: /mnt/nvme
-                           name: nvme
-                   volumes:
-                     - name: nvme
-                       hostPath:
-                         path: /path/on/host/nvme
-                         type: Directory
+               kubernetes:
+                 pod_config:
+                   spec:
+                     containers:
+                       - volumeMounts:
+                           - mountPath: /mnt/nvme
+                             name: nvme
+                     volumes:
+                       - name: nvme
+                         hostPath:
+                           path: /path/on/host/nvme
+                           type: Directory
 
       **Global configuration:**
 
