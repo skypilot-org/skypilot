@@ -33,7 +33,7 @@ class CloudCapability(str, enum.Enum):
 ALL_CAPABILITIES = [CloudCapability.COMPUTE, CloudCapability.STORAGE]
 
 
-def check(
+def check_capabilities(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
@@ -228,14 +228,14 @@ def check(
     return enabled_clouds
 
 
-def check_single_capability(
+def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
     capability: CloudCapability = CloudCapability.COMPUTE,
 ) -> List[str]:
     clouds_with_capability = []
-    enabled_clouds = check(quiet, verbose, clouds, [capability])
+    enabled_clouds = check_capabilities(quiet, verbose, clouds, [capability])
     for cloud, capabilities in enabled_clouds.items():
         if capability in capabilities:
             clouds_with_capability.append(cloud)
@@ -259,8 +259,7 @@ def get_cached_enabled_clouds_or_refresh(
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
     if not cached_enabled_clouds:
         try:
-            check_single_capability(quiet=True,
-                                    capability=CloudCapability.COMPUTE)
+            check(quiet=True, capability=CloudCapability.COMPUTE)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
@@ -294,8 +293,7 @@ def get_cached_enabled_storage_clouds_or_refresh(
         global_user_state.get_cached_enabled_storage_clouds()
     if not cached_enabled_storage_clouds:
         try:
-            check_single_capability(quiet=True,
-                                    capability=CloudCapability.STORAGE)
+            check(quiet=True, capability=CloudCapability.STORAGE)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
