@@ -18,7 +18,7 @@ sky launch -c slurm-cluster examples/slurm_cloud_deploy/deploy.yaml
 This creates a complete cluster with:
 - A controller node
 - Worker node(s) (default: 2 nodes, use `--num-nodes` to change)
-- Slurm configuration for job submission
+- Slurm configuration for job submission with resource sharing
 - NFS server on the controller
 - NFS client configuration on all workers
 - Shared `/mnt` directory across all nodes
@@ -68,9 +68,23 @@ After setup is complete:
 ## GPU Support
 
 If your cluster has GPUs:
-- A "gpu" partition will be automatically created
-- Request GPUs with `--gres=gpu:N` where N is the number of GPUs
-- Example: `sbatch --partition=gpu --gres=gpu:1 my_job.sh`
+- A "gpu" partition will be automatically created.
+- Request GPUs with `--gres=gpu:N` where N is the number of GPUs.
+
+Example job submissions:
+```bash
+# Use all GPUs on a single node
+sbatch --partition=gpu --gres=gpu:4 my_job.sh
+
+# Use 2 GPUs per node across both nodes (4 GPUs total)
+sbatch --partition=gpu --nodes=2 --ntasks-per-node=1 --gres=gpu:2 my_job.sh
+
+# Use all GPUs across all nodes (8 GPUs total)
+sbatch --partition=gpu --nodes=2 --ntasks-per-node=1 --gres=gpu:4 my_job.sh
+
+# For jobs that don't need GPUs, use the cpu partition
+sbatch --partition=cpu my_cpu_job.sh
+```
 
 ## Security Notes
 
