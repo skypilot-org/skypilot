@@ -450,7 +450,10 @@ class Cloud:
         Returns a boolean of whether the user can access this cloud's storage,
         and a string describing the reason if the user cannot access.
         """
-        raise NotImplementedError
+        # A given cloud does not support storage
+        # unless it overrides this method.
+        raise exceptions.NotSupportedError(
+            f'{cls._REPR} does not support storage.')
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod

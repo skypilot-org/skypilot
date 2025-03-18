@@ -457,6 +457,10 @@ class OCI(clouds.Cloud):
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
     @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        return cls.check_credentials()
+
+    @classmethod
     def check_disk_tier(
             cls, instance_type: Optional[str],
             disk_tier: Optional[resources_utils.DiskTier]) -> Tuple[bool, str]:

@@ -575,6 +575,10 @@ class Azure(clouds.Cloud):
                                                     clouds='azure')
 
     @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        return cls.check_credentials()
+
+    @classmethod
     @annotations.lru_cache(scope='global',
                            maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:

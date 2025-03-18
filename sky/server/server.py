@@ -173,7 +173,7 @@ async def check(request: fastapi.Request,
         request_id=request.state.request_id,
         request_name='check',
         request_body=check_body,
-        func=sky_check.check,
+        func=sky_check.check_single_capability,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 

@@ -215,7 +215,9 @@ def _get_cloud_dependencies_installation_commands(
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
-    for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
+    for cloud in sky_check.get_cached_enabled_clouds_or_refresh().append(
+        sky_check.get_cached_enabled_storage_clouds_or_refresh()
+    ):
         cloud_python_dependencies: List[str] = copy.deepcopy(
             dependencies.extras_require[cloud.canonical_name()])
 

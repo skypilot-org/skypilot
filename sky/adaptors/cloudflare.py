@@ -9,7 +9,7 @@ from typing import Dict, Optional, Tuple
 from sky.adaptors import common
 from sky.utils import annotations
 from sky.utils import ux_utils
-
+from sky import exceptions
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
                          'Try pip install "skypilot[cloudflare]"')
 boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
@@ -149,6 +149,9 @@ def create_endpoint():
 
 
 def check_credentials() -> Tuple[bool, Optional[str]]:
+    return check_storage_credentials()
+
+def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Cloudflare R2.
 
     Returns:

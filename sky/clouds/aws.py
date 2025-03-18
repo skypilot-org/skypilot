@@ -667,6 +667,10 @@ class AWS(clouds.Cloud):
         return True, hints
 
     @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        return cls.check_credentials()
+
+    @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
         stdout = cls._aws_configure_list()
         if stdout is None:

@@ -720,7 +720,6 @@ class GCP(clouds.Cloud):
     @classmethod
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has compute access credentials to this cloud."""
-        print('checking compute credentials')
         return cls._check_credentials(  # Check APIs.
             [
                 ('compute', 'Compute Engine'),
@@ -733,7 +732,6 @@ class GCP(clouds.Cloud):
     @classmethod
     def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has compute access credentials to this cloud."""
-        print('checking storage credentials')
         return cls._check_credentials(  # Check APIs.
             [
                 ('storage', 'Cloud Storage'),

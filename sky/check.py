@@ -81,20 +81,19 @@ def check(
                         capabilities: List[CloudCapability]) -> None:
         cloud_repr, cloud = cloud_tuple
         for capability in capabilities:
-            not_implemented = False
+            not_supported = False
             with rich_utils.safe_status(f'Checking {cloud_repr}...'):
                 try:
                     ok, reason = check_credentials(cloud, capability)
-                except NotImplementedError:
-                    not_implemented = True
+                except exceptions.NotSupportedError:
+                    not_supported = True
                 except Exception:  # pylint: disable=broad-except
                     # Catch all exceptions to prevent a single cloud
                     # from blocking the check for other clouds.
                     ok, reason = False, traceback.format_exc()
-            if not_implemented:
+            if not_supported:
                 continue
-            status_msg = capability.value + ': ' + ('enabled'
-                                                    if ok else 'disabled')
+            status_msg = ('enabled' if ok else 'disabled')
             styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
             echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
                  ' ' * 30)
@@ -338,7 +337,7 @@ def get_cloud_credential_file_mounts(
     # Currently, get_cached_enabled_clouds_or_refresh() does not support r2 as
     # only clouds with computing instances are marked as enabled by skypilot.
     # This will be removed when cloudflare/r2 is added as a 'cloud'.
-    r2_is_enabled, _ = cloudflare.check_credentials()
+    r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
         r2_credential_mounts = cloudflare.get_credential_file_mounts()
         file_mounts.update(r2_credential_mounts)
@@ -352,8 +351,7 @@ def _format_enabled_cloud(cloud_name: str,
                      capabilities: List[CloudCapability]) -> str:
         capabilities_str = ', '.join(
             [capability.value for capability in capabilities])
-        return f'{colorama.Fore.GREEN}{cloud_name}: ' \
-                f'{capabilities_str}{colorama.Style.RESET_ALL}'
+        return f'{colorama.Fore.GREEN}{cloud_name}{colorama.Style.RESET_ALL}'
 
     if cloud_name == repr(sky_clouds.Kubernetes()):
         # Get enabled contexts for Kubernetes

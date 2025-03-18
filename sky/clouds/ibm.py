@@ -433,6 +433,10 @@ class IBM(clouds.Cloud):
         except Exception as e:
             return (False, f'{str(e)}' + help_str)
 
+    @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        return cls.check_credentials()
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping
          written to the cluster's file_mounts segment

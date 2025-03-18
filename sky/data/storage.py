@@ -85,17 +85,14 @@ def get_cached_enabled_storage_clouds_or_refresh(
     enabled_clouds = sky_check.get_cached_enabled_storage_clouds_or_refresh()
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
 
-    enabled_storage_clouds = [
-        cloud for cloud in enabled_clouds if cloud in STORE_ENABLED_CLOUDS
-    ]
-    r2_is_enabled, _ = cloudflare.check_credentials()
+    r2_is_enabled, _ = cloudflare.check_storage_credentials()
     if r2_is_enabled:
-        enabled_storage_clouds.append(cloudflare.NAME)
-    if raise_if_no_cloud_access and not enabled_storage_clouds:
+        enabled_clouds.append(cloudflare.NAME)
+    if raise_if_no_cloud_access and not enabled_clouds:
         raise exceptions.NoCloudAccessError(
             'No cloud access available for storage. '
             'Please check your cloud credentials.')
-    return enabled_storage_clouds
+    return enabled_clouds
 
 
 def _is_storage_cloud_enabled(cloud_name: str,
