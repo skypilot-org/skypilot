@@ -359,7 +359,8 @@ class GKELabelFormatter(GPULabelFormatter):
     # label to use in an autoscaling environment. For list of topologies, see:
     # tpu v5e: https://cloud.google.com/tpu/docs/tpus-in-gke
     # tpu v5p: https://cloud.google.com/tpu/docs/v5p
-    # TODO(romilb): Add support for TPU v4 and v6.
+    # tpu v6e: https://cloud.google.com/tpu/docs/v6e
+    # TODO(romilb): Add support for TPU v4.
     GKE_TPU_TOPOLOGIES = {
         'tpu-v5-lite-podslice': {
             1: '1x1',
@@ -374,6 +375,11 @@ class GKELabelFormatter(GPULabelFormatter):
         'tpu-v5p-slice': {
             4: '2x2x1'
         },
+        'tpu-v6e-slice': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        }
     }
 
     @classmethod
@@ -784,6 +790,7 @@ class GKEAutoscaler(Autoscaler):
         """Check if the node pool has enough TPU capacity
         to fit the instance type.
         """
+
         if 'goog-gke-tpu-node-pool-type' not in node_pool_resource_labels:
             # This node does not have TPUs.
             return False
