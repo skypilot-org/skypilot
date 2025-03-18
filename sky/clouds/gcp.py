@@ -843,7 +843,10 @@ class GCP(clouds.Cloud):
         permissions = {'permissions': gcp_minimal_permissions}
         request = crm.projects().testIamPermissions(resource=project,
                                                     body=permissions)
-        ret_permissions = request.execute().get('permissions', [])
+        try:
+            ret_permissions = request.execute().get('permissions', [])
+        except gcp.gcp_auth_refresh_error_exception() as e:
+            return False, common_utils.format_exception(e, use_bracket=True)
 
         diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
         if diffs:

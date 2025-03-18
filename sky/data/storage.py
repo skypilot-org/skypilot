@@ -143,6 +143,22 @@ class StoreType(enum.Enum):
 
         raise ValueError(f'Unsupported cloud for StoreType: {cloud}')
 
+    def to_cloud(self) -> str:
+        if self == StoreType.S3:
+            return str(clouds.AWS())
+        elif self == StoreType.GCS:
+            return str(clouds.GCP())
+        elif self == StoreType.AZURE:
+            return str(clouds.Azure())
+        elif self == StoreType.R2:
+            return cloudflare.NAME
+        elif self == StoreType.IBM:
+            return str(clouds.IBM())
+        elif self == StoreType.OCI:
+            return str(clouds.OCI())
+        else:
+            raise ValueError(f'Unknown store type: {self}')
+
     @classmethod
     def from_store(cls, store: 'AbstractStore') -> 'StoreType':
         if isinstance(store, S3Store):

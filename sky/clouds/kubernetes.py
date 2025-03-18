@@ -229,32 +229,52 @@ class Kubernetes(clouds.Cloud):
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
         # kubernetes cluster/context).
-        regions_to_return = []
-        autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if autoscaler_type is None and instance_type is not None:
-            # If autoscaler is not set, check if the instance type fits in the
-            # cluster. Else, rely on the autoscaler to provision the right
-            # instance type without running checks. Worst case, if autoscaling
-            # fails, the pod will be stuck in pending state until
-            # provision_timeout, after which failover will be triggered.
-            for r in regions:
-                context = r.name
-                try:
-                    fits, reason = kubernetes_utils.check_instance_fits(
-                        context, instance_type)
-                except exceptions.KubeAPIUnreachableError as e:
-                    cls._log_unreachable_context(context, str(e))
-                    continue
-                if fits:
-                    regions_to_return.append(r)
-                else:
-                    logger.debug(
-                        f'Instance type {instance_type} does '
-                        'not fit in the Kubernetes cluster with context: '
-                        f'{context}. Reason: {reason}')
-        else:
-            regions_to_return = regions
+        if instance_type is None:
+            return regions
 
+        autoscaler_type = kubernetes_utils.get_autoscaler_type()
+        if (autoscaler_type is not None and not kubernetes_utils.get_autoscaler(
+                autoscaler_type).can_query_backend):
+            # Unsupported autoscaler type. Rely on the autoscaler to
+            # provision the right instance type without running checks.
+            # Worst case, if autoscaling fails, the pod will be stuck in
+            # pending state until provision_timeout, after which failover
+            # will be triggered.
+            #
+            # Removing this if statement produces the same behavior,
+            # because can_create_new_instance_of_type() always returns True
+            # for unsupported autoscaler types.
+            # This check is here as a performance optimization to avoid
+            # further code executions that is known to return this result.
+            return regions
+
+        regions_to_return = []
+        for r in regions:
+            context = r.name
+            try:
+                fits, reason = kubernetes_utils.check_instance_fits(
+                    context, instance_type)
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
+                continue
+            if fits:
+                regions_to_return.append(r)
+                continue
+            logger.debug(f'Instance type {instance_type} does '
+                         'not fit in the existing Kubernetes cluster '
+                         'with context: '
+                         f'{context}. Reason: {reason}')
+            if autoscaler_type is None:
+                continue
+            autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
+            logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
+            if autoscaler.can_create_new_instance_of_type(
+                    context, instance_type):
+                logger.debug(f'Kubernetes cluster {context} can be '
+                             'autoscaled to create instance type '
+                             f'{instance_type}. Including {context} '
+                             'in the list of regions to return.')
+                regions_to_return.append(r)
         return regions_to_return
 
     def instance_type_to_hourly_cost(self,
@@ -618,7 +638,6 @@ class Kubernetes(clouds.Cloud):
             chosen_instance_type = (
                 kubernetes_utils.KubernetesInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
-
         # Check the availability of the specified instance type in all contexts.
         available_regions = self.regions_with_offering(
             chosen_instance_type,
