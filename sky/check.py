@@ -227,7 +227,6 @@ def check(
             echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
                  f'Enabled clouds {PARTY_POPPER_EMOJI}'
                  f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
-    print(enabled_clouds)
     return enabled_clouds
 
 
@@ -239,11 +238,9 @@ def check_single_capability(
 ) -> List[str]:
     clouds_with_capability = []
     enabled_clouds = check(quiet, verbose, clouds, [capability])
-    print(enabled_clouds)
     for cloud, capabilities in enabled_clouds.items():
         if capability in capabilities:
             clouds_with_capability.append(cloud)
-    print(clouds_with_capability)
     return clouds_with_capability
 
 
