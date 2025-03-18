@@ -103,8 +103,9 @@ run: |
   StateSaveLocation=/var/spool/slurmctld
   SlurmdSpoolDir=/var/spool/slurmd
   AuthType=auth/munge
-  SelectType=select/cons_res
-  SelectTypeParameters=CR_Core_Memory
+  # Linear is required for support running multiple jobs on the same node
+  SelectType=select/linear
+  # SelectTypeParameters=CR_Core_Memory
   # Use Linux process tracking instead of cgroups
   ProctrackType=proctrack/linuxproc
   # Enable GPU support via Generic Resources (if GPUs are present)
@@ -217,11 +218,11 @@ run: |
     done
     
     # Create partitions
-    echo "PartitionName=cpu Nodes=ALL Default=YES MaxTime=INFINITE State=UP" | sudo tee -a /etc/slurm/slurm.conf
+    echo "PartitionName=cpu Nodes=ALL Default=YES MaxTime=INFINITE State=UP OverSubscribe=FORCE:32" | sudo tee -a /etc/slurm/slurm.conf
     
     # Create GPU partition if GPU nodes exist
     if [ -n "$gpu_nodes" ]; then
-      echo "PartitionName=gpu Nodes=${gpu_nodes} Default=NO MaxTime=INFINITE State=UP" | sudo tee -a /etc/slurm/slurm.conf
+      echo "PartitionName=gpu Nodes=${gpu_nodes} Default=NO MaxTime=INFINITE State=UP OverSubscribe=FORCE:32" | sudo tee -a /etc/slurm/slurm.conf
     fi
 
     # Distribute slurm.conf and gres.conf to all nodes
