@@ -4362,9 +4362,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 if purge:
                     msg = common_utils.format_exception(e, use_bracket=True)
                     logger.warning(
-                        'Failed abnormal non-terminated nodes cleanup. Skipping and cleaning up as '
-                        f'purge is set. Cleaning up cluster configuration data. Details: {msg}'
-                        )
+                        'Failed abnormal non-terminated nodes cleanup. '
+                        'Skipping and cleaning up as purge is set. Cleaning '
+                        f'up cluster configuration data. Details: {msg}')
                     self.remove_cluster_config(handle)
                 else:
                     raise
