@@ -1802,6 +1802,21 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
         status == status_lib.ClusterStatus.UP for status in node_statuses) and
                     len(node_statuses) == handle.launched_nodes)
 
+    def get_node_counts_from_ray_status(
+            runner: command_runner.CommandRunner) -> Tuple[int, int, str, str]:
+        rc, output, stderr = runner.run(
+            instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
+            stream_logs=False,
+            require_outputs=True,
+            separate_stderr=True)
+        if rc:
+            raise RuntimeError(
+                f'Refreshing status ({cluster_name!r}): Failed to check '
+                f'ray cluster\'s healthiness with '
+                f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
+                f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
+        return (*_count_healthy_nodes_from_ray(output), output, stderr)
+
     def run_ray_status_to_check_ray_cluster_healthy() -> bool:
         try:
             # NOTE: fetching the IPs is very slow as it calls into
@@ -1822,26 +1837,34 @@ def _update_cluster_status(cluster_name: str) -> Optional[Dict[str, Any]]:
                 raise exceptions.FetchClusterInfoError(
                     reason=exceptions.FetchClusterInfoError.Reason.HEAD)
             head_runner = runners[0]
-            rc, output, stderr = head_runner.run(
-                instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND,
-                stream_logs=False,
-                require_outputs=True,
-                separate_stderr=True)
-            if rc:
-                raise RuntimeError(
-                    f'Refreshing status ({cluster_name!r}): Failed to check '
-                    f'ray cluster\'s healthiness with '
-                    f'{instance_setup.RAY_STATUS_WITH_SKY_RAY_PORT_COMMAND}.\n'
-                    f'-- stdout --\n{output}\n-- stderr --\n{stderr}')
 
-            ready_head, ready_workers = _count_healthy_nodes_from_ray(output)
             total_nodes = handle.launched_nodes * handle.num_ips_per_node
-            if ready_head + ready_workers == total_nodes:
-                return True
+
+            for i in range(5):
+                ready_head, ready_workers, output, stderr = (
+                    get_node_counts_from_ray_status(head_runner))
+                if ready_head + ready_workers == total_nodes:
+                    return True
+                logger.debug(f'Refreshing status ({cluster_name!r}) attempt '
+                             f'{i}: ray status not showing all nodes '
+                             f'({ready_head + ready_workers}/{total_nodes});\n'
+                             f'output:\n{output}\nstderr:\n{stderr}')
+
+                # If cluster JUST started, maybe not all the nodes have shown
+                # up. Try again for a few seconds.
+                # Note: We are okay with this performance hit because it's very
+                # rare to normally hit this case. It requires:
+                # - All the instances in the cluster are up on the cloud side
+                #   (not preempted), but
+                # - The ray cluster is somehow degraded so not all instances are
+                #   showing up
+                time.sleep(1)
+
             raise RuntimeError(
                 f'Refreshing status ({cluster_name!r}): ray status not showing '
                 f'all nodes ({ready_head + ready_workers}/'
-                f'{total_nodes}); output: {output}; stderr: {stderr}')
+                f'{total_nodes});\noutput:\n{output}\nstderr:\n{stderr}')
+
         except exceptions.FetchClusterInfoError:
             logger.debug(
                 f'Refreshing status ({cluster_name!r}) failed to get IPs.')

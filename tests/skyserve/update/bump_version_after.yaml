@@ -3,7 +3,7 @@
 # This requires the service yaml to not contain a work_dir field.
 # Otherwise, SkyServe will always create new replicas (with new buckets)
 # and delete the old replicas.
-# 
+#
 # Usage:
 #   sky serve up -n bump_version examples/serve/bump_version.yaml
 # Edit the yaml by changing replicas from 2 to 3 and run:
@@ -17,11 +17,9 @@ service:
 
 resources:
   ports: 8081
-  cpus: 2+
 
 setup: |
   wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py
 
 run: |
   python3 server.py --port 8081
-  

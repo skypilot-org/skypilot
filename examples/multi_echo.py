@@ -8,7 +8,9 @@ from typing import Optional
 import sky
 
 
-def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
+def run(cluster: Optional[str] = None,
+        cloud: Optional[str] = None,
+        use_spot: bool = True):
     if cluster is None:
         # (username, last 4 chars of hash of hostname): for uniquefying users on
         # shared-account cloud providers.
@@ -29,7 +31,7 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
             # is not limited by the number of CPU cores (5 x 2 x 2 = 20).
             cpus='5+',
             accelerators={'T4': 1},
-            use_spot=True)
+            use_spot=use_spot)
         task = sky.Task(num_nodes=2).set_resources(cluster_resources)
     request_id = sky.launch(dag, cluster_name=cluster)
     sky.stream_and_get(request_id)
@@ -55,9 +57,12 @@ def run(cluster: Optional[str] = None, cloud: Optional[str] = None):
 if __name__ == '__main__':
     cluster = None
     cloud = None
+    use_spot = True
     if len(sys.argv) > 1:
         # For smoke test passing in a cluster name.
         cluster = sys.argv[1]
     if len(sys.argv) > 2:
         cloud = sys.argv[2]
-    run(cluster, cloud)
+    if len(sys.argv) > 3:
+        use_spot = sys.argv[3] == '1'
+    run(cluster, cloud, use_spot)
