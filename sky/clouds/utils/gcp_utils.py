@@ -179,13 +179,9 @@ def get_minimal_compute_permissions() -> List[str]:
             skypilot_config.get_nested(('gcp', 'specific_reservations'), [])):
         permissions += constants.RESERVATION_PERMISSIONS
 
-    permissions += constants.GCP_MINIMAL_PERMISSIONS
-
     return permissions
 
 def get_minimal_storage_permissions() -> List[str]:
     permissions = copy.copy(constants.STORAGE_MINIMAL_PERMISSIONS)
-
-    permissions += constants.GCP_MINIMAL_PERMISSIONS
 
     return permissions

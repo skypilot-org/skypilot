@@ -141,20 +141,6 @@ FIREWALL_RULES_TEMPLATE = [
     },
 ]
 
-GCP_MINIMAL_PERMISSIONS = [
-    'iam.roles.get',
-    # We now skip the check for `iam.serviceAccounts.actAs` permission for
-    # simplicity as it can be granted at the service-account level.
-    # Check: sky.provision.gcp.config::_is_permission_satisfied
-    # 'iam.serviceAccounts.actAs',
-    'iam.serviceAccounts.get',
-    'serviceusage.services.enable',
-    'serviceusage.services.list',
-    'serviceusage.services.use',
-    'resourcemanager.projects.get',
-    'resourcemanager.projects.getIamPolicy',
-]
-
 # A list of permissions required to run SkyPilot on GCP.
 # Keep this in sync with https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
 VM_MINIMAL_PERMISSIONS = [
@@ -178,6 +164,17 @@ VM_MINIMAL_PERMISSIONS = [
     'compute.subnetworks.useExternalIp',
     'compute.projects.get',
     'compute.zoneOperations.get',
+    'iam.roles.get',
+    # We now skip the check for `iam.serviceAccounts.actAs` permission for
+    # simplicity as it can be granted at the service-account level.
+    # Check: sky.provision.gcp.config::_is_permission_satisfied
+    # 'iam.serviceAccounts.actAs',
+    'iam.serviceAccounts.get',
+    'serviceusage.services.enable',
+    'serviceusage.services.list',
+    'serviceusage.services.use',
+    'resourcemanager.projects.get',
+    'resourcemanager.projects.getIamPolicy',
 ]
 
 
@@ -187,6 +184,9 @@ STORAGE_MINIMAL_PERMISSIONS = [
     'storage.buckets.delete',
     'storage.objects.create',
     'storage.objects.update',
+    'storage.objects.delete',
+    'storage.objects.get',
+    'storage.objects.list',
 ]
 
 # Permissions implied by GCP built-in roles. We hardcode these here, as we
