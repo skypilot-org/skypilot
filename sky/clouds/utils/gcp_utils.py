@@ -181,6 +181,7 @@ def get_minimal_compute_permissions() -> List[str]:
 
     return permissions
 
+
 def get_minimal_storage_permissions() -> List[str]:
     permissions = copy.copy(constants.STORAGE_MINIMAL_PERMISSIONS)
 

@@ -727,7 +727,8 @@ class GCP(clouds.Cloud):
                 ('cloudresourcemanager', 'Cloud Resource Manager'),
                 ('iam', 'Identity and Access Management (IAM)'),
                 ('tpu', 'Cloud TPU'),  # Keep as final element.
-            ], gcp_utils.get_minimal_compute_permissions())
+            ],
+            gcp_utils.get_minimal_compute_permissions())
 
     @classmethod
     def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -740,7 +741,8 @@ class GCP(clouds.Cloud):
 
     @classmethod
     def _check_credentials(
-            cls, apis: List[Tuple[str, str]], gcp_minimal_permissions: List[str]) -> Tuple[bool, Optional[str]]:
+            cls, apis: List[Tuple[str, str]],
+            gcp_minimal_permissions: List[str]) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -830,7 +832,7 @@ class GCP(clouds.Cloud):
                 f'GCP identity ({identity_str}):\n    '
                 f'{diffs}\n    '
                 'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
-        
+
         enabled_api = False
         for endpoint, display_name in apis:
             if is_api_disabled(endpoint, project_id):
@@ -870,7 +872,7 @@ class GCP(clouds.Cloud):
             print('\nHint: Enabled GCP API(s) may take a few minutes to take '
                   'effect. If any SkyPilot commands/calls failed, retry after '
                   'some time.')
-        
+
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

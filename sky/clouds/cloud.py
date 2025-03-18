@@ -450,7 +450,7 @@ class Cloud:
         Returns a boolean of whether the user can access this cloud's storage,
         and a string describing the reason if the user cannot access.
         """
-        return cls.check_credentials()
+        raise NotImplementedError
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod

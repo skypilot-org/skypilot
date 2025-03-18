@@ -177,7 +177,6 @@ VM_MINIMAL_PERMISSIONS = [
     'resourcemanager.projects.getIamPolicy',
 ]
 
-
 STORAGE_MINIMAL_PERMISSIONS = [
     'storage.buckets.create',
     'storage.buckets.get',
