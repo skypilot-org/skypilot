@@ -727,7 +727,7 @@ class GCP(clouds.Cloud):
                 ('cloudresourcemanager', 'Cloud Resource Manager'),
                 ('iam', 'Identity and Access Management (IAM)'),
                 ('tpu', 'Cloud TPU'),  # Keep as final element.
-            ])
+            ], gcp_utils.get_minimal_compute_permissions())
 
     @classmethod
     def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
@@ -736,11 +736,11 @@ class GCP(clouds.Cloud):
         return cls._check_credentials(  # Check APIs.
             [
                 ('storage', 'Cloud Storage'),
-            ])
+            ], gcp_utils.get_minimal_storage_permissions())
 
     @classmethod
     def _check_credentials(
-            cls, apis: List[Tuple[str, str]]) -> Tuple[bool, Optional[str]]:
+            cls, apis: List[Tuple[str, str]], gcp_minimal_permissions: List[str]) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -805,6 +805,32 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
+        # pylint: disable=import-outside-toplevel,unused-import
+        import google.auth
+
+        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
+        credentials, project = google.auth.default()
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
+        permissions = {'permissions': gcp_minimal_permissions}
+        request = crm.projects().testIamPermissions(resource=project,
+                                                    body=permissions)
+        try:
+            ret_permissions = request.execute().get('permissions', [])
+        except gcp.gcp_auth_refresh_error_exception() as e:
+            return False, common_utils.format_exception(e, use_bracket=True)
+
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
+        if diffs:
+            identity_str = identity[0] if identity else None
+            return False, (
+                'The following permissions are not enabled for the current '
+                f'GCP identity ({identity_str}):\n    '
+                f'{diffs}\n    '
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+        
         enabled_api = False
         for endpoint, display_name in apis:
             if is_api_disabled(endpoint, project_id):
@@ -844,33 +870,7 @@ class GCP(clouds.Cloud):
             print('\nHint: Enabled GCP API(s) may take a few minutes to take '
                   'effect. If any SkyPilot commands/calls failed, retry after '
                   'some time.')
-
-        # pylint: disable=import-outside-toplevel,unused-import
-        import google.auth
-
-        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
-        credentials, project = google.auth.default()
-        crm = gcp.build('cloudresourcemanager',
-                        'v1',
-                        credentials=credentials,
-                        cache_discovery=False)
-        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
-        permissions = {'permissions': gcp_minimal_permissions}
-        request = crm.projects().testIamPermissions(resource=project,
-                                                    body=permissions)
-        try:
-            ret_permissions = request.execute().get('permissions', [])
-        except gcp.gcp_auth_refresh_error_exception() as e:
-            return False, common_utils.format_exception(e, use_bracket=True)
-
-        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if diffs:
-            identity_str = identity[0] if identity else None
-            return False, (
-                'The following permissions are not enabled for the current '
-                f'GCP identity ({identity_str}):\n    '
-                f'{diffs}\n    '
-                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+        
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

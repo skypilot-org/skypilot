@@ -22,8 +22,6 @@ PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
 
 
 class CloudCapability(enum.Enum):
-    # Filter for all cloud capabilities.
-    ALL = 'all'
     # Compute capability.
     COMPUTE = 'compute'
     # Storage capability.
