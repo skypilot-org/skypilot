@@ -788,7 +788,7 @@ class GCP(clouds.Cloud):
             ('compute', 'Compute Engine'),
             ('cloudresourcemanager', 'Cloud Resource Manager'),
             ('iam', 'Identity and Access Management (IAM)'),
-            ('tpu', 'Cloud TPU'),  # Keep as final element.
+            # ('tpu', 'Cloud TPU'),  # Keep as final element.
         )
         enabled_api = False
         for endpoint, display_name in apis:
