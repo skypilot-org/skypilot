@@ -97,6 +97,7 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
     # Multi-host compatible v5e TPU configurations allowed.
     'tpu-v5-lite-podslice': 'v5e',
     'tpu-v5p-slice': 'v5p',
+    'tpu-v6e-slice': 'v6e',
 }
 
 POD_STATUSES = {
@@ -359,7 +360,8 @@ class GKELabelFormatter(GPULabelFormatter):
     # label to use in an autoscaling environment. For list of topologies, see:
     # tpu v5e: https://cloud.google.com/tpu/docs/tpus-in-gke
     # tpu v5p: https://cloud.google.com/tpu/docs/v5p
-    # TODO(romilb): Add support for TPU v4 and v6.
+    # tpu v6e: https://cloud.google.com/tpu/docs/v6e
+    # TODO(romilb): Add support for TPU v4.
     GKE_TPU_TOPOLOGIES = {
         'tpu-v5-lite-podslice': {
             1: '1x1',
@@ -374,6 +376,11 @@ class GKELabelFormatter(GPULabelFormatter):
         'tpu-v5p-slice': {
             4: '2x2x1'
         },
+        'tpu-v6e-slice': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        }
     }
 
     @classmethod
@@ -784,6 +791,7 @@ class GKEAutoscaler(Autoscaler):
         """Check if the node pool has enough TPU capacity
         to fit the instance type.
         """
+
         if 'goog-gke-tpu-node-pool-type' not in node_pool_resource_labels:
             # This node does not have TPUs.
             return False
@@ -807,12 +815,11 @@ class GKEAutoscaler(Autoscaler):
         # according to
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
-        # ct<version>-hightpu-<node-chip-count>t
+        # ct<version>-<type>-<node-chip-count>t
         logger.debug(
             f'inferring TPU chip count from machine type: {machine_type}')
         if (len(machine_type_parts) != 3 or
                 not machine_type_parts[0].startswith('ct') or
-                machine_type_parts[1] != 'hightpu' or
                 not machine_type_parts[2].endswith('t') or
                 not machine_type_parts[2].strip('t').isdigit()):
             logger.debug(f'machine type {machine_type} is not a '
