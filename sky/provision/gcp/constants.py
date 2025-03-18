@@ -141,6 +141,11 @@ FIREWALL_RULES_TEMPLATE = [
     },
 ]
 
+GCP_MINIMAL_PERMISSIONS = [
+    'serviceusage.services.enable',
+    'serviceusage.services.list',
+]
+
 # A list of permissions required to run SkyPilot on GCP.
 # Keep this in sync with https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html # pylint: disable=line-too-long
 VM_MINIMAL_PERMISSIONS = [
@@ -170,8 +175,6 @@ VM_MINIMAL_PERMISSIONS = [
     # Check: sky.provision.gcp.config::_is_permission_satisfied
     # 'iam.serviceAccounts.actAs',
     'iam.serviceAccounts.get',
-    'serviceusage.services.enable',
-    'serviceusage.services.list',
     'serviceusage.services.use',
     'resourcemanager.projects.get',
     'resourcemanager.projects.getIamPolicy',

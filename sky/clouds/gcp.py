@@ -124,6 +124,7 @@ def _run_output(cmd):
 
 
 def is_api_disabled(endpoint: str, project_id: str) -> bool:
+    # requires serviceusage.services.list
     proc = subprocess.run((f'gcloud services list --project {project_id} '
                            f' | grep {endpoint}.googleapis.com'),
                           check=False,
@@ -842,6 +843,7 @@ class GCP(clouds.Cloud):
                     suffix = ' (free of charge)'
                 print(f'\nEnabling {display_name} API{suffix}...')
                 t1 = time.time()
+                # requires serviceusage.services.enable
                 proc = subprocess.run(
                     f'gcloud services enable {endpoint}.googleapis.com '
                     f'--project {project_id}',
