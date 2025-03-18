@@ -10,9 +10,6 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.backends.backend_utils import SKY_REMOTE_PATH
 
-# Global temp directory
-TEMP_DIR = pathlib.Path(tempfile.gettempdir())
-
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
 
@@ -33,8 +30,8 @@ class TestBackwardCompatibility:
     SKY_WHEEL_DIR = pathlib.Path(SKY_REMOTE_PATH).expanduser().absolute()
 
     # Command templates
-    ACTIVATE_BASE = f'rm -r  {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
-    ACTIVATE_CURRENT = f'rm -r  {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
+    ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
+    ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
 
     def _run_cmd(self, cmd: str):
@@ -74,7 +71,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_BASE} && '
             'pip install uv && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow azure-cli && '
+            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
 
         # Install current version in current environment
@@ -82,7 +79,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && '
             'pip install uv && '
             'uv pip uninstall skypilot && '
-            'uv pip install --prerelease=allow azure-cli && '
+            'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
 
         yield  # Optional teardown logic
