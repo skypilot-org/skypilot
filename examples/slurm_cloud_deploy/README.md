@@ -7,29 +7,29 @@ This directory contains configuration files to deploy a Slurm cluster on cloud r
 - `deploy.yaml`: Complete Slurm cluster setup with NFS in a single step
 - `add-users.yaml`: User creation and management with NFS home directories (idempotent - safe to run multiple times)
 
-## Deployment
+## Step 1: Slurm and NFS Deployment
 
 Deploy the Slurm cluster with NFS in a single step:
 
 ```bash
-sky launch -c slurm_cluster examples/slurm_cloud_deploy/deploy.yaml
+sky launch -c slurm-cluster examples/slurm_cloud_deploy/deploy.yaml
 ```
 
 This creates a complete cluster with:
 - A controller node
-- Worker node(s)
+- Worker node(s) (default: 2 nodes, use `--num-nodes` to change)
 - Slurm configuration for job submission
 - NFS server on the controller
 - NFS client configuration on all workers
 - Shared `/mnt` directory across all nodes
 - GPU support (if GPUs are requested)
 
-## Adding Users
+## Step 2: Adding Users
 
-After the cluster is deployed, add users with:
+After the cluster is deployed with Slurm and NFS, add users with:
 
 ```bash
-sky exec slurm_cluster examples/slurm_cloud_deploy/add-users.yaml
+sky exec slurm-cluster examples/slurm_cloud_deploy/add-users.yaml
 ```
 
 This script is fully idempotent, so it's safe to run multiple times:
@@ -41,17 +41,20 @@ The script configures users with:
 - Home directories on the NFS share (`/mnt/username`)
 - Same user accounts across all nodes with consistent UIDs/GIDs
 - SSH keys for passwordless access
-- Sudo access (can be removed if not needed)
+- Sudo access (can be removed if needed)
+- Default password = username (change for production use)
 
 You can add more users at any time by running the `add-users.yaml` script again with different usernames.
 
-## Customizing Users
+### Customizing Users
 
 You can specify which users to create or update by modifying the `USERS` environment variable:
 
 ```bash
-sky exec slurm_cluster examples/slurm_cloud_deploy/add-users.yaml --env USERS="carol dave eve"
+sky launch --fast -c slurm-cluster examples/slurm_cloud_deploy/add-users.yaml --env USERS="carol dave eve"
 ```
+
+By default, the script will create users "alice" and "bob" if no USERS variable is specified. You can call the script multiple times to add more users.
 
 ## Using the Cluster
 
@@ -82,14 +85,14 @@ If your cluster has GPUs:
 git clone https://github.com/skypilot-org/skypilot.git
 cd skypilot/examples/slurm_cloud_deploy
 
-# Launch the cluster
+# Launch the cluster with 2 nodes by default
 sky launch -c slurm-cluster --workdir . deploy.yaml
 
-# Add users
-sky exec slurm-cluster add-users.yaml --env USERS="alice bob charlie"
+# Add default users (alice and bob)
+sky launch --fast -c slurm-cluster add-users.yaml
 
 # Add more users later (won't affect existing users)
-sky exec slurm-cluster add-users.yaml --env USERS="dave eve"
+sky launch --fast -c slurm-cluster add-users.yaml --env USERS="dave eve"
 
 # Connect to the cluster
 ssh slurm-cluster
