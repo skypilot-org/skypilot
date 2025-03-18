@@ -164,12 +164,13 @@ def _list_accelerators(
 
     accelerators_qtys: Set[Tuple[str, int]] = set()
     keys = lf.get_label_keys()
-    nodes = kubernetes_utils.get_kubernetes_nodes(context)
+    nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
     pods = None
     if realtime:
         # Get the pods to get the real-time GPU usage
         try:
-            pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(context)
+            pods = kubernetes_utils.get_all_pods_in_kubernetes_cluster(
+                context=context)
         except kubernetes.api_exception() as e:
             if e.status == 403:
                 logger.warning(

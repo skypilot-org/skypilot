@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
+import multiprocessing
 import os
 import pathlib
 import re
@@ -38,6 +39,7 @@ from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -47,6 +49,7 @@ from sky.utils import common_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -496,13 +499,18 @@ async def launch(launch_body: payloads.LaunchBody,
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
+    cluster_name = exec_body.cluster_name
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
+        precondition=preconditions.ClusterStartCompletePrecondition(
+            request_id=request.state.request_id,
+            cluster_name=cluster_name,
+        ),
         schedule_type=requests_lib.ScheduleType.LONG,
-        request_cluster_name=exec_body.cluster_name,
+        request_cluster_name=cluster_name,
     )
 
 
@@ -1088,6 +1096,9 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 
 if __name__ == '__main__':
     import uvicorn
+
+    from sky.server import uvicorn as skyuvicorn
+
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
@@ -1109,16 +1120,26 @@ if __name__ == '__main__':
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
-        uvicorn.run('sky.server.server:app',
-                    host=cmd_args.host,
-                    port=cmd_args.port,
-                    workers=num_workers)
+        config = uvicorn.Config('sky.server.server:app',
+                                host=cmd_args.host,
+                                port=cmd_args.port,
+                                workers=num_workers)
+        skyuvicorn.run(config)
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for sub_proc in sub_procs:
-            sub_proc.terminate()
-            sub_proc.join()
+
+        def cleanup(proc: multiprocessing.Process) -> None:
+            try:
+                proc.terminate()
+                proc.join()
+            finally:
+                # The process may not be started yet, close it anyway.
+                proc.close()
+
+        subprocess_utils.run_in_parallel(cleanup,
+                                         sub_procs,
+                                         num_threads=len(sub_procs))
