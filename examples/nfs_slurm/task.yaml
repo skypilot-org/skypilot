@@ -30,6 +30,21 @@ setup: |
   # Always ensure NEW_HOME has the updated .bashrc
   cp $OLD_HOME/.bashrc $NEW_HOME/.bashrc
 
+  # Update .profile idempotently
+  if [ -f $OLD_HOME/.profile ]; then
+    # Create backup of original .profile if it doesn't exist
+    if [ ! -f $OLD_HOME/.profile.orig ]; then
+      cp $OLD_HOME/.profile $OLD_HOME/.profile.orig
+    fi
+    
+    # Update .profile by replacing $HOME references with $OLD_HOME
+    sed -i "s|\$HOME|$OLD_HOME|g" $OLD_HOME/.profile
+    
+    # Add HOME export to the beginning of .profile
+    echo "export HOME=$NEW_HOME" | cat - $OLD_HOME/.profile > $OLD_HOME/.profile.tmp
+    mv $OLD_HOME/.profile.tmp $OLD_HOME/.profile
+  fi
+
   echo $HOME
   # Print current user.
   echo $(whoami)
