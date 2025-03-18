@@ -44,6 +44,11 @@ run: |
     fi
   }
 
+  #################################################
+  # PART 1: SLURM CLUSTER SETUP
+  #################################################
+  echo "Setting up Slurm cluster..."
+
   # Generate munge key manually on controller
   if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
     sudo sh -c 'dd if=/dev/urandom bs=1 count=1024 > /etc/munge/munge.key'
@@ -260,4 +265,78 @@ run: |
   else
     echo "=== Example CPU job submission ==="
     echo "To submit a job: sbatch my_job.sh"
-  fi 
+  fi
+
+  #################################################
+  # PART 2: NFS SETUP
+  #################################################
+  echo "Setting up NFS for shared storage..."
+
+  # Install NFS on all nodes (server on controller, client on all)
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    # Controller node: Install NFS server
+    sudo apt install -y nfs-kernel-server
+
+    # Create /mnt directory if it doesn't exist
+    sudo mkdir -p /mnt
+    sudo chmod 755 /mnt
+
+    # Add /mnt to exports
+    echo "/mnt *(rw,sync,no_subtree_check,no_root_squash)" | sudo tee -a /etc/exports
+    sudo exportfs -a
+    sudo systemctl restart nfs-kernel-server
+    
+    # Create a /mnt/home_template directory to copy for new users
+    sudo mkdir -p /mnt/home_template
+    sudo cp -r /etc/skel/. /mnt/home_template/
+    
+    echo "NFS server setup complete on controller node"
+  else
+    # Worker nodes: Install NFS client only
+    sudo apt install -y nfs-common
+  fi
+
+  # Configure NFS on all nodes
+  if [ "$SKYPILOT_NODE_RANK" = "0" ]; then
+    # On controller, create a script that will be used to mount NFS on worker nodes
+    cat > /tmp/mount_nfs.sh << 'EOF'
+  #!/bin/bash
+  sudo mkdir -p /mnt
+  sudo mount ${CONTROLLER_IP}:/mnt /mnt
+  echo "${CONTROLLER_IP}:/mnt /mnt nfs defaults 0 0" | sudo tee -a /etc/fstab
+  EOF
+    sed -i "s/\${CONTROLLER_IP}/${CONTROLLER_IP}/g" /tmp/mount_nfs.sh
+    chmod +x /tmp/mount_nfs.sh
+    
+    # Distribute to all worker nodes
+    for node in $(echo "$SKYPILOT_NODE_IPS" | tail -n +2); do
+      scp -o StrictHostKeyChecking=no /tmp/mount_nfs.sh $node:/tmp/
+      ssh -o StrictHostKeyChecking=no $node "bash /tmp/mount_nfs.sh"
+    done
+    
+    rm /tmp/mount_nfs.sh
+  fi
+  
+  # Create barrier to ensure NFS is mounted before continuing
+  create_barrier "nfs_setup_complete"
+  
+  echo "NFS setup complete. The /mnt directory is now shared across all nodes."
+  echo "You can now create users with home directories under /mnt."
+  
+  #################################################
+  # SUMMARY
+  #################################################
+  echo ""
+  echo "=== DEPLOYMENT SUMMARY ==="
+  echo "Slurm cluster is ready with $SKYPILOT_NODE_COUNT nodes"
+  echo "Controller node: $CONTROLLER_IP"
+  echo "NFS shared directory: /mnt"
+  echo ""
+  echo "Next step: Create users with 'sky exec <cluster> examples/slurm_cloud_deploy/setup-users.yaml [--env users=\"user1 user2 user3\"]'"
+  echo ""
+  echo "To use the cluster:"
+  echo " - Submit jobs with: sbatch <script.sh>"
+  echo " - View queue with: squeue"
+  echo " - Check node status with: sinfo"
+  echo ""
+  echo "All files placed in /mnt will be accessible from all nodes" 

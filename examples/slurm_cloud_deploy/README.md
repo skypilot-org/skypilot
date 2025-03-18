@@ -4,56 +4,53 @@ This directory contains configuration files to deploy a Slurm cluster on cloud r
 
 ## File Overview
 
-- `deploy.yaml`: Basic Slurm cluster setup
-- `nfs-setup.yaml`: NFS server and client configuration
-- `setup-users.yaml`: User creation with home directories on NFS
+- `deploy.yaml`: Complete Slurm cluster setup with NFS in a single step
+- `add-users.yaml`: User creation and management with NFS home directories (idempotent - safe to run multiple times)
 
-## Deployment Workflow
+## Deployment
 
-The deployment process consists of three sequential steps:
-
-### 1. Deploy the Slurm Cluster
+Deploy the Slurm cluster with NFS in a single step:
 
 ```bash
 sky launch -c slurm_cluster examples/slurm_cloud_deploy/deploy.yaml
 ```
 
-This creates a basic Slurm cluster with:
+This creates a complete cluster with:
 - A controller node
 - Worker node(s)
 - Slurm configuration for job submission
+- NFS server on the controller
+- NFS client configuration on all workers
+- Shared `/mnt` directory across all nodes
 - GPU support (if GPUs are requested)
 
-### 2. Set Up NFS
+## Adding Users
+
+After the cluster is deployed, add users with:
 
 ```bash
-sky exec slurm_cluster examples/slurm_cloud_deploy/nfs-setup.yaml
+sky exec slurm_cluster examples/slurm_cloud_deploy/add-users.yaml
 ```
 
-This adds NFS functionality to the cluster:
-- Installs NFS server on the controller node
-- Sets up `/mnt` as the shared directory
-- Configures all worker nodes as NFS clients
-- Creates a template directory for new user homes
+This script is fully idempotent, so it's safe to run multiple times:
+- For new users: creates accounts with NFS home directories
+- For existing users: verifies and updates settings if needed
+- Provides a summary of which users were newly created vs updated
 
-### 3. Create Users
+The script configures users with:
+- Home directories on the NFS share (`/mnt/username`)
+- Same user accounts across all nodes with consistent UIDs/GIDs
+- SSH keys for passwordless access
+- Sudo access (can be removed if not needed)
 
-```bash
-sky exec slurm_cluster examples/slurm_cloud_deploy/setup-users.yaml
-```
-
-This creates users with homes on the NFS share:
-- Creates the same users on all nodes
-- Sets home directories to `/mnt/username`
-- Sets up SSH keys for passwordless access
-- Ensures consistent UIDs/GIDs across the cluster
+You can add more users at any time by running the `add-users.yaml` script again with different usernames.
 
 ## Customizing Users
 
-You can specify which users to create by modifying the `users` environment variable:
+You can specify which users to create or update by modifying the `USERS` environment variable:
 
 ```bash
-sky exec slurm_cluster examples/slurm_cloud_deploy/setup-users.yaml --env users="carol dave eve"
+sky exec slurm_cluster examples/slurm_cloud_deploy/add-users.yaml --env USERS="carol dave eve"
 ```
 
 ## Using the Cluster
@@ -78,16 +75,39 @@ If your cluster has GPUs:
 - Consider using SSH keys instead of passwords for authentication
 - For better security, restrict sudo access appropriately
 
+## Quick Start Example
+
 ```bash
-cd examples/slurm_cloud_deploy
+# Clone the SkyPilot repository if you haven't already
+git clone https://github.com/skypilot-org/skypilot.git
+cd skypilot/examples/slurm_cloud_deploy
+
+# Launch the cluster
 sky launch -c slurm-cluster --workdir . deploy.yaml
-```
 
+# Add users
+sky exec slurm-cluster add-users.yaml --env USERS="alice bob charlie"
 
-## Test
+# Add more users later (won't affect existing users)
+sky exec slurm-cluster add-users.yaml --env USERS="dave eve"
 
-```bash
+# Connect to the cluster
 ssh slurm-cluster
-sbatch ~/sky_workdir/run.sh
+
+# Create and submit a test job
+cat > ~/test_job.sh << EOF
+#!/bin/bash
+#SBATCH --job-name=test
+#SBATCH --output=test-%j.out
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+hostname
+sleep 10
+echo "Job completed successfully!"
+EOF
+
+chmod +x ~/test_job.sh
+sbatch ~/test_job.sh
+squeue  # Check job status
 ```
 
