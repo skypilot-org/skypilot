@@ -815,12 +815,11 @@ class GKEAutoscaler(Autoscaler):
         # according to
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
-        # ct<version>-hightpu-<node-chip-count>t
+        # ct<version>-<type>-<node-chip-count>t
         logger.debug(
             f'inferring TPU chip count from machine type: {machine_type}')
         if (len(machine_type_parts) != 3 or
                 not machine_type_parts[0].startswith('ct') or
-                machine_type_parts[1] != 'hightpu' or
                 not machine_type_parts[2].endswith('t') or
                 not machine_type_parts[2].strip('t').isdigit()):
             logger.debug(f'machine type {machine_type} is not a '
