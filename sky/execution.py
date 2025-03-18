@@ -529,12 +529,10 @@ def launch(
             ]
             skip_unnecessary_provisioning = True
 
-    detach_setup = True
-    if controller_utils.Controllers.from_name(cluster_name) is not None:
-        # Attach to setup if the cluster is a controller, so that user can
-        # see the setup logs when inspecting the launch process to know
-        # excatly what the job is waiting for.
-        detach_setup = False
+    # Attach to setup if the cluster is a controller, so that user can
+    # see the setup logs when inspecting the launch process to know
+    # excatly what the job is waiting for.
+    detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
 
     return _execute(
         entrypoint=entrypoint,
