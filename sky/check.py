@@ -65,26 +65,32 @@ def check_capabilities(
         enabled_style = {'fg': 'green', 'bold': False}
         styles = disabled_style
         service_string = []
+        hints_to_capabilities = {}
+        reasons_to_capabilities = {}
         for capability, ok, reason in cloud_capabilities:
             if ok:
                 status_msg = 'enabled'
                 styles = enabled_style
                 service_string.append(click.style(capability, **enabled_style))
+                if reason is not None:
+                    hints_to_capabilities.setdefault(reason, []).append(capability)
             else:
                 service_string.append(click.style(capability, **disabled_style))
+                if reason is not None:
+                    reasons_to_capabilities.setdefault(reason, []).append(capability)
+
         echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
                 ' ' * 30)
-        echo('    ' + 'services: ' + ' '.join(service_string))
-        for capability, ok, reason in cloud_capabilities:
-            if ok:
-                if verbose and cloud is not cloudflare:
-                    activated_account = cloud.get_active_user_identity_str()
-                    if activated_account is not None:
-                        echo(f'    Activated account: {activated_account}')
-                if reason is not None:
-                    echo(f'    Hint: {reason}')
-            else:
-                echo(f'    Reason: {reason}')
+        if status_msg == 'enabled':
+            echo('    ' + 'services: ' + ' '.join(service_string))
+            if verbose and cloud is not cloudflare:
+                activated_account = cloud.get_active_user_identity_str()
+                if activated_account is not None:
+                    echo(f'    Activated account: {activated_account}')
+        for reason, caps in hints_to_capabilities.items():
+            echo(f'    Hint [{", ".join(caps)}]: {reason}')
+        for reason, caps in reasons_to_capabilities.items():
+            echo(f'    Reason [{", ".join(caps)}]: {reason}')
 
     def get_cloud_tuple(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
