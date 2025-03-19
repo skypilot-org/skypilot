@@ -28,7 +28,10 @@ By leveraging SkyPilot's multi-region approach, we achieved:
 
 ## Compute Embeddings from Text Data with LLM Models
 
-You need to convert text into vector representations (embeddings) so they can be stored in a vector database. In our example, we use `Alibaba-NLP/gte-Qwen2-7B-instruct`, one of the top embedding models on the MTEB leaderboard.
+You need to convert text into vector representations (embeddings) so they can be stored in a vector database. 
+
+We use the book partition of the [Amazon reviews 2023](https://huggingface.co/datasets/McAuley-Lab/Amazon-Reviews-2023/tree/main), containing ~30M Amazon reviews for books, and generating the embeddings for the reviews with the state-of-the-art specialized embedding LLM `Alibaba-NLP/gte-Qwen2-7B-instruct`, one of the top embedding models on the [MTEB leaderboard](https://huggingface.co/spaces/mteb/leaderboard).
+
 
 Use the following command to launch a job that processes your text dataset and computes embeddings: 
 ```
