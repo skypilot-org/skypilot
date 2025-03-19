@@ -130,6 +130,7 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
         # refresh already noticed and cleaned it up.
         logger.info(f'Cluster {cluster_name} not found.')
         return None
+    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
         logger.info('=== Checking the job status... ===')
