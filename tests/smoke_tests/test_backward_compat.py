@@ -64,7 +64,7 @@ class TestBackwardCompatibility:
         # Create and set up virtual environments using uv
         for env_dir in [self.BASE_ENV_DIR, self.CURRENT_ENV_DIR]:
             if not env_dir.exists():
-                self._run_cmd(f'uv venv --seed --python=3.9 {env_dir}',)
+                self._run_cmd(f'uv venv --seed --python=3.10 {env_dir}',)
 
         # Install dependencies in base environment
         self._run_cmd(
