@@ -20,6 +20,7 @@ types-pyvmomi
 types-aiofiles
 
 # testing
+docker
 pytest
 pytest-xdist
 pytest-env>=0.6
