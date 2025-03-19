@@ -1209,17 +1209,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                 # Here, we manually convert the any_of field to a set to avoid
                 # only the difference in the random order of the any_of fields.
                 old_config_any_of = old_config.get('resources',
-                                                   {}).pop('any_of', None)
+                                                   {}).pop('any_of', [])
                 new_config_any_of = new_config.get('resources',
-                                                   {}).pop('any_of', None)
-                if old_config_any_of is not None and new_config_any_of is None:
+                                                   {}).pop('any_of', [])
+                if set(old_config_any_of) != set(new_config_any_of):
                     continue
-                if old_config_any_of is None and new_config_any_of is not None:
-                    continue
-                if (old_config_any_of is not None and
-                        new_config_any_of is not None):
-                    if set(old_config_any_of) != set(new_config_any_of):
-                        continue
                 # File mounts should both be empty, as update always
                 # create new buckets if they are not empty.
                 if (old_config == new_config and
