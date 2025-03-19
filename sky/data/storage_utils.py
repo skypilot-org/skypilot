@@ -24,6 +24,9 @@ _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
     'to the cloud storage for {path!r}'
     'due to the following error: {error_msg!r}')
 
+_USE_SKYIGNORE_HINT = (
+    'To avoid using .gitignore, you can create a .skyignore file instead.')
+
 _LAST_USE_TRUNC_LENGTH = 25
 
 
@@ -120,91 +123,99 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     """
     expand_src_dir_path = os.path.expanduser(src_dir_path)
 
-    git_exclude_path = os.path.join(expand_src_dir_path, '.git/info/exclude')
-    gitignore_path = os.path.join(expand_src_dir_path,
-                                  constants.GIT_IGNORE_FILE)
+    # We will use `git ls-files` to list files that we should ignore, but
+    # `ls-files` will not recurse into subdirectories. So, we need to manually
+    # list the submodules and run `ls-files` within the root and each submodule.
+    # Print the submodule paths relative to expand_src_dir_path, separated by
+    # null chars.
+    submodules_cmd = (f'git -C {shlex.quote(expand_src_dir_path)} '
+                      'submodule foreach -q "printf \\$displaypath\\\\\\0"')
 
-    git_exclude_exists = os.path.isfile(git_exclude_path)
-    gitignore_exists = os.path.isfile(gitignore_path)
+    try:
+        submodules_output = subprocess.run(submodules_cmd,
+                                           shell=True,
+                                           stdout=subprocess.PIPE,
+                                           stderr=subprocess.PIPE,
+                                           check=True,
+                                           text=True)
+    except subprocess.CalledProcessError as e:
+        gitignore_path = os.path.join(expand_src_dir_path,
+                                      constants.GIT_IGNORE_FILE)
 
-    # This command outputs a list to be excluded according to .gitignore
-    # and .git/info/exclude
-    filter_cmd = (f'git -C {shlex.quote(expand_src_dir_path)} '
-                  'status --ignored --porcelain=v1')
+        if (e.returncode == exceptions.GIT_FATAL_EXIT_CODE and
+                'not a git repository' in e.stderr):
+            # If git failed because we aren't in a git repository, but there is
+            # a .gitignore, warn the user that it will be ignored.
+            if os.path.exists(gitignore_path):
+                logger.warning('Detected a .gitignore file, but '
+                               f'{src_dir_path} is not a git repository. The '
+                               '.gitignore file will be ignored. '
+                               f'{_USE_SKYIGNORE_HINT}')
+            # Otherwise, this is fine and we can exit early.
+            return []
+
+        if e.returncode == exceptions.COMMAND_NOT_FOUND_EXIT_CODE:
+            # Git is not installed. This is fine, skip the check.
+            # If .gitignore is present, warn the user.
+            if os.path.exists(gitignore_path):
+                logger.warning(f'Detected a .gitignore file in {src_dir_path}, '
+                               'but git is not installed. The .gitignore file '
+                               f'will be ignored. {_USE_SKYIGNORE_HINT}')
+            return []
+
+        # Pretty much any other error is unexpected, so re-raise.
+        raise
+
+    # submodules_output will contain each submodule path (relative to
+    # src_dir_path), each ending with a null character.
+    # .split will have an empty string at the end because of the final null
+    # char, so trim it.
+    submodules = submodules_output.stdout.split('\0')[:-1]
+
+    # The empty string is the relative reference to the src_dir_path.
+    all_git_repos = ['.'] + [
+        # We only care about submodules that are a subdirectory of src_dir_path.
+        submodule for submodule in submodules if not submodule.startswith('../')
+    ]
+
     excluded_list: List[str] = []
+    for repo in all_git_repos:
+        # repo is the path relative to src_dir_path. Get the full path.
+        repo_path = os.path.join(expand_src_dir_path, repo)
+        # This command outputs a list to be excluded according to .gitignore
+        # and .git/info/exclude
+        filter_cmd = (f'git -C {shlex.quote(repo_path)} ls-files -z '
+                      '--others --ignore --exclude-standard --directory')
+        output = subprocess.run(filter_cmd,
+                                shell=True,
+                                stdout=subprocess.PIPE,
+                                stderr=subprocess.PIPE,
+                                check=True,
+                                text=True)
+        # Don't catch any errors. We would only expect to see errors during the
+        # first git invocation - so if we see any here, crash.
 
-    if git_exclude_exists or gitignore_exists:
-        try:
-            output = subprocess.run(filter_cmd,
-                                    shell=True,
-                                    stdout=subprocess.PIPE,
-                                    stderr=subprocess.PIPE,
-                                    check=True,
-                                    text=True)
-        except subprocess.CalledProcessError as e:
-            # when the SRC_DIR_PATH is not a git repo and .git
-            # does not exist in it
-            if e.returncode == exceptions.GIT_FATAL_EXIT_CODE:
-                if 'not a git repository' in e.stderr:
-                    # Check if the user has 'write' permission to
-                    # SRC_DIR_PATH
-                    if not os.access(expand_src_dir_path, os.W_OK):
-                        error_msg = 'Write permission denial'
-                        logger.warning(
-                            _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
-                                path=src_dir_path, error_msg=error_msg))
-                        return excluded_list
-                    init_cmd = f'git -C {expand_src_dir_path} init'
-                    try:
-                        subprocess.run(init_cmd,
-                                       shell=True,
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE,
-                                       check=True)
-                        output = subprocess.run(filter_cmd,
-                                                shell=True,
-                                                stdout=subprocess.PIPE,
-                                                stderr=subprocess.PIPE,
-                                                check=True,
-                                                text=True)
-                    except subprocess.CalledProcessError as init_e:
-                        logger.warning(
-                            _FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG.format(
-                                path=src_dir_path, error_msg=init_e.stderr))
-                        return excluded_list
-                    if git_exclude_exists:
-                        # removes all the files/dirs created with 'git init'
-                        # under .git/ except .git/info/exclude
-                        remove_files_cmd = (f'find {expand_src_dir_path}' \
-                                            f'/.git -path {git_exclude_path}' \
-                                            ' -prune -o -type f -exec rm -f ' \
-                                            '{} +')
-                        remove_dirs_cmd = (f'find {expand_src_dir_path}' \
-                                        f'/.git -path {git_exclude_path}' \
-                                        ' -o -type d -empty -delete')
-                        subprocess.run(remove_files_cmd,
-                                       shell=True,
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE,
-                                       check=True)
-                        subprocess.run(remove_dirs_cmd,
-                                       shell=True,
-                                       stdout=subprocess.PIPE,
-                                       stderr=subprocess.PIPE,
-                                       check=True)
+        output_list = output.stdout.split('\0')
+        # trim the empty string at the end
+        output_list = output_list[:-1]
 
-        output_list = output.stdout.split('\n')
-        for line in output_list:
-            # FILTER_CMD outputs items preceded by '!!'
-            # to specify excluded files/dirs
-            # e.g., '!! mydir/' or '!! mydir/myfile.txt'
-            if line.startswith('!!'):
-                to_be_excluded = line[3:]
-                if line.endswith('/'):
-                    # aws s3 sync and gsutil rsync require * to exclude
-                    # files/dirs under the specified directory.
-                    to_be_excluded += '*'
-                excluded_list.append(to_be_excluded)
+        for item in output_list:
+
+            if repo == '.' and item == './':
+                logger.warning(f'{src_dir_path} is within a git repo, but the '
+                               'entire directory is ignored by git. We will '
+                               'ignore all git exclusions. '
+                               f'{_USE_SKYIGNORE_HINT}')
+                return []
+
+            to_be_excluded = os.path.join(repo, item)
+            if item.endswith('/'):
+                # aws s3 sync and gsutil rsync require * to exclude
+                # files/dirs under the specified directory.
+                to_be_excluded += '*'
+
+            excluded_list.append(to_be_excluded)
+
     return excluded_list
 
 
