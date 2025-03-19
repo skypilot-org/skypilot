@@ -18,7 +18,6 @@ import uuid
 
 from sky import models
 from sky import sky_logging
-from sky.clouds import CloudCapability
 from sky.utils import common_utils
 from sky.utils import db_utils
 from sky.utils import registry
@@ -31,7 +30,7 @@ if typing.TYPE_CHECKING:
 
 logger = sky_logging.init_logger(__name__)
 
-_ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds'
+_ENABLED_CLOUDS_KEY_PREFIX = 'enabled_clouds_'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
@@ -797,7 +796,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 
 def get_cached_enabled_clouds(
-        cloud_capability: CloudCapability) -> List['clouds.Cloud']:
+        cloud_capability: 'clouds.CloudCapability') -> List['clouds.Cloud']:
 
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_get_capability_key(cloud_capability),))
@@ -821,14 +820,14 @@ def get_cached_enabled_clouds(
 
 
 def set_enabled_clouds(enabled_clouds: List[str],
-                       cloud_capability: CloudCapability) -> None:
+                       cloud_capability: 'clouds.CloudCapability') -> None:
     _DB.cursor.execute(
         'INSERT OR REPLACE INTO config VALUES (?, ?)',
         (_get_capability_key(cloud_capability), json.dumps(enabled_clouds)))
     _DB.conn.commit()
 
 
-def _get_capability_key(cloud_capability: CloudCapability) -> str:
+def _get_capability_key(cloud_capability: 'clouds.CloudCapability') -> str:
     return _ENABLED_CLOUDS_KEY_PREFIX + cloud_capability.value
 
 

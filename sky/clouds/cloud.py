@@ -445,25 +445,15 @@ class Cloud:
         return {reservation: 0 for reservation in specific_reservations}
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
         string describing the reason if the user cannot access.
         """
         raise NotImplementedError
-
-    @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud's storage.
-
-        Returns a boolean of whether the user can access this cloud's storage,
-        and a string describing the reason if the user cannot access.
-        """
-        # A given cloud does not support storage
-        # unless it overrides this method.
-        raise exceptions.NotSupportedError(
-            f'{cls._REPR} does not support storage.')
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod

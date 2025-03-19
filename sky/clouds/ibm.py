@@ -6,9 +6,11 @@ from typing import Any, Dict, Iterator, List, Optional, Tuple, Union
 import colorama
 
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
+from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -395,7 +397,21 @@ class IBM(clouds.Cloud):
         return image_size
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_credentials()
+        elif cloud_capability == CloudCapability.STORAGE:
+            # TODO(seungjin): Implement separate check for
+            # if the user has access to IBM COS.
+            return cls._check_credentials()
+        else:
+            raise exceptions.NotSupportedError(
+                f'{cls._REPR} does not support {cloud_capability}.')
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         required_fields = ['iam_api_key', 'resource_group_id']
@@ -432,11 +448,6 @@ class IBM(clouds.Cloud):
         # pylint: disable=W0703
         except Exception as e:
             return (False, f'{str(e)}' + help_str)
-
-    @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        # TODO(seungjin): Check if the user has access to IBM COS.
-        return cls.check_credentials()
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping

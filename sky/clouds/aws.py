@@ -16,6 +16,7 @@ from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import aws
+from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.clouds.service_catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
@@ -559,9 +560,24 @@ class AWS(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud."""
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_credentials()
+        elif cloud_capability == CloudCapability.STORAGE:
+            # TODO(seungjin): Implement separate check for
+            # if the user has access to S3.
+            return cls._check_credentials()
+        else:
+            raise exceptions.NotSupportedError(
+                f'{cls._REPR} does not support {cloud_capability}.')
+
+    @classmethod
     @annotations.lru_cache(scope='global',
                            maxsize=1)  # Cache since getting identity is slow.
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         dependency_installation_hints = (
@@ -665,11 +681,6 @@ class AWS(clouds.Cloud):
                 f'\n{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
         return True, hints
-
-    @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        # TODO(seungjin): Check if the user has access to S3.
-        return cls.check_credentials()
 
     @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:

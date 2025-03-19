@@ -36,17 +36,6 @@ def check_capabilities(
     enabled_clouds: Dict[str, List[sky_clouds.CloudCapability]] = {}
     disabled_clouds: Dict[str, List[sky_clouds.CloudCapability]] = {}
 
-    def check_credentials(
-            cloud: Union[sky_clouds.Cloud,
-                         ModuleType], capability: sky_clouds.CloudCapability
-    ) -> Tuple[bool, Optional[str]]:
-        if capability == sky_clouds.CloudCapability.COMPUTE:
-            return cloud.check_credentials()
-        elif capability == sky_clouds.CloudCapability.STORAGE:
-            return cloud.check_storage_credentials()
-        else:
-            raise ValueError(f'Invalid capability: {capability}')
-
     def check_one_cloud(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
                                           ModuleType]]) -> None:
@@ -55,7 +44,7 @@ def check_capabilities(
         for capability in capabilities:
             with rich_utils.safe_status(f'Checking {cloud_repr}...'):
                 try:
-                    ok, reason = check_credentials(cloud, capability)
+                    ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     continue
                 except Exception:  # pylint: disable=broad-except

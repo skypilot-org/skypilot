@@ -5,6 +5,8 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 import requests
 
 from sky import clouds
+from sky import exceptions
+from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import registry
@@ -241,7 +243,17 @@ class Lambda(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_credentials()
+        else:
+            raise exceptions.NotSupportedError(
+                f'{cls._REPR} does not support {cloud_capability}.')
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):

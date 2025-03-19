@@ -15,6 +15,7 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import gcp
+from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.utils import annotations
@@ -719,24 +720,26 @@ class GCP(clouds.Cloud):
         return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has compute access credentials to this cloud."""
-        return cls._check_credentials(  # Check APIs.
-            [
-                ('compute', 'Compute Engine'),
-                ('cloudresourcemanager', 'Cloud Resource Manager'),
-                ('iam', 'Identity and Access Management (IAM)'),
-                ('tpu', 'Cloud TPU'),  # Keep as final element.
-            ],
-            gcp_utils.get_minimal_compute_permissions())
-
-    @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has compute access credentials to this cloud."""
-        return cls._check_credentials(  # Check APIs.
-            [
-                ('storage', 'Cloud Storage'),
-            ], gcp_utils.get_minimal_storage_permissions())
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_credentials(  # Check APIs.
+                [
+                    ('compute', 'Compute Engine'),
+                    ('cloudresourcemanager', 'Cloud Resource Manager'),
+                    ('iam', 'Identity and Access Management (IAM)'),
+                    ('tpu', 'Cloud TPU'),  # Keep as final element.
+                ],
+                gcp_utils.get_minimal_compute_permissions())
+        elif cloud_capability == CloudCapability.STORAGE:
+            return cls._check_credentials(  # Check APIs.
+                [
+                    ('storage', 'Cloud Storage'),
+                ], gcp_utils.get_minimal_storage_permissions())
+        else:
+            raise exceptions.NotSupportedError(
+                f'{cls._REPR} does not support {cloud_capability}.')
 
     @classmethod
     def _check_credentials(
