@@ -14,7 +14,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import azure
-from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.clouds.utils import azure_utils
 from sky.utils import annotations
@@ -513,18 +512,16 @@ class Azure(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
-        if cloud_capability == CloudCapability.COMPUTE:
-            return cls._check_credentials()
-        elif cloud_capability == CloudCapability.STORAGE:
-            # TODO(seungjin): Implement separate check for
-            # if the user has access to Azure Blob Storage.
-            return cls._check_credentials()
-        else:
-            raise exceptions.NotSupportedError(
-                f'{cls._REPR} does not support {cloud_capability}.')
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to Azure Blob Storage.
+        return cls._check_credentials()
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:

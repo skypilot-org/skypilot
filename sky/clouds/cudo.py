@@ -4,8 +4,6 @@ import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
-from sky import exceptions
-from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.utils import common_utils
 from sky.utils import registry
@@ -269,18 +267,9 @@ class Cudo(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
-        if cloud_capability == CloudCapability.COMPUTE:
-            return cls._check_credentials()
-        else:
-            raise exceptions.NotSupportedError(
-                f'{cls._REPR} does not support {cloud_capability}.')
-
-    @classmethod
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
-
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Cudo's compute service."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
             from cudo_compute import cudo_api

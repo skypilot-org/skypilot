@@ -28,7 +28,6 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import clouds
 from sky import exceptions
 from sky.adaptors import oci as oci_adaptor
-from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
@@ -397,18 +396,18 @@ class OCI(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
-        if cloud_capability == CloudCapability.COMPUTE:
-            return cls._check_credentials()
-        elif cloud_capability == CloudCapability.STORAGE:
-            # TODO(seungjin): Implement separate check for
-            # if the user has access to OCI Object Storage.
-            return cls._check_credentials()
-        else:
-            raise exceptions.NotSupportedError(
-                f'{cls._REPR} does not support {cloud_capability}.')
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to OCI Object Storage.
+        return cls._check_credentials()
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:

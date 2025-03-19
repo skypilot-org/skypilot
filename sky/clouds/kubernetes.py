@@ -9,7 +9,6 @@ from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
-from sky.clouds import CloudCapability
 from sky.clouds import service_catalog
 from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
@@ -656,17 +655,9 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def check_credentials(
-            cls,
-            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
-        if cloud_capability == CloudCapability.COMPUTE:
-            return cls._check_credentials()
-        else:
-            raise exceptions.NotSupportedError(
-                f'{cls._REPR} does not support {cloud_capability}.')
-
-    @classmethod
-    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Kubernetes."""
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()

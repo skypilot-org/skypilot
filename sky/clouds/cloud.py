@@ -453,7 +453,27 @@ class Cloud:
         Returns a boolean of whether the user can access this cloud, and a
         string describing the reason if the user cannot access.
         """
-        raise NotImplementedError
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_compute_credentials()
+        elif cloud_capability == CloudCapability.STORAGE:
+            return cls._check_storage_credentials()
+        else:
+            raise exceptions.NotSupportedError(
+                f'{cls._REPR} does not support {cloud_capability}.')
+
+    @classmethod
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        this cloud's compute service."""
+        raise exceptions.NotSupportedError(
+            f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        this cloud's storage service."""
+        raise exceptions.NotSupportedError(
+            f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod
