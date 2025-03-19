@@ -1,7 +1,7 @@
 # Large-Scale AI Batch Inference: 9x Faster Embedding Generation
 
 <p align="center">
-<img src="https://i.imgur.com/NZOuhpk" alt="Large-Scale Embedding Generation with SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/NZOuhpk.png" alt="Large-Scale Embedding Generation with SkyPilot" style="width: 70%;">
 </p>
 
 ## Large-Scale Embedding Generation for Text
@@ -50,8 +50,9 @@ export ENDPOINT=$(sky status --ip monitor)
 ```
 and visit `http:$ENDPOINT:8000` in the browser. 
 <p align="center">
-<img src="https://i.imgur.com/8cMp3l1" alt="Large-Scale Embedding Generation with SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/8cMp3l1.png" alt="Large-Scale Embedding Generation with SkyPilot" style="width: 70%;">
 </p>
+
 ## Learn More
 
 For a complete walkthrough of this case study, including detailed performance metrics and implementation insights, read our [blog post on large-scale embedding generation](https://blog.skypilot.co/large-scale-embedding-generation/).
