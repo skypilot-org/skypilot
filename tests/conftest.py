@@ -151,10 +151,6 @@ def pytest_configure(config):
 
     pytest.terminate_on_failure = config.getoption('--terminate-on-failure')
 
-    if config.getoption('--remote-server'):
-        # Set xdist to use only 1 worker when remote-server is enabled
-        config.option.numprocesses = 1
-
 
 def _get_cloud_to_run(config) -> List[str]:
     cloud_to_run = []

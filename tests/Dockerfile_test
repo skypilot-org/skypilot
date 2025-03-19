@@ -2,7 +2,6 @@ FROM ubuntu:latest
 
 # Add build arguments
 ARG USERNAME=buildkite
-ENV USERNAME=${USERNAME}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
