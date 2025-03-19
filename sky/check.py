@@ -46,8 +46,8 @@ def check_capabilities(
     if capabilities is None:
         capabilities = ALL_CAPABILITIES
     assert capabilities is not None
-    enabled_clouds = {}
-    disabled_clouds = {}
+    enabled_clouds: Dict[str, List[CloudCapability]] = {}
+    disabled_clouds: Dict[str, List[CloudCapability]] = {}
 
     def check_credentials(
             cloud: Union[sky_clouds.Cloud, ModuleType],
@@ -76,10 +76,11 @@ def check_capabilities(
         else:
             raise ValueError(f'Invalid capability: {capability}')
 
-    def check_one_cloud(cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
-                                                      ModuleType]],
-                        capabilities: List[CloudCapability]) -> None:
+    def check_one_cloud(
+            cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
+                                          ModuleType]]) -> None:
         cloud_repr, cloud = cloud_tuple
+        assert capabilities is not None
         for capability in capabilities:
             not_supported = False
             with rich_utils.safe_status(f'Checking {cloud_repr}...'):
@@ -98,10 +99,7 @@ def check_capabilities(
             echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
                  ' ' * 30)
             if ok:
-                if cloud_repr not in enabled_clouds:
-                    enabled_clouds[cloud_repr] = [capability]
-                else:
-                    enabled_clouds[cloud_repr].append(capability)
+                enabled_clouds.setdefault(cloud_repr, []).append(capability)
                 if verbose and cloud is not cloudflare:
                     activated_account = cloud.get_active_user_identity_str()
                     if activated_account is not None:
@@ -109,10 +107,7 @@ def check_capabilities(
                 if reason is not None:
                     echo(f'    Hint: {reason}')
             else:
-                if cloud_repr not in disabled_clouds:
-                    disabled_clouds[cloud_repr] = [capability]
-                else:
-                    disabled_clouds[cloud_repr].append(capability)
+                disabled_clouds.setdefault(cloud_repr, []).append(capability)
                 echo(f'    Reason: {reason}')
 
     def get_cloud_tuple(
@@ -153,7 +148,7 @@ def check_capabilities(
     ]
 
     for cloud_tuple in sorted(clouds_to_check):
-        check_one_cloud(cloud_tuple, capabilities)
+        check_one_cloud(cloud_tuple)
 
     # Determine the set of enabled clouds: (previously enabled clouds + newly
     # enabled clouds - newly disabled clouds) intersected with
@@ -228,6 +223,9 @@ def check_capabilities(
     return enabled_clouds
 
 
+# 'sky check' command and associated '/check' server endpoint
+# only checks compute capability for backward compatibility.
+# This necessitates setting default capability to CloudCapability.COMPUTE.
 def check(
     quiet: bool = False,
     verbose: bool = False,

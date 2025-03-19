@@ -668,6 +668,7 @@ class AWS(clouds.Cloud):
 
     @classmethod
     def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        # TODO(seungjin): Check if the user has access to S3.
         return cls.check_credentials()
 
     @classmethod

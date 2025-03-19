@@ -832,6 +832,11 @@ class GCP(clouds.Cloud):
                 f'{diffs}\n    '
                 'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
 
+        # This code must be executed after the iam check above,
+        # as the check below for api enablement itself needs:
+        # - serviceusage.services.enable
+        # - serviceusage.services.list
+        # iam permissions.
         enabled_api = False
         for endpoint, display_name in apis:
             if is_api_disabled(endpoint, project_id):

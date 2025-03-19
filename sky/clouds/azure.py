@@ -576,6 +576,7 @@ class Azure(clouds.Cloud):
 
     @classmethod
     def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        # TODO(seungjin): Check if the user has access to Azure Blob Storage.
         return cls.check_credentials()
 
     @classmethod
