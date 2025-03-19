@@ -43,8 +43,13 @@ This will automatically find available machines across multiple regions to compu
 
 You can use `sky jobs queue` and `sky jobs dashboard` to see the status of jobs. Alternatively, you can monitor the progress via 
 ```
-sky launch monitor_progress.yaml
+sky launch -n monitor monitor_progress.yaml 
 ```
+and get the IP address via 
+```
+export ENDPOINT=$(sky status --ip monitor)
+```
+and visit `http:$monitor:8000` in the browser. 
 
 ## Learn More
 

@@ -1,4 +1,4 @@
-name: compute-text-vectors
+name: batch-inference-compute-text-vectors
 
 workdir: .
 

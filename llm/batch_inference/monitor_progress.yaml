@@ -1,4 +1,4 @@
-name: clip-monitor-progress
+name: batch-inference-monitor-progress
 
 workdir: .
 
