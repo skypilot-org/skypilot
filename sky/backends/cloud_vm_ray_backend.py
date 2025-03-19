@@ -1981,7 +1981,8 @@ class RetryingVmProvisioner(object):
         # is running. Here we check the enabled clouds and expiring credentials
         # and raise a warning to the user.
         if task.is_controller_task():
-            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                clouds.CloudCapability.COMPUTE)
             expirable_clouds = backend_utils.get_expirable_clouds(
                 enabled_clouds)
 

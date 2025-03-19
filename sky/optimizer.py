@@ -368,7 +368,8 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = (
-                    sky_check.get_cached_enabled_clouds_or_refresh())
+                    sky_check.get_cached_enabled_clouds_or_refresh(
+                        clouds.CloudCapability.COMPUTE))
                 if clouds.cloud_in_iterable(clouds.Kubernetes(),
                                             enabled_clouds):
                     if any(orig_resources.cloud is None
@@ -1206,6 +1207,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         dag: The DAG specified by a user.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=clouds.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     global_disabled_clouds: Set[str] = set()
@@ -1228,6 +1230,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
                                     global_disabled_clouds),
                         capability=clouds.CloudCapability.COMPUTE)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            capability=clouds.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
                            {str(c) for c in enabled_clouds})
@@ -1269,6 +1272,7 @@ def _fill_in_launchable_resources(
         a cloud that is not enabled.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=clouds.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (

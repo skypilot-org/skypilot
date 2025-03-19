@@ -200,6 +200,7 @@ def check(
 
 
 def get_cached_enabled_clouds_or_refresh(
+        capability: sky_clouds.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
     """Returns cached enabled clouds and if no cloud is enabled, refresh.
 
@@ -214,60 +215,23 @@ def get_cached_enabled_clouds_or_refresh(
             raise_if_no_cloud_access is set to True.
     """
     cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-        sky_clouds.CloudCapability.COMPUTE)
+        capability)
     if not cached_enabled_clouds:
         try:
-            check(quiet=True, capability=sky_clouds.CloudCapability.COMPUTE)
+            check(quiet=True, capability=capability)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
         cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
-            sky_clouds.CloudCapability.COMPUTE)
+            capability)
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
     return cached_enabled_clouds
-
-
-def get_cached_enabled_storage_clouds_or_refresh(
-        raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
-    """Returns cached enabled storage clouds and if no cloud is enabled,
-    refresh.
-
-    This function will perform a refresh if no public cloud is enabled.
-
-    Args:
-        raise_if_no_cloud_access: if True, raise an exception if no public
-            cloud is enabled.
-
-    Raises:
-        exceptions.NoCloudAccessError: if no public cloud is enabled and
-            raise_if_no_cloud_access is set to True.
-    """
-    cached_enabled_storage_clouds = (
-        global_user_state.get_cached_enabled_clouds(
-            sky_clouds.CloudCapability.STORAGE))
-    if not cached_enabled_storage_clouds:
-        try:
-            check(quiet=True, capability=sky_clouds.CloudCapability.STORAGE)
-        except SystemExit:
-            # If no cloud is enabled, check() will raise SystemExit.
-            # Here we catch it and raise the exception later only if
-            # raise_if_no_cloud_access is set to True.
-            pass
-        cached_enabled_storage_clouds = (
-            global_user_state.get_cached_enabled_clouds(
-                sky_clouds.CloudCapability.STORAGE))
-    if raise_if_no_cloud_access and not cached_enabled_storage_clouds:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NoCloudAccessError(
-                'Cloud access is not set up. Run: '
-                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
-    return cached_enabled_storage_clouds
 
 
 def get_cloud_credential_file_mounts(

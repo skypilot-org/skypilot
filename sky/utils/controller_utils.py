@@ -216,9 +216,11 @@ def _get_cloud_dependencies_installation_commands(
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
     enabled_compute_clouds = set(
-        sky_check.get_cached_enabled_clouds_or_refresh())
+        sky_check.get_cached_enabled_clouds_or_refresh(
+            clouds.CloudCapability.COMPUTE))
     enabled_storage_clouds = set(
-        sky_check.get_cached_enabled_storage_clouds_or_refresh())
+        sky_check.get_cached_enabled_clouds_or_refresh(
+            clouds.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
 
     for cloud in enabled_clouds:
