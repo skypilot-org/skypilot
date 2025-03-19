@@ -125,6 +125,19 @@ def pytest_addoption(parser):
         action='store_true',
         default=False,
         help='Run tests against a remote server in Docker container.')
+    # Custom options for backward compatibility tests
+    parser.addoption(
+        '--need-launch',
+        action='store_true',
+        default=False,
+        help='Whether to launch clusters in tests',
+    )
+    parser.addoption(
+        '--base-branch',
+        type=str,
+        default='master',
+        help='Base branch to test backward compatibility against',
+    )
 
 
 def pytest_configure(config):
