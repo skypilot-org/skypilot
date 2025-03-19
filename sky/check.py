@@ -42,6 +42,7 @@ def check_capabilities(
                                           ModuleType]]) -> None:
         cloud_repr, cloud = cloud_tuple
         assert capabilities is not None
+        cloud_capabilities = []
         for capability in capabilities:
             with rich_utils.safe_status(f'Checking {cloud_repr}...'):
                 try:
@@ -52,12 +53,30 @@ def check_capabilities(
                     # Catch all exceptions to prevent a single cloud
                     # from blocking the check for other clouds.
                     ok, reason = False, traceback.format_exc()
-            status_msg = ('enabled' if ok else 'disabled')
-            styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
-            echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
-                 ' ' * 30)
+            cloud_capabilities.append((capability, ok, reason))
             if ok:
                 enabled_clouds.setdefault(cloud_repr, []).append(capability)
+            else:
+                disabled_clouds.setdefault(cloud_repr, []).append(capability)
+        # Print the capabilities for the cloud.
+        # consider cloud enabled if any capability is enabled.
+        status_msg = 'disabled'
+        disabled_style = {'dim': True}
+        enabled_style = {'fg': 'green', 'bold': False}
+        styles = disabled_style
+        service_string = []
+        for capability, ok, reason in cloud_capabilities:
+            if ok:
+                status_msg = 'enabled'
+                styles = enabled_style
+                service_string.append(click.style(capability, **enabled_style))
+            else:
+                service_string.append(click.style(capability, **disabled_style))
+        echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
+                ' ' * 30)
+        echo('    ' + 'services: ' + ' '.join(service_string))
+        for capability, ok, reason in cloud_capabilities:
+            if ok:
                 if verbose and cloud is not cloudflare:
                     activated_account = cloud.get_active_user_identity_str()
                     if activated_account is not None:
@@ -65,7 +84,6 @@ def check_capabilities(
                 if reason is not None:
                     echo(f'    Hint: {reason}')
             else:
-                disabled_clouds.setdefault(cloud_repr, []).append(capability)
                 echo(f'    Reason: {reason}')
 
     def get_cloud_tuple(
@@ -182,6 +200,19 @@ def check_capabilities(
                  f'{colorama.Style.RESET_ALL}{enabled_clouds_str}')
     return enabled_clouds
 
+
+def check_all(
+    quiet: bool = False,
+    verbose: bool = False,
+    clouds: Optional[Iterable[str]] = None,
+    capability: CloudCapability = CloudCapability.COMPUTE,
+) -> List[str]:
+    clouds_with_capability = []
+    enabled_clouds = check_capabilities(quiet, verbose, clouds, ALL_CAPABILITIES)
+    for cloud, capabilities in enabled_clouds.items():
+        if capability in capabilities:
+            clouds_with_capability.append(cloud)
+    return clouds_with_capability
 
 # 'sky check' command and associated '/check' server endpoint
 # only checks compute capability for backward compatibility.

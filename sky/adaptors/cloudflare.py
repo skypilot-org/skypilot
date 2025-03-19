@@ -11,6 +11,7 @@ from sky.adaptors import common
 from sky.clouds import cloud
 from sky.utils import annotations
 from sky.utils import ux_utils
+from sky import exceptions
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
                          'Try pip install "skypilot[cloudflare]"')
