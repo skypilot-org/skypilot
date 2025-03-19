@@ -134,12 +134,11 @@ class _RevertibleStatus:
         self.message = message
 
     def __enter__(self):
-        with _logging_lock:
-            global _status_nesting_level
-            _statuses[self.status_type].update(self.message)
-            _status_nesting_level += 1
-            _statuses[self.status_type].__enter__()
-            return _statuses[self.status_type]
+        global _status_nesting_level
+        _statuses[self.status_type].update(self.message)
+        _status_nesting_level += 1
+        _statuses[self.status_type].__enter__()
+        return _statuses[self.status_type]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         with _logging_lock:
