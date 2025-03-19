@@ -69,7 +69,6 @@ class TestBackwardCompatibility:
         # Install dependencies in base environment
         self._run_cmd(
             f'{self.ACTIVATE_BASE} && '
-            'pip install uv && '
             'uv pip uninstall skypilot && '
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
@@ -77,7 +76,6 @@ class TestBackwardCompatibility:
         # Install current version in current environment
         self._run_cmd(
             f'{self.ACTIVATE_CURRENT} && '
-            'pip install uv && '
             'uv pip uninstall skypilot && '
             'uv pip install --prerelease=allow "azure-cli>=2.65.0" && '
             'uv pip install -e .[all]',)
