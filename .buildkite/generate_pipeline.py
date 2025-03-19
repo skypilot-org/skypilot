@@ -156,9 +156,10 @@ def _extract_marked_tests(
         # param: rolling
         # function_name: test_skyserve_new_autoscaler_update
         param = None
-        if '[' in function_name and 'serve' in marks:
-            # Only serve tests are slow and flaky, so we separate them
-            # to different steps for parallel execution
+        if '[' in function_name and 'test_mount_and_storage' not in file_path:
+            # We separate different params to different steps for parallel execution,
+            # and separate different param's log to different steps for better visualization.
+            # Exclude the test_mount_and_storage, because these tests are fast and have fewer logs.
             param = re.search('\[(.+?)\]', function_name).group(1)
         if param:
             function_name_param_map[clean_function_name].append(param)
@@ -166,7 +167,6 @@ def _extract_marked_tests(
     function_cloud_map = {}
     for function_name, marks in function_name_marks_map.items():
         clouds_to_include = []
-        is_serve_test = 'serve' in marks
         run_on_cloud_kube_backend = ('resource_heavy' in marks and
                                      'kubernetes' in default_clouds_to_run)
 
@@ -196,11 +196,13 @@ def _extract_marked_tests(
 
         # pytest will only run the first cloud if there are multiple clouds
         # make it consistent with pytest behavior
-        # print(f"final_clouds_to_include: {final_clouds_to_include}")
         final_clouds_to_include = [final_clouds_to_include[0]]
         param_list = function_name_param_map.get(function_name, [None])
-        if len(param_list) < len(final_clouds_to_include):
+        if len(final_clouds_to_include) < len(param_list):
             # align, so we can zip them together
+            final_clouds_to_include += [final_clouds_to_include[0]] * (
+                len(param_list) - len(final_clouds_to_include))
+        if len(param_list) < len(final_clouds_to_include):
             param_list += [None
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
@@ -217,18 +219,18 @@ def _generate_pipeline(test_file: str,
                        auto_retry: bool = False) -> Dict[str, Any]:
     """Generate a Buildkite pipeline from test files."""
     steps = []
-    generated_function_set = set()
+    generated_steps_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
         for cloud, queue, param in zip(*clouds_queues_param):
-            if test_function in generated_function_set:
-                # Skip duplicate nested function tests under the same class
-                continue
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
+            if label in generated_steps_set:
+                # Skip duplicate nested function tests under the same class
+                continue
             step = {
                 'label': label,
                 'command': command,
@@ -244,7 +246,7 @@ def _generate_pipeline(test_file: str,
                     # Automatically retry 2 times on any failure by default.
                     'automatic': True
                 }
-            generated_function_set.add(test_function)
+            generated_steps_set.add(label)
             steps.append(step)
     return {'steps': steps}
 
