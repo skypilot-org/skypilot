@@ -660,29 +660,28 @@ class GKEAutoscaler(Autoscaler):
             logger.debug(f'{e.message}', exc_info=True)
             return True
 
-        try:
-            # Check if any node pool with autoscaling enabled can
-            # fit the instance type.
-            node_pools = cluster['nodePools'] if 'nodePools' in cluster else []
-            for node_pool in node_pools:
-                name = node_pool['name'] if 'name' in node_pool else ''
-                logger.debug(f'checking if node pool {name} '
-                             'has autoscaling enabled.')
-                autoscaling = node_pool[
-                    'autoscaling'] if 'autoscaling' in node_pool else None
-                autoscaling_enabled = autoscaling[
-                    'enabled'] if 'enabled' in autoscaling else False
-                if autoscaling_enabled:
-                    logger.debug(f'node pool {name} has autoscaling enabled. '
-                                 'Checking if it can create a node '
-                                 f'satisfying {instance_type}')
+        # Check if any node pool with autoscaling enabled can
+        # fit the instance type.
+        node_pools = cluster.get('nodePools', [])
+        for node_pool in node_pools:
+            name = node_pool.get('name', '')
+            logger.debug(f'checking if node pool {name} '
+                         'has autoscaling enabled.')
+            autoscaling_enabled = (node_pool.get('autoscaling',
+                                                 {}).get('enabled', False))
+            if autoscaling_enabled:
+                logger.debug(f'node pool {name} has autoscaling enabled. '
+                             'Checking if it can create a node '
+                             f'satisfying {instance_type}')
+                try:
                     if cls._check_instance_fits_gke_autoscaler_node_pool(
                             instance_type, node_pool):
                         return True
-        except KeyError:
-            logger.debug('encountered KeyError while checking if '
-                         f'node pool {name} has autoscaling enabled.')
-            return True
+                except KeyError:
+                    logger.debug('encountered KeyError while checking if '
+                                 f'node pool {name} can create a node '
+                                 f'satisfying {instance_type}.')
+                    return True
         return False
 
     @classmethod
