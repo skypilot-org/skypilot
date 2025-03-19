@@ -97,7 +97,8 @@ def test_kubernetes_labels_resources():
 
 
 def test_no_cloud_labels_resources():
-    global_user_state.set_enabled_clouds(['aws', 'gcp'])
+    global_user_state.set_enabled_clouds(['aws', 'gcp'],
+                                         clouds.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -110,7 +111,8 @@ def test_no_cloud_labels_resources():
 
 
 def test_no_cloud_labels_resources_single_enabled_cloud():
-    global_user_state.set_enabled_clouds(['aws'])
+    global_user_state.set_enabled_clouds(['aws'],
+                                         clouds.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS
