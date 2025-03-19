@@ -45,16 +45,19 @@ class _RevertibleStatus:
         global _status_nesting_level
         _status.update(self.message)
         _status_nesting_level += 1
+        print("!!!!!!!!", _status_nesting_level, self.message)
         _status.__enter__()
         return _status
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         global _status_nesting_level, _status
         _status_nesting_level -= 1
+        print("!!!!!!!!", _status_nesting_level, self.message)
         if _status_nesting_level <= 0:
             _status_nesting_level = 0
             if _status is not None:
                 _status.__exit__(exc_type, exc_val, exc_tb)
+                print("!!!!!!!!! set _status to None")
                 _status = None
         else:
             _status.update(self.previous_message)
@@ -73,10 +76,12 @@ def safe_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     """A wrapper for multi-threaded console.status."""
     from sky import sky_logging  # pylint: disable=import-outside-toplevel
     global _status
+    print("safe_status", threading.current_thread(), threading.main_thread())
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _status is None:
             _status = console.status(msg, refresh_per_second=8)
+        print('=========', _status)
         return _RevertibleStatus(msg)
     return _NoOpConsoleStatus()
 
@@ -104,9 +109,12 @@ def force_update_status(msg: str):
 def safe_logger():
     logged = False
     with _logging_lock:
+        print("&&&&&&&&&&&&", _status, 1 if _status is None else _status._live.is_started)
         if _status is not None and _status._live.is_started:  # pylint: disable=protected-access
             _status.stop()
+            print("enter safe_logger")
             yield
+            print("exit safe_logger")
             logged = True
             _status.start()
     if not logged:

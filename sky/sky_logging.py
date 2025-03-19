@@ -41,6 +41,7 @@ class NewLineFormatter(logging.Formatter):
 class RichSafeStreamHandler(logging.StreamHandler):
 
     def emit(self, record: logging.LogRecord) -> None:
+        # print("emit", record)
         with rich_utils.safe_logger():
             return super().emit(record)
 
@@ -64,8 +65,10 @@ print = builtins.print  # pylint: disable=redefined-builtin
 def _setup_logger():
     _root_logger.setLevel(logging.DEBUG)
     global _default_handler
+    print("$$$$$$$$$$$", _default_handler)
     if _default_handler is None:
         _default_handler = RichSafeStreamHandler(sys.stdout)
+        print("$$$$$$$$$$$", _default_handler, env_options.Options.SHOW_DEBUG_INFO.get())
         _default_handler.flush = sys.stdout.flush  # type: ignore
         if env_options.Options.SHOW_DEBUG_INFO.get():
             _default_handler.setLevel(logging.DEBUG)
