@@ -290,13 +290,6 @@ def _convert_quick_tests_core(test_files: List[str], args: List[str]):
         # for pre-merge. And let the author controls which clouds
         # to run by parameter.
         pipeline = _generate_pipeline(test_file, args)
-        pipeline['steps'].append({
-            'label': 'Backward compatibility test',
-            'command': 'bash tests/backward_compatibility_tests.sh',
-            'agents': {
-                'queue': QUEUE_GENERIC_CLOUD
-            }
-        })
         output_file_pipelines.append(pipeline)
         print(f'Converted {test_file} to {yaml_file_path}\n\n')
     _dump_pipeline_to_file(yaml_file_path,
@@ -316,7 +309,7 @@ def main(args):
         if not test_file.startswith('test_'):
             continue
         test_file_path = os.path.join('tests/smoke_tests', test_file)
-        if "test_quick_tests_core" in test_file:
+        if "test_quick_tests_core" in test_file or "test_backward_compat" in test_file:
             quick_tests_core_files.append(test_file_path)
         else:
             release_files.append(test_file_path)
