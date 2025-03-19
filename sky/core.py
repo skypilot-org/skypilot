@@ -1001,7 +1001,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds() -> List[clouds.Cloud]:
-    return global_user_state.get_cached_enabled_clouds()
+    return global_user_state.get_cached_enabled_clouds(
+        clouds.CloudCapability.COMPUTE)
 
 
 @usage_lib.entrypoint
@@ -1136,7 +1137,7 @@ def local_down() -> None:
                 ux_utils.spinner_message('Running sky check...')):
             sky_check.check(clouds=['kubernetes'],
                             quiet=True,
-                            capability=sky_check.CloudCapability.COMPUTE)
+                            capability=clouds.CloudCapability.COMPUTE)
         logger.info(
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,

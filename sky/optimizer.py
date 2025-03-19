@@ -1226,7 +1226,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         sky_check.check(quiet=True,
                         clouds=list(clouds_need_recheck -
                                     global_disabled_clouds),
-                        capability=sky_check.CloudCapability.COMPUTE)
+                        capability=clouds.CloudCapability.COMPUTE)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -

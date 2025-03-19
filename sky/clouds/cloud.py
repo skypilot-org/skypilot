@@ -48,6 +48,16 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
 
 
+class CloudCapability(enum.Enum):
+    # Compute capability.
+    COMPUTE = 'compute'
+    # Storage capability.
+    STORAGE = 'storage'
+
+
+ALL_CAPABILITIES = [CloudCapability.COMPUTE, CloudCapability.STORAGE]
+
+
 class Region(collections.namedtuple('Region', ['name'])):
     """A region."""
     name: str
