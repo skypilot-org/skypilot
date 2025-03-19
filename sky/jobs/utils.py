@@ -125,7 +125,11 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
-    assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
+    if handle is None:
+        # This can happen if the cluster was preempted and background status
+        # refresh already noticed and cleaned it up.
+        logger.info(f'Cluster {cluster_name} not found.')
+        return None
     status = None
     try:
         logger.info('=== Checking the job status... ===')
