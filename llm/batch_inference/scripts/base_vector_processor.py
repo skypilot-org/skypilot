@@ -1,16 +1,18 @@
+from abc import ABC
+from abc import abstractmethod
 import asyncio
+import json
 import logging
 import os
+from pathlib import Path
 import pickle
 import time
-from abc import ABC, abstractmethod
-from pathlib import Path
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pandas as pd
 import torch
-import json
+
 
 class BaseVectorProcessor(ABC):
     """Base class for processing data and computing vector embeddings.
@@ -48,18 +50,19 @@ class BaseVectorProcessor(ABC):
         self.start_idx = start_idx
         self.end_idx = end_idx
         self._current_batch = []
-        
+
         # Dataset attributes
         self.dataset_name = dataset_name
         self.split = split
         self.streaming = streaming
-        
+
         # Model attributes
         self.model = None
         self.partition_counter = 0
-        
+
         # Control parallel preprocessing
-        self.preprocessing_semaphore = asyncio.Semaphore(max_preprocessing_tasks)
+        self.preprocessing_semaphore = asyncio.Semaphore(
+            max_preprocessing_tasks)
 
         # Progress tracking
         self.metrics_path = Path(output_path).parent / 'metrics'
@@ -72,7 +75,7 @@ class BaseVectorProcessor(ABC):
         self.start_time = time.time()
         self.last_update_time = self.start_time
         self.session_id = f"{self.worker_id}_{int(self.start_time)}"
-        
+
         # Load existing history if available
         self.metrics_history = self._load_metrics_history()
 
@@ -92,7 +95,8 @@ class BaseVectorProcessor(ABC):
         pass
 
     @abstractmethod
-    async def do_batch_processing(self, batch: List[Any]) -> List[Tuple[int, Any]]:
+    async def do_batch_processing(self,
+                                  batch: List[Any]) -> List[Tuple[int, Any]]:
         """Process a batch of preprocessed inputs."""
         pass
 
@@ -162,11 +166,11 @@ class BaseVectorProcessor(ABC):
         current_time = time.time()
         elapsed = current_time - self.start_time
         elapsed_since_update = current_time - self.last_update_time
-        
+
         # Only compute throughput if some time has elapsed
         if elapsed_since_update > 0:
             processing_rate = self.processed_count / elapsed if elapsed > 0 else 0
-            
+
             metrics = {
                 'worker_id': self.worker_id,
                 'session_id': self.session_id,
@@ -181,10 +185,10 @@ class BaseVectorProcessor(ABC):
                 'status': 'running',
                 'partition_counter': self.partition_counter
             }
-            
+
             # Add to history
             self.metrics_history.append(metrics)
-            
+
             # Save to files
             try:
                 with open(self.metrics_file, 'w') as f:
@@ -193,14 +197,14 @@ class BaseVectorProcessor(ABC):
                 self.save_metrics_history()
             except Exception as e:
                 logging.warning(f"Failed to save metrics: {e}")
-        
+
         self.last_update_time = current_time
 
     async def find_existing_progress(self) -> Tuple[int, int]:
         """Find the latest progress from previous runs."""
         max_idx = self.start_idx - 1
         partition_counter = 0
-        
+
         # Check metrics file first
         if self.metrics_file.exists():
             try:
@@ -211,23 +215,27 @@ class BaseVectorProcessor(ABC):
                         max_idx = max(max_idx, metrics['current_idx'])
                     if 'partition_counter' in metrics:
                         partition_counter = metrics['partition_counter']
-                    logging.info(f"Recovered progress from metrics: idx={max_idx}, partition={partition_counter}")
+                    logging.info(
+                        f"Recovered progress from metrics: idx={max_idx}, partition={partition_counter}"
+                    )
             except Exception as e:
                 logging.warning(f"Failed to recover from metrics file: {e}")
-        
+
         # Check for existing parquet files as backup
         try:
             prefix = self.output_path.stem
             parent = self.output_path.parent
             existing_files = list(parent.glob(f"{prefix}*.parquet"))
-            
+
             for file_path in existing_files:
                 try:
                     df = pd.read_parquet(file_path)
                     if 'idx' in df.columns:
                         max_idx = max(max_idx, df['idx'].max())
-                        logging.info(f"Found existing progress in {file_path.name}: max_idx={max_idx}")
-                    
+                        logging.info(
+                            f"Found existing progress in {file_path.name}: max_idx={max_idx}"
+                        )
+
                     # Extract partition number from filename
                     import re
                     match = re.search(r'_part(\d+)\.parquet$', file_path.name)
@@ -235,10 +243,11 @@ class BaseVectorProcessor(ABC):
                         part_num = int(match.group(1))
                         partition_counter = max(partition_counter, part_num + 1)
                 except Exception as e:
-                    logging.warning(f"Failed to read parquet file {file_path}: {e}")
+                    logging.warning(
+                        f"Failed to read parquet file {file_path}: {e}")
         except Exception as e:
             logging.warning(f"Failed to check for existing parquet files: {e}")
-        
+
         return max_idx, partition_counter
 
     async def run(self):
@@ -249,13 +258,14 @@ class BaseVectorProcessor(ABC):
                 await self.setup_model()
 
             # Find existing progress and recover state
-            resume_idx, self.partition_counter = await self.find_existing_progress()
+            resume_idx, self.partition_counter = await self.find_existing_progress(
+            )
             self.start_idx = max(self.start_idx, resume_idx + 1)
 
             logging.info(
                 f'Starting processing from index {self.start_idx} (partition {self.partition_counter})'
             )
-            
+
             # Record start event in history
             start_metrics = {
                 'worker_id': self.worker_id,
@@ -275,7 +285,8 @@ class BaseVectorProcessor(ABC):
             async for idx, input_data in self.do_data_loading():
                 self._current_batch.append((idx, input_data))
                 if len(self._current_batch) >= self.batch_size:
-                    batch_results = await self.do_batch_processing(self._current_batch)
+                    batch_results = await self.do_batch_processing(
+                        self._current_batch)
                     results.extend(batch_results)
                     self._current_batch = []
 
@@ -287,7 +298,8 @@ class BaseVectorProcessor(ABC):
 
             # Process any remaining items in the batch
             if self._current_batch:
-                batch_results = await self.do_batch_processing(self._current_batch)
+                batch_results = await self.do_batch_processing(
+                    self._current_batch)
                 results.extend(batch_results)
 
             # Write the final partition if there are any leftover results
@@ -309,11 +321,11 @@ class BaseVectorProcessor(ABC):
             self.metrics_history.append(end_metrics)
             self.update_metrics()
             self.save_metrics_history()
-            
+
             logging.info(
                 f'Completed processing {self.processed_count} items ({self.failed_count} failed)'
             )
-            
+
         except Exception as e:
             logging.error(f"Error during batch processing: {e}", exc_info=True)
             # Record error in metrics
@@ -327,4 +339,4 @@ class BaseVectorProcessor(ABC):
             }
             self.metrics_history.append(error_metrics)
             self.save_metrics_history()
-            raise 
+            raise

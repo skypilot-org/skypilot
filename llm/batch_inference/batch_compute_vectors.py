@@ -13,6 +13,7 @@ import argparse
 import os
 import time
 import uuid
+
 import sky
 
 
@@ -49,10 +50,12 @@ def main():
                         type=int,
                         default=0,
                         help='Global start index in dataset')
-    parser.add_argument('--end-idx',
-                        type=int,
-                        default= 29475453, #29475453, # text
-                        help='Global end index in dataset, not inclusive')
+    parser.add_argument(
+        '--end-idx',
+        type=int,
+        default=29475453,
+        #29475453 is the last index of the review dataset
+        help='Global end index in dataset, not inclusive')
     parser.add_argument('--num-jobs',
                         type=int,
                         default=500,
@@ -64,13 +67,14 @@ def main():
                         type=str,
                         default='sky-embeddings',
                         help='Name of the bucket to store embeddings')
-    parser.add_argument('--partition-method',
-                        type=str,
-                        choices=['chunk', 'stride'],
-                        default='stride',
-                        help='Method to partition data: chunk (contiguous) or stride (interleaved)')
+    parser.add_argument(
+        '--partition-method',
+        type=str,
+        choices=['chunk', 'stride'],
+        default='stride',
+        help=
+        'Method to partition data: chunk (contiguous) or stride (interleaved)')
     args = parser.parse_args()
-
 
     # Load the worker task template
     task = sky.Task.from_yaml('compute_text_vectors.yaml')
@@ -79,7 +83,7 @@ def main():
     for job_rank in range(args.num_jobs):
         # Create a unique worker ID
         worker_id = f"worker_{job_rank}"
-        
+
         # Update environment variables based on partition method
         env_vars = {
             'WORKER_ID': worker_id,
@@ -89,26 +93,28 @@ def main():
             'GLOBAL_START_IDX': str(args.start_idx),
             'GLOBAL_END_IDX': str(args.end_idx),
         }
-        
+
         # If using chunk method, also provide start_idx and end_idx
         if args.partition_method == 'chunk':
-            job_start, job_end = calculate_job_range(args.start_idx, args.end_idx,
-                                                 job_rank, args.num_jobs)
+            job_start, job_end = calculate_job_range(args.start_idx,
+                                                     args.end_idx, job_rank,
+                                                     args.num_jobs)
             env_vars['START_IDX'] = str(job_start)
             env_vars['END_IDX'] = str(job_end)
             job_name = f'vector-compute-{job_start}-{job_end}'
         else:
             # For stride method, we use the global start/end and let the worker handle striding
             job_name = f'vector-compute-worker-{job_rank}'
-            
+
         task_copy = task.update_envs(env_vars)
 
         print(f"Launching {job_name} with {worker_id}...")
-        
+
         sky.jobs.launch(
             task_copy,
             name=job_name,
         )
+
 
 if __name__ == '__main__':
     main()
