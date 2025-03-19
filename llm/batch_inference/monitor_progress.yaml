@@ -10,7 +10,8 @@ resources:
     - 8000
 
 envs:
-  EMBEDDINGS_BUCKET_NAME: sky-text-embeddings-multi-cluster-final-2
+  # make sure this is the same as the source in compute_vectors.yaml
+  EMBEDDINGS_BUCKET_NAME: sky-text-embeddings 
 
 file_mounts:
   /output:

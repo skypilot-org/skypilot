@@ -71,17 +71,6 @@ def main():
                         help='Method to partition data: chunk (contiguous) or stride (interleaved)')
     args = parser.parse_args()
 
-    # make sure every run use different bucket name
-    args.bucket_name = f"{args.bucket_name}-{str(uuid.uuid4())[:4]}"
-    # eric: todo; this doesn't work
-
-    # Launch monitoring service first (unless skipped)
-    print("Launching monitoring service cluster...")
-    monitor_task = sky.Task.from_yaml('monitor_progress.yaml')
-    monitor_task.update_envs({
-        'EMBEDDINGS_BUCKET_NAME': args.bucket_name,
-    })  
-    monitor_job = sky.launch(monitor_task)
 
     # Load the worker task template
     task = sky.Task.from_yaml('compute_text_vectors.yaml')
@@ -94,7 +83,6 @@ def main():
         # Update environment variables based on partition method
         env_vars = {
             'WORKER_ID': worker_id,
-            'EMBEDDINGS_BUCKET_NAME': args.bucket_name,
             'PARTITION_METHOD': args.partition_method,
             'WORKER_RANK': str(job_rank),
             'TOTAL_WORKERS': str(args.num_jobs),
