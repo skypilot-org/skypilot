@@ -28,6 +28,31 @@ Welcome to SkyPilot!
 
 SkyPilot is an open-source framework for running AI and batch workloads on any infra.
 
+.. raw:: html
+
+   <script>
+   function pauseAndReplay(video) {
+   setTimeout(function() {
+      video.currentTime = 0;
+      video.play();
+   }, 10000); // 10 second gap
+   }
+
+   function restartVideo(video) {
+      video.currentTime = 0;
+      video.play();
+   }
+   </script>
+   <div style="position: relative; margin-bottom: 20px;">
+     <video id="video-with-badge" style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
+        <source src="../_static/intro-with-badge.mp4" type="video/mp4" />
+     </video>
+     <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 8px; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.6); color: white; border: none; border-radius: 50%; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
+   </div>
+
+
+   </script>
+
 SkyPilot **is easy to use for AI users**:
 
 - Quickly spin up compute on your own infra
@@ -46,38 +71,10 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 * :ref:`Managed Spot <managed-jobs>`: 3-6x cost savings using spot instances, with preemption auto-recovery
 * Optimizer: auto-selects the cheapest & most available infra
 
+
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
 
-.. raw:: html
-
-   <script>
-   function pauseAndReplay(video) {
-   setTimeout(function() {
-      video.currentTime = 0;
-      video.play();
-   }, 10000); // 10 second gap
-   }
-   
-   function restartVideo(video) {
-      video.currentTime = 0;
-      video.play();
-   }
-   </script>
-   <div style="position: relative; margin-bottom: 20px;">
-     <video style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
-        <source src="../_static/intro.mp4" type="video/mp4" />
-     </video>
-     <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.6); color: white; border: none; border-radius: 50%; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
-   </div>
-
-   </script>
-   <div style="position: relative; margin-bottom: 20px;">
-     <video id="video-with-badge" style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
-        <source src="../_static/intro-with-badge.mp4" type="video/mp4" />
-     </video>
-     <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.6); color: white; border: none; border-radius: 50%; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
-   </div>
 
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
