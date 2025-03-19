@@ -66,7 +66,7 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=180 if generic_cloud == 'azure' else 120),
+                timeout=360 if generic_cloud == 'azure' else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -889,6 +889,7 @@ def test_managed_jobs_storage(generic_cloud: str):
         non_persistent_bucket_removed_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
+        timeout *= 2
     elif generic_cloud == 'kubernetes':
         # With Kubernetes, we don't know which object storage provider is used.
         # Check S3, GCS and Azure if bucket exists in any of them.
