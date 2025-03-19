@@ -3,11 +3,13 @@ import asyncio
 import copy
 import logging
 import threading
+import time
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar
 
 import aiohttp
 import fastapi
 import httpx
+from prometheus_client import parser as prometheus_parser
 from starlette import background
 import uvicorn
 
@@ -27,6 +29,7 @@ _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
 # Whether to use "whether the inference engine queue is full or not" as an
 # indicator for available replicas.
 _USE_IE_QUEUE_INDICATOR = False
+_IE_QUEUE_PROBE_INTERVAL = 0.2
 
 
 class QueueSizeFilter(logging.Filter):
@@ -151,6 +154,22 @@ class ClientPool:
         with self._lock:
             return self._pool.get(url, None)
 
+    def set_replica_available_no_lock(self, url: str) -> None:
+        if url not in self._available_replicas:
+            self._available_replicas.append(url)
+
+    def set_replica_available(self, url: str) -> None:
+        with self._lock:
+            self.set_replica_available_no_lock(url)
+
+    def set_replica_unavailable_no_lock(self, url: str) -> None:
+        if url in self._available_replicas:
+            self._available_replicas.remove(url)
+
+    def set_replica_unavailable(self, url: str) -> None:
+        with self._lock:
+            self.set_replica_unavailable_no_lock(url)
+
     def pre_execute_hook(self, url: str, request: fastapi.Request) -> None:
         with self._lock:
             logger.info(f'Active requests: {self._active_requests}, '
@@ -160,8 +179,7 @@ class ClientPool:
                 return
             self._active_requests[url] = self._active_requests.get(url, 0) + 1
             if self._active_requests[url] >= self._max_concurrent_requests:
-                if url in self._available_replicas:
-                    self._available_replicas.remove(url)
+                self.set_replica_unavailable_no_lock(url)
 
     def post_execute_hook(self, url: str, request: fastapi.Request) -> None:
         with self._lock:
@@ -171,8 +189,7 @@ class ClientPool:
             if url in self._active_requests and self._active_requests[url] > 0:
                 self._active_requests[url] -= 1
                 if self._active_requests[url] < self._max_concurrent_requests:
-                    if url not in self._available_replicas:
-                        self._available_replicas.append(url)
+                    self.set_replica_available_no_lock(url)
 
 
 class SkyServeLoadBalancer:
@@ -650,6 +667,60 @@ class SkyServeLoadBalancer:
         return fastapi.responses.JSONResponse(
             status_code=200, content={'remaining_to_steal': num_steal})
 
+    async def _probe_ie_queue_one_replica(
+            self, replica: str) -> Tuple[Optional[float], str]:
+        """Probe the inference engine queue of one replica."""
+        # TODO(tian): Support vLLM & other inference engines.
+        assert self._workload_steal_session is not None
+        try:
+            # TODO(tian): Use urlparse for robustness, and change the session
+            # name since this is no longer only used for stealing requests.
+            async with self._workload_steal_session.get(  # pylint: disable=not-async-context-manager
+                    replica + '/metrics') as response:
+                metrics_text = await response.text()
+            metrics = prometheus_parser.text_string_to_metric_families(
+                metrics_text)
+            for f in metrics:
+                if f.name == 'sglang:num_queue_reqs':
+                    return f.samples[0].value, replica
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error probing inference engine queue of {replica}: '
+                         f'{common_utils.format_exception(e)}')
+        return None, replica
+
+    async def _probe_ie_queue(self) -> None:
+        """Probe the inference engine queue."""
+        assert self._loop is not None
+        assert self._request_queue is not None
+        while True:
+            await asyncio.sleep(_IE_QUEUE_PROBE_INTERVAL)
+            time_start = time.perf_counter()
+            tasks = []
+            for replica in self._replica_pool.ready_replicas():
+                tasks.append(self._probe_ie_queue_one_replica(replica))
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            time_end_probe = time.perf_counter()
+            time_start_set_replica = time.perf_counter()
+            for queue_size, replica in results:
+                if isinstance(queue_size, Exception):
+                    logger.error(f'Error probing inference engine queue: '
+                                 f'{common_utils.format_exception(queue_size)}')
+                elif queue_size is None:
+                    logger.error(f'No inference engine queue size found for '
+                                 f'{replica}.')
+                else:
+                    logger.info(f'Inference engine queue size for {replica}: '
+                                f'{queue_size}')
+                    if queue_size > 0:
+                        self._replica_pool.set_replica_unavailable(replica)
+                    else:
+                        self._replica_pool.set_replica_available(replica)
+            time_end_set_replica = time.perf_counter()
+            time_elapsed_set_replica = (time_end_set_replica -
+                                        time_start_set_replica)
+            logger.info(f'Probe time: {time_end_probe - time_start}s, '
+                        f'Set replica time: {time_elapsed_set_replica}s.')
+
     def run(self):
         # Add health check endpoint first so it takes precedence
         self._app.add_api_route(constants.LB_HEALTH_ENDPOINT,
@@ -704,6 +775,10 @@ class SkyServeLoadBalancer:
             # Start the request stealing loop
             self._tasks.append(
                 self._loop.create_task(self._request_stealing_loop()))
+
+            if _USE_IE_QUEUE_INDICATOR:
+                self._tasks.append(
+                    self._loop.create_task(self._probe_ie_queue()))
 
         @self._app.on_event('shutdown')
         async def shutdown():

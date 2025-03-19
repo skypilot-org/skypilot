@@ -15,6 +15,7 @@ setup: |
   pip list | grep fastapi > /dev/null 2>&1 || pip install fastapi > /dev/null 2>&1
   pip list | grep httpx > /dev/null 2>&1 || pip install httpx > /dev/null 2>&1
   pip list | grep xxhash > /dev/null 2>&1 || pip install xxhash > /dev/null 2>&1
+  pip list | grep prometheus_client > /dev/null 2>&1 || pip install prometheus_client > /dev/null 2>&1
 
 run: |
   {{ sky_activate_python_env }}

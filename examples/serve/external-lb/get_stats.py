@@ -1,7 +1,7 @@
+import requests
 from rich import print
 
 import sky
-import requests
 
 st = sky.serve.status('llm8b2')
 st = sky.client.sdk.get(st)[0]
@@ -16,7 +16,8 @@ for lb in st['external_lb_info']:
     print(lb['endpoint'])
     resp = requests.get(lb['endpoint'] + '/conf')
     conf = resp.json()
-    raw_queue_size = requests.get(lb['endpoint'] + '/raw-queue-size').json()['queue_size']
+    raw_queue_size = requests.get(lb['endpoint'] +
+                                  '/raw-queue-size').json()['queue_size']
     conf['raw_queue_size'] = raw_queue_size
     print(conf)
 print()
