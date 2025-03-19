@@ -82,18 +82,15 @@ def check_capabilities(
         cloud_repr, cloud = cloud_tuple
         assert capabilities is not None
         for capability in capabilities:
-            not_supported = False
             with rich_utils.safe_status(f'Checking {cloud_repr}...'):
                 try:
                     ok, reason = check_credentials(cloud, capability)
                 except exceptions.NotSupportedError:
-                    not_supported = True
+                    continue
                 except Exception:  # pylint: disable=broad-except
                     # Catch all exceptions to prevent a single cloud
                     # from blocking the check for other clouds.
                     ok, reason = False, traceback.format_exc()
-            if not_supported:
-                continue
             status_msg = ('enabled' if ok else 'disabled')
             styles = {'fg': 'green', 'bold': False} if ok else {'dim': True}
             echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) +
@@ -287,8 +284,8 @@ def get_cached_enabled_storage_clouds_or_refresh(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
-    cached_enabled_storage_clouds = \
-        global_user_state.get_cached_enabled_storage_clouds()
+    cached_enabled_storage_clouds = (
+        global_user_state.get_cached_enabled_storage_clouds())
     if not cached_enabled_storage_clouds:
         try:
             check(quiet=True, capability=CloudCapability.STORAGE)
@@ -297,8 +294,8 @@ def get_cached_enabled_storage_clouds_or_refresh(
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
-        cached_enabled_storage_clouds = \
-            global_user_state.get_cached_enabled_storage_clouds()
+        cached_enabled_storage_clouds = (
+            global_user_state.get_cached_enabled_storage_clouds())
     if raise_if_no_cloud_access and not cached_enabled_storage_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
