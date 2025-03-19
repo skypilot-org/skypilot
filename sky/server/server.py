@@ -1140,6 +1140,9 @@ if __name__ == '__main__':
                 # The process may not be started yet, close it anyway.
                 proc.close()
 
+        # Terminate processes in reverse order in case dependency, especially
+        # queue server. Terminate queue server first does not affect the
+        # correctness of cleanup but introduce redundant error messages.
         subprocess_utils.run_in_parallel(cleanup,
-                                         sub_procs,
+                                         list(reversed(sub_procs)),
                                          num_threads=len(sub_procs))
