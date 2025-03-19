@@ -181,6 +181,12 @@ temp/
 
         # Add and commit submodule - ignored files won't be added
         subprocess.run(['git', 'add', '.'], cwd=submodule_dir, check=True)
+        subprocess.run(['git', 'config', 'user.name', 'Test User'],
+                       cwd=submodule_dir,
+                       check=True)
+        subprocess.run(['git', 'config', 'user.email', 'test@example.com'],
+                       cwd=submodule_dir,
+                       check=True)
         subprocess.run(['git', 'commit', '-m', 'Initial submodule commit'],
                        cwd=submodule_dir,
                        check=True)
