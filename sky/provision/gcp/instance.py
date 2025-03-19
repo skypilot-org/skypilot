@@ -586,8 +586,11 @@ def open_ports(
     }
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance,
-        instance_utils.GCPTPUVMInstance,
     ]
+    use_tpu_vms = provider_config.get('_has_tpus', False)
+    if use_tpu_vms:
+        handlers.append(instance_utils.GCPTPUVMInstance)
+
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              label_filters, lambda _: None)
     operations = collections.defaultdict(list)
