@@ -1,14 +1,11 @@
-import os
 import pathlib
 import subprocess
-import tempfile
-import time
 
 import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
-from sky.backends.backend_utils import SKY_REMOTE_PATH
+from sky.backends import backend_utils
 
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
@@ -27,7 +24,8 @@ class TestBackwardCompatibility:
         '~/sky-back-compat-current').expanduser().absolute()
     BASE_SKY_DIR = pathlib.Path('~/sky-base').expanduser().absolute()
     CURRENT_SKY_DIR = pathlib.Path('./').expanduser().absolute()
-    SKY_WHEEL_DIR = pathlib.Path(SKY_REMOTE_PATH).expanduser().absolute()
+    SKY_WHEEL_DIR = pathlib.Path(
+        backend_utils.SKY_REMOTE_PATH).expanduser().absolute()
 
     # Command templates
     ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
