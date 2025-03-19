@@ -660,21 +660,29 @@ class GKEAutoscaler(Autoscaler):
             logger.debug(f'{e.message}', exc_info=True)
             return True
 
-        # Check if any node pool with autoscaling enabled can
-        # fit the instance type.
-        for node_pool in cluster['nodePools']:
-            logger.debug(f'checking if node pool {node_pool["name"]} '
-                         'has autoscaling enabled.')
-            if (node_pool['autoscaling'] is not None and
-                    'enabled' in node_pool['autoscaling'] and
-                    node_pool['autoscaling']['enabled']):
-                logger.debug(
-                    f'node pool {node_pool["name"]} has autoscaling enabled. '
-                    'Checking if it can create a node '
-                    f'satisfying {instance_type}')
-                if cls._check_instance_fits_gke_autoscaler_node_pool(
-                        instance_type, node_pool):
-                    return True
+        try:
+            # Check if any node pool with autoscaling enabled can
+            # fit the instance type.
+            node_pools = cluster['nodePools'] if 'nodePools' in cluster else []
+            for node_pool in node_pools:
+                name = node_pool['name'] if 'name' in node_pool else ''
+                logger.debug(f'checking if node pool {name} '
+                             'has autoscaling enabled.')
+                autoscaling = node_pool[
+                    'autoscaling'] if 'autoscaling' in node_pool else None
+                autoscaling_enabled = autoscaling[
+                    'enabled'] if 'enabled' in autoscaling else False
+                if autoscaling_enabled:
+                    logger.debug(f'node pool {name} has autoscaling enabled. '
+                                 'Checking if it can create a node '
+                                 f'satisfying {instance_type}')
+                    if cls._check_instance_fits_gke_autoscaler_node_pool(
+                            instance_type, node_pool):
+                        return True
+        except KeyError:
+            logger.debug('encountered KeyError while checking if '
+                         f'node pool {name} has autoscaling enabled.')
+            return True
         return False
 
     @classmethod
@@ -775,9 +783,9 @@ class GKEAutoscaler(Autoscaler):
         to fit the instance type.
         """
         for accelerator in node_pool_accelerators:
-            node_accelerator_type = GKELabelFormatter. \
-                get_accelerator_from_label_value(
-                    accelerator['acceleratorType'])
+            node_accelerator_type = (
+                GKELabelFormatter.get_accelerator_from_label_value(
+                    accelerator['acceleratorType']))
             node_accelerator_count = accelerator['acceleratorCount']
             if node_accelerator_type == requested_gpu_type and int(
                     node_accelerator_count) >= requested_gpu_count:
@@ -811,24 +819,22 @@ class GKEAutoscaler(Autoscaler):
     @classmethod
     def _tpu_chip_count_from_instance_type(cls, machine_type: str) -> int:
         """Infer the number of TPU chips from the instance type."""
-        machine_type_parts = machine_type.split('-')
         # according to
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
         # ct<version>-<type>-<node-chip-count>t
         logger.debug(
             f'inferring TPU chip count from machine type: {machine_type}')
-        if (len(machine_type_parts) != 3 or
-                not machine_type_parts[0].startswith('ct') or
-                not machine_type_parts[2].endswith('t') or
-                not machine_type_parts[2].strip('t').isdigit()):
+        pattern = r'ct[a-z0-9]+-[a-z]+-([0-9]+)t'
+        search = re.search(pattern, machine_type)
+        if search is None:
             logger.debug(f'machine type {machine_type} is not a '
                          'valid TPU machine type format.')
             return 0
-        num_tpu_chips = int(machine_type_parts[2].strip('t'))
+        num_tpu_chips = search.group(1)
         logger.debug(
             f'machine type {machine_type} has {num_tpu_chips} TPU chips.')
-        return num_tpu_chips
+        return int(num_tpu_chips)
 
     @classmethod
     def _is_node_multi_host_tpu(cls, resource_labels: dict) -> bool:
