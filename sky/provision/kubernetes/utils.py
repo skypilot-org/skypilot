@@ -609,6 +609,7 @@ class GKEAutoscaler(Autoscaler):
     _pip_install_gcp_hint_last_sent = 0.0
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
     def can_create_new_instance_of_type(cls, context: str,
                                         instance_type: str) -> bool:
         """Looks at each node pool in the cluster and checks if
