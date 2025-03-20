@@ -245,9 +245,9 @@ class TestBackwardCompatibility:
                 # Cover jobs launched in the old version and ran to terminal states
                 launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
                 launch_job(f'{managed_job_name}-old-1', 'echo hi'),
-                expect_status(f'{managed_job_name}-old-0',
-                              [sky.ManagedJobStatus.SUCCEEDED]),
                 expect_status(f'{managed_job_name}-old-1',
+                              [sky.ManagedJobStatus.SUCCEEDED]),
+                expect_status(f'{managed_job_name}-old-0',
                               [sky.ManagedJobStatus.RUNNING]),
                 f'sky jobs cancel -n {managed_job_name}-old-0 -y',
                 expect_status(f'{managed_job_name}-old-0', [
