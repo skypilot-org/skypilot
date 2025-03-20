@@ -49,14 +49,22 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 .. raw:: html
 
    <script>
+   // Track the timeout to be able to clear it later
+   var replayTimeout;
+   
    function pauseAndReplay(video) {
-   setTimeout(function() {
-      video.currentTime = 0;
-      video.play();
-   }, 10000); // 10 second gap
+     // Clear any existing timeout first
+     clearTimeout(replayTimeout);
+     
+     replayTimeout = setTimeout(function() {
+        video.currentTime = 0;
+        video.play();
+     }, 10000); // 10 second gap
    }
 
    function restartVideo(video) {
+      // Clear any pending auto-replay timeouts when manually restarting
+      clearTimeout(replayTimeout);
       video.currentTime = 0;
       video.play();
    }
