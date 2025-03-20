@@ -31,6 +31,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 _ENABLED_CLOUDS_KEY = 'enabled_clouds'
+_ENABLED_STORAGE_CLOUDS_KEY = 'enabled_storage_clouds'
 
 _DB_PATH = os.path.expanduser('~/.sky/state.db')
 pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
@@ -817,9 +818,38 @@ def get_cached_enabled_clouds() -> List['clouds.Cloud']:
     return enabled_clouds
 
 
+def get_cached_enabled_storage_clouds() -> List['clouds.Cloud']:
+    rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
+                              (_ENABLED_STORAGE_CLOUDS_KEY,))
+    ret = []
+    for (value,) in rows:
+        ret = json.loads(value)
+        break
+    enabled_clouds: List['clouds.Cloud'] = []
+    for c in ret:
+        try:
+            cloud = registry.CLOUD_REGISTRY.from_str(c)
+        except ValueError:
+            # Handle the case for the clouds whose support has been removed from
+            # SkyPilot, e.g., 'local' was a cloud in the past and may be stored
+            # in the database for users before #3037. We should ignore removed
+            # clouds and continue.
+            continue
+        if cloud is not None:
+            enabled_clouds.append(cloud)
+    return enabled_clouds
+
+
 def set_enabled_clouds(enabled_clouds: List[str]) -> None:
     _DB.cursor.execute('INSERT OR REPLACE INTO config VALUES (?, ?)',
                        (_ENABLED_CLOUDS_KEY, json.dumps(enabled_clouds)))
+    _DB.conn.commit()
+
+
+def set_enabled_storage_clouds(enabled_storage_clouds: List[str]) -> None:
+    _DB.cursor.execute(
+        'INSERT OR REPLACE INTO config VALUES (?, ?)',
+        (_ENABLED_STORAGE_CLOUDS_KEY, json.dumps(enabled_storage_clouds)))
     _DB.conn.commit()
 
 

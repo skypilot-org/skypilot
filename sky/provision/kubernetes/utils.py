@@ -97,6 +97,7 @@ GKE_TPU_ACCELERATOR_TO_GENERATION = {
     # Multi-host compatible v5e TPU configurations allowed.
     'tpu-v5-lite-podslice': 'v5e',
     'tpu-v5p-slice': 'v5p',
+    'tpu-v6e-slice': 'v6e',
 }
 
 POD_STATUSES = {
@@ -359,7 +360,8 @@ class GKELabelFormatter(GPULabelFormatter):
     # label to use in an autoscaling environment. For list of topologies, see:
     # tpu v5e: https://cloud.google.com/tpu/docs/tpus-in-gke
     # tpu v5p: https://cloud.google.com/tpu/docs/v5p
-    # TODO(romilb): Add support for TPU v4 and v6.
+    # tpu v6e: https://cloud.google.com/tpu/docs/v6e
+    # TODO(romilb): Add support for TPU v4.
     GKE_TPU_TOPOLOGIES = {
         'tpu-v5-lite-podslice': {
             1: '1x1',
@@ -374,6 +376,11 @@ class GKELabelFormatter(GPULabelFormatter):
         'tpu-v5p-slice': {
             4: '2x2x1'
         },
+        'tpu-v6e-slice': {
+            1: '1x1',
+            4: '2x2',
+            8: '2x4'
+        }
     }
 
     @classmethod
@@ -602,6 +609,7 @@ class GKEAutoscaler(Autoscaler):
     _pip_install_gcp_hint_last_sent = 0.0
 
     @classmethod
+    @annotations.lru_cache(scope='request', maxsize=10)
     def can_create_new_instance_of_type(cls, context: str,
                                         instance_type: str) -> bool:
         """Looks at each node pool in the cluster and checks if
@@ -655,18 +663,25 @@ class GKEAutoscaler(Autoscaler):
 
         # Check if any node pool with autoscaling enabled can
         # fit the instance type.
-        for node_pool in cluster['nodePools']:
-            logger.debug(f'checking if node pool {node_pool["name"]} '
+        node_pools = cluster.get('nodePools', [])
+        for node_pool in node_pools:
+            name = node_pool.get('name', '')
+            logger.debug(f'checking if node pool {name} '
                          'has autoscaling enabled.')
-            if (node_pool['autoscaling'] is not None and
-                    'enabled' in node_pool['autoscaling'] and
-                    node_pool['autoscaling']['enabled']):
-                logger.debug(
-                    f'node pool {node_pool["name"]} has autoscaling enabled. '
-                    'Checking if it can create a node '
-                    f'satisfying {instance_type}')
-                if cls._check_instance_fits_gke_autoscaler_node_pool(
-                        instance_type, node_pool):
+            autoscaling_enabled = (node_pool.get('autoscaling',
+                                                 {}).get('enabled', False))
+            if autoscaling_enabled:
+                logger.debug(f'node pool {name} has autoscaling enabled. '
+                             'Checking if it can create a node '
+                             f'satisfying {instance_type}')
+                try:
+                    if cls._check_instance_fits_gke_autoscaler_node_pool(
+                            instance_type, node_pool):
+                        return True
+                except KeyError:
+                    logger.debug('encountered KeyError while checking if '
+                                 f'node pool {name} can create a node '
+                                 f'satisfying {instance_type}.')
                     return True
         return False
 
@@ -768,9 +783,9 @@ class GKEAutoscaler(Autoscaler):
         to fit the instance type.
         """
         for accelerator in node_pool_accelerators:
-            node_accelerator_type = GKELabelFormatter. \
-                get_accelerator_from_label_value(
-                    accelerator['acceleratorType'])
+            node_accelerator_type = (
+                GKELabelFormatter.get_accelerator_from_label_value(
+                    accelerator['acceleratorType']))
             node_accelerator_count = accelerator['acceleratorCount']
             if node_accelerator_type == requested_gpu_type and int(
                     node_accelerator_count) >= requested_gpu_count:
@@ -784,6 +799,7 @@ class GKEAutoscaler(Autoscaler):
         """Check if the node pool has enough TPU capacity
         to fit the instance type.
         """
+
         if 'goog-gke-tpu-node-pool-type' not in node_pool_resource_labels:
             # This node does not have TPUs.
             return False
@@ -803,25 +819,22 @@ class GKEAutoscaler(Autoscaler):
     @classmethod
     def _tpu_chip_count_from_instance_type(cls, machine_type: str) -> int:
         """Infer the number of TPU chips from the instance type."""
-        machine_type_parts = machine_type.split('-')
         # according to
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
-        # ct<version>-hightpu-<node-chip-count>t
+        # ct<version>-<type>-<node-chip-count>t
         logger.debug(
             f'inferring TPU chip count from machine type: {machine_type}')
-        if (len(machine_type_parts) != 3 or
-                not machine_type_parts[0].startswith('ct') or
-                machine_type_parts[1] != 'hightpu' or
-                not machine_type_parts[2].endswith('t') or
-                not machine_type_parts[2].strip('t').isdigit()):
+        pattern = r'ct[a-z0-9]+-[a-z]+-([0-9]+)t'
+        search = re.search(pattern, machine_type)
+        if search is None:
             logger.debug(f'machine type {machine_type} is not a '
                          'valid TPU machine type format.')
             return 0
-        num_tpu_chips = int(machine_type_parts[2].strip('t'))
+        num_tpu_chips = search.group(1)
         logger.debug(
             f'machine type {machine_type} has {num_tpu_chips} TPU chips.')
-        return num_tpu_chips
+        return int(num_tpu_chips)
 
     @classmethod
     def _is_node_multi_host_tpu(cls, resource_labels: dict) -> bool:
