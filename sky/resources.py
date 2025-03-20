@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import colorama
 
 from sky import check as sky_check
+from sky.clouds import cloud as sky_cloud
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
@@ -677,7 +678,8 @@ class Resources:
             # cloud corresponds to region/zone, errors out.
             valid_clouds = []
             enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-                clouds.CloudCapability.COMPUTE, raise_if_no_cloud_access=True)
+                sky_cloud.CloudCapability.COMPUTE,
+                raise_if_no_cloud_access=True)
             cloud_to_errors = {}
             for cloud in enabled_clouds:
                 try:
@@ -796,7 +798,8 @@ class Resources:
             # If cloud not specified
             valid_clouds = []
             enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-                clouds.CloudCapability.COMPUTE, raise_if_no_cloud_access=True)
+                sky_cloud.CloudCapability.COMPUTE,
+                raise_if_no_cloud_access=True)
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
                     valid_clouds.append(cloud)
@@ -991,7 +994,7 @@ class Resources:
         else:
             at_least_one_cloud_supports_ports = False
             for cloud in sky_check.get_cached_enabled_clouds_or_refresh(
-                    clouds.CloudCapability.COMPUTE,
+                    sky_cloud.CloudCapability.COMPUTE,
                     raise_if_no_cloud_access=True):
                 try:
                     cloud.check_features_are_supported(
@@ -1022,7 +1025,7 @@ class Resources:
             # If no specific cloud is set, validate label against ALL clouds.
             # The label will be dropped if invalid for any one of the cloud
             validated_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-                clouds.CloudCapability.COMPUTE)
+                sky_cloud.CloudCapability.COMPUTE)
         invalid_table = log_utils.create_table(['Label', 'Reason'])
         for key, value in self._labels.items():
             for cloud in validated_clouds:

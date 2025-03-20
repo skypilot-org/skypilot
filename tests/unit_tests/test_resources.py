@@ -6,9 +6,9 @@ from unittest import mock
 import pytest
 
 from sky import clouds
-from sky.clouds import cloud as sky_cloud
 from sky import global_user_state
 from sky import skypilot_config
+from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
 from sky.utils import resources_utils
 
