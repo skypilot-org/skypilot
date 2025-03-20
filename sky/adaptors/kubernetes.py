@@ -82,7 +82,7 @@ def _load_config(context: Optional[str] = None):
                 kubeconfig_path = os.environ.get('KUBECONFIG', '~/.kube/config')
                 err_str = (
                     f'Failed to load Kubernetes configuration for {context!r}. '
-                    f'Please check if your kubeconfig file exists at '
+                    'Please check if your kubeconfig file exists at '
                     f'{kubeconfig_path} and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
