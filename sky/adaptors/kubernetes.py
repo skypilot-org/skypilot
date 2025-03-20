@@ -79,10 +79,11 @@ def _load_config(context: Optional[str] = None):
                     '    If you were running a local Kubernetes '
                     'cluster, run `sky local up` to start the cluster.')
             else:
+                kubeconfig_path = os.environ.get('KUBECONFIG', '~/.kube/config')
                 err_str = (
                     f'Failed to load Kubernetes configuration for {context!r}. '
-                    'Please check if your kubeconfig file exists at '
-                    f'~/.kube/config and is valid.\n{suffix}')
+                    f'Please check if your kubeconfig file exists at '
+                    f'{kubeconfig_path} and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
