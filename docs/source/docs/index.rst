@@ -13,19 +13,6 @@ Welcome to SkyPilot!
   :class: no-scaled-link, only-light
 
 
-.. raw:: html
-
-   <p></p>
-   <p style="text-align:center">
-   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
-   </p>
-   <p style="text-align:center">
-   <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
-   <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
-   <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
-   <script async defer src="https://buttons.github.io/buttons.js"></script>
-   </p>
-
 SkyPilot is an open-source framework for running AI and batch workloads on any infra.
 
 .. raw:: html
@@ -47,7 +34,7 @@ SkyPilot is an open-source framework for running AI and batch workloads on any i
      <video id="video-with-badge" style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
         <source src="../_static/intro-with-badge.mp4" type="video/mp4" />
      </video>
-     <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 8px; display: flex; align-items: center; justify-content: center; background-color: rgba(0,0,0,0.6); color: white; border: none; border-radius: 50%; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
+     <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background-color: transparent; color: white; border: none; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
    </div>
 
 
@@ -71,9 +58,20 @@ SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 * :ref:`Spot instance support <spot-jobs>`: 3-6x cost savings, with preemption auto-recovery
 * Intelligent scheduling: automatically run on the cheapest & most available infra
 
+.. raw:: html
+
+   <p></p>
+   <p style="text-align:center">
+   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
+   </p>
+   <p style="text-align:center">
+   <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
+   <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
+   <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
+   <script async defer src="https://buttons.github.io/buttons.js"></script>
+   </p>
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
-
 
 
 
