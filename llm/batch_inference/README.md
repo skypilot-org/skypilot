@@ -1,7 +1,7 @@
 # Large-Scale AI Batch Inference: 9x Faster Embedding Generation
 
 <p align="center">
-<img src="https://i.imgur.com/NZOuhpk.png" alt="Large-Scale Embedding Generation with SkyPilot" style="width: 70%;">
+<img src="https://i.imgur.com/mGugNob.png" alt="Large-Scale Embedding Generation with SkyPilot" style="width: 70%;">
 </p>
 
 ## Large-Scale Embedding Generation for Text
