@@ -1,7 +1,9 @@
 FROM ubuntu:latest
 
 # Add build arguments
-ARG USERNAME=buildkite
+ARG USERNAME
+RUN if [ -z "$USERNAME" ]; then echo "ERROR: USERNAME build argument is required. Use --build-arg USERNAME=${USER}"; exit 1; fi
+RUN echo "Building for user: $USERNAME"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -101,7 +103,7 @@ RUN sudo chown ${USERNAME}:${USERNAME} ~/entrypoint.sh && \
 ENTRYPOINT /bin/bash ~/entrypoint.sh
 
 # Command on Mac:
-# docker build --platform linux/amd64 -t sky-test-image --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
+# docker build --platform linux/amd64 -t sky-test-image --build-arg USERNAME=$USER --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
 
 # Full command with all mounts, credential copying, and proxy settings:
 # export LINUX_USERNAME=buildkite

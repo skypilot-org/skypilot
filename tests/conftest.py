@@ -355,14 +355,15 @@ def setup_docker_container(request):
         ]
 
         # Run the container
-        subprocess.run([
+        docker_cmd = [
             'docker', 'run', '-d', '--name', container_name, '--platform',
             'linux/amd64', *[f'-v={v}' for v in volumes], '-e',
             f'USERNAME={os.environ.get("USER", default_user)}', '-e',
             'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-p', '46581:46580',
             image_name
-        ],
-                       check=True)
+        ]
+        logger.info(f'Running Docker command: {" ".join(docker_cmd)}')
+        subprocess.run(docker_cmd, check=True)
 
         # Wait for container to be ready
         logger.info('Waiting for container to be ready...')
