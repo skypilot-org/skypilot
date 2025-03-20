@@ -49,6 +49,7 @@ uv pip install --prerelease=allow "azure-cli>=2.65.0"
 uv pip install -r requirements-dev.txt
 uv pip install -e ".[all]"
 sky api start --deploy
+sky check
 
 # Execute the hash regeneration function
 regenerate_user_hash
