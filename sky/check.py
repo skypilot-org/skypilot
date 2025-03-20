@@ -184,8 +184,7 @@ def check_capability(
     capability: CloudCapability = CloudCapability.COMPUTE,
 ) -> List[str]:
     clouds_with_capability = []
-    enabled_clouds = check_capabilities(quiet, verbose, clouds,
-                                        ALL_CAPABILITIES)
+    enabled_clouds = check_capabilities(quiet, verbose, clouds, [capability])
     for cloud, capabilities in enabled_clouds.items():
         if capability in capabilities:
             clouds_with_capability.append(cloud)
