@@ -6,11 +6,11 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 import colorama
 
 from sky import check as sky_check
-from sky.clouds import cloud as sky_cloud
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
