@@ -338,6 +338,14 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
             f' --quiet $({query_cmd})')
 
 
+def is_inside_docker() -> bool:
+    """Check if the current environment is running inside a Docker container."""
+    if os.path.exists('/.dockerenv'):
+        return True
+
+    return False
+
+
 def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
@@ -372,7 +380,11 @@ def run_one_test(test: Test) -> None:
                 config = yaml.safe_load(f)
         else:
             config = {}
-        config['api_server'] = {'endpoint': 'http://0.0.0.0:46581'}
+        host = '0.0.0.0' if is_inside_docker() else 'host.docker.internal'
+        config['api_server'] = {'endpoint': f'http://{host}:46581'}
+        test.echo(
+            f'Overriding API server endpoint: {config["api_server"]["endpoint"]}'
+        )
         yaml.dump(config, temp_config)
         temp_config.close()
         # Update the environment variable to use the temporary file
