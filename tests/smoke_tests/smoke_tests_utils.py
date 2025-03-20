@@ -362,7 +362,7 @@ def run_one_test(test: Test) -> None:
         env_dict.update(test.env)
 
     # Create a temporary config file with API server config only if running with remote server
-    if 'PYTEST_REMOTE_SERVER' in os.environ:
+    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
         temp_config = tempfile.NamedTemporaryFile(mode='w',
                                                   suffix='.yaml',
                                                   delete=False)

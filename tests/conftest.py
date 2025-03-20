@@ -276,7 +276,7 @@ def setup_docker_container(request):
         return
 
     # Set environment variable to indicate we're using remote server
-    os.environ['SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+    os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
 
     # Docker image and container names
     image_name = 'sky-test-image'
@@ -411,6 +411,8 @@ def setup_docker_container(request):
 
         if worker_count == 0:
             logger.info('Last worker finished, cleaning up container...')
+            subprocess.run(['docker', 'stop', '-t', '600', container_name],
+                           check=False)
             subprocess.run(['docker', 'rm', '-f', container_name], check=False)
             try:
                 os.remove(counter_file)
