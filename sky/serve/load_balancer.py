@@ -28,7 +28,7 @@ _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
 # Whether to use "whether the inference engine queue is full or not" as an
 # indicator for available replicas.
-_USE_IE_QUEUE_INDICATOR = False
+_USE_IE_QUEUE_INDICATOR = True
 _IE_QUEUE_PROBE_INTERVAL = 0.2
 
 
@@ -493,6 +493,9 @@ class SkyServeLoadBalancer:
             await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
             try:
                 if not await self._request_queue.empty():
+                    continue
+                # Don't steal if there is no replica.
+                if not self._replica_pool.ready_replicas():
                     continue
                 steal_targets, self_url = self._steal_targets()
                 # logger.info(f'Steal targets: {steal_targets}, '
