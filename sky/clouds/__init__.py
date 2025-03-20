@@ -55,4 +55,6 @@ __all__ = [
     'Nebius',
     # Utility functions
     'cloud_in_iterable',
+    'ALL_CAPABILITIES',
+    'CloudCapability',
 ]
