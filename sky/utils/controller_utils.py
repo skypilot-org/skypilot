@@ -283,7 +283,7 @@ def _get_cloud_dependencies_installation_commands(
         python_packages.update(cloud_python_dependencies)
 
     if (cloudflare.NAME
-            in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+            in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
         python_packages.update(dependencies.extras_require['cloudflare'])
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
@@ -814,8 +814,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
         cloud_str = store_type.to_cloud()
-        if (cloud_str not in
-                storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+        if (cloud_str not in storage_lib.
+                get_cached_enabled_storage_cloud_names_or_refresh()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'`{task_type}.bucket` is specified in SkyPilot config '

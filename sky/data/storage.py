@@ -78,7 +78,7 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
 _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
 
 
-def get_cached_enabled_storage_clouds_or_refresh(
+def get_cached_enabled_storage_cloud_names_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
@@ -98,8 +98,9 @@ def get_cached_enabled_storage_clouds_or_refresh(
 
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = get_cached_enabled_storage_clouds_or_refresh()
-    if cloud_name in enabled_storage_clouds:
+    enabled_storage_cloud_names = (
+        get_cached_enabled_storage_cloud_names_or_refresh())
+    if cloud_name in enabled_storage_cloud_names:
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.

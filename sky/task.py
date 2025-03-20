@@ -974,8 +974,8 @@ class Task:
         # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
-        enabled_storage_clouds = (
-            storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+        enabled_storage_cloud_names = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh(
                 raise_if_no_cloud_access=True))
 
         if self.best_resources is not None:
@@ -987,13 +987,13 @@ class Task:
             storage_region = resources.region
 
         if storage_cloud is not None:
-            if str(storage_cloud) not in enabled_storage_clouds:
+            if str(storage_cloud) not in enabled_storage_cloud_names:
                 storage_cloud = None
 
         storage_cloud_str = None
         if storage_cloud is None:
-            storage_cloud_str = enabled_storage_clouds[0]
-            assert storage_cloud_str is not None, enabled_storage_clouds[0]
+            storage_cloud_str = enabled_storage_cloud_names[0]
+            assert storage_cloud_str is not None, enabled_storage_cloud_names[0]
             storage_region = None  # Use default region in the Store class
         else:
             storage_cloud_str = str(storage_cloud)
