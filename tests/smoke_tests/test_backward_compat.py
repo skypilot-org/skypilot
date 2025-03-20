@@ -33,12 +33,14 @@ class TestBackwardCompatibility:
     ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
 
-    # Shorthand of running a list of commands in the base environment.
-    def _run_in_base(self, *cmds: str) -> list[str]:
+    # Shorthand of switching to base environment and running a list of commands in environment.
+    def _switch_to_base(self, *cmds: str) -> list[str]:
+        cmds = [self.SKY_API_RESTART] + list(cmds)
         return [f'{self.ACTIVATE_BASE} && {c}' for c in cmds]
 
-    # Shorthand of running a list of commands in the current environment.
-    def _run_in_current(self, *cmds: str) -> list[str]:
+    # Shorthand of switching to current environment and running a list of commands in environment.
+    def _switch_to_current(self, *cmds: str) -> list[str]:
+        cmds = [self.SKY_API_RESTART] + list(cmds)
         return [f'{self.ACTIVATE_CURRENT} && {c}' for c in cmds]
 
     def _run_cmd(self, cmd: str):
@@ -240,8 +242,7 @@ class TestBackwardCompatibility:
                 job_name=job_name, job_status=status, timeout=300)
 
         commands = [
-            *self._run_in_base(
-                self.SKY_API_RESTART,
+            *self._switch_to_base(
                 # Cover jobs launched in the old version and ran to terminal states
                 launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
                 launch_job(f'{managed_job_name}-old-1', 'echo hi'),
@@ -262,8 +263,7 @@ class TestBackwardCompatibility:
                 expect_status(f'{managed_job_name}-1',
                               [sky.ManagedJobStatus.RUNNING]),
             ),
-            *self._run_in_current(
-                self.SKY_API_RESTART,
+            *self._switch_to_current(
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
                 launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
