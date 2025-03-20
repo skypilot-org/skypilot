@@ -178,10 +178,10 @@ def check_capabilities(
 
 
 def check_capability(
+    capability: CloudCapability,
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capability: CloudCapability = CloudCapability.COMPUTE,
 ) -> List[str]:
     clouds_with_capability = []
     enabled_clouds = check_capabilities(quiet, verbose, clouds, [capability])
@@ -191,9 +191,6 @@ def check_capability(
     return clouds_with_capability
 
 
-# 'sky check' command and associated '/check' server endpoint
-# only checks compute capability for backward compatibility.
-# This necessitates setting default capability to CloudCapability.COMPUTE.
 def check(
     quiet: bool = False,
     verbose: bool = False,
@@ -222,7 +219,7 @@ def get_cached_enabled_clouds_or_refresh(
         capability)
     if not cached_enabled_clouds:
         try:
-            check_capability(quiet=True, capability=sky_cloud.CloudCapability.COMPUTE)
+            check_capability(sky_cloud.CloudCapability.COMPUTE, quiet=True)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
@@ -296,10 +293,11 @@ def _print_checked_cloud(
     } if enabled_capabilities else {
         'dim': True
     }
-    service_string = (click.style('[' + ', '.join(enabled_capabilities) + ']',
-                                  **styles) if enabled_capabilities else '')
+    capability_string = (click.style(
+        '[' + ', '.join(enabled_capabilities) +
+        ']', **styles) if enabled_capabilities else '')
     echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) + ' ' +
-         service_string)
+         capability_string)
     if status_msg == 'enabled':
         if verbose and cloud is not cloudflare:
             activated_account = cloud.get_active_user_identity_str()
@@ -313,17 +311,18 @@ def _print_checked_cloud(
 
 def _format_enabled_cloud(cloud_name: str,
                           capabilities: List[CloudCapability]) -> str:
+    cloud_and_capabilities = f'{cloud_name} ' + '[' + ', '.join(
+        capabilities) + ']'
 
-    def _green_color(cloud_name: str) -> str:
-        enabled_capabilities_str = '[' + ', '.join(capabilities) + ']'
-        return (f'{colorama.Fore.GREEN}{cloud_name} '
-                f'{enabled_capabilities_str}{colorama.Style.RESET_ALL}')
+    def _green_color(str_to_format: str) -> str:
+        return (
+            f'{colorama.Fore.GREEN}{str_to_format}{colorama.Style.RESET_ALL}')
 
     if cloud_name == repr(sky_clouds.Kubernetes()):
         # Get enabled contexts for Kubernetes
         existing_contexts = sky_clouds.Kubernetes.existing_allowed_contexts()
         if not existing_contexts:
-            return _green_color(cloud_name)
+            return _green_color(cloud_and_capabilities)
 
         # Check if allowed_contexts is explicitly set in config
         allowed_contexts = skypilot_config.get_nested(
@@ -341,7 +340,7 @@ def _format_enabled_cloud(cloud_name: str,
         else:
             context_info = f'Active context: {existing_contexts[0]}'
 
-        return (f'{_green_color(cloud_name)}\n'
+        return (f'{_green_color(cloud_and_capabilities)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
                 f'{colorama.Style.RESET_ALL}')
-    return _green_color(cloud_name)
+    return _green_color(cloud_and_capabilities)

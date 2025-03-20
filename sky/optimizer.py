@@ -1226,10 +1226,10 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             all_clouds_specified.add(cloud_str)
 
         # Explicitly check again to update the enabled cloud list.
-        sky_check.check_capability(quiet=True,
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
                                    clouds=list(clouds_need_recheck -
-                                               global_disabled_clouds),
-                                   capability=sky_cloud.CloudCapability.COMPUTE)
+                                               global_disabled_clouds))
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
