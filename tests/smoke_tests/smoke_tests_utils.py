@@ -361,21 +361,22 @@ def run_one_test(test: Test) -> None:
     if test.env:
         env_dict.update(test.env)
 
-    # Create a temporary config file with API server config
-    temp_config = tempfile.NamedTemporaryFile(mode='w',
-                                              suffix='.yaml',
-                                              delete=False)
-    if 'SKYPILOT_CONFIG' in env_dict:
-        # Read the original config
-        with open(env_dict['SKYPILOT_CONFIG'], 'r') as f:
-            config = yaml.safe_load(f)
-    else:
-        config = {}
-    config['api_server'] = {'endpoint': 'http://0.0.0.0:46581'}
-    yaml.dump(config, temp_config)
-    temp_config.close()
-    # Update the environment variable to use the temporary file
-    env_dict['SKYPILOT_CONFIG'] = temp_config.name
+    # Create a temporary config file with API server config only if running with remote server
+    if 'PYTEST_REMOTE_SERVER' in os.environ:
+        temp_config = tempfile.NamedTemporaryFile(mode='w',
+                                                  suffix='.yaml',
+                                                  delete=False)
+        if 'SKYPILOT_CONFIG' in env_dict:
+            # Read the original config
+            with open(env_dict['SKYPILOT_CONFIG'], 'r') as f:
+                config = yaml.safe_load(f)
+        else:
+            config = {}
+        config['api_server'] = {'endpoint': 'http://0.0.0.0:46581'}
+        yaml.dump(config, temp_config)
+        temp_config.close()
+        # Update the environment variable to use the temporary file
+        env_dict['SKYPILOT_CONFIG'] = temp_config.name
 
     for command in test.commands:
         write(f'+ {command}\n')

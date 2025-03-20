@@ -275,6 +275,9 @@ def setup_docker_container(request):
         yield
         return
 
+    # Set environment variable to indicate we're using remote server
+    os.environ['SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+
     # Docker image and container names
     image_name = 'sky-test-image'
     container_name = 'sky-test'
@@ -345,11 +348,10 @@ def setup_docker_container(request):
 
         # Prepare volume mounts with read-write mode
         volumes = [
-            f'{workspace_path}:/skypilot:rw',
-            f'{os.path.expanduser("~/.sky")}:/home/{os.environ.get("USER", default_user)}/.sky:rw',
-            f'{os.path.expanduser("~/.aws")}:/home/{os.environ.get("USER", default_user)}/.aws:rw',
-            f'{os.path.expanduser("~/.azure")}:/home/{os.environ.get("USER", default_user)}/.azure:rw',
-            f'{os.path.expanduser("~/.config/gcloud")}:/home/{os.environ.get("USER", default_user)}/.config/gcloud:rw',
+            f'{workspace_path}:/skypilot',
+            f'{os.path.expanduser("~/.aws")}:/home/{os.environ.get("USER", default_user)}/.aws',
+            f'{os.path.expanduser("~/.azure")}:/home/{os.environ.get("USER", default_user)}/.azure',
+            f'{os.path.expanduser("~/.config/gcloud")}:/home/{os.environ.get("USER", default_user)}/.config/gcloud',
         ]
 
         # Run the container
