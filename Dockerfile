@@ -11,14 +11,14 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     # Install system packages
     apt-get update -y && \
     apt-get install --no-install-recommends -y \
-        git gcc rsync sudo patch openssh-server \
-        pciutils nano fuse socat netcat-openbsd curl rsync vim tini && \
+    git gcc rsync sudo patch openssh-server \
+    pciutils nano fuse socat netcat-openbsd curl rsync vim tini && \
     rm -rf /var/lib/apt/lists/* && \
     # Install kubectl based on architecture
     ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
-        "x86_64") echo "amd64" ;; \
-        "aarch64") echo "arm64" ;; \
-        *) echo "$(uname -m)" ;; \
+    "x86_64") echo "amd64" ;; \
+    "aarch64") echo "arm64" ;; \
+    *) echo "$(uname -m)" ;; \
     esac)} && \
     curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
@@ -31,3 +31,9 @@ RUN conda install -c conda-forge google-cloud-sdk && \
     conda clean -afy && \
     ~/.local/bin/uv cache clean && \
     rm -rf ~/.cache/pip ~/.cache/uv
+
+# Set tini as entrypoint
+ENTRYPOINT ["/usr/bin/tini", "--"]
+
+# CMD instruction
+CMD ["bash"]
