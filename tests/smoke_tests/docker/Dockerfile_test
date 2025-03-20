@@ -85,46 +85,35 @@ RUN source ~/miniconda3/etc/profile.d/conda.sh && \
     conda activate base && \
     uv pip install pyOpenSSL==23.1.1
 
+# Copy the entrypoint script
+COPY tests/smoke_tests/docker/entrypoint.sh /home/${USERNAME}/entrypoint.sh
+COPY tests/smoke_tests/docker/stop_sky_resource.sh /home/${USERNAME}/stop_sky_resource.sh
 
-# Set the working directory to the home directory of user
-WORKDIR /home/${USERNAME}
-
-# Create entrypoint script
-RUN printf '%s\n' \
-    '#!/bin/bash' \
-    'source ~/miniconda3/etc/profile.d/conda.sh' \
-    'conda activate base' \
-    'cd /skypilot' \
-    'pip uninstall -y skypilot' \
-    'uv pip install --prerelease=allow "azure-cli>=2.65.0"' \
-    'uv pip install -r requirements-dev.txt' \
-    'uv pip install -e ".[all]"' \
-    'sky api start' \
-    '# Keep the container running by tailing the API server log' \
-    'tail -f ~/.sky/api_server/server.log' > ~/entrypoint.sh && chmod +x ~/entrypoint.sh
+# Debug and set permissions
+RUN sudo chown ${USERNAME}:${USERNAME} ~/entrypoint.sh && \
+    sudo chown ${USERNAME}:${USERNAME} ~/stop_sky_resource.sh && \
+    ls -la ~/entrypoint.sh && \
+    ls -la ~/stop_sky_resource.sh && \
+    chmod +x ~/entrypoint.sh && \
+    chmod +x ~/stop_sky_resource.sh
 
 # Set the entrypoint
-ENTRYPOINT ["/bin/bash", "-c", "exec ~/entrypoint.sh"]
+ENTRYPOINT /bin/bash ~/entrypoint.sh
 
-# Command examples:
-# docker build --platform linux/amd64 -t sky-test-image --build-arg USERNAME=buildkite --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/Dockerfile_test .
+# Command on Mac:
+# docker build --platform linux/amd64 -t sky-test-image --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
 
 # Full command with all mounts, credential copying, and proxy settings:
-# export USERNAME=buildkite
+# export LINUX_USERNAME=buildkite
 # docker run --platform linux/amd64 -it --name sky-test \
-#   -v "$(pwd)":/skypilot \
-#   -v "$HOME/.sky":"/home/${USERNAME}/.sky" \
-#   -v "$HOME/.aws":"/home/${USERNAME}/.aws":ro \
-#   -v "$HOME/.azure":"/home/${USERNAME}/.azure":ro \
-#   -v "$HOME/.config/gcloud":"/home/${USERNAME}/.config/gcloud":ro \
+#   -v "$(pwd)":/skypilot:rw \
+#   -v "$HOME/.aws":"/home/${LINUX_USERNAME}/.aws" \
+#   -v "$HOME/.azure":"/home/${LINUX_USERNAME}/.azure" \
+#   -v "$HOME/.config/gcloud":"/home/${LINUX_USERNAME}/.config/gcloud" \
 #   -e https_proxy=http://host.docker.internal:7890 \
 #   -e http_proxy=http://host.docker.internal:7890 \
 #   -e all_proxy=socks5://host.docker.internal:7890 \
 #   -e no_proxy=localhost,127.0.0.1,0.0.0.0 \
 #   --add-host=host.docker.internal:host-gateway \
+#   -p 46581:46580 \
 #   sky-test-image
-
-# For interactive access to the container:
-# docker exec -it sky-container /bin/bash
-
-# docker start -ai sky-container

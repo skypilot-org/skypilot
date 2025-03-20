@@ -1,4 +1,5 @@
 import fcntl
+import json
 import os
 import subprocess
 import tempfile
@@ -245,7 +246,7 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             full_name = item.nodeid
             marks = [mark.name for mark in item.iter_markers()]
-            logger.info(f"Collected {full_name} with marks: {marks}")
+            print(f"Collected {full_name} with marks: {marks}")
 
 
 def _is_generic_test(item) -> bool:
@@ -275,151 +276,141 @@ def setup_docker_container(request):
         return
 
     # Docker image and container names
-    image_name = 'sky-server-image'
-    container_name = 'sky-server-test'
+    image_name = 'sky-test-image'
+    container_name = 'sky-test'
     dockerfile_path = 'tests/Dockerfile_test'
     default_user = os.environ.get('USER', 'buildkite')
 
-    # Create a lockfile in a temporary directory that all processes can access
+    # Create a lockfile and counter file in a temporary directory that all processes can access
     lock_file = os.path.join(tempfile.gettempdir(), 'sky_docker_setup.lock')
+    counter_file = os.path.join(tempfile.gettempdir(), 'sky_docker_workers.txt')
 
-    # Flag to track if this worker created the container
-    container_created_by_this_worker = False
-    client = None
+    lock_fd = open(lock_file, 'w')
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
-    with open(lock_file, 'w') as f:
+    try:
         try:
-            # Try to acquire an exclusive lock
-            fcntl.flock(f, fcntl.LOCK_EX)
+            with open(counter_file, 'r') as f:
+                worker_count = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            worker_count = 0
 
-            # Initialize Docker client
-            client = docker.from_env()
+        worker_count += 1
+        with open(counter_file, 'w') as f:
+            f.write(str(worker_count))
 
-            # Check if container is already running (another worker might have started it)
-            try:
-                container = client.containers.get(container_name)
-                logger.info(f'Container {container_name} is already running')
-                fcntl.flock(f, fcntl.LOCK_UN)
-                yield container
+        # Check if container is already running (another worker might have started it)
+        try:
+            # Use docker ps with filter to check for running container
+            result = subprocess.run([
+                'docker', 'ps', '--filter', f'name={container_name}',
+                '--format', '{{.Names}}'
+            ],
+                                    check=True,
+                                    capture_output=True,
+                                    text=True)
+            if container_name in result.stdout:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                yield container_name
                 return
-            except docker.errors.NotFound:
-                pass
+        except subprocess.CalledProcessError:
+            pass
 
-            # Check if image exists, build if not
-            image_exists = False
+        # Use docker images with filter to check for existing image
+        result = subprocess.run([
+            'docker', 'images', '--filter', f'reference={image_name}',
+            '--format', '{{.Repository}}'
+        ],
+                                check=True,
+                                capture_output=True,
+                                text=True)
+        if image_name in result.stdout:
+            logger.info(f'Docker image {image_name} already exists')
+        else:
+            logger.info(f'Docker image {image_name} not found, building...')
+            subprocess.run([
+                'docker', 'build', '-t', image_name, '--build-arg',
+                f'USERNAME={default_user}', '-f', dockerfile_path, '.'
+            ],
+                           check=True)
+            logger.info(f'Successfully built Docker image {image_name}')
+
+        # Remove existing container if it exists
+        subprocess.run(['docker', 'rm', '-f', container_name], check=False)
+
+        # Start new container
+        logger.info(f'Starting Docker container {container_name}...')
+        workspace_path = os.path.abspath(
+            os.path.dirname(os.path.dirname(__file__)))
+
+        # Prepare volume mounts with read-write mode
+        volumes = [
+            f'{workspace_path}:/skypilot:rw',
+            f'{os.path.expanduser("~/.sky")}:/home/{os.environ.get("USER", default_user)}/.sky:rw',
+            f'{os.path.expanduser("~/.aws")}:/home/{os.environ.get("USER", default_user)}/.aws:rw',
+            f'{os.path.expanduser("~/.azure")}:/home/{os.environ.get("USER", default_user)}/.azure:rw',
+            f'{os.path.expanduser("~/.config/gcloud")}:/home/{os.environ.get("USER", default_user)}/.config/gcloud:rw',
+        ]
+
+        # Run the container
+        subprocess.run([
+            'docker', 'run', '-d', '--name', container_name, '--platform',
+            'linux/amd64', *[f'-v={v}' for v in volumes], '-e',
+            f'USERNAME={os.environ.get("USER", default_user)}', '-e',
+            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-p', '46581:46580',
+            image_name
+        ],
+                       check=True)
+
+        # Wait for container to be ready
+        logger.info('Waiting for container to be ready...')
+        max_retries = 30
+        retry_count = 0
+        while retry_count < max_retries:
             try:
-                client.images.get(image_name)
-                image_exists = True
-                logger.info(f'Docker image {image_name} already exists')
-            except docker.errors.ImageNotFound:
-                logger.info(f'Docker image {image_name} not found, building...')
-                try:
-                    # Create a temporary directory for Docker config to bypass credential stores
-                    temp_docker_config = os.path.join(tempfile.gettempdir(),
-                                                      'temp_docker_config')
-                    os.makedirs(temp_docker_config, exist_ok=True)
+                # Use docker logs with tail to check for API server start message
+                result = subprocess.run(
+                    ['docker', 'logs', '--tail', '50', container_name],
+                    capture_output=True,
+                    text=True)
+                if 'SkyPilot API server started' in result.stdout:
+                    logger.info('Container is ready!')
+                    break
+                retry_count += 1
+                time.sleep(1)
+            except subprocess.CalledProcessError:
+                retry_count += 1
+                time.sleep(1)
+        else:
+            raise Exception(
+                'Container failed to start properly - API server did not start')
 
-                    # Save original Docker config
-                    original_docker_config = os.environ.get('DOCKER_CONFIG')
+        # Release the lock before yielding
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        yield container_name
 
-                    # Set temporary Docker config
-                    os.environ['DOCKER_CONFIG'] = temp_docker_config
+    except Exception as e:
+        logger.error(f'Error in Docker setup: {e}')
+        raise
+    finally:
+        # Reacquire lock for file operations
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
 
-                    # Create a minimal config.json without credential stores
-                    config_json = os.path.join(temp_docker_config,
-                                               'config.json')
-                    with open(config_json, 'w') as f:
-                        f.write('{"credsStore": ""}')
+        # Decrement worker counter and cleanup if this is the last worker
+        with open(counter_file, 'r') as f:
+            worker_count = int(f.read().strip())
+        worker_count -= 1
+        with open(counter_file, 'w') as f:
+            f.write(str(worker_count))
 
-                    try:
-                        client.images.build(
-                            path='.',
-                            dockerfile=dockerfile_path,
-                            tag=image_name,
-                            buildargs={'USERNAME': default_user})
-                        image_exists = True
-                        logger.info(
-                            f'Successfully built Docker image {image_name}')
-                    finally:
-                        # Restore original Docker config
-                        if original_docker_config:
-                            os.environ['DOCKER_CONFIG'] = original_docker_config
-                        else:
-                            os.environ.pop('DOCKER_CONFIG', None)
+        # Release the lock and close the file
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
 
-                except Exception as e:
-                    logger.error(f'Failed to build Docker image: {e}')
-                    raise
-
-            if not image_exists:
-                raise Exception(
-                    f'Failed to ensure Docker image {image_name} exists')
-
-            # Remove existing container if it exists
+        if worker_count == 0:
+            logger.info('Last worker finished, cleaning up container...')
+            subprocess.run(['docker', 'rm', '-f', container_name], check=False)
             try:
-                container = client.containers.get(container_name)
-                container.remove(force=True)
-            except docker.errors.NotFound:
+                os.remove(counter_file)
+            except OSError:
                 pass
-
-            # Start new container
-            logger.info(f'Starting Docker container {container_name}...')
-            workspace_path = os.path.abspath(
-                os.path.dirname(os.path.dirname(__file__)))
-            container = client.containers.run(
-                image_name,
-                name=container_name,
-                detach=True,
-                volumes={
-                    workspace_path: '/skypilot',
-                    os.path.expanduser('~/.sky'): f'/home/{os.environ.get("USER", default_user)}/.sky',
-                    os.path.expanduser('~/.aws'): f'/home/{os.environ.get("USER", default_user)}/.aws',
-                    os.path.expanduser('~/.azure'): f'/home/{os.environ.get("USER", default_user)}/.azure',
-                    os.path.expanduser('~/.config/gcloud'): f'/home/{os.environ.get("USER", default_user)}/.config/gcloud',
-                },
-                environment={
-                    'USERNAME': os.environ.get('USER', default_user),
-                    'SKYPILOT_DISABLE_USAGE_COLLECTION': '1'
-                },
-                platform='linux/amd64')
-
-            # Mark that this worker created the container
-            container_created_by_this_worker = True
-
-            # Wait for container to be ready
-            logger.info('Waiting for container to be ready...')
-            max_retries = 30
-            retry_count = 0
-            while retry_count < max_retries:
-                try:
-                    exit_code = container.exec_run(
-                        'pgrep -f "sky api"').exit_code
-                    if exit_code == 0:
-                        logger.info('Container is ready!')
-                        break
-                    retry_count += 1
-                    time.sleep(1)
-                except:
-                    retry_count += 1
-                    time.sleep(1)
-            else:
-                raise Exception('Container failed to start properly')
-
-            # Release the lock after setup is complete
-            fcntl.flock(f, fcntl.LOCK_UN)
-            yield container
-
-        except Exception as e:
-            logger.error(f'Error in Docker setup: {e}')
-            # Make sure to release the lock even if an error occurs
-            fcntl.flock(f, fcntl.LOCK_UN)
-            raise
-        finally:
-            # Cleanup after tests - this will run only for the process that created the container
-            if container_created_by_this_worker and client is not None:
-                logger.info(f'Cleaning up Docker container {container_name}...')
-                try:
-                    container = client.containers.get(container_name)
-                    container.remove(force=True)
-                except Exception as e:
-                    logger.error(f'Error removing container: {e}')
