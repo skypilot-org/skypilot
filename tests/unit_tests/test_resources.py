@@ -6,6 +6,7 @@ from unittest import mock
 import pytest
 
 from sky import clouds
+from sky.clouds import cloud as sky_cloud
 from sky import global_user_state
 from sky import skypilot_config
 from sky.resources import Resources
@@ -98,7 +99,7 @@ def test_kubernetes_labels_resources():
 
 def test_no_cloud_labels_resources():
     global_user_state.set_enabled_clouds(['aws', 'gcp'],
-                                         clouds.CloudCapability.COMPUTE)
+                                         sky_cloud.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -112,7 +113,7 @@ def test_no_cloud_labels_resources():
 
 def test_no_cloud_labels_resources_single_enabled_cloud():
     global_user_state.set_enabled_clouds(['aws'],
-                                         clouds.CloudCapability.COMPUTE)
+                                         sky_cloud.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS

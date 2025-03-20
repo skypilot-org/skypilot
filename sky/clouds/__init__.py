@@ -1,9 +1,7 @@
 """Clouds in Sky."""
 
-from sky.clouds.cloud import ALL_CAPABILITIES
 from sky.clouds.cloud import Cloud
 from sky.clouds.cloud import cloud_in_iterable
-from sky.clouds.cloud import CloudCapability
 from sky.clouds.cloud import CloudImplementationFeatures
 from sky.clouds.cloud import OpenPortsVersion
 from sky.clouds.cloud import ProvisionerVersion
@@ -55,6 +53,4 @@ __all__ = [
     'Nebius',
     # Utility functions
     'cloud_in_iterable',
-    'ALL_CAPABILITIES',
-    'CloudCapability',
 ]

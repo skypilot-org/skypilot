@@ -16,6 +16,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
@@ -369,7 +370,7 @@ class Optimizer:
                 # in the error message.
                 enabled_clouds = (
                     sky_check.get_cached_enabled_clouds_or_refresh(
-                        clouds.CloudCapability.COMPUTE))
+                        sky_cloud.CloudCapability.COMPUTE))
                 if clouds.cloud_in_iterable(clouds.Kubernetes(),
                                             enabled_clouds):
                     if any(orig_resources.cloud is None
@@ -1207,7 +1208,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         dag: The DAG specified by a user.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-        capability=clouds.CloudCapability.COMPUTE,
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     global_disabled_clouds: Set[str] = set()
@@ -1228,9 +1229,9 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         sky_check.check(quiet=True,
                         clouds=list(clouds_need_recheck -
                                     global_disabled_clouds),
-                        capability=clouds.CloudCapability.COMPUTE)
+                        capability=sky_cloud.CloudCapability.COMPUTE)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-            capability=clouds.CloudCapability.COMPUTE,
+            capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
                            {str(c) for c in enabled_clouds})
@@ -1272,7 +1273,7 @@ def _fill_in_launchable_resources(
         a cloud that is not enabled.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
-        capability=clouds.CloudCapability.COMPUTE,
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (

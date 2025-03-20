@@ -13,6 +13,8 @@ import math
 import typing
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
+from typing_extensions import assert_never
+
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -452,6 +454,9 @@ class Cloud:
 
         Returns a boolean of whether the user can access this cloud, and a
         string describing the reason if the user cannot access.
+
+        Raises NotSupportedError if the capability is
+        not supported by this cloud.
         """
         if cloud_capability == CloudCapability.COMPUTE:
             return cls._check_compute_credentials()
@@ -460,6 +465,7 @@ class Cloud:
         else:
             raise exceptions.NotSupportedError(
                 f'{cls._REPR} does not support {cloud_capability}.')
+        assert_never(cloud_capability)
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:

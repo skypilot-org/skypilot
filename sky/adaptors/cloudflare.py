@@ -8,7 +8,7 @@ from typing import Dict, Optional, Tuple
 
 from sky import exceptions
 from sky.adaptors import common
-from sky.clouds import CloudCapability
+from sky.clouds import cloud
 from sky.utils import annotations
 from sky.utils import ux_utils
 
@@ -151,13 +151,13 @@ def create_endpoint():
 
 
 def check_credentials(
-        cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
-    if cloud_capability == CloudCapability.COMPUTE:
+        cloud_capability: cloud.CloudCapability) -> Tuple[bool, Optional[str]]:
+    if cloud_capability == cloud.CloudCapability.COMPUTE:
         # for backward compatibility,
         # we check storage credentials for compute.
         # TODO(seungjin): properly return not supported error for compute.
         return check_storage_credentials()
-    elif cloud_capability == CloudCapability.STORAGE:
+    elif cloud_capability == cloud.CloudCapability.STORAGE:
         return check_storage_credentials()
     else:
         raise exceptions.NotSupportedError(

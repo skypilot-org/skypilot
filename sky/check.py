@@ -12,6 +12,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -24,17 +25,17 @@ def check_capabilities(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capabilities: Optional[List[sky_clouds.CloudCapability]] = None,
-) -> Dict[str, List[sky_clouds.CloudCapability]]:
+    capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
+) -> Dict[str, List[sky_cloud.CloudCapability]]:
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
     echo('Checking credentials to enable clouds for SkyPilot.')
     if capabilities is None:
-        capabilities = sky_clouds.ALL_CAPABILITIES
+        capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
-    enabled_clouds: Dict[str, List[sky_clouds.CloudCapability]] = {}
-    disabled_clouds: Dict[str, List[sky_clouds.CloudCapability]] = {}
+    enabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
+    disabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
 
     def check_one_cloud(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
@@ -189,7 +190,7 @@ def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capability: sky_clouds.CloudCapability = sky_clouds.CloudCapability.COMPUTE,
+    capability: sky_cloud.CloudCapability = sky_cloud.CloudCapability.COMPUTE,
 ) -> List[str]:
     clouds_with_capability = []
     enabled_clouds = check_capabilities(quiet, verbose, clouds, [capability])
@@ -200,7 +201,7 @@ def check(
 
 
 def get_cached_enabled_clouds_or_refresh(
-        capability: sky_clouds.CloudCapability,
+        capability: sky_cloud.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
     """Returns cached enabled clouds and if no cloud is enabled, refresh.
 

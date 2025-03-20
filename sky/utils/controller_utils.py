@@ -19,6 +19,7 @@ from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -217,10 +218,10 @@ def _get_cloud_dependencies_installation_commands(
 
     enabled_compute_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
-            clouds.CloudCapability.COMPUTE))
+            sky_cloud.CloudCapability.COMPUTE))
     enabled_storage_clouds = set(
         sky_check.get_cached_enabled_clouds_or_refresh(
-            clouds.CloudCapability.STORAGE))
+            sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
 
     for cloud in enabled_clouds:

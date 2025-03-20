@@ -26,6 +26,7 @@ from sky.utils import status_lib
 if typing.TYPE_CHECKING:
     from sky import backends
     from sky import clouds
+    from sky.clouds import cloud
     from sky.data import Storage
 
 logger = sky_logging.init_logger(__name__)
@@ -796,7 +797,7 @@ def get_cluster_names_start_with(starts_with: str) -> List[str]:
 
 
 def get_cached_enabled_clouds(
-        cloud_capability: 'clouds.CloudCapability') -> List['clouds.Cloud']:
+        cloud_capability: 'cloud.CloudCapability') -> List['clouds.Cloud']:
 
     rows = _DB.cursor.execute('SELECT value FROM config WHERE key = ?',
                               (_get_capability_key(cloud_capability),))
@@ -820,14 +821,14 @@ def get_cached_enabled_clouds(
 
 
 def set_enabled_clouds(enabled_clouds: List[str],
-                       cloud_capability: 'clouds.CloudCapability') -> None:
+                       cloud_capability: 'cloud.CloudCapability') -> None:
     _DB.cursor.execute(
         'INSERT OR REPLACE INTO config VALUES (?, ?)',
         (_get_capability_key(cloud_capability), json.dumps(enabled_clouds)))
     _DB.conn.commit()
 
 
-def _get_capability_key(cloud_capability: 'clouds.CloudCapability') -> str:
+def _get_capability_key(cloud_capability: 'cloud.CloudCapability') -> str:
     return _ENABLED_CLOUDS_KEY_PREFIX + cloud_capability.value
 
 
