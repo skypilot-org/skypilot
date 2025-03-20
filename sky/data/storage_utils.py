@@ -112,10 +112,9 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     """ Lists files and patterns ignored by git in the source directory
 
-    Runs `git status --ignored` which returns a list of excluded files and
+    Runs `git ls-files --ignored ...` which returns a list of excluded files and
     patterns read from .gitignore and .git/info/exclude using git.
-    `git init` is run if SRC_DIR_PATH is not a git repository and removed
-    after obtaining excluded list.
+    This will also be run for all submodules under the src_dir_path.
 
     Returns:
         List[str] containing files and patterns to be ignored.  Some of the
@@ -182,8 +181,16 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     for repo in all_git_repos:
         # repo is the path relative to src_dir_path. Get the full path.
         repo_path = os.path.join(expand_src_dir_path, repo)
-        # This command outputs a list to be excluded according to .gitignore
-        # and .git/info/exclude
+        # This command outputs a list to be excluded according to .gitignore,
+        # .git/info/exclude, and global exclude config.
+        # -z: filenames terminated by \0 instead of \n
+        # --others: show untracked files
+        # --ignore: out of untracked files, only show ignored files
+        # --exclude-standard: use standard exclude rules (required for --ignore)
+        # --directory: if an entire directory is ignored, collapse to a single
+        #              entry rather than listing every single file
+        # Since we are using --others instead of --cached, this will not show
+        # files that are tracked but also present in .gitignore.
         filter_cmd = (f'git -C {shlex.quote(repo_path)} ls-files -z '
                       '--others --ignore --exclude-standard --directory')
         output = subprocess.run(filter_cmd,
