@@ -2,7 +2,7 @@
 import os
 import traceback
 from types import ModuleType
-from typing import Dict, Iterable, List, Optional, Set, Tuple, Union
+from typing import Callable, Dict, Iterable, List, Optional, Set, Tuple, Union
 
 import click
 import colorama
@@ -59,41 +59,7 @@ def check_capabilities(
                 enabled_clouds.setdefault(cloud_repr, []).append(capability)
             else:
                 disabled_clouds.setdefault(cloud_repr, []).append(capability)
-        # Print the capabilities for the cloud.
-        # consider cloud enabled if any capability is enabled.
-        enabled_capabilities: List[CloudCapability] = []
-        hints_to_capabilities: Dict[str, List[CloudCapability]] = {}
-        reasons_to_capabilities: Dict[str, List[CloudCapability]] = {}
-        for capability, ok, reason in cloud_capabilities:
-            if ok:
-                enabled_capabilities.append(capability)
-                if reason is not None:
-                    hints_to_capabilities.setdefault(reason,
-                                                     []).append(capability)
-            elif reason is not None:
-                reasons_to_capabilities.setdefault(reason,
-                                                   []).append(capability)
-        status_msg = 'enabled' if enabled_capabilities else 'disabled'
-        styles = {
-            'fg': 'green',
-            'bold': False
-        } if enabled_capabilities else {
-            'dim': True
-        }
-        service_string = (click.style(
-            '[' + ', '.join(enabled_capabilities) +
-            ']', **styles) if enabled_capabilities else '')
-        echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) + ' ' +
-             service_string)
-        if status_msg == 'enabled':
-            if verbose and cloud is not cloudflare:
-                activated_account = cloud.get_active_user_identity_str()
-                if activated_account is not None:
-                    echo(f'    Activated account: {activated_account}')
-        for reason, caps in hints_to_capabilities.items():
-            echo(f'    Hint [{", ".join(caps)}]: {reason}')
-        for reason, caps in reasons_to_capabilities.items():
-            echo(f'    Reason [{", ".join(caps)}]: {reason}')
+        _print_checked_cloud(echo, verbose, cloud_tuple, cloud_capabilities)
 
     def get_cloud_tuple(
             cloud_name: str) -> Tuple[str, Union[sky_clouds.Cloud, ModuleType]]:
@@ -202,7 +168,8 @@ def check_capabilities(
         # Pretty print for UX.
         if not quiet:
             enabled_clouds_str = '\n  ' + '\n  '.join([
-                _format_enabled_cloud(cloud, capabilities) for cloud, capabilities in enabled_clouds.items()
+                _format_enabled_cloud(cloud, capabilities)
+                for cloud, capabilities in enabled_clouds.items()
             ])
             echo(f'\n{colorama.Fore.GREEN}{PARTY_POPPER_EMOJI} '
                  f'Enabled clouds {PARTY_POPPER_EMOJI}'
@@ -210,7 +177,7 @@ def check_capabilities(
     return enabled_clouds
 
 
-def check_all(
+def check_capability(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
@@ -232,14 +199,9 @@ def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capability: sky_cloud.CloudCapability = sky_cloud.CloudCapability.COMPUTE,
 ) -> List[str]:
-    clouds_with_capability = []
-    enabled_clouds = check_capabilities(quiet, verbose, clouds, [capability])
-    for cloud, capabilities in enabled_clouds.items():
-        if capability in capabilities:
-            clouds_with_capability.append(cloud)
-    return clouds_with_capability
+    return list(
+        check_capabilities(quiet, verbose, clouds, sky_cloud.ALL_CAPABILITIES).keys())
 
 
 def get_cached_enabled_clouds_or_refresh(
@@ -261,7 +223,7 @@ def get_cached_enabled_clouds_or_refresh(
         capability)
     if not cached_enabled_clouds:
         try:
-            check(quiet=True, capability=capability)
+            check_capability(quiet=True, capability=sky_cloud.CloudCapability.COMPUTE)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
@@ -309,11 +271,54 @@ def get_cloud_credential_file_mounts(
     return file_mounts
 
 
-def _format_enabled_cloud(cloud_name: str, capabilities: List[CloudCapability]) -> str:
+def _print_checked_cloud(
+    echo: Callable, verbose: bool, cloud_tuple: Tuple[str,
+                                                      Union[sky_clouds.Cloud,
+                                                            ModuleType]],
+    cloud_capabilities: List[Tuple[CloudCapability, bool,
+                                   Optional[str]]]) -> None:
+    cloud_repr, cloud = cloud_tuple
+    # Print the capabilities for the cloud.
+    # consider cloud enabled if any capability is enabled.
+    enabled_capabilities: List[CloudCapability] = []
+    hints_to_capabilities: Dict[str, List[CloudCapability]] = {}
+    reasons_to_capabilities: Dict[str, List[CloudCapability]] = {}
+    for capability, ok, reason in cloud_capabilities:
+        if ok:
+            enabled_capabilities.append(capability)
+            if reason is not None:
+                hints_to_capabilities.setdefault(reason, []).append(capability)
+        elif reason is not None:
+            reasons_to_capabilities.setdefault(reason, []).append(capability)
+    status_msg = 'enabled' if enabled_capabilities else 'disabled'
+    styles = {
+        'fg': 'green',
+        'bold': False
+    } if enabled_capabilities else {
+        'dim': True
+    }
+    service_string = (click.style('[' + ', '.join(enabled_capabilities) + ']',
+                                  **styles) if enabled_capabilities else '')
+    echo('  ' + click.style(f'{cloud_repr}: {status_msg}', **styles) + ' ' +
+         service_string)
+    if status_msg == 'enabled':
+        if verbose and cloud is not cloudflare:
+            activated_account = cloud.get_active_user_identity_str()
+            if activated_account is not None:
+                echo(f'    Activated account: {activated_account}')
+    for reason, caps in hints_to_capabilities.items():
+        echo(f'    Hint [{", ".join(caps)}]: {reason}')
+    for reason, caps in reasons_to_capabilities.items():
+        echo(f'    Reason [{", ".join(caps)}]: {reason}')
+
+
+def _format_enabled_cloud(cloud_name: str,
+                          capabilities: List[CloudCapability]) -> str:
 
     def _green_color(cloud_name: str) -> str:
         enabled_capabilities_str = '[' + ', '.join(capabilities) + ']'
-        return f'{colorama.Fore.GREEN}{cloud_name} {enabled_capabilities_str}{colorama.Style.RESET_ALL}'
+        return (f'{colorama.Fore.GREEN}{cloud_name} '
+                f'{enabled_capabilities_str}{colorama.Style.RESET_ALL}')
 
     if cloud_name == repr(sky_clouds.Kubernetes()):
         # Get enabled contexts for Kubernetes
