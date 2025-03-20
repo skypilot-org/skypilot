@@ -12,8 +12,39 @@ Welcome to SkyPilot!
   :alt: SkyPilot
   :class: no-scaled-link, only-light
 
+.. raw:: html
+
+   <p></p>
+   <p style="text-align:center">
+   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
+   </p>
+   <p style="text-align:center">
+   <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
+   <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
+   <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
+   <script async defer src="https://buttons.github.io/buttons.js"></script>
+   </p>
 
 SkyPilot is an open-source framework for running AI and batch workloads on any infra.
+
+
+SkyPilot **is easy to use for AI users**:
+
+- Quickly spin up compute on your own infra
+- Environment and job as code --- simple and portable
+- Easy job management: queue, run, and auto-recover many jobs
+
+SkyPilot **unifies multiple clusters, clouds, and hardware**:
+
+- One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
+- :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
+- :ref:`Team deployment <sky-api-server>` and resource sharing
+
+SkyPilot **cuts your cloud costs & maximizes GPU availability**:
+
+* Autostop: automatic cleanup of idle resources
+* :ref:`Spot instance support <spot-jobs>`: 3-6x cost savings, with preemption auto-recovery
+* Intelligent scheduling: automatically run on the cheapest & most available infra
 
 .. raw:: html
 
@@ -40,36 +71,6 @@ SkyPilot is an open-source framework for running AI and batch workloads on any i
 
    </script>
 
-SkyPilot **is easy to use for AI users**:
-
-- Quickly spin up compute on your own infra
-- Environment and job as code --- simple and portable
-- Easy job management: queue, run, and auto-recover many jobs
-
-SkyPilot **unifies multiple clusters, clouds, and hardware**:
-
-- One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
-- :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
-- :ref:`Team deployment <sky-api-server>` and resource sharing
-
-SkyPilot **cuts your cloud costs & maximizes GPU availability**:
-
-* Autostop: automatic cleanup of idle resources
-* :ref:`Spot instance support <spot-jobs>`: 3-6x cost savings, with preemption auto-recovery
-* Intelligent scheduling: automatically run on the cheapest & most available infra
-
-.. raw:: html
-
-   <p></p>
-   <p style="text-align:center">
-   <strong>Run AI on Any Infra</strong> — Unified, Faster, Cheaper
-   </p>
-   <p style="text-align:center">
-   <a class="github-button" href="https://github.com/skypilot-org/skypilot" data-show-count="true" data-size="large" aria-label="Star skypilot-org/skypilot on GitHub">Star</a>
-   <a class="github-button" href="https://github.com/skypilot-org/skypilot/subscription" data-icon="octicon-eye" data-size="large" aria-label="Watch skypilot-org/skypilot on GitHub">Watch</a>
-   <a class="reference external image-reference" style="vertical-align:9.5px" href="http://slack.skypilot.co"><img src="https://img.shields.io/badge/SkyPilot-Join%20Slack-blue?logo=slack" style="height:27px"></a>
-   <script async defer src="https://buttons.github.io/buttons.js"></script>
-   </p>
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
