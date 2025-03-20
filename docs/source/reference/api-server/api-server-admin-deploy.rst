@@ -197,6 +197,7 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
+.. _sky-api-server-connect:
 Step 4: Get the API server URL
 ------------------------------
 
@@ -257,31 +258,7 @@ Our default of using a NodePort service is the recommended way to expose the API
         .. tip::
 
             To avoid frequent IP address changes on nodes by your cloud provider, you can attach a static IP address to your nodes (`instructions for GKE <https://cloud.google.com/compute/docs/ip-addresses/configure-static-external-ip-address>`_) and use it as the ``NODE_IP`` in the command above.
-    
-.. dropdown:: Migration notes for 0.8.0 nightly users
 
-    If you are upgrading from 0.8.0 nightly with a previously deployed NodePort service, the service will be kept by default to avoid breaking existing workflows. In addition, a new LoadBalancer service will be created to expose the API server by default. You can choose any of the following options based on your needs:
-
-    - Keep the NodePort service and disable the LoadBalancer service:
-
-    .. code-block:: bash
-
-        helm upgrade --install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
-            --set ingress.nodePortEnabled=true \
-            --set ingress-nginx.controller.service.type=ClusterIP
-
-    - Migrate from the NodePort service to the LoadBalancer service:
-
-    .. note::
-
-        Make sure there is no clients using the NodePort service before disabling it.
-
-    .. code-block:: bash
-
-        helm upgrade --install -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
-            --set ingress.nodePortEnabled=false
-
-    - Keep both services, no action needed. You can still migrate to one of the options above later.
 
 Step 5: Test the API server
 ---------------------------
@@ -437,6 +414,26 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
+Migrate from legacy NodePort service
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
+
+- Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
+
+  Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
+  
+- Disable the legacy NodePort service:
+
+  Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
+
+.. note::
+
+    Make sure there is no clients using the NodePort service before disabling it.
+
+.. note::
+
+    Refer to :ref:`sky-api-server-connect` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-cloud-deploy:
 

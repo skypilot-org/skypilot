@@ -77,17 +77,17 @@ ingress:
   # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
   path: '/'
 
-  # TODO(aylei): document the migration steps in v0.9.0 release note
   # Whether enable an additional NodePort service for the ingress controller
   # Default to null for backward compatibility:
-  # - For existing deployments, keep the service as is so that upgrade does not break existing NodePort endpoint (if any)
+  # - For existing deployments, error out and ask users to set ingress.nodePortEnabled explicitly
   # - For new deployments, disable the NodePort service, equivalent to ingress.nodePortEnabled=false
   # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
-  # - Keep the existing NodePort endpoint
+  # - Ask users to set ingress.nodePortEnabled explicitly
   # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
-  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled or ingress-nginx.controller.service.type
+  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and swtich to ingress-nginx.controller.service.type
   # if you are upgrading from 0.8.0 nightly.
   # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
+  # TODO(aylei): document the migration steps in v0.9.0 release note and remove these fields
   nodePortEnabled: null
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
