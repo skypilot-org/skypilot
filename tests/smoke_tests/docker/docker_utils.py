@@ -21,7 +21,5 @@ if _is_inside_docker():
 
 def get_api_server_endpoint_inside_docker() -> str:
     """Get the API server endpoint inside a Docker container."""
-    if _is_inside_docker():
-        return f'http://{CONTAINER_NAME}:46581'
-    else:
-        return f'http://0.0.0.0:46581'
+    host = 'host.docker.internal' if _is_inside_docker() else '0.0.0.0'
+    return f'http://{host}:46581'
