@@ -61,7 +61,7 @@ SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
 SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 * Autostop: automatic cleanup of idle resources
-* [Spot instance support](https://docs.skypilot.co/en/latest/examples/spot-jobs.html): 3-6x cost savings, with preemption auto-recovery
+* [Spot instance support](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#running-on-spot-instances): 3-6x cost savings, with preemption auto-recovery
 * Intelligent scheduling: automatically run on the cheapest & most available infra
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
