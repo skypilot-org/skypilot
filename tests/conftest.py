@@ -279,9 +279,13 @@ def setup_docker_container(request):
     os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
 
     # Docker image and container names
-    image_name = 'sky-test-image'
-    container_name = 'sky-test'
+    image_name = 'sky-remote-test-image'
+    container_name = 'sky-remote-test'
     dockerfile_path = 'tests/Dockerfile_test'
+    # Buildkite have this env variable set to better identify the test container
+    container_name_env = os.environ.get('CONTAINER_NAME', container_name)
+    if container_name_env:
+        container_name += f'-{container_name_env}'
     default_user = os.environ.get('USER', 'buildkite')
 
     # Create a lockfile and counter file in a temporary directory that all processes can access
