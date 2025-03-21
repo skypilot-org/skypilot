@@ -197,7 +197,8 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
-.. _sky-api-server-connect:
+.. _sky-get-api-server-url:
+
 Step 4: Get the API server URL
 ------------------------------
 
@@ -414,6 +415,8 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
+.. _sky-migrate-legacy-service:
+
 Migrate from legacy NodePort service
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -433,7 +436,7 @@ If you are upgrading from an early 0.8.0 nightly with a previously deployed Node
 
 .. note::
 
-    Refer to :ref:`sky-api-server-connect` for how to customize and/or connect to the new service.
+    Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-cloud-deploy:
 
