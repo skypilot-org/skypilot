@@ -6,10 +6,10 @@ import tempfile
 import time
 from typing import List
 
-import docker
 import pytest
+import requests
+from smoke_tests.docker import docker_utils
 
-import sky
 from sky import sky_logging
 
 # Initialize logger at the top level
@@ -338,9 +338,6 @@ def setup_docker_container(request):
                            check=True)
             logger.info(f'Successfully built Docker image {image_name}')
 
-        # Remove existing container if it exists
-        subprocess.run(['docker', 'rm', '-f', container_name], check=False)
-
         # Start new container
         logger.info(f'Starting Docker container {container_name}...')
         workspace_path = os.path.abspath(
@@ -367,26 +364,30 @@ def setup_docker_container(request):
 
         # Wait for container to be ready
         logger.info('Waiting for container to be ready...')
+        url = docker_utils.get_api_server_endpoint_inside_docker()
+        health_endpoint = f'{url}/api/health'
         max_retries = 30
         retry_count = 0
+
         while retry_count < max_retries:
             try:
-                # Use docker logs with tail to check for API server start message
-                result = subprocess.run(
-                    ['docker', 'logs', '--tail', '50', container_name],
-                    capture_output=True,
-                    text=True)
-                if 'SkyPilot API server started' in result.stdout:
+                response = requests.get(health_endpoint)
+                response.raise_for_status()
+
+                # Parse JSON response
+                if response.json().get('status') == 'healthy':
                     logger.info('Container is ready!')
                     break
+
                 retry_count += 1
                 time.sleep(1)
-            except subprocess.CalledProcessError:
+            except (requests.RequestException, ValueError):
                 retry_count += 1
                 time.sleep(1)
         else:
             raise Exception(
-                'Container failed to start properly - API server did not start')
+                'Container failed to start properly - health check did not pass'
+            )
 
         # Release the lock before yielding
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
@@ -406,16 +407,15 @@ def setup_docker_container(request):
         with open(counter_file, 'w') as f:
             f.write(str(worker_count))
 
-        # Release the lock and close the file
-        fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        lock_fd.close()
-
         if worker_count == 0:
             logger.info('Last worker finished, cleaning up container...')
             subprocess.run(['docker', 'stop', '-t', '600', container_name],
                            check=False)
-            subprocess.run(['docker', 'rm', '-f', container_name], check=False)
             try:
                 os.remove(counter_file)
             except OSError:
                 pass
+
+        # Release the lock and close the file
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()

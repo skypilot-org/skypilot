@@ -12,6 +12,7 @@ import uuid
 
 import colorama
 import pytest
+from smoke_tests.docker import docker_utils
 import yaml
 
 import sky
@@ -338,14 +339,6 @@ def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
             f' --quiet $({query_cmd})')
 
 
-def is_inside_docker() -> bool:
-    """Check if the current environment is running inside a Docker container."""
-    if os.path.exists('/.dockerenv'):
-        return True
-
-    return False
-
-
 def run_one_test(test: Test) -> None:
     # Fail fast if `sky` CLI somehow errors out.
     subprocess.run(['sky', 'status'], stdout=subprocess.DEVNULL, check=True)
@@ -380,8 +373,9 @@ def run_one_test(test: Test) -> None:
                 config = yaml.safe_load(f)
         else:
             config = {}
-        host = '0.0.0.0' if is_inside_docker() else 'host.docker.internal'
-        config['api_server'] = {'endpoint': f'http://{host}:46581'}
+        config['api_server'] = {
+            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
+        }
         test.echo(
             f'Overriding API server endpoint: {config["api_server"]["endpoint"]}'
         )
