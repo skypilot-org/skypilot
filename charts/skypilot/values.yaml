@@ -103,6 +103,7 @@ ingress-nginx:
 rbac:
   # Configure the RBAC permissions for the SkyPilot API server
   # TODO(aylei): Do not setup rbac policies when rbac.kubernetesCredentials.userKubeconfig=true
+  # Namespace-scoped rules of the namespace where the SkyPilot API server is deployed.
   rules:
     # Required for managing pods and their lifecycle
     - apiGroups: [ "" ]
@@ -116,15 +117,16 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "secrets" ]  
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+  # Cluster-scoped rules for API server.
   clusterRules:
-    # Required for getting node resources. 
-    - apiGroups: [ "" ]
-      resources: [ "nodes" ]
-      verbs: [ "get", "list", "watch" ]
     # Required for creating skypilot-system namespace, which hosts fuse device manager.
     - apiGroups: [ "" ]
       resources: [ "namespaces" ]  
       verbs: [ "get", "list", "watch", "create" ]
+    # Required for getting node resources. 
+    - apiGroups: [ "" ]
+      resources: [ "nodes" ]
+      verbs: [ "get", "list", "watch" ]
     # Required for granting cluster permissions to SkyPilot Pods.
     - apiGroups: [ "rbac.authorization.k8s.io" ]
       resources: [ "clusterroles", "clusterrolebindings" ]  
@@ -137,11 +139,6 @@ rbac:
     - apiGroups: [ "networking.k8s.io" ]
       resources: [ "ingressclasses" ]
       verbs: [ "get", "list", "watch" ]
-    # Required for managing jobs (e.g. GPU labeler)
-    - apiGroups: [ "batch" ]
-      resources: [ "jobs" ]  
-      verbs: [ "get", "list", "watch", "create", "delete" ]
-    # TODO(aylei): Consolidate all system components into skypilot-system namespace so that we can restrict the following permissions to be namespace-scoped.
     # Required for granting namespaced permissions to SkyPilot Pods and SkyPilot system components.
     - apiGroups: [ "rbac.authorization.k8s.io" ] 
       resources: [ "roles", "rolebindings" ]
@@ -150,10 +147,6 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "daemonsets" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-    # Required for managing SkyPilot system Jobs
-    - apiGroups: [ "batch" ]
-      resources: [ "jobs" ]
-      verbs: [ "get", "list", "watch", "create", "delete" ]
     # Required for managing configmaps of SkyPilot Pods and SkyPilot system components. 
     - apiGroups: [ "" ]
       resources: [ "configmaps" ]
