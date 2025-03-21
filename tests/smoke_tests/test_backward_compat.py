@@ -236,8 +236,8 @@ class TestBackwardCompatibility:
                 f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} '
                 f'--num-nodes 2 -n {job_name} "{command}"')
 
-        def expect_status(job_name: str,
-                          status: Sequence[sky.ManagedJobStatus]):
+        def wait_for_status(job_name: str,
+                            status: Sequence[sky.ManagedJobStatus]):
             return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=job_name, job_status=status, timeout=300)
 
@@ -246,22 +246,22 @@ class TestBackwardCompatibility:
                 # Cover jobs launched in the old version and ran to terminal states
                 launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
                 launch_job(f'{managed_job_name}-old-1', 'echo hi'),
-                expect_status(f'{managed_job_name}-old-1',
-                              [sky.ManagedJobStatus.SUCCEEDED]),
-                expect_status(f'{managed_job_name}-old-0',
-                              [sky.ManagedJobStatus.RUNNING]),
+                wait_for_status(f'{managed_job_name}-old-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-old-0',
+                                [sky.ManagedJobStatus.RUNNING]),
                 f'sky jobs cancel -n {managed_job_name}-old-0 -y',
-                expect_status(f'{managed_job_name}-old-0', [
+                wait_for_status(f'{managed_job_name}-old-0', [
                     sky.ManagedJobStatus.CANCELLED,
                     sky.ManagedJobStatus.CANCELLING
                 ]),
                 # Cover jobs launched in the new version and still running after upgrade
                 launch_job(f'{managed_job_name}-0', 'echo hi; sleep 1000'),
                 launch_job(f'{managed_job_name}-1', 'echo hi; sleep 400'),
-                expect_status(f'{managed_job_name}-0',
-                              [sky.ManagedJobStatus.RUNNING]),
-                expect_status(f'{managed_job_name}-1',
-                              [sky.ManagedJobStatus.RUNNING]),
+                wait_for_status(f'{managed_job_name}-0',
+                                [sky.ManagedJobStatus.RUNNING]),
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.RUNNING]),
             ),
             *self._switch_to_current(
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
@@ -272,10 +272,18 @@ class TestBackwardCompatibility:
                 f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
                 f'sky jobs cancel -y -n {managed_job_name}-0',
                 f'sky jobs cancel -y -n {managed_job_name}-3',
-                expect_status(f'{managed_job_name}-1',
-                              [sky.ManagedJobStatus.SUCCEEDED]),
-                expect_status(f'{managed_job_name}-2',
-                              [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-2',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                wait_for_status(f'{managed_job_name}-3', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
                 f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
             ),
