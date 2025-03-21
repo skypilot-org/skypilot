@@ -178,7 +178,7 @@ def check_capabilities(
 
 
 def check_capability(
-    capability: CloudCapability,
+    capability: sky_cloud.CloudCapability,
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
@@ -197,7 +197,8 @@ def check(
     clouds: Optional[Iterable[str]] = None,
 ) -> List[str]:
     return list(
-        check_capabilities(quiet, verbose, clouds, sky_cloud.ALL_CAPABILITIES).keys())
+        check_capabilities(quiet, verbose, clouds,
+                           sky_cloud.ALL_CAPABILITIES).keys())
 
 
 def get_cached_enabled_clouds_or_refresh(
@@ -271,14 +272,15 @@ def _print_checked_cloud(
     echo: Callable, verbose: bool, cloud_tuple: Tuple[str,
                                                       Union[sky_clouds.Cloud,
                                                             ModuleType]],
-    cloud_capabilities: List[Tuple[CloudCapability, bool,
-                                   Optional[str]]]) -> None:
+    cloud_capabilities: List[Tuple[sky_cloud.CloudCapability, bool,
+                                   Optional[str]]]
+) -> None:
     cloud_repr, cloud = cloud_tuple
     # Print the capabilities for the cloud.
     # consider cloud enabled if any capability is enabled.
-    enabled_capabilities: List[CloudCapability] = []
-    hints_to_capabilities: Dict[str, List[CloudCapability]] = {}
-    reasons_to_capabilities: Dict[str, List[CloudCapability]] = {}
+    enabled_capabilities: List[sky_cloud.CloudCapability] = []
+    hints_to_capabilities: Dict[str, List[sky_cloud.CloudCapability]] = {}
+    reasons_to_capabilities: Dict[str, List[sky_cloud.CloudCapability]] = {}
     for capability, ok, reason in cloud_capabilities:
         if ok:
             enabled_capabilities.append(capability)
@@ -310,7 +312,7 @@ def _print_checked_cloud(
 
 
 def _format_enabled_cloud(cloud_name: str,
-                          capabilities: List[CloudCapability]) -> str:
+                          capabilities: List[sky_cloud.CloudCapability]) -> str:
     cloud_and_capabilities = f'{cloud_name} ' + '[' + ', '.join(
         capabilities) + ']'
 

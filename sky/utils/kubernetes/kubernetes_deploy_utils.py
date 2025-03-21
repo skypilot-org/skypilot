@@ -168,7 +168,7 @@ def deploy_local_cluster(gpus: bool):
                                f'\nError: {stderr}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check_capability(sky_check.CloudCapability.COMPUTE,
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
                                    quiet=True,
                                    clouds=['kubernetes'])
     if cluster_created:

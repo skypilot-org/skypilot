@@ -107,8 +107,10 @@ def _is_storage_cloud_enabled(cloud_name: str,
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
-        sky_check.check_capability(quiet=True,
-                                   capability=sky_cloud.CloudCapability.STORAGE)
+        sky_check.check_capability(
+            sky_cloud.CloudCapability.STORAGE,
+            quiet=True,
+        )
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
