@@ -279,13 +279,7 @@ def setup_docker_container(request):
     os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
 
     # Docker image and container names
-    image_name = 'sky-remote-test-image'
-    container_name = 'sky-remote-test'
     dockerfile_path = 'tests/Dockerfile_test'
-    # Buildkite have this env variable set to better identify the test container
-    container_name_env = os.environ.get('CONTAINER_NAME', container_name)
-    if container_name_env:
-        container_name += f'-{container_name_env}'
     default_user = os.environ.get('USER', 'buildkite')
 
     # Create a lockfile and counter file in a temporary directory that all processes can access
@@ -310,40 +304,46 @@ def setup_docker_container(request):
         try:
             # Use docker ps with filter to check for running container
             result = subprocess.run([
-                'docker', 'ps', '--filter', f'name={container_name}',
-                '--format', '{{.Names}}'
+                'docker', 'ps', '--filter',
+                f'name={docker_utils.CONTAINER_NAME}', '--format', '{{.Names}}'
             ],
                                     check=True,
                                     capture_output=True,
                                     text=True)
-            if container_name in result.stdout:
+            if docker_utils.CONTAINER_NAME in result.stdout:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                yield container_name
+                yield docker_utils.CONTAINER_NAME
                 return
         except subprocess.CalledProcessError:
             pass
 
         # Use docker images with filter to check for existing image
         result = subprocess.run([
-            'docker', 'images', '--filter', f'reference={image_name}',
-            '--format', '{{.Repository}}'
+            'docker', 'images', '--filter',
+            f'reference={docker_utils.IMAGE_NAME}', '--format',
+            '{{.Repository}}'
         ],
                                 check=True,
                                 capture_output=True,
                                 text=True)
-        if image_name in result.stdout:
-            logger.info(f'Docker image {image_name} already exists')
+        if docker_utils.IMAGE_NAME in result.stdout:
+            logger.info(
+                f'Docker image {docker_utils.IMAGE_NAME} already exists')
         else:
-            logger.info(f'Docker image {image_name} not found, building...')
+            logger.info(
+                f'Docker image {docker_utils.IMAGE_NAME} not found, building...'
+            )
             subprocess.run([
-                'docker', 'build', '-t', image_name, '--build-arg',
+                'docker', 'build', '-t', docker_utils.IMAGE_NAME, '--build-arg',
                 f'USERNAME={default_user}', '-f', dockerfile_path, '.'
             ],
                            check=True)
-            logger.info(f'Successfully built Docker image {image_name}')
+            logger.info(
+                f'Successfully built Docker image {docker_utils.IMAGE_NAME}')
 
         # Start new container
-        logger.info(f'Starting Docker container {container_name}...')
+        logger.info(
+            f'Starting Docker container {docker_utils.CONTAINER_NAME}...')
         workspace_path = os.path.abspath(
             os.path.dirname(os.path.dirname(__file__)))
 
@@ -358,11 +358,11 @@ def setup_docker_container(request):
 
         # Run the container
         docker_cmd = [
-            'docker', 'run', '-d', '--name', container_name, '--platform',
-            'linux/amd64', *[f'-v={v}' for v in volumes], '-e',
+            'docker', 'run', '-d', '--name', docker_utils.CONTAINER_NAME,
+            '--platform', 'linux/amd64', *[f'-v={v}' for v in volumes], '-e',
             f'USERNAME={os.environ.get("USER", default_user)}', '-e',
             'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-p', '46581:46580',
-            image_name
+            docker_utils.IMAGE_NAME
         ]
         logger.info(f'Running Docker command: {" ".join(docker_cmd)}')
         subprocess.run(docker_cmd, check=True)
@@ -396,7 +396,7 @@ def setup_docker_container(request):
 
         # Release the lock before yielding
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        yield container_name
+        yield docker_utils.CONTAINER_NAME
 
     except Exception as e:
         logger.error(f'Error in Docker setup: {e}')
@@ -414,8 +414,9 @@ def setup_docker_container(request):
 
         if worker_count == 0:
             logger.info('Last worker finished, cleaning up container...')
-            subprocess.run(['docker', 'stop', '-t', '600', container_name],
-                           check=False)
+            subprocess.run(
+                ['docker', 'stop', '-t', '600', docker_utils.CONTAINER_NAME],
+                check=False)
             try:
                 os.remove(counter_file)
             except OSError:
