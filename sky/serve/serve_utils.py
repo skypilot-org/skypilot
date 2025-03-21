@@ -557,6 +557,10 @@ def get_service_status_encoded(service_names: Optional[List[str]]) -> str:
         # Get all service names
         service_names = serve_state.get_glob_service_names(None)
     for service_name in service_names:
+        if service_name.endswith('-lb'):
+            # TODO(tian): Hack. Fix this.
+            # NOTE(tian): Align with format_lb_service_name.
+            continue
         service_status = _get_service_status(service_name)
         if service_status is None:
             continue

@@ -7,13 +7,14 @@ envs:
 
 service:
   readiness_probe:
-    path: /v1/chat/completions
-    post_data:
-      model: $MODEL_NAME
-      messages:
-        - role: user
-          content: Hello! What is your name?
-      max_tokens: 1
+    path: /v1/models
+    # path: /v1/chat/completions
+    # post_data:
+    #   model: $MODEL_NAME
+    #   messages:
+    #     - role: user
+    #       content: Hello! What is your name?
+    #   max_tokens: 1
   replicas: 4
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
@@ -28,8 +29,8 @@ service:
         cloud: aws
         region: ap-northeast-1
       load_balancing_policy: consistent_hashing
-  max_concurrent_requests: 50
-  max_queue_size: 10000
+  # max_concurrent_requests: 50
+  # max_queue_size: 10000
 
 resources:
   cloud: aws

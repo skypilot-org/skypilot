@@ -175,19 +175,19 @@ class ClientPool:
             logger.info(f'Active requests: {self._active_requests}, '
                         f'Available replicas: {self._available_replicas}')
             self._load_balancing_policy.pre_execute_hook(url, request)
+            self._active_requests[url] = self._active_requests.get(url, 0) + 1
             if _USE_IE_QUEUE_INDICATOR:
                 return
-            self._active_requests[url] = self._active_requests.get(url, 0) + 1
             if self._active_requests[url] >= self._max_concurrent_requests:
                 self.set_replica_unavailable_no_lock(url)
 
     def post_execute_hook(self, url: str, request: fastapi.Request) -> None:
         with self._lock:
             self._load_balancing_policy.post_execute_hook(url, request)
-            if _USE_IE_QUEUE_INDICATOR:
-                return
             if url in self._active_requests and self._active_requests[url] > 0:
                 self._active_requests[url] -= 1
+                if _USE_IE_QUEUE_INDICATOR:
+                    return
                 if self._active_requests[url] < self._max_concurrent_requests:
                     self.set_replica_available_no_lock(url)
 
@@ -673,7 +673,7 @@ class SkyServeLoadBalancer:
     async def _probe_ie_queue_one_replica(
             self, replica: str) -> Tuple[Optional[float], str]:
         """Probe the inference engine queue of one replica."""
-        # TODO(tian): Support vLLM & other inference engines.
+        # TODO(tian): Support other inference engines.
         assert self._workload_steal_session is not None
         try:
             # TODO(tian): Use urlparse for robustness, and change the session
@@ -684,7 +684,9 @@ class SkyServeLoadBalancer:
             metrics = prometheus_parser.text_string_to_metric_families(
                 metrics_text)
             for f in metrics:
-                if f.name == 'sglang:num_queue_reqs':
+                if f.name in [
+                        'vllm:num_requests_waiting', 'sglang:num_queue_reqs'
+                ]:
                     return f.samples[0].value, replica
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error probing inference engine queue of {replica}: '
@@ -712,8 +714,8 @@ class SkyServeLoadBalancer:
                     logger.error(f'No inference engine queue size found for '
                                  f'{replica}.')
                 else:
-                    logger.info(f'Inference engine queue size for {replica}: '
-                                f'{queue_size}')
+                    logger.debug(f'Inference engine queue size for {replica}: '
+                                 f'{queue_size}')
                     if queue_size > 0:
                         self._replica_pool.set_replica_unavailable(replica)
                     else:
@@ -721,8 +723,8 @@ class SkyServeLoadBalancer:
             time_end_set_replica = time.perf_counter()
             time_elapsed_set_replica = (time_end_set_replica -
                                         time_start_set_replica)
-            logger.info(f'Probe time: {time_end_probe - time_start}s, '
-                        f'Set replica time: {time_elapsed_set_replica}s.')
+            logger.debug(f'Probe time: {time_end_probe - time_start}s, '
+                         f'Set replica time: {time_elapsed_set_replica}s.')
 
     def run(self):
         # Add health check endpoint first so it takes precedence
