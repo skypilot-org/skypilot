@@ -46,9 +46,9 @@ RUN conda init && \
     $HOME/.local/bin/uv pip install 'skypilot-nightly[remote,kubernetes]' 'ray[default]==2.9.3' 'pycryptodome==3.12.0' && \
     $HOME/.local/bin/uv pip uninstall skypilot-nightly && \
     ARCH=${TARGETARCH:-$(case "$(uname -m)" in \
-    "x86_64") echo "amd64" ;; \
-    "aarch64") echo "arm64" ;; \
-    *) echo "$(uname -m)" ;; \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
     esac)} && \
     curl -LO "https://dl.k8s.io/release/v1.31.6/bin/linux/$ARCH/kubectl" && \
     chmod +x kubectl && \
