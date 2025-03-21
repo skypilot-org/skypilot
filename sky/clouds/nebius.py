@@ -43,10 +43,8 @@ class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            ('Autodown and Autostop not supported. Can\'t delete disk.'),
-        # Autostop functionality can be implemented, but currently,
-        # there is only a single flag for both autostop and autodown.
+        clouds.CloudImplementationFeatures.AUTO_DOWN:
+            ('Autodown not supported. Can\'t delete disk.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:

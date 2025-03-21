@@ -110,9 +110,12 @@ class Kubernetes(clouds.Cloud):
             # Controllers cannot spin up new pods with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.HOST_CONTROLLERS] = message
-            # Pod does not have permissions to terminate itself with exec auth.
+            # Pod does not have permissions to down itself with exec auth.
             unsupported_features[
-                clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
+                clouds.CloudImplementationFeatures.AUTO_DOWN] = message
+            # Pod does not have permissions to stop itself with exec auth.
+            unsupported_features[
+                clouds.CloudImplementationFeatures.AUTO_STOP] = message
         # Allow spot instances if supported by the cluster
         try:
             spot_label_key, _ = kubernetes_utils.get_spot_label(context)
