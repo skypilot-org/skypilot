@@ -241,7 +241,9 @@ class Lambda(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Lambda's compute service."""
         try:
             lambda_utils.LambdaCloudClient().list_instances()
         except (AssertionError, KeyError, lambda_utils.LambdaCloudError):

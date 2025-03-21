@@ -13,6 +13,8 @@ import math
 import typing
 from typing import Dict, Iterable, Iterator, List, Optional, Set, Tuple, Union
 
+from typing_extensions import assert_never
+
 from sky import exceptions
 from sky import skypilot_config
 from sky.clouds import service_catalog
@@ -46,6 +48,16 @@ class CloudImplementationFeatures(enum.Enum):
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
+
+
+class CloudCapability(enum.Enum):
+    # Compute capability.
+    COMPUTE = 'compute'
+    # Storage capability.
+    STORAGE = 'storage'
+
+
+ALL_CAPABILITIES = [CloudCapability.COMPUTE, CloudCapability.STORAGE]
 
 
 class Region(collections.namedtuple('Region', ['name'])):
@@ -435,25 +447,36 @@ class Cloud:
         return {reservation: 0 for reservation in specific_reservations}
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def check_credentials(
+            cls,
+            cloud_capability: CloudCapability) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud.
 
         Returns a boolean of whether the user can access this cloud, and a
         string describing the reason if the user cannot access.
+
+        Raises NotSupportedError if the capability is
+        not supported by this cloud.
         """
-        raise NotImplementedError
+        if cloud_capability == CloudCapability.COMPUTE:
+            return cls._check_compute_credentials()
+        elif cloud_capability == CloudCapability.STORAGE:
+            return cls._check_storage_credentials()
+        assert_never(cloud_capability)
 
     @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud's storage.
-
-        Returns a boolean of whether the user can access this cloud's storage,
-        and a string describing the reason if the user cannot access.
-        """
-        # A given cloud does not support storage
-        # unless it overrides this method.
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        this cloud's compute service."""
         raise exceptions.NotSupportedError(
-            f'{cls._REPR} does not support storage.')
+            f'{cls._REPR} does not support {CloudCapability.COMPUTE.value}.')
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        this cloud's storage service."""
+        raise exceptions.NotSupportedError(
+            f'{cls._REPR} does not support {CloudCapability.STORAGE.value}.')
 
     # TODO(zhwu): Make the return type immutable.
     @classmethod

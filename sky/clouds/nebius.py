@@ -250,8 +250,9 @@ class Nebius(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for Nebius. """
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Nebius's compute service."""
         logging.debug('Nebius cloud check credentials')
         token_cred_msg = ('    Credentials can be set up by running: \n'\
                     f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'\

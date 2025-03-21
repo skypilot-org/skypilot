@@ -719,9 +719,9 @@ class GCP(clouds.Cloud):
         return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has compute access credentials to this cloud."""
-        return cls._check_credentials(  # Check APIs.
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's compute service."""
+        return cls._check_credentials(
             [
                 ('compute', 'Compute Engine'),
                 ('cloudresourcemanager', 'Cloud Resource Manager'),
@@ -731,12 +731,11 @@ class GCP(clouds.Cloud):
             gcp_utils.get_minimal_compute_permissions())
 
     @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has compute access credentials to this cloud."""
-        return cls._check_credentials(  # Check APIs.
-            [
-                ('storage', 'Cloud Storage'),
-            ], gcp_utils.get_minimal_storage_permissions())
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's storage service."""
+        return cls._check_credentials(
+            [('storage', 'Cloud Storage')],
+            gcp_utils.get_minimal_storage_permissions())
 
     @classmethod
     def _check_credentials(

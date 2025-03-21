@@ -312,7 +312,9 @@ class SCP(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        SCP's compute service."""
         try:
             scp_utils.SCPClient().list_instances()
         except (AssertionError, KeyError, scp_utils.SCPClientError,

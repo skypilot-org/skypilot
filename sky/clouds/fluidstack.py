@@ -255,8 +255,9 @@ class Fluidstack(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        FluidStack's compute service."""
         try:
             assert os.path.exists(
                 os.path.expanduser(fluidstack_utils.FLUIDSTACK_API_KEY_PATH))

@@ -19,6 +19,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -1001,7 +1002,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds() -> List[clouds.Cloud]:
-    return global_user_state.get_cached_enabled_clouds()
+    return global_user_state.get_cached_enabled_clouds(
+        sky_cloud.CloudCapability.COMPUTE)
 
 
 @usage_lib.entrypoint
@@ -1136,7 +1138,7 @@ def local_down() -> None:
                 ux_utils.spinner_message('Running sky check...')):
             sky_check.check(clouds=['kubernetes'],
                             quiet=True,
-                            capability=sky_check.CloudCapability.COMPUTE)
+                            capability=sky_cloud.CloudCapability.COMPUTE)
         logger.info(
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,

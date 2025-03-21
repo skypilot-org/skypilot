@@ -25,6 +25,7 @@ from sky.adaptors import gcp
 from sky.adaptors import ibm
 from sky.adaptors import nebius
 from sky.adaptors import oci
+from sky.clouds import cloud as sky_cloud
 from sky.data import data_transfer
 from sky.data import data_utils
 from sky.data import mounting_utils
@@ -80,11 +81,12 @@ _BUCKET_EXTERNALLY_DELETED_DEBUG_MESSAGE = (
 _STORAGE_LOG_FILE_NAME = 'storage_sync.log'
 
 
-def get_cached_enabled_storage_clouds_or_refresh(
+def get_cached_enabled_storage_cloud_names_or_refresh(
         raise_if_no_cloud_access: bool = False) -> List[str]:
     # This is a temporary solution until https://github.com/skypilot-org/skypilot/issues/1943 # pylint: disable=line-too-long
     # is resolved by implementing separate 'enabled_storage_clouds'
-    enabled_clouds = sky_check.get_cached_enabled_storage_clouds_or_refresh()
+    enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        sky_cloud.CloudCapability.STORAGE)
     enabled_clouds = [str(cloud) for cloud in enabled_clouds]
 
     r2_is_enabled, _ = cloudflare.check_storage_credentials()
@@ -99,13 +101,14 @@ def get_cached_enabled_storage_clouds_or_refresh(
 
 def _is_storage_cloud_enabled(cloud_name: str,
                               try_fix_with_sky_check: bool = True) -> bool:
-    enabled_storage_clouds = get_cached_enabled_storage_clouds_or_refresh()
-    if cloud_name in enabled_storage_clouds:
+    enabled_storage_cloud_names = (
+        get_cached_enabled_storage_cloud_names_or_refresh())
+    if cloud_name in enabled_storage_cloud_names:
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
         sky_check.check(quiet=True,
-                        capability=sky_check.CloudCapability.STORAGE)
+                        capability=sky_cloud.CloudCapability.STORAGE)
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False

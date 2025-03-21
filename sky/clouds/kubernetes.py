@@ -655,7 +655,9 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Kubernetes."""
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()

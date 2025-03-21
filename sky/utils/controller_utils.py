@@ -19,6 +19,7 @@ from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -216,9 +217,11 @@ def _get_cloud_dependencies_installation_commands(
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
     enabled_compute_clouds = set(
-        sky_check.get_cached_enabled_clouds_or_refresh())
+        sky_check.get_cached_enabled_clouds_or_refresh(
+            sky_cloud.CloudCapability.COMPUTE))
     enabled_storage_clouds = set(
-        sky_check.get_cached_enabled_storage_clouds_or_refresh())
+        sky_check.get_cached_enabled_clouds_or_refresh(
+            sky_cloud.CloudCapability.STORAGE))
     enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
 
     for cloud in enabled_clouds:
@@ -281,7 +284,7 @@ def _get_cloud_dependencies_installation_commands(
         python_packages.update(cloud_python_dependencies)
 
     if (cloudflare.NAME
-            in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+            in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
         python_packages.update(dependencies.extras_require['cloudflare'])
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
@@ -812,8 +815,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
         cloud_str = store_type.to_cloud()
-        if (cloud_str not in
-                storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+        if (cloud_str not in storage_lib.
+                get_cached_enabled_storage_cloud_names_or_refresh()):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(
                     f'`{task_type}.bucket` is specified in SkyPilot config '

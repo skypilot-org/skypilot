@@ -1,5 +1,4 @@
 """Credential checks: check cloud credentials and enable clouds."""
-import enum
 import os
 import traceback
 from types import ModuleType
@@ -13,6 +12,7 @@ from sky import exceptions
 from sky import global_user_state
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
@@ -21,60 +21,21 @@ CHECK_MARK_EMOJI = '\U00002714'  # Heavy check mark unicode
 PARTY_POPPER_EMOJI = '\U0001F389'  # Party popper unicode
 
 
-# Declaring CloudCapability as a subclass of str
-# allows it to be JSON serializable.
-class CloudCapability(str, enum.Enum):
-    # Compute capability.
-    COMPUTE = 'compute'
-    # Storage capability.
-    STORAGE = 'storage'
-
-
-ALL_CAPABILITIES = [CloudCapability.COMPUTE, CloudCapability.STORAGE]
-
-
 def check_capabilities(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capabilities: Optional[List[CloudCapability]] = None,
-) -> Dict[str, List[CloudCapability]]:
+    capabilities: Optional[List[sky_cloud.CloudCapability]] = None,
+) -> Dict[str, List[sky_cloud.CloudCapability]]:
     echo = (lambda *_args, **_kwargs: None
            ) if quiet else lambda *args, **kwargs: click.echo(
                *args, **kwargs, color=True)
     echo('Checking credentials to enable clouds for SkyPilot.')
     if capabilities is None:
-        capabilities = ALL_CAPABILITIES
+        capabilities = sky_cloud.ALL_CAPABILITIES
     assert capabilities is not None
-    enabled_clouds: Dict[str, List[CloudCapability]] = {}
-    disabled_clouds: Dict[str, List[CloudCapability]] = {}
-
-    def check_credentials(
-            cloud: Union[sky_clouds.Cloud, ModuleType],
-            capability: CloudCapability) -> Tuple[bool, Optional[str]]:
-        if capability == CloudCapability.COMPUTE:
-            return cloud.check_credentials()
-        elif capability == CloudCapability.STORAGE:
-            return cloud.check_storage_credentials()
-        else:
-            raise ValueError(f'Invalid capability: {capability}')
-
-    def get_cached_state(capability: CloudCapability) -> List[sky_clouds.Cloud]:
-        if capability == CloudCapability.COMPUTE:
-            return global_user_state.get_cached_enabled_clouds()
-        elif capability == CloudCapability.STORAGE:
-            return global_user_state.get_cached_enabled_storage_clouds()
-        else:
-            raise ValueError(f'Invalid capability: {capability}')
-
-    def set_cached_state(clouds: List[str],
-                         capability: CloudCapability) -> None:
-        if capability == CloudCapability.COMPUTE:
-            global_user_state.set_enabled_clouds(clouds)
-        elif capability == CloudCapability.STORAGE:
-            global_user_state.set_enabled_storage_clouds(clouds)
-        else:
-            raise ValueError(f'Invalid capability: {capability}')
+    enabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
+    disabled_clouds: Dict[str, List[sky_cloud.CloudCapability]] = {}
 
     def check_one_cloud(
             cloud_tuple: Tuple[str, Union[sky_clouds.Cloud,
@@ -84,7 +45,7 @@ def check_capabilities(
         for capability in capabilities:
             with rich_utils.safe_status(f'Checking {cloud_repr}...'):
                 try:
-                    ok, reason = check_credentials(cloud, capability)
+                    ok, reason = cloud.check_credentials(capability)
                 except exceptions.NotSupportedError:
                     continue
                 except Exception:  # pylint: disable=broad-except
@@ -170,12 +131,14 @@ def check_capabilities(
             if not cloud.startswith('Cloudflare')
         }
         previously_enabled_clouds_set = {
-            repr(cloud) for cloud in get_cached_state(capability)
+            repr(cloud)
+            for cloud in global_user_state.get_cached_enabled_clouds(capability)
         }
         enabled_clouds_for_capability = (config_allowed_clouds_set & (
             (previously_enabled_clouds_set | enabled_clouds_set) -
             disabled_clouds_set))
-        set_cached_state(list(enabled_clouds_for_capability), capability)
+        global_user_state.set_enabled_clouds(
+            list(enabled_clouds_for_capability), capability)
         all_enabled_clouds = all_enabled_clouds.union(
             enabled_clouds_for_capability)
     disallowed_clouds_hint = None
@@ -227,7 +190,7 @@ def check(
     quiet: bool = False,
     verbose: bool = False,
     clouds: Optional[Iterable[str]] = None,
-    capability: CloudCapability = CloudCapability.COMPUTE,
+    capability: sky_cloud.CloudCapability = sky_cloud.CloudCapability.COMPUTE,
 ) -> List[str]:
     clouds_with_capability = []
     enabled_clouds = check_capabilities(quiet, verbose, clouds, [capability])
@@ -238,6 +201,7 @@ def check(
 
 
 def get_cached_enabled_clouds_or_refresh(
+        capability: sky_cloud.CloudCapability,
         raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
     """Returns cached enabled clouds and if no cloud is enabled, refresh.
 
@@ -251,57 +215,24 @@ def get_cached_enabled_clouds_or_refresh(
         exceptions.NoCloudAccessError: if no public cloud is enabled and
             raise_if_no_cloud_access is set to True.
     """
-    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
+    cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
+        capability)
     if not cached_enabled_clouds:
         try:
-            check(quiet=True, capability=CloudCapability.COMPUTE)
+            check(quiet=True, capability=capability)
         except SystemExit:
             # If no cloud is enabled, check() will raise SystemExit.
             # Here we catch it and raise the exception later only if
             # raise_if_no_cloud_access is set to True.
             pass
-        cached_enabled_clouds = global_user_state.get_cached_enabled_clouds()
+        cached_enabled_clouds = global_user_state.get_cached_enabled_clouds(
+            capability)
     if raise_if_no_cloud_access and not cached_enabled_clouds:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.NoCloudAccessError(
                 'Cloud access is not set up. Run: '
                 f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
     return cached_enabled_clouds
-
-
-def get_cached_enabled_storage_clouds_or_refresh(
-        raise_if_no_cloud_access: bool = False) -> List[sky_clouds.Cloud]:
-    """Returns cached enabled storage clouds and if no cloud is enabled,
-    refresh.
-
-    This function will perform a refresh if no public cloud is enabled.
-
-    Args:
-        raise_if_no_cloud_access: if True, raise an exception if no public
-            cloud is enabled.
-
-    Raises:
-        exceptions.NoCloudAccessError: if no public cloud is enabled and
-            raise_if_no_cloud_access is set to True.
-    """
-    cached_enabled_storage_clouds = (
-        global_user_state.get_cached_enabled_storage_clouds())
-    if not cached_enabled_storage_clouds:
-        try:
-            check(quiet=True, capability=CloudCapability.STORAGE)
-        except SystemExit:
-            # If no cloud is enabled, check() will raise SystemExit.
-            # Here we catch it and raise the exception later only if
-            # raise_if_no_cloud_access is set to True.
-            pass
-        cached_enabled_storage_clouds = (
-            global_user_state.get_cached_enabled_storage_clouds())
-    if raise_if_no_cloud_access and not cached_enabled_storage_clouds:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.NoCloudAccessError(
-                'Cloud access is not set up. Run: '
-                f'{colorama.Style.BRIGHT}sky check{colorama.Style.RESET_ALL}')
-    return cached_enabled_storage_clouds
 
 
 def get_cloud_credential_file_mounts(
