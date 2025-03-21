@@ -316,17 +316,16 @@ class Nebius(clouds.Cloud):
         hints = None
         if not nebius_profile_in_aws_cred():
             hints = (f'[{nebius.NEBIUS_PROFILE_NAME}] profile '
-            'is not set in ~/.aws/credentials.')
+                     'is not set in ~/.aws/credentials.')
         if hints:
             hints += ' Run the following commands:'
             if not nebius_profile_in_aws_cred():
                 hints += (
                     f'\n{_INDENT_PREFIX}  $ pip install boto3'
-                    f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius'
-                )
+                    f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius')
             hints += (
                 f'\n{_INDENT_PREFIX}For more info: '
-                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius' # pylint: disable=line-too-long
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius'  # pylint: disable=line-too-long
             )
         return (False, hints) if hints else (True, hints)
 
