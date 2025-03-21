@@ -1,9 +1,7 @@
 """Kubernetes-specific configuration for the provisioner."""
-import copy
 import logging
-import math
 import os
-from typing import Any, Dict, Optional, Union
+from typing import Any, Dict, Optional
 
 import yaml
 
@@ -111,139 +109,24 @@ class InvalidNamespaceError(ValueError):
             'the field')
 
 
-def using_existing_msg(resource_type: str, name: str) -> str:
+def _using_existing_msg(resource_type: str, name: str) -> str:
     return f'using existing {resource_type} "{name}"'
 
 
-def updating_existing_msg(resource_type: str, name: str) -> str:
+def _updating_existing_msg(resource_type: str, name: str) -> str:
     return f'updating existing {resource_type} "{name}"'
 
 
-def not_found_msg(resource_type: str, name: str) -> str:
+def _not_found_msg(resource_type: str, name: str) -> str:
     return f'{resource_type} "{name}" not found, attempting to create it'
 
 
-def not_checking_msg(resource_type: str, name: str) -> str:
-    return f'not checking if {resource_type} "{name}" exists'
-
-
-def created_msg(resource_type: str, name: str) -> str:
+def _created_msg(resource_type: str, name: str) -> str:
     return f'successfully created {resource_type} "{name}"'
 
 
-def not_provided_msg(resource_type: str) -> str:
+def _not_provided_msg(resource_type: str) -> str:
     return f'no {resource_type} config provided, must already exist'
-
-
-def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
-    """Fills CPU and GPU resources in the ray cluster config.
-
-    For each node type and each of CPU/GPU, looks at container's resources
-    and limits, takes min of the two.
-    """
-    if 'available_node_types' not in config:
-        return config
-    node_types = copy.deepcopy(config['available_node_types'])
-    head_node_type = config['head_node_type']
-    for node_type in node_types:
-
-        node_config = node_types[node_type]['node_config']
-        # The next line is for compatibility with configs which define pod specs
-        # cf.create_node().
-        pod = node_config.get('pod', node_config)
-        container_data = pod['spec']['containers'][0]
-
-        autodetected_resources = get_autodetected_resources(container_data)
-        if node_types == head_node_type:
-            # we only autodetect worker type node memory resource
-            autodetected_resources.pop('memory')
-        if 'resources' not in config['available_node_types'][node_type]:
-            config['available_node_types'][node_type]['resources'] = {}
-        autodetected_resources.update(
-            config['available_node_types'][node_type]['resources'])
-        config['available_node_types'][node_type][
-            'resources'] = autodetected_resources
-        logger.debug(f'Updating the resources of node type {node_type} '
-                     f'to include {autodetected_resources}.')
-    return config
-
-
-def get_autodetected_resources(
-        container_data: Dict[str, Any]) -> Dict[str, Any]:
-    container_resources = container_data.get('resources', None)
-    if container_resources is None:
-        return {'CPU': 0, 'GPU': 0}
-
-    node_type_resources = {
-        resource_name.upper(): get_resource(container_resources, resource_name)
-        for resource_name in ['cpu', 'gpu']
-    }
-
-    memory_limits = get_resource(container_resources, 'memory')
-    node_type_resources['memory'] = memory_limits
-
-    return node_type_resources
-
-
-def get_resource(container_resources: Dict[str, Any],
-                 resource_name: str) -> int:
-    request = _get_resource(container_resources,
-                            resource_name,
-                            field_name='requests')
-    limit = _get_resource(container_resources,
-                          resource_name,
-                          field_name='limits')
-    # Use request if limit is not set, else use limit.
-    # float('inf') means there's no limit set
-    res_count = request if limit == float('inf') else limit
-    # Convert to int since Ray autoscaler expects int.
-    # We also round up the resource count to the nearest integer to provide the
-    # user at least the amount of resource they requested.
-    rounded_count = math.ceil(res_count)
-    if resource_name == 'cpu':
-        # For CPU, we set minimum count to 1 because if CPU count is set to 0,
-        # (e.g. when the user sets --cpu 0.5), ray will not be able to schedule
-        # any tasks.
-        return max(1, rounded_count)
-    else:
-        # For GPU and memory, return the rounded count.
-        return rounded_count
-
-
-def _get_resource(container_resources: Dict[str, Any], resource_name: str,
-                  field_name: str) -> Union[int, float]:
-    """Returns the resource quantity.
-
-    The amount of resource is rounded up to nearest integer.
-    Returns float("inf") if the resource is not present.
-
-    Args:
-        container_resources: Container's resource field.
-        resource_name: One of 'cpu', 'gpu' or 'memory'.
-        field_name: One of 'requests' or 'limits'.
-
-    Returns:
-        Union[int, float]: Detected resource quantity.
-    """
-    if field_name not in container_resources:
-        # No limit/resource field.
-        return float('inf')
-    resources = container_resources[field_name]
-    # Look for keys containing the resource_name. For example,
-    # the key 'nvidia.com/gpu' contains the key 'gpu'.
-    matching_keys = [key for key in resources if resource_name in key.lower()]
-    if not matching_keys:
-        return float('inf')
-    if len(matching_keys) > 1:
-        # Should have only one match -- mostly relevant for gpu.
-        raise ValueError(f'Multiple {resource_name} types not supported.')
-    # E.g. 'nvidia.com/gpu' or 'cpu'.
-    resource_key = matching_keys.pop()
-    resource_quantity = resources[resource_key]
-    if resource_name == 'memory':
-        return kubernetes_utils.parse_memory_resource(resource_quantity)
-    else:
-        return kubernetes_utils.parse_cpu_or_gpu_resource(resource_quantity)
 
 
 def _configure_autoscaler_service_account(
@@ -252,7 +135,7 @@ def _configure_autoscaler_service_account(
     account_field = 'autoscaler_service_account'
     if account_field not in provider_config:
         logger.info('_configure_autoscaler_service_account: '
-                    f'{not_provided_msg(account_field)}')
+                    f'{_not_provided_msg(account_field)}')
         return
 
     account = provider_config[account_field]
@@ -271,15 +154,15 @@ def _configure_autoscaler_service_account(
         # since the service_account.metadata.name is the only important
         # attribute, which is already filtered for above.
         logger.info('_configure_autoscaler_service_account: '
-                    f'{using_existing_msg(account_field, name)}')
+                    f'{_using_existing_msg(account_field, name)}')
         return
 
     logger.info('_configure_autoscaler_service_account: '
-                f'{not_found_msg(account_field, name)}')
+                f'{_not_found_msg(account_field, name)}')
     kubernetes.core_api(context).create_namespaced_service_account(
         namespace, account)
     logger.info('_configure_autoscaler_service_account: '
-                f'{created_msg(account_field, name)}')
+                f'{_created_msg(account_field, name)}')
 
 
 def _configure_autoscaler_role(namespace: str, context: Optional[str],
@@ -295,7 +178,7 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
 
     if role_field not in provider_config:
         logger.info('_configure_autoscaler_role: '
-                    f'{not_provided_msg(role_field)}')
+                    f'{_not_provided_msg(role_field)}')
         return
 
     role = provider_config[role_field]
@@ -315,18 +198,18 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
         new_role = kubernetes_utils.dict_to_k8s_object(role, 'V1Role')
         if new_role.rules == existing_role.rules:
             logger.info('_configure_autoscaler_role: '
-                        f'{using_existing_msg(role_field, name)}')
+                        f'{_using_existing_msg(role_field, name)}')
             return
         logger.info('_configure_autoscaler_role: '
-                    f'{updating_existing_msg(role_field, name)}')
+                    f'{_updating_existing_msg(role_field, name)}')
         kubernetes.auth_api(context).patch_namespaced_role(
             name, namespace, role)
         return
 
     logger.info('_configure_autoscaler_role: '
-                f'{not_found_msg(role_field, name)}')
+                f'{_not_found_msg(role_field, name)}')
     kubernetes.auth_api(context).create_namespaced_role(namespace, role)
-    logger.info(f'_configure_autoscaler_role: {created_msg(role_field, name)}')
+    logger.info(f'_configure_autoscaler_role: {_created_msg(role_field, name)}')
 
 
 def _configure_autoscaler_role_binding(
@@ -346,7 +229,7 @@ def _configure_autoscaler_role_binding(
 
     if binding_field not in provider_config:
         logger.info('_configure_autoscaler_role_binding: '
-                    f'{not_provided_msg(binding_field)}')
+                    f'{_not_provided_msg(binding_field)}')
         return
 
     binding = provider_config[binding_field]
@@ -381,20 +264,20 @@ def _configure_autoscaler_role_binding(
         if (new_rb.role_ref == existing_binding.role_ref and
                 new_rb.subjects == existing_binding.subjects):
             logger.info('_configure_autoscaler_role_binding: '
-                        f'{using_existing_msg(binding_field, name)}')
+                        f'{_using_existing_msg(binding_field, name)}')
             return
         logger.info('_configure_autoscaler_role_binding: '
-                    f'{updating_existing_msg(binding_field, name)}')
+                    f'{_updating_existing_msg(binding_field, name)}')
         kubernetes.auth_api(context).patch_namespaced_role_binding(
             name, rb_namespace, binding)
         return
 
     logger.info('_configure_autoscaler_role_binding: '
-                f'{not_found_msg(binding_field, name)}')
+                f'{_not_found_msg(binding_field, name)}')
     kubernetes.auth_api(context).create_namespaced_role_binding(
         rb_namespace, binding)
     logger.info('_configure_autoscaler_role_binding: '
-                f'{created_msg(binding_field, name)}')
+                f'{_created_msg(binding_field, name)}')
 
 
 def _configure_autoscaler_cluster_role(namespace, context,
@@ -402,7 +285,7 @@ def _configure_autoscaler_cluster_role(namespace, context,
     role_field = 'autoscaler_cluster_role'
     if role_field not in provider_config:
         logger.info('_configure_autoscaler_cluster_role: '
-                    f'{not_provided_msg(role_field)}')
+                    f'{_not_provided_msg(role_field)}')
         return
 
     role = provider_config[role_field]
@@ -421,18 +304,18 @@ def _configure_autoscaler_cluster_role(namespace, context,
         new_cr = kubernetes_utils.dict_to_k8s_object(role, 'V1ClusterRole')
         if new_cr.rules == existing_cr.rules:
             logger.info('_configure_autoscaler_cluster_role: '
-                        f'{using_existing_msg(role_field, name)}')
+                        f'{_using_existing_msg(role_field, name)}')
             return
         logger.info('_configure_autoscaler_cluster_role: '
-                    f'{updating_existing_msg(role_field, name)}')
+                    f'{_updating_existing_msg(role_field, name)}')
         kubernetes.auth_api(context).patch_cluster_role(name, role)
         return
 
     logger.info('_configure_autoscaler_cluster_role: '
-                f'{not_found_msg(role_field, name)}')
+                f'{_not_found_msg(role_field, name)}')
     kubernetes.auth_api(context).create_cluster_role(role)
     logger.info(
-        f'_configure_autoscaler_cluster_role: {created_msg(role_field, name)}')
+        f'_configure_autoscaler_cluster_role: {_created_msg(role_field, name)}')
 
 
 def _configure_autoscaler_cluster_role_binding(
@@ -440,7 +323,7 @@ def _configure_autoscaler_cluster_role_binding(
     binding_field = 'autoscaler_cluster_role_binding'
     if binding_field not in provider_config:
         logger.info('_configure_autoscaler_cluster_role_binding: '
-                    f'{not_provided_msg(binding_field)}')
+                    f'{_not_provided_msg(binding_field)}')
         return
 
     binding = provider_config[binding_field]
@@ -468,18 +351,18 @@ def _configure_autoscaler_cluster_role_binding(
         if (new_binding.role_ref == existing_binding.role_ref and
                 new_binding.subjects == existing_binding.subjects):
             logger.info('_configure_autoscaler_cluster_role_binding: '
-                        f'{using_existing_msg(binding_field, name)}')
+                        f'{_using_existing_msg(binding_field, name)}')
             return
         logger.info('_configure_autoscaler_cluster_role_binding: '
-                    f'{updating_existing_msg(binding_field, name)}')
+                    f'{_updating_existing_msg(binding_field, name)}')
         kubernetes.auth_api(context).patch_cluster_role_binding(name, binding)
         return
 
     logger.info('_configure_autoscaler_cluster_role_binding: '
-                f'{not_found_msg(binding_field, name)}')
+                f'{_not_found_msg(binding_field, name)}')
     kubernetes.auth_api(context).create_cluster_role_binding(binding)
     logger.info('_configure_autoscaler_cluster_role_binding: '
-                f'{created_msg(binding_field, name)}')
+                f'{_created_msg(binding_field, name)}')
 
 
 def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):
@@ -625,7 +508,7 @@ def _configure_services(namespace: str, context: Optional[str],
                         provider_config: Dict[str, Any]) -> None:
     service_field = 'services'
     if service_field not in provider_config:
-        logger.info(f'_configure_services: {not_provided_msg(service_field)}')
+        logger.info(f'_configure_services: {_not_provided_msg(service_field)}')
         return
 
     services = provider_config[service_field]
@@ -646,19 +529,19 @@ def _configure_services(namespace: str, context: Optional[str],
             new_svc = kubernetes_utils.dict_to_k8s_object(service, 'V1Service')
             if new_svc.spec.ports == existing_service.spec.ports:
                 logger.info('_configure_services: '
-                            f'{using_existing_msg("service", name)}')
+                            f'{_using_existing_msg("service", name)}')
                 return
             else:
                 logger.info('_configure_services: '
-                            f'{updating_existing_msg("service", name)}')
+                            f'{_updating_existing_msg("service", name)}')
                 kubernetes.core_api(context).patch_namespaced_service(
                     name, namespace, service)
         else:
             logger.info(
-                f'_configure_services: {not_found_msg("service", name)}')
+                f'_configure_services: {_not_found_msg("service", name)}')
             kubernetes.core_api(context).create_namespaced_service(
                 namespace, service)
-            logger.info(f'_configure_services: {created_msg("service", name)}')
+            logger.info(f'_configure_services: {_created_msg("service", name)}')
 
 
 class KubernetesError(Exception):
