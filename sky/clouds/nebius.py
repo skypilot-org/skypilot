@@ -26,23 +26,17 @@ _INDENT_PREFIX = '    '
 
 
 def nebius_profile_in_aws_cred() -> bool:
-    """Checks if Nebius Object Storage profile is set in aws credentials
-     and has endpoint_url."""
+    """Checks if Nebius Object Storage profile is set in aws credentials."""
 
     profile_path = os.path.expanduser('~/.aws/credentials')
-    nebius_endpoint_re = re.compile(r'/^endpoint_url *= *https:\/\/storage\.[a-zA-Z1-9\-]*\.nebius\.cloud:443$/gm')  # pylint: disable=line-too-long
     nebius_profile_exists = False
-    nebius_endpoint_exists = False
     if os.path.isfile(profile_path):
         with open(profile_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[{nebius.NEBIUS_PROFILE_NAME}]' in line:
                     nebius_profile_exists = True
-                if nebius_endpoint_re.match(line):
-                    nebius_endpoint_exists = True
-                    break
 
-    return nebius_profile_exists and nebius_endpoint_exists
+    return nebius_profile_exists
 
 
 @registry.CLOUD_REGISTRY.register
