@@ -349,6 +349,7 @@ def setup_docker_container(request):
             f'{os.path.expanduser("~/.aws")}:/home/{os.environ.get("USER", default_user)}/.aws',
             f'{os.path.expanduser("~/.azure")}:/home/{os.environ.get("USER", default_user)}/.azure',
             f'{os.path.expanduser("~/.config/gcloud")}:/home/{os.environ.get("USER", default_user)}/.config/gcloud',
+            f'{os.path.expanduser("~/.kube/config")}:/home/{os.environ.get("USER", default_user)}/.kube/config',
         ]
 
         # Run the container

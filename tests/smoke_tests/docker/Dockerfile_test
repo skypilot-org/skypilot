@@ -109,6 +109,7 @@ ENTRYPOINT /bin/bash ~/entrypoint.sh
 # export LINUX_USERNAME=buildkite
 # docker run --platform linux/amd64 -it --name sky-test \
 #   -v "$(pwd)":/skypilot:rw \
+#   -v "$HOME/.kube/config":"/home/${LINUX_USERNAME}/.kube/config" \
 #   -v "$HOME/.aws":"/home/${LINUX_USERNAME}/.aws" \
 #   -v "$HOME/.azure":"/home/${LINUX_USERNAME}/.azure" \
 #   -v "$HOME/.config/gcloud":"/home/${LINUX_USERNAME}/.config/gcloud" \
