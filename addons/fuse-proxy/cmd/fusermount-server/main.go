@@ -1,0 +1,45 @@
+package main
+
+import (
+	"flag"
+	"os"
+	"os/signal"
+	"syscall"
+
+	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/common"
+	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/server"
+	log "k8s.io/klog/v2"
+)
+
+var (
+	// TODO(aylei): hacky, we should not assume specific knowledge in the caller container, need to find a better way.
+	fusermountPath = flag.String("fusermount-path", "/bin/fusermount-original", "Path to fusermount binary in the caller container")
+)
+
+func main() {
+	log.InitFlags(nil)
+	flag.Parse()
+	socketPath := common.MustGetServerSocketPath()
+
+	srv := server.NewServer(*fusermountPath, socketPath)
+
+	// Handle signals for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- srv.Start()
+	}()
+	select {
+	case err := <-errChan:
+		if err != nil {
+			log.Fatalf("Server error: %v", err)
+		}
+	case <-sigChan:
+		log.Info("Shutting down server...")
+		if err := srv.Stop(); err != nil {
+			log.Errorf("Error during shutdown: %v", err)
+		}
+	}
+}

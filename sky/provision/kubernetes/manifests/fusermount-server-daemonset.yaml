@@ -1,0 +1,38 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: fusermount-server
+  namespace: skypilot-system
+  labels:
+    app: fusermount-server
+    role: agent
+    parent: skypilot
+spec:
+  selector:
+    matchLabels:
+      app: fusermount-server
+  template:
+    metadata:
+      labels:
+        app: fusermount-server
+    spec:
+      containers:
+      - name: server
+        image: aylei/fusermount-server:20250321-9
+        securityContext:
+          privileged: true
+        volumeMounts:
+        - name: shared-dir
+          mountPath: /var/run/fusermount
+        env:
+        - name: FUSERMOUNT_SHARED_DIR
+          value: /var/run/fusermount
+        resources:
+          requests:
+            cpu: 50m
+            memory: 50Mi
+      volumes:
+      - name: shared-dir
+        hostPath:
+          path: /var/run/fusermount
+          type: DirectoryOrCreate
