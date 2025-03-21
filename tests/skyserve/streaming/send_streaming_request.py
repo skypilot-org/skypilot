@@ -13,9 +13,9 @@ url = f'{args.endpoint}/'
 
 expected = WORD_TO_STREAM.split()
 index = 0
-max_retries = 3
+max_attempts = 3
 
-for attempt in range(max_retries):
+for attempt in range(max_attempts):
     try:
         with requests.get(url, stream=True) as response:
             if response.status_code == 503:
@@ -24,7 +24,7 @@ for attempt in range(max_retries):
                 # The availability of replicas can fluctuate during service startup and operation.
                 # Implementing retries helps handle these temporary unavailability periods.
                 print(
-                    f"Retrying in 5 seconds... (attempt {attempt}/{max_retries})"
+                    f"Retrying in 5 seconds... (attempt {attempt}/{max_attempts})"
                 )
                 time.sleep(5)
                 continue
@@ -39,7 +39,7 @@ for attempt in range(max_retries):
                 break  # Success, exit the loop
     except requests.exceptions.ConnectionError:
         # EKS could have connection errors when the service is starting up.
-        print(f"Retrying in 5 seconds... (attempt {attempt}/{max_retries})")
+        print(f"Retrying in 5 seconds... (attempt {attempt}/{max_attempts})")
         time.sleep(5)
         continue
 
