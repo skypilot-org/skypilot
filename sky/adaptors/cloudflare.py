@@ -2,12 +2,12 @@
 # pylint: disable=import-outside-toplevel
 
 import contextlib
-import functools
 import os
 import threading
 from typing import Dict, Optional, Tuple
 
 from sky.adaptors import common
+from sky.utils import annotations
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
@@ -62,7 +62,7 @@ def get_r2_credentials(boto3_session):
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session."""
     # Creating the session object is not thread-safe for boto3,
@@ -76,7 +76,7 @@ def session():
         return session_
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def resource(resource_name: str, **kwargs):
     """Create a Cloudflare resource.
 
@@ -102,7 +102,7 @@ def resource(resource_name: str, **kwargs):
         **kwargs)
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def client(service_name: str, region):
     """Create an CLOUDFLARE client of a certain service.
 
@@ -149,6 +149,10 @@ def create_endpoint():
 
 
 def check_credentials() -> Tuple[bool, Optional[str]]:
+    return check_storage_credentials()
+
+
+def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Cloudflare R2.
 
     Returns:

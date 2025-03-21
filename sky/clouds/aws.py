@@ -1,7 +1,6 @@
 """Amazon Web Services."""
 import enum
 import fnmatch
-import functools
 import hashlib
 import json
 import os
@@ -21,7 +20,9 @@ from sky.clouds import service_catalog
 from sky.clouds.service_catalog import common as catalog_common
 from sky.clouds.utils import aws_utils
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
@@ -30,7 +31,7 @@ from sky.utils import ux_utils
 if typing.TYPE_CHECKING:
     # renaming to avoid shadowing variables
     from sky import resources as resources_lib
-    from sky import status_lib
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -126,7 +127,7 @@ class AWSIdentityType(enum.Enum):
         return self in expirable_types
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class AWS(clouds.Cloud):
     """Amazon Web Services."""
 
@@ -558,7 +559,8 @@ class AWS(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='global',
+                           maxsize=1)  # Cache since getting identity is slow.
     def check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
@@ -665,6 +667,11 @@ class AWS(clouds.Cloud):
         return True, hints
 
     @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        # TODO(seungjin): Check if the user has access to S3.
+        return cls.check_credentials()
+
+    @classmethod
     def _current_identity_type(cls) -> Optional[AWSIdentityType]:
         stdout = cls._aws_configure_list()
         if stdout is None:
@@ -696,7 +703,7 @@ class AWS(clouds.Cloud):
         return AWSIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def _aws_configure_list(cls) -> Optional[bytes]:
         proc = subprocess.run('aws configure list',
                               shell=True,
@@ -708,7 +715,8 @@ class AWS(clouds.Cloud):
         return proc.stdout
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='global',
+                           maxsize=1)  # Cache since getting identity is slow.
     def _sts_get_caller_identity(cls) -> Optional[List[List[str]]]:
         try:
             sts = aws.client('sts', check_credentials=False)
@@ -789,7 +797,8 @@ class AWS(clouds.Cloud):
         return [user_ids]
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='global',
+                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> Optional[List[List[str]]]:
         """Returns a [UserId, Account] list that uniquely identifies the user.
 
@@ -893,11 +902,11 @@ class AWS(clouds.Cloud):
             if os.path.exists(os.path.expanduser(f'~/.aws/{filename}'))
         }
 
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def can_credential_expire(self) -> bool:
         identity_type = self._current_identity_type()
-        return identity_type is not None and identity_type.can_credential_expire(
-        )
+        return (identity_type is not None and
+                identity_type.can_credential_expire())
 
     def instance_type_exists(self, instance_type):
         return service_catalog.instance_type_exists(instance_type, clouds='aws')
@@ -945,7 +954,8 @@ class AWS(clouds.Cloud):
         Returns:
             False if the quota is found to be zero, and True otherwise.
         Raises:
-            ImportError: if the dependencies for AWS are not able to be installed.
+            ImportError: if the dependencies for AWS are not able to be
+                installed.
             botocore.exceptions.ClientError: error in Boto3 client request.
         """
 
@@ -959,7 +969,8 @@ class AWS(clouds.Cloud):
         quota_code = aws_catalog.get_quota_code(instance_type, use_spot)
 
         if quota_code is None:
-            # Quota code not found in the catalog for the chosen instance_type, try provisioning anyway
+            # Quota code not found in the catalog for the chosen instance_type,
+            # try provisioning anyway.
             return True
 
         if aws_utils.use_reservations():
@@ -973,7 +984,8 @@ class AWS(clouds.Cloud):
             response = client.get_service_quota(ServiceCode='ec2',
                                                 QuotaCode=quota_code)
         except aws.botocore_exceptions().ClientError:
-            # Botocore client connection not established, try provisioning anyways
+            # Botocore client connection not established, try provisioning
+            # anyways
             return True
 
         if response['Quota']['Value'] == 0:

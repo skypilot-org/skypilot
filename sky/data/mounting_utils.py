@@ -24,7 +24,14 @@ RCLONE_VERSION = 'v1.68.2'
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
-    install_cmd = ('sudo wget -nc https://github.com/romilbhardwaj/goofys/'
+    install_cmd = ('ARCH=$(uname -m) && '
+                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                   '  echo "goofys is not supported on $ARCH" && '
+                   f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
+                   'else '
+                   '  ARCH_SUFFIX="amd64"; '
+                   'fi && '
+                   'sudo wget -nc https://github.com/romilbhardwaj/goofys/'
                    'releases/download/0.24.0-romilb-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
                    'sudo chmod 755 /usr/local/bin/goofys')
@@ -47,11 +54,35 @@ def get_s3_mount_cmd(bucket_name: str,
     return mount_cmd
 
 
+def get_nebius_mount_cmd(nebius_profile_name: str,
+                         endpoint_url: str,
+                         bucket_name: str,
+                         mount_path: str,
+                         _bucket_sub_path: Optional[str] = None) -> str:
+    """Returns a command to install Nebius mount utility goofys."""
+    if _bucket_sub_path is None:
+        _bucket_sub_path = ''
+    else:
+        _bucket_sub_path = f':{_bucket_sub_path}'
+    mount_cmd = (f'AWS_PROFILE={nebius_profile_name} goofys -o allow_other '
+                 f'--stat-cache-ttl {_STAT_CACHE_TTL} '
+                 f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                 f'--endpoint {endpoint_url} '
+                 f'{bucket_name}{_bucket_sub_path} {mount_path}')
+    return mount_cmd
+
+
 def get_gcs_mount_install_cmd() -> str:
     """Returns a command to install GCS mount utility gcsfuse."""
-    install_cmd = ('wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
+    install_cmd = ('ARCH=$(uname -m) && '
+                   'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+                   '  ARCH_SUFFIX="arm64"; '
+                   'else '
+                   '  ARCH_SUFFIX="amd64"; '
+                   'fi && '
+                   'wget -nc https://github.com/GoogleCloudPlatform/gcsfuse'
                    f'/releases/download/v{GCSFUSE_VERSION}/'
-                   f'gcsfuse_{GCSFUSE_VERSION}_amd64.deb '
+                   f'gcsfuse_{GCSFUSE_VERSION}_${{ARCH_SUFFIX}}.deb '
                    '-O /tmp/gcsfuse.deb && '
                    'sudo dpkg --install /tmp/gcsfuse.deb')
     return install_cmd
@@ -77,16 +108,24 @@ def get_gcs_mount_cmd(bucket_name: str,
 
 def get_az_mount_install_cmd() -> str:
     """Returns a command to install AZ Container mount utility blobfuse2."""
-    install_cmd = ('sudo apt-get update; '
-                   'sudo apt-get install -y '
-                   '-o Dpkg::Options::="--force-confdef" '
-                   'fuse3 libfuse3-dev && '
-                   'wget -nc https://github.com/Azure/azure-storage-fuse'
-                   f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
-                   f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.x86_64.deb '
-                   '-O /tmp/blobfuse2.deb && '
-                   'sudo dpkg --install /tmp/blobfuse2.deb && '
-                   f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
+    install_cmd = (
+        'sudo apt-get update; '
+        'sudo apt-get install -y '
+        '-o Dpkg::Options::="--force-confdef" '
+        'fuse3 libfuse3-dev && '
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  echo "blobfuse2 is not supported on $ARCH" && '
+        f'  exit {exceptions.ARCH_NOT_SUPPORTED_EXIT_CODE}; '
+        'else '
+        '  ARCH_SUFFIX="x86_64"; '
+        'fi && '
+        'wget -nc https://github.com/Azure/azure-storage-fuse'
+        f'/releases/download/blobfuse2-{BLOBFUSE2_VERSION}'
+        f'/blobfuse2-{BLOBFUSE2_VERSION}-Debian-11.0.${{ARCH_SUFFIX}}.deb '
+        '-O /tmp/blobfuse2.deb && '
+        'sudo dpkg --install /tmp/blobfuse2.deb && '
+        f'mkdir -p {_BLOBFUSE_CACHE_ROOT_DIR};')
 
     return install_cmd
 
@@ -117,7 +156,8 @@ def get_az_mount_cmd(container_name: str,
     if storage_account_key is None:
         key_env_var = f'AZURE_STORAGE_SAS_TOKEN={shlex.quote(" ")}'
     else:
-        key_env_var = f'AZURE_STORAGE_ACCESS_KEY={storage_account_key}'
+        key_env_var = ('AZURE_STORAGE_ACCESS_KEY='
+                       f'{shlex.quote(storage_account_key)}')
 
     cache_path = _BLOBFUSE_CACHE_DIR.format(
         storage_account_name=storage_account_name,
@@ -206,14 +246,20 @@ def get_rclone_install_cmd() -> str:
     """
     # pylint: disable=line-too-long
     install_cmd = (
+        'ARCH=$(uname -m) && '
+        'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
+        '  ARCH_SUFFIX="arm"; '
+        'else '
+        '  ARCH_SUFFIX="amd64"; '
+        'fi && '
         f'(which dpkg > /dev/null 2>&1 && (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.deb'
-        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-amd64.deb'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.deb)))'
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && sudo dpkg -i rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.deb)))'
         f' || (which rclone > /dev/null || (cd ~ > /dev/null'
-        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-amd64.rpm'
-        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-amd64.rpm -y'
-        f' && rm -f rclone-{RCLONE_VERSION}-linux-amd64.rpm))')
+        f' && curl -O https://downloads.rclone.org/{RCLONE_VERSION}/rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm'
+        f' && sudo yum --nogpgcheck install rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm -y'
+        f' && rm -f rclone-{RCLONE_VERSION}-linux-${{ARCH_SUFFIX}}.rpm))')
     return install_cmd
 
 

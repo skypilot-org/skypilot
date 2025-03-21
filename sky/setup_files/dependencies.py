@@ -5,6 +5,7 @@ This file is imported by setup.py, so:
   correct.
 - It should not import any dependencies, as they may not be installed yet.
 """
+import sys
 from typing import Dict, List
 
 install_requires = [
@@ -40,6 +41,18 @@ install_requires = [
     # <= 3.13 may encounter https://github.com/ultralytics/yolov5/issues/414
     'pyyaml > 3.13, != 5.4.*',
     'requests',
+    'fastapi',
+    'uvicorn[standard]',
+    # Some pydantic versions are not compatible with ray. Adopted from ray's
+    # setup.py:
+    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
+    # We need pydantic>=2.0.0 for API server and client.
+    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3,>2',
+    # Required for Form data by pydantic
+    'python-multipart',
+    'aiofiles',
+    'httpx',
+    'setproctitle',
 ]
 
 local_ray = [
@@ -61,10 +74,6 @@ remote = [
     # Adopted from ray's setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L343
     'protobuf >= 3.15.3, != 3.19.5',
-    # Some pydantic versions are not compatible with ray. Adopted from ray's
-    # setup.py:
-    # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254
-    'pydantic!=2.0.*,!=2.1.*,!=2.2.*,!=2.3.*,!=2.4.*,<3',
 ]
 
 # NOTE: Change the templates/jobs-controller.yaml.j2 file if any of the
@@ -111,10 +120,13 @@ extras_require: Dict[str, List[str]] = {
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
     'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
-        'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
+        'ibm-cloud-sdk-core',
+        'ibm-vpc',
+        'ibm-platform-services>=0.48.0',
+        'ibm-cos-sdk',
     ] + local_ray,
     'docker': ['docker'] + local_ray,
-    'lambda': local_ray,
+    'lambda': [],  # No dependencies needed for lambda
     'cloudflare': aws_dependencies,
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
@@ -138,6 +150,15 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
+    'nebius': [
+        'nebius>=0.2.0',
+    ] + aws_dependencies
 }
 
-extras_require['all'] = sum(extras_require.values(), [])
+# Nebius needs python3.10. If python 3.9 [all] will not install nebius
+if sys.version_info < (3, 10):
+    filtered_keys = [k for k in extras_require if k != 'nebius']
+    extras_require['all'] = sum(
+        [v for k, v in extras_require.items() if k != 'nebius'], [])
+else:
+    extras_require['all'] = sum(extras_require.values(), [])

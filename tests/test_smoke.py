@@ -25,6 +25,7 @@
 # Change cloud for generic tests to aws
 # > pytest tests/test_smoke.py --generic-cloud aws
 
+from smoke_tests.test_api_server import *
 from smoke_tests.test_basic import *
 from smoke_tests.test_cluster_job import *
 from smoke_tests.test_images import *

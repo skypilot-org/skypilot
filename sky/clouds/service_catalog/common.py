@@ -13,9 +13,9 @@ import requests
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.clouds import cloud as cloud_lib
-from sky.clouds import cloud_registry
 from sky.clouds.service_catalog import constants
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import rich_utils
 from sky.utils import ux_utils
 
@@ -171,7 +171,9 @@ def read_catalog(filename: str,
     assert (pull_frequency_hours is None or
             pull_frequency_hours >= 0), pull_frequency_hours
     catalog_path = get_catalog_path(filename)
-    cloud = cloud_registry.CLOUD_REGISTRY.from_str(os.path.dirname(filename))
+    cloud = os.path.dirname(filename)
+    if cloud != 'common':
+        cloud = str(registry.CLOUD_REGISTRY.from_str(cloud))
 
     meta_path = os.path.join(_ABSOLUTE_VERSIONED_CATALOG_DIR, '.meta', filename)
     os.makedirs(os.path.dirname(meta_path), exist_ok=True)

@@ -7,11 +7,12 @@ import colorama
 
 from sky import clouds
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import ibm
 from sky.adaptors.ibm import CREDENTIAL_FILE
 from sky.clouds import service_catalog
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -21,7 +22,7 @@ if typing.TYPE_CHECKING:
 logger = sky_logging.init_logger(__name__)
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class IBM(clouds.Cloud):
     """IBM Web Services."""
 
@@ -167,7 +168,7 @@ class IBM(clouds.Cloud):
     def make_deploy_resources_variables(
         self,
         resources: 'resources_lib.Resources',
-        cluster_name: resources_utils.ClusterName,
+        cluster_name: 'resources_utils.ClusterName',
         region: 'clouds.Region',
         zones: Optional[List['clouds.Zone']],
         num_nodes: int,
@@ -252,10 +253,10 @@ class IBM(clouds.Cloud):
 
     @classmethod
     def get_default_instance_type(
-            cls,
-            cpus: Optional[str] = None,
-            memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None
+        cls,
+        cpus: Optional[str] = None,
+        memory: Optional[str] = None,
+        disk_tier: Optional['resources_utils.DiskTier'] = None
     ) -> Optional[str]:
         return service_catalog.get_default_instance_type(cpus=cpus,
                                                          memory=memory,
@@ -431,6 +432,11 @@ class IBM(clouds.Cloud):
         # pylint: disable=W0703
         except Exception as e:
             return (False, f'{str(e)}' + help_str)
+
+    @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        # TODO(seungjin): Check if the user has access to IBM COS.
+        return cls.check_credentials()
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         """Returns a {remote:local} credential path mapping

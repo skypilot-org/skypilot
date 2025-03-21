@@ -27,13 +27,14 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
-from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
 
@@ -454,6 +455,11 @@ class OCI(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}{credential_help_str}\n'
                 f'{cls._INDENT_PREFIX}Error details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    @classmethod
+    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        # TODO(seungjin): Check if the user has access to OCI Object Storage.
+        return cls.check_credentials()
 
     @classmethod
     def check_disk_tier(
