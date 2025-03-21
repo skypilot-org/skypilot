@@ -648,7 +648,7 @@ def autostop(
         try:
             cloud.check_features_are_supported(
                 handle.launched_resources,
-                {clouds.CloudImplementationFeatures.AUTO_TERMINATE})
+                {clouds.CloudImplementationFeatures.AUTO_DOWN})
         except exceptions.NotSupportedError as e:
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '
