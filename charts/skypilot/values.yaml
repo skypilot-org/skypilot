@@ -103,12 +103,17 @@ ingress-nginx:
 rbac:
   # Configure the RBAC permissions for the SkyPilot API server
   # TODO(aylei): Do not setup rbac policies when rbac.kubernetesCredentials.userKubeconfig=true
-  # Namespace-scoped rules of the namespace where the SkyPilot API server is deployed.
-  rules:
+  # Addtional grantedNamespaces other than the release namespace (where API server is deployed).
+  # Different namespaces may need different permissions, but it would be complex and error-prone to manage rules for each namespace.
+  # Instead, we aggregate all the permissions needed across namespaces and grant them to all the namespaces listed.
+  grantedNamespaces:
+  - namespace: "skypilot-system"
+  # Namespace-scoped rules that are granted to the release namespace and rbac.grantedNamespaces.
+  namespaceRules:
     # Required for managing pods and their lifecycle
     - apiGroups: [ "" ]
-      resources: [ "pods", "pods/status", "pods/exec" ]
-      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+      resources: [ "pods", "pods/status", "pods/exec", "pods/portforward" ]
+      verbs: [ "*" ]
     # Required for managing services for SkyPilot Pods
     - apiGroups: [ "" ]
       resources: [ "services" ]
@@ -117,29 +122,8 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "secrets" ]  
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-  # Cluster-scoped rules for API server.
-  clusterRules:
-    # Required for creating skypilot-system namespace, which hosts fuse device manager.
-    - apiGroups: [ "" ]
-      resources: [ "namespaces" ]  
-      verbs: [ "get", "list", "watch", "create" ]
-    # Required for getting node resources. 
-    - apiGroups: [ "" ]
-      resources: [ "nodes" ]
-      verbs: [ "get", "list", "watch" ]
-    # Required for granting cluster permissions to SkyPilot Pods.
-    - apiGroups: [ "rbac.authorization.k8s.io" ]
-      resources: [ "clusterroles", "clusterrolebindings" ]  
-      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-    # Required for autodetecting runtime classes
-    - apiGroups: [ "node.k8s.io" ]
-      resources: [ "runtimeclasses" ]  
-      verbs: [ "get", "list", "watch" ]
-    # Required for exposing services.
-    - apiGroups: [ "networking.k8s.io" ]
-      resources: [ "ingressclasses" ]
-      verbs: [ "get", "list", "watch" ]
     # Required for granting namespaced permissions to SkyPilot Pods and SkyPilot system components.
+    # TODO(aylei): This is too permissive, consider passing existing roles instead.
     - apiGroups: [ "rbac.authorization.k8s.io" ] 
       resources: [ "roles", "rolebindings" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ] 
@@ -154,6 +138,30 @@ rbac:
     # Required for managing service accounts for SkyPilot Pods and SkyPilot system components. 
     - apiGroups: [ "" ]
       resources: [ "serviceaccounts" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+  # Cluster-scoped rules for API server.
+  clusterRules:
+    # Required for managing skypilot-system namespace, which hosts skypilot system components like smarter-device-manager.
+    - apiGroups: [ "" ]
+      resources: [ "namespaces" ]  
+      resourceNames: [ "skypilot-system" ]
+      verbs: [ "get", "list", "watch", "create" ]
+    # Required for getting node resources. 
+    - apiGroups: [ "" ]
+      resources: [ "nodes" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for autodetecting runtime classes
+    - apiGroups: [ "node.k8s.io" ]
+      resources: [ "runtimeclasses" ]  
+      verbs: [ "get", "list", "watch" ]
+    # Required for exposing services.
+    - apiGroups: [ "networking.k8s.io" ]
+      resources: [ "ingressclasses" ]
+      verbs: [ "get", "list", "watch" ]
+    # TODO(aylei): This is too permissive, consider passing existing roles instead.
+    # Required for granting cluster permissions to SkyPilot Pods.
+    - apiGroups: [ "rbac.authorization.k8s.io" ]
+      resources: [ "clusterroles", "clusterrolebindings" ]  
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
     
 kubernetesCredentials:
