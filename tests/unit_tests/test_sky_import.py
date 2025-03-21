@@ -8,7 +8,7 @@ import sys
 
 import pytest
 
-from sky.adaptors.common import LazyImport
+from sky.adaptors import common as adaptors_common
 
 
 @pytest.fixture
@@ -17,7 +17,8 @@ def lazy_import_modules():
     return [
         obj._module_name
         for obj in gc.get_objects()
-        if isinstance(obj, LazyImport) and hasattr(obj, '_module_name')
+        if isinstance(obj, adaptors_common.LazyImport) and
+        hasattr(obj, '_module_name')
     ]
 
 
