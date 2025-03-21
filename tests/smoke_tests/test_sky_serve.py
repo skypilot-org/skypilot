@@ -817,7 +817,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes
 @pytest.mark.no_do  # Spot instances not on DO
 @pytest.mark.no_vast  # Vast doesn't support opening ports
-@pytest.mark.no_nebius # Spot instances are not supported by Nebius
+@pytest.mark.no_nebius  # Spot instances are not supported by Nebius
 @pytest.mark.parametrize('mode', ['rolling', 'blue_green'])
 def test_skyserve_new_autoscaler_update(mode: str, generic_cloud: str):
     """Test skyserve with update that changes autoscaler"""

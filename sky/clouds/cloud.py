@@ -50,6 +50,7 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_STOP = 'auto_stop'  # Pod/VM can stop itself
     AUTO_DOWN = 'auto_down'  # Pod/VM can down itself
 
+
 class CloudCapability(enum.Enum):
     # Compute capability.
     COMPUTE = 'compute'
