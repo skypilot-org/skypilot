@@ -48,69 +48,26 @@ class DockerLoginConfig:
 
     @classmethod
     def from_env_vars(cls, d: Dict[str, str]) -> 'DockerLoginConfig':
-        username = d[constants.DOCKER_USERNAME_ENV_VAR]
-        password = d[constants.DOCKER_PASSWORD_ENV_VAR]
-        server = d[constants.DOCKER_SERVER_ENV_VAR]
-
-        # Process command substitution in environment variables
-        username = cls._process_env_value(username, 'username')
-        password = cls._process_env_value(password, 'password')
-        server = cls._process_env_value(server, 'server')
-
         return cls(
-            username=username,
-            password=password,
-            server=server,
+            username=d[constants.DOCKER_USERNAME_ENV_VAR],
+            password=d[constants.DOCKER_PASSWORD_ENV_VAR],
+            server=d[constants.DOCKER_SERVER_ENV_VAR],
         )
 
-    @staticmethod
-    def _process_env_value(value: str, var_name: str) -> str:
-        """Process environment variable values, handling command
-        substitution and escaping.
-
-        Supports:
-        1. Command execution with $(command) syntax
-        2. Escaping with \\$(command) to use the literal string
-
-        Args:
-            value: The environment variable value to process
-            var_name: Name of the variable (for error reporting)
-
-        Returns:
-            Processed value with commands executed if applicable
+    def process_credential(self) -> None:
+        """Process a Docker credential for login.
+        
+        Handles escaped command substitution syntax and returns the properly
+        quoted string for shell execution. If the string starts with '\\$(' and
+        ends with ')', it will remove the escape character, allowing the literal
+        '$(' to be used.
         """
-        # Handle escaped command syntax: \$(command) -> $(command)
-        if value.startswith('\\$(') and value.endswith(')'):
-            return value[1:]  # Remove the escape character
+        # Handle escaped command substitution by removing the escape character
+        if self.username.startswith('\\$(') and self.username.endswith(')'):
+            self.username = self.username[1:-1]  # Remove escape character
 
-        # Handle command execution: $(command) -> execute and return result
-        if value.startswith('$(') and value.endswith(')'):
-            # Extract the command without the $( and ) wrapper
-            command = value[2:-1]
-            try:
-                result = subprocess_utils.run(
-                    command,
-                    shell=True,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    check=True,
-                    universal_newlines=True,
-                )
-                output = result.stdout.strip()
-                return output
-            except subprocess.CalledProcessError as e:
-                logger.error(
-                    f'Failed to execute command for Docker {var_name}: {e}')
-                logger.error(f'Command stderr: {e.stderr}')
-                raise ValueError(
-                    f'Command execution failed for Docker {var_name}. '
-                    f'Error: {e.stderr.strip() or str(e)}. '
-                    f'If you meant to use the literal string "{value}" as the '
-                    f'{var_name}, please escape it with a backslash: '
-                    f'\\"{value}"') from e
-
-        return value
-
+        if self.password.startswith('\\$(') and self.password.endswith(')'):
+            self.password = self.password[1:-1]  # Remove escape character
 
 # Copied from ray.autoscaler._private.ray_constants
 # The default maximum number of bytes to allocate to the object store unless
@@ -274,12 +231,11 @@ class DockerInitializer:
 
         # SkyPilot: Docker login if user specified a private docker registry.
         if 'docker_login_config' in self.docker_config:
-            # Docker login credentials can be specified as executable commands
-            # in the format "$(command)", which will be executed to get the
-            # actual value. To use a literal $(command) string, escape it with
-            # a backslash: \$(command)
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
+
+            docker_login_config.process_credential()
+
             self._run(
                 f'{self.docker_cmd} login --username '
                 f'{docker_login_config.username} '
