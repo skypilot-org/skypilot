@@ -77,37 +77,11 @@ To get the latest features and fixes, use the nightly build or [install from sou
 pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,nebius]"
 ```
 
-<script>
-// Track the timeout to be able to clear it later
-var replayTimeout;
-
-function pauseAndReplay(video) {
-  // Clear any existing timeout first
-  clearTimeout(replayTimeout);
-  
-  replayTimeout = setTimeout(function() {
-    video.currentTime = 0;
-    video.play();
-  }, 10000); // 10 second gap
-}
-
-function restartVideo(video) {
-  // Clear any pending auto-replay timeouts when manually restarting
-  clearTimeout(replayTimeout);
-  video.currentTime = 0;
-  video.play();
-}
-</script>
-<div style="position: relative; margin-bottom: 20px;">
-  <video id="video-with-badge" style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
-    <source src="docs/source/_static/intro-with-badge.mp4" type="video/mp4" />
+<p align="center">
+  <video width="100%" autoplay loop muted playsinline>
+    <source src="docs/source/_static/intro-with-badge.mp4" type="video/mp4">
   </video>
-  <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background-color: transparent; color: white; border: none; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
-</div>
-
-
-</script>
-
+</p>
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
