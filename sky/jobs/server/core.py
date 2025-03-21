@@ -105,7 +105,7 @@ def launch(
 
         local_to_controller_file_mounts = {}
 
-        if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+        if storage_lib.get_cached_enabled_storage_cloud_names_or_refresh():
             for task_ in dag.tasks:
                 controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                     task_, task_type='jobs')

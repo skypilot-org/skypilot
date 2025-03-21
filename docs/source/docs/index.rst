@@ -112,7 +112,7 @@ Read the research:
    :maxdepth: 1
    :caption: Clusters
 
-   Start a Cluster <../examples/interactive-development>
+   ../examples/interactive-development
    Cluster Jobs <../reference/job-queue>
    ../examples/auto-failover
    ../reference/auto-stop

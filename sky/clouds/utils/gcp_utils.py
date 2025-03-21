@@ -167,7 +167,7 @@ def _list_reservations_for_instance_type(
     return [GCPReservation.from_dict(r) for r in json.loads(stdout)]
 
 
-def get_minimal_permissions() -> List[str]:
+def get_minimal_compute_permissions() -> List[str]:
     permissions = copy.copy(constants.VM_MINIMAL_PERMISSIONS)
     if skypilot_config.get_nested(('gcp', 'vpc_name'), None) is None:
         # If custom VPC is not specified, permissions to modify network are
@@ -178,5 +178,15 @@ def get_minimal_permissions() -> List[str]:
     if (skypilot_config.get_nested(('gcp', 'prioritize_reservations'), False) or
             skypilot_config.get_nested(('gcp', 'specific_reservations'), [])):
         permissions += constants.RESERVATION_PERMISSIONS
+
+    permissions += constants.GCP_MINIMAL_PERMISSIONS
+
+    return permissions
+
+
+def get_minimal_storage_permissions() -> List[str]:
+    permissions = copy.copy(constants.STORAGE_MINIMAL_PERMISSIONS)
+
+    permissions += constants.GCP_MINIMAL_PERMISSIONS
 
     return permissions

@@ -297,8 +297,8 @@ def _is_permission_satisfied(service_account, crm, iam, required_permissions,
 def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     """Setup a gcp service account with IAM roles.
 
-    Creates a gcp service acconut and binds IAM roles which allow it to control
-    control storage/compute services. Specifically, the head node needs to have
+    Creates a gcp service account and binds IAM roles which allow it to control
+    storage/compute services. Specifically, the head node needs to have
     an IAM role that allows it to create further gce instances and store items
     in google cloud storage.
 
@@ -311,7 +311,7 @@ def _configure_iam_role(config: common.ProvisionConfig, crm, iam) -> dict:
     )
     service_account = _get_service_account(email, project_id, iam)
 
-    permissions = gcp_utils.get_minimal_permissions()
+    permissions = gcp_utils.get_minimal_compute_permissions()
     roles = constants.DEFAULT_SERVICE_ACCOUNT_ROLES
     if config.provider_config.get(constants.HAS_TPU_PROVIDER_FIELD, False):
         roles = (constants.DEFAULT_SERVICE_ACCOUNT_ROLES +

@@ -1,4 +1,5 @@
 import argparse
+import time
 
 import requests
 
@@ -12,39 +13,35 @@ url = f'{args.endpoint}/'
 
 expected = WORD_TO_STREAM.split()
 index = 0
-max_retries = 3
-retry_count = 0
+max_attempts = 3
 
-while retry_count < max_retries:
+for attempt in range(max_attempts):
     try:
         with requests.get(url, stream=True) as response:
-            response.raise_for_status()
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    current = chunk.decode().strip()
-                    assert current == expected[index], (current,
-                                                        expected[index])
-                    index += 1
-            break  # Success, exit the loop
-    except requests.exceptions.HTTPError as e:
-        if e.response.status_code == 503:
-            # 503 Service Unavailable errors can occur when the load balancer has no available replicas.
-            # As seen in the logs: "No replica selected for request" and "Available Replica URLs: []"
-            # The availability of replicas can fluctuate during service startup and operation.
-            # Implementing retries helps handle these temporary unavailability periods.
-            retry_count += 1
-            if retry_count < max_retries:
+            if response.status_code == 503:
+                # 503 Service Unavailable errors can occur when the load balancer has no available replicas.
+                # As seen in the logs: "No replica selected for request" and "Available Replica URLs: []"
+                # The availability of replicas can fluctuate during service startup and operation.
+                # Implementing retries helps handle these temporary unavailability periods.
                 print(
-                    f"Got 503 Server Error, retrying in 5 seconds... (attempt {retry_count}/{max_retries})"
+                    f"Retrying in 5 seconds... (attempt {attempt}/{max_attempts})"
                 )
-                import time
                 time.sleep(5)
+                continue
             else:
-                print(f"Max retries reached after {max_retries} attempts")
-                raise
-        else:
-            # For other HTTP errors, raise immediately
-            raise
+                response.raise_for_status()
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        current = chunk.decode().strip()
+                        assert current == expected[index], (current,
+                                                            expected[index])
+                        index += 1
+                break  # Success, exit the loop
+    except requests.exceptions.ConnectionError:
+        # EKS could have connection errors when the service is starting up.
+        print(f"Retrying in 5 seconds... (attempt {attempt}/{max_attempts})")
+        time.sleep(5)
+        continue
 
 assert index == len(expected)
 

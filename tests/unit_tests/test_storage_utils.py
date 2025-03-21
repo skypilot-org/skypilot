@@ -1,10 +1,14 @@
 import io
 import os
+import shlex
+import subprocess
 import tempfile
+from unittest import mock
 import zipfile
 
 import pytest
 
+from sky import exceptions
 from sky.data import storage_utils
 from sky.skylet import constants
 
@@ -68,6 +72,15 @@ def skyignore_dir():
         yield temp_dir
 
 
+@pytest.fixture
+def basic_git_repo():
+    """Fixture that provides a basic initialized git repository."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Set up git repo
+        subprocess.run(['git', 'init'], cwd=temp_dir, check=True)
+        yield temp_dir
+
+
 def test_get_excluded_files_from_skyignore_no_file():
     excluded_files = storage_utils.get_excluded_files_from_skyignore('.')
     assert not excluded_files
@@ -119,3 +132,360 @@ def test_zip_files_and_folders(skyignore_dir):
         log_file.seek(0)
         log_file_content = log_file.read()
         assert f'Zipped {skyignore_dir}' in log_file_content
+
+
+def test_get_excluded_files_from_gitignore_with_submodules():
+    """Test gitignore exclusion with submodules."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Set up main repo
+        subprocess.run(['git', 'init'], cwd=temp_dir, check=True)
+
+        # Create .gitignore FIRST
+        gitignore_content = """
+*.pyc
+__pycache__/
+test.log
+"""
+        with open(os.path.join(temp_dir, '.gitignore'), 'w') as f:
+            f.write(gitignore_content)
+
+        # Create some files
+        with open(os.path.join(temp_dir, 'main.py'), 'w') as f:
+            f.write('print("main")')
+        with open(os.path.join(temp_dir, 'test.pyc'), 'w') as f:
+            f.write('compiled')
+        with open(os.path.join(temp_dir, 'test.log'), 'w') as f:
+            f.write('log')
+
+        # Now add - ignored files won't be added
+        subprocess.run(['git', 'add', '.'], cwd=temp_dir, check=True)
+
+        # Create and set up submodule
+        submodule_dir = os.path.join(temp_dir, 'submod')
+        os.makedirs(submodule_dir)
+        subprocess.run(['git', 'init'], cwd=submodule_dir, check=True)
+
+        # Create .gitignore in submodule FIRST
+        sub_gitignore_content = """
+*.txt
+temp/
+"""
+        with open(os.path.join(submodule_dir, '.gitignore'), 'w') as f:
+            f.write(sub_gitignore_content)
+
+        # Create some files in submodule
+        with open(os.path.join(submodule_dir, 'sub.py'), 'w') as f:
+            f.write('print("sub")')
+        with open(os.path.join(submodule_dir, 'data.txt'), 'w') as f:
+            f.write('data')
+
+        # Add and commit submodule - ignored files won't be added
+        subprocess.run(['git', 'add', '.'], cwd=submodule_dir, check=True)
+        subprocess.run(['git', 'config', 'user.name', 'Test User'],
+                       cwd=submodule_dir,
+                       check=True)
+        subprocess.run(['git', 'config', 'user.email', 'test@example.com'],
+                       cwd=submodule_dir,
+                       check=True)
+        subprocess.run(['git', 'commit', '-m', 'Initial submodule commit'],
+                       cwd=submodule_dir,
+                       check=True)
+
+        # Add submodule to main repo
+        subprocess.run(['git', 'submodule', 'add', './submod'],
+                       cwd=temp_dir,
+                       check=True)
+
+        # Test gitignore exclusions
+        excluded_files = storage_utils.get_excluded_files_from_gitignore(
+            temp_dir)
+        norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+        # Check files from main repo's .gitignore
+        assert 'test.pyc' in norm_excluded_files
+        assert 'test.log' in norm_excluded_files
+
+        # Check files from submodule's .gitignore
+        assert os.path.join('submod', 'data.txt') in norm_excluded_files
+
+
+def test_get_excluded_files_no_git():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create .gitignore but don't initialize git
+        with open(os.path.join(temp_dir, '.gitignore'), 'w') as f:
+            f.write('*.pyc\n')
+
+        with mock.patch('sky.data.storage_utils.logger') as mock_logger:
+            excluded_files = storage_utils.get_excluded_files_from_gitignore(
+                temp_dir)
+
+        assert excluded_files == []
+        mock_logger.warning.assert_called_once()
+        assert '.gitignore file will be ignored' in mock_logger.warning.call_args[
+            0][0]
+        assert storage_utils._USE_SKYIGNORE_HINT in mock_logger.warning.call_args[
+            0][0]
+
+
+def test_get_excluded_files_git_not_installed():
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create .gitignore
+        with open(os.path.join(temp_dir, '.gitignore'), 'w') as f:
+            f.write('*.pyc\n')
+
+        def mock_run(*args, **kwargs):
+            raise subprocess.CalledProcessError(
+                exceptions.COMMAND_NOT_FOUND_EXIT_CODE,
+                cmd='git',
+                stderr='git: command not found')
+
+        with mock.patch('subprocess.run', side_effect=mock_run):
+            with mock.patch('sky.data.storage_utils.logger') as mock_logger:
+                excluded_files = storage_utils.get_excluded_files_from_gitignore(
+                    temp_dir)
+
+        assert excluded_files == []
+        mock_logger.warning.assert_called_once()
+        assert 'git is not installed' in mock_logger.warning.call_args[0][0]
+        assert storage_utils._USE_SKYIGNORE_HINT in mock_logger.warning.call_args[
+            0][0]
+
+
+def test_get_excluded_files_with_negation(basic_git_repo):
+    """Test negation patterns in .gitignore."""
+    temp_dir = basic_git_repo
+
+    # Create .gitignore with negation pattern
+    with open(os.path.join(temp_dir, '.gitignore'), 'w') as f:
+        f.write("""
+*.txt
+!important.txt
+""")
+
+    # Create files
+    for filename in ['test.txt', 'data.txt', 'important.txt']:
+        with open(os.path.join(temp_dir, filename), 'w') as fh:
+            fh.write('content')
+
+    # Check excluded files
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(temp_dir)
+    norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+    # test.txt and data.txt should be ignored, but not important.txt
+    assert 'test.txt' in norm_excluded_files
+    assert 'data.txt' in norm_excluded_files
+    assert 'important.txt' not in norm_excluded_files
+
+
+def test_get_excluded_files_from_subdirectory(basic_git_repo):
+    """Test exclusion from a subdirectory with its own .gitignore."""
+    temp_dir = basic_git_repo
+
+    # Create subdir with its own .gitignore
+    subdir = os.path.join(temp_dir, 'subdir')
+    os.makedirs(subdir)
+    with open(os.path.join(subdir, '.gitignore'), 'w') as f:
+        f.write('file.txt\n')
+
+    # Create the file that should be ignored
+    with open(os.path.join(subdir, 'file.txt'), 'w') as f:
+        f.write('test content')
+
+    # Call get_excluded_files_from_gitignore on the subdir
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(subdir)
+    assert 'file.txt' in [os.path.normpath(f) for f in excluded_files]
+
+
+def test_empty_gitignore_file(basic_git_repo):
+    """Test that empty .gitignore files don't cause issues."""
+    temp_dir = basic_git_repo
+
+    # Create empty .gitignore
+    with open(os.path.join(temp_dir, '.gitignore'), 'w') as f:
+        f.write('')  # Empty file
+
+    # Create some files
+    with open(os.path.join(temp_dir, 'test.txt'), 'w') as f:
+        f.write('test content')
+
+    # Empty .gitignore should not exclude any files
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(temp_dir)
+    assert not excluded_files, f"Expected no excluded files, got {excluded_files}"
+
+
+def test_get_excluded_files_with_nested_gitignores(basic_git_repo):
+    """Test handling of nested directories with multiple .gitignore files."""
+    temp_dir = basic_git_repo
+
+    # Helper function to create file with content
+    def create_file(path, content='content'):
+        with open(path, 'w') as f:
+            f.write(content)
+
+    # Create root .gitignore
+    create_file(os.path.join(temp_dir, '.gitignore'), '*.log\n')
+
+    # Create nested directory structure with different .gitignore files
+    level1 = os.path.join(temp_dir, 'level1')
+    level2 = os.path.join(level1, 'level2')
+    os.makedirs(level1)
+    os.makedirs(level2)
+
+    # Create .gitignore files at each level
+    create_file(os.path.join(level1, '.gitignore'), '*.tmp\n')
+    create_file(os.path.join(level2, '.gitignore'), '*.dat\n')
+
+    # Create test files at each level
+    create_file(os.path.join(temp_dir, 'root.log'), 'root log')
+    create_file(os.path.join(temp_dir, 'root.tmp'), 'root tmp')
+
+    create_file(os.path.join(level1, 'level1.log'), 'level1 log')
+    create_file(os.path.join(level1, 'level1.tmp'), 'level1 tmp')
+    create_file(os.path.join(level1, 'level1.dat'), 'level1 dat')
+
+    create_file(os.path.join(level2, 'level2.log'), 'level2 log')
+    create_file(os.path.join(level2, 'level2.tmp'), 'level2 tmp')
+    create_file(os.path.join(level2, 'level2.dat'), 'level2 dat')
+
+    # Test from root directory
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(temp_dir)
+    norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+    # All .log files should be excluded via root gitignore
+    assert 'root.log' in norm_excluded_files
+    assert os.path.join('level1', 'level1.log') in norm_excluded_files
+    assert os.path.join('level1', 'level2', 'level2.log') in norm_excluded_files
+
+    # All .tmp files should be excluded via level1 gitignore
+    assert 'root.tmp' not in norm_excluded_files  # Not excluded at root level
+    assert os.path.join('level1', 'level1.tmp') in norm_excluded_files
+    assert os.path.join('level1', 'level2', 'level2.tmp') in norm_excluded_files
+
+    # All .dat files should be excluded via level2 gitignore
+    assert os.path.join(
+        'level1',
+        'level1.dat') not in norm_excluded_files  # Not excluded at level1
+    assert os.path.join('level1', 'level2', 'level2.dat') in norm_excluded_files
+
+    # Test from level1 directory
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(level1)
+    norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+    # Both .tmp and .log files should be excluded
+    assert 'level1.log' in norm_excluded_files  # From parent .gitignore
+    assert 'level1.tmp' in norm_excluded_files  # From level1 .gitignore
+    assert os.path.join(
+        'level2', 'level2.dat') in norm_excluded_files  # From level2 .gitignore
+
+
+def test_complex_negation_patterns(basic_git_repo):
+    """Test complex negation patterns in .gitignore, including directory-specific patterns."""
+    temp_dir = basic_git_repo
+
+    # Helper function to create file with content
+    def create_file(path, content='content'):
+        with open(path, 'w') as f:
+            f.write(content)
+
+    # Create directory structure
+    src_dir = os.path.join(temp_dir, 'src')
+    test_dir = os.path.join(src_dir, 'test')
+    docs_dir = os.path.join(temp_dir, 'docs')
+
+    for d in [src_dir, test_dir, docs_dir]:
+        os.makedirs(d)
+
+    # Create .gitignore with complex negation patterns
+    create_file(
+        os.path.join(temp_dir, '.gitignore'), """
+# Ignore all .txt files
+*.txt
+
+# But not in the docs directory
+!docs/*.txt
+
+# Ignore all files in src directory
+src/*
+
+# But not .py files in src
+!src/*.py
+
+# Except for test_*.py files
+src/test_*.py
+
+# But allow specific test files
+!src/test_important.py
+""")
+
+    # Create various files to test patterns
+    files_to_create = [
+        # Root dir files
+        os.path.join(temp_dir, 'readme.txt'),
+        os.path.join(temp_dir, 'config.py'),
+
+        # docs dir files
+        os.path.join(docs_dir, 'manual.txt'),
+        os.path.join(docs_dir, 'guide.md'),
+
+        # src dir files
+        os.path.join(src_dir, 'main.py'),
+        os.path.join(src_dir, 'utils.py'),
+        os.path.join(src_dir, 'test_main.py'),
+        os.path.join(src_dir, 'test_important.py'),
+        os.path.join(src_dir, 'data.txt'),
+
+        # src/test dir files
+        os.path.join(test_dir, 'test_utils.py'),
+        os.path.join(test_dir, 'fixture.txt'),
+    ]
+
+    for f in files_to_create:
+        create_file(f)
+
+    # Check excluded files
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(temp_dir)
+    norm_excluded_files = [os.path.normpath(f) for f in excluded_files]
+
+    # Files that should be excluded (based on actual git behavior)
+    should_exclude = [
+        'readme.txt',  # *.txt
+        os.path.join('src', 'data.txt'),  # src/* and *.txt
+        os.path.join('src', 'test_main.py'),  # src/test_*.py
+    ]
+
+    # Files that should NOT be excluded
+    should_not_exclude = [
+        'config.py',  # Not matched by any pattern
+        os.path.join('docs', 'manual.txt'),  # !docs/*.txt
+        os.path.join('docs', 'guide.md'),  # Not matched by any pattern
+        os.path.join('src', 'main.py'),  # !src/*.py
+        os.path.join('src', 'utils.py'),  # !src/*.py
+        os.path.join('src', 'test_important.py'),  # !src/test_important.py
+    ]
+
+    # Assert all files that should be excluded are in the list
+    for f in should_exclude:
+        assert f in norm_excluded_files, f"Expected {f} to be excluded"
+
+    # Assert all files that should not be excluded are not in the list
+    for f in should_not_exclude:
+        assert f not in norm_excluded_files, f"Expected {f} not to be excluded"
+
+    # Check the src/test directory
+    # Git might represent it either as individual files or as a directory pattern
+    is_test_dir_excluded = False
+
+    # Option 1: The test directory is excluded as a wildcard pattern
+    test_dir_patterns = [
+        os.path.join('src', 'test', '*'),
+        os.path.join('src', 'test')
+    ]
+    if any(pattern in norm_excluded_files for pattern in test_dir_patterns):
+        is_test_dir_excluded = True
+
+    # Option 2: Individual files within the test directory are excluded
+    elif (os.path.join('src', 'test', 'fixture.txt') in norm_excluded_files and
+          os.path.join('src', 'test', 'test_utils.py') in norm_excluded_files):
+        is_test_dir_excluded = True
+
+    assert is_test_dir_excluded, "Expected src/test directory contents to be excluded"

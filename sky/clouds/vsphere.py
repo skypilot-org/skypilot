@@ -254,8 +254,9 @@ class Vsphere(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        vSphere's compute service."""
 
         try:
             # pylint: disable=import-outside-toplevel,unused-import

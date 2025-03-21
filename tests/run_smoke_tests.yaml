@@ -15,5 +15,5 @@ setup: |
 run: |
   # docker exec sandbox /bin/bash -c "cd /root/skypilot && pytest tests/test_smoke.py --terminate-on-failure"
   docker exec sandbox /bin/bash -c "cd /root/skypilot && pytest tests/test_smoke.py --terminate-on-failure --lf"
-  # docker exec sandbox /bin/bash -c "cd /root/skypilot && tests/backward_compatibility_tests.sh"
+  # docker exec sandbox /bin/bash -c "cd /root/skypilot && pytest tests/smoke_tests/test_backward_compat.py"
   # docker exec sandbox /bin/bash -c "ps aux | grep "sky|pytest" | awk '{print $2}' | xargs kill; export SKYPILOT_DEV=1 sky down -a"

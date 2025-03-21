@@ -249,8 +249,9 @@ class Paperspace(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Verify that the user has valid credentials for Paperspace."""
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Paperspace's compute service."""
         try:
             # attempt to make a CURL request for listing instances
             utils.PaperspaceCloudClient().list_instances()

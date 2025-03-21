@@ -34,7 +34,7 @@ repos:
         files: "^sky/skylet/providers/ibm/.*"  # Only match IBM-specific directory
 
 -   repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v0.991  # Match the version from requirements
+    rev: v1.4.0  # Match the version from requirements
     hooks:
     -   id: mypy
         args:
@@ -58,7 +58,7 @@ repos:
         name: yapf
         exclude: (sky/skylet/providers/ibm/.*)  # Matches exclusions from the script
         args: ['--recursive', '--parallel', '--in-place']  # Only necessary flags
-        additional_dependencies: [toml==0.10.2]
+        additional_dependencies: [toml==0.10.2] # Match the version from requirements
 
 -   repo: https://github.com/pylint-dev/pylint
     rev: v2.14.5  # Match the version from requirements
