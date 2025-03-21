@@ -77,11 +77,7 @@ To get the latest features and fixes, use the nightly build or [install from sou
 pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,nebius]"
 ```
 
-<p align="center">
-  <video width="100%" autoplay loop muted playsinline>
-    <source src="docs/source/_static/intro-with-badge.mp4" type="video/mp4">
-  </video>
-</p>
+![intro-with-badge](docs/source/_static/intro-with-badge.gif)
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
