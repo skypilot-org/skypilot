@@ -1,6 +1,7 @@
 """ Nebius Cloud. """
 import logging
 import os
+import re
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -25,17 +26,23 @@ _INDENT_PREFIX = '    '
 
 
 def nebius_profile_in_aws_cred() -> bool:
-    """Checks if Nebius Object Storage profile is set in aws credentials"""
+    """Checks if Nebius Object Storage profile is set in aws credentials
+     and has endpoint_url."""
 
     profile_path = os.path.expanduser('~/.aws/credentials')
+    nebius_endpoint_re = re.compile(r'/^endpoint_url *= *https:\/\/storage\.[a-zA-Z1-9\-]*\.nebius\.cloud:443$/gm')  # pylint: disable=line-too-long
     nebius_profile_exists = False
+    nebius_endpoint_exists = False
     if os.path.isfile(profile_path):
         with open(profile_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[{nebius.NEBIUS_PROFILE_NAME}]' in line:
                     nebius_profile_exists = True
+                if nebius_endpoint_re.match(line):
+                    nebius_endpoint_exists = True
                     break
-    return nebius_profile_exists
+
+    return nebius_profile_exists and nebius_endpoint_exists
 
 
 @registry.CLOUD_REGISTRY.register
@@ -297,25 +304,30 @@ class Nebius(clouds.Cloud):
         return True, None
 
     @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to Nebius Object Storage.
 
         Returns:
             A tuple of a boolean value and a hint message where the bool
-            is True when both credentials needed for Nebius is set. It is False
-            when either of those are not set, which would hint with a
-            string on unset credential.
+            is True when credentials needed for Nebius Object Storage is set.
+            It is False when either of those are not set, which would hint
+            with a string on unset credential.
         """
         hints = None
         if not nebius_profile_in_aws_cred():
-            hints = f'[{nebius.NEBIUS_PROFILE_NAME}] profile is not set in ~/.aws/credentials.'  # pylint: disable=line-too-long
+            hints = (f'[{nebius.NEBIUS_PROFILE_NAME}] profile '
+            'is not set in ~/.aws/credentials.')
         if hints:
             hints += ' Run the following commands:'
             if not nebius_profile_in_aws_cred():
-                hints += f'\n{_INDENT_PREFIX}  $ pip install boto3'
-                hints += f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius'
-            hints += f'\n{_INDENT_PREFIX}For more info: '
-            hints += 'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius'  # pylint: disable=line-too-long
+                hints += (
+                    f'\n{_INDENT_PREFIX}  $ pip install boto3'
+                    f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius'
+                )
+            hints += (
+                f'\n{_INDENT_PREFIX}For more info: '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius' # pylint: disable=line-too-long
+            )
         return (False, hints) if hints else (True, hints)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
