@@ -69,6 +69,7 @@ class DockerLoginConfig:
         if self.password.startswith('\\$(') and self.password.endswith(')'):
             self.password = self.password[1:-1]  # Remove escape character
 
+
 # Copied from ray.autoscaler._private.ray_constants
 # The default maximum number of bytes to allocate to the object store unless
 # overridden by the user.
