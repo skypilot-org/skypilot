@@ -7,9 +7,9 @@ ARG DEBIAN_FRONTEND=noninteractive
 # Detect architecture
 ARG TARGETARCH
 
-# Initialize conda for root user, install ssh and other local dependencies
+# Initialize conda for root user, install ssh, tini, and other local dependencies
 RUN apt update -y && \
-    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl -y && \
+    apt install git gcc rsync sudo patch openssh-server pciutils nano fuse socat netcat-openbsd curl tini -y && \
     rm -rf /var/lib/apt/lists/* && \
     apt remove -y python3 && \
     conda init
@@ -58,15 +58,6 @@ RUN conda init && \
 
 # Set PYTHONUNBUFFERED=1 to have Python print to stdout/stderr immediately
 ENV PYTHONUNBUFFERED=1
-
-# Switch back to root to install tini
-USER root
-
-# Install tini 
-RUN apt-get update && apt-get install -y tini && apt-get clean
-
-# Switch back to sky user
-USER sky
 
 # Set tini as entrypoint 
 ENTRYPOINT ["/usr/bin/tini", "--"]
