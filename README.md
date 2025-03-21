@@ -61,8 +61,8 @@ SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
 SkyPilot **cuts your cloud costs & maximizes GPU availability**:
 * Autostop: automatic cleanup of idle resources
-* [Managed Spot](https://docs.skypilot.co/en/latest/examples/managed-jobs.html): 3-6x cost savings using spot instances, with preemption auto-recovery
-* Optimizer: auto-selects the cheapest & most available infra
+* [Spot instance support](https://docs.skypilot.co/en/latest/examples/spot-jobs.html): 3-6x cost savings, with preemption auto-recovery
+* Intelligent scheduling: automatically run on the cheapest & most available infra
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
@@ -76,6 +76,37 @@ To get the latest features and fixes, use the nightly build or [install from sou
 # Choose your clouds:
 pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,nebius]"
 ```
+
+<script>
+// Track the timeout to be able to clear it later
+var replayTimeout;
+
+function pauseAndReplay(video) {
+  // Clear any existing timeout first
+  clearTimeout(replayTimeout);
+  
+  replayTimeout = setTimeout(function() {
+    video.currentTime = 0;
+    video.play();
+  }, 10000); // 10 second gap
+}
+
+function restartVideo(video) {
+  // Clear any pending auto-replay timeouts when manually restarting
+  clearTimeout(replayTimeout);
+  video.currentTime = 0;
+  video.play();
+}
+</script>
+<div style="position: relative; margin-bottom: 20px;">
+  <video id="video-with-badge" style="width: 100%; height: auto;" autoplay muted playsinline onended="pauseAndReplay(this)">
+    <source src="../_static/intro-with-badge.mp4" type="video/mp4" />
+  </video>
+  <button onclick="restartVideo(this.previousElementSibling)" title="Restart" style="position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; display: flex; align-items: center; justify-content: center; background-color: transparent; color: white; border: none; cursor: pointer; opacity: 0.7; transition: opacity 0.3s; font-size: 18px;">↺</button>
+</div>
+
+
+</script>
 
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
@@ -141,10 +172,6 @@ SkyPilot then performs the heavy-lifting for you, including:
 3. Sync the local `workdir` to the VM
 4. Run the task's `setup` commands to prepare the VM for running the task
 5. Run the task's `run` commands
-
-<p align="center">
-  <img src="https://i.imgur.com/TgamzZ2.gif" alt="SkyPilot Demo"/>
-</p>
 
 
 See [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html) to get started with SkyPilot.
