@@ -44,7 +44,7 @@ class Nebius(clouds.Cloud):
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.AUTO_DOWN:
-            ('Autodown not supported. Can\'t delete disk.'),
+            ('Autodown not supported. Can\'t delete OS disk.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:

@@ -84,7 +84,7 @@ def test_job_queue(generic_cloud: str, accelerator: Dict[str, str]):
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-@pytest.mark.no_nebius  # Doesn't support Nebius for now
+@pytest.mark.no_nebius  # Nebius does not support Docker
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 @pytest.mark.parametrize(
     'image_id',
@@ -227,7 +227,7 @@ def test_scp_job_queue():
 @pytest.mark.no_oci  # OCI Cloud does not have T4 gpus.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius Cloud does not have T4 gpus.
+@pytest.mark.no_nebius  # Nebius does not have T4 gpus.
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_job_queue_multinode(generic_cloud: str, accelerator: Dict[str, str]):
     accelerator = accelerator.get(generic_cloud, 'T4')
@@ -382,7 +382,7 @@ def test_ibm_job_queue_multinode():
 @pytest.mark.no_scp  # Doesn't support SCP for now
 @pytest.mark.no_oci  # Doesn't support OCI for now
 @pytest.mark.no_kubernetes  # Doesn't support Kubernetes for now
-@pytest.mark.no_nebius  # Doesn't support Nebius for now
+@pytest.mark.no_nebius  # Nebius does not support Docker
 # TODO(zhwu): we should fix this for kubernetes
 def test_docker_preinstalled_package(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
@@ -1201,7 +1201,6 @@ def test_azure_start_stop():
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_kubernetes  # Kubernetes does not autostop yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not autostop yet
 def test_autostop(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 7m15s (435s) to autostop a VM, so here we use 600 to ensure
@@ -1270,7 +1269,7 @@ def test_autostop(generic_cloud: str):
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping in SkyPilot implementation
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet. Run test_scp_autodown instead.
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius does not support stopping in SkyPilot implementation
+@pytest.mark.no_nebius  # Nebius does not support autodown
 def test_autodown(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     # Azure takes ~ 13m30s (810s) to autodown a VM, so here we use 900 to ensure
@@ -1396,7 +1395,7 @@ def test_cancel_azure():
 @pytest.mark.no_paperspace  # Paperspace has `gnome-shell` on nvidia-smi
 @pytest.mark.no_scp  # SCP does not support num_nodes > 1 yet
 @pytest.mark.no_vast  # Vast does not support num_nodes > 1 yet
-@pytest.mark.no_nebius  # Nebius Cloud does not have V100 gpus
+@pytest.mark.no_nebius  # Nebius Cloud does not work with Cuda 11
 @pytest.mark.resource_heavy
 @pytest.mark.parametrize('accelerator', [{'do': 'H100'}])
 def test_cancel_pytorch(generic_cloud: str, accelerator: Dict[str, str]):
