@@ -149,6 +149,10 @@ def create_endpoint():
 
 
 def check_credentials() -> Tuple[bool, Optional[str]]:
+    return check_storage_credentials()
+
+
+def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Cloudflare R2.
 
     Returns:

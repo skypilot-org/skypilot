@@ -93,7 +93,7 @@ SKYLET_VERSION = '12'
 # The version of the lib files that skylet/jobs use. Whenever there is an API
 # change for the job_lib or log_lib, we need to bump this version, so that the
 # user can be notified to update their SkyPilot version on the remote cluster.
-SKYLET_LIB_VERSION = 2
+SKYLET_LIB_VERSION = 3
 SKYLET_VERSION_FILE = '~/.sky/skylet_version'
 
 # `sky jobs dashboard`-related
@@ -267,6 +267,12 @@ USER_ID_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER_ID'
 # Similar to USER_ID_ENV_VAR, this is mainly used to make sure sky commands
 # runs on a VM launched by SkyPilot will be recognized as the same user.
 USER_ENV_VAR = f'{SKYPILOT_ENV_VAR_PREFIX}USER'
+
+# Internal: Env var indicating the system is running with a remote API server.
+# It is used for internal purposes, including the jobs controller to mark
+# clusters as launched with a remote API server.
+USING_REMOTE_API_SERVER_ENV_VAR = (
+    f'{SKYPILOT_ENV_VAR_PREFIX}USING_REMOTE_API_SERVER')
 
 # In most clouds, cluster names can only contain lowercase letters, numbers
 # and hyphens. We use this regex to validate the cluster name.

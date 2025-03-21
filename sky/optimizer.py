@@ -1225,7 +1225,8 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         # Explicitly check again to update the enabled cloud list.
         sky_check.check(quiet=True,
                         clouds=list(clouds_need_recheck -
-                                    global_disabled_clouds))
+                                    global_disabled_clouds),
+                        capability=sky_check.CloudCapability.COMPUTE)
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
@@ -1328,13 +1329,17 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Style.RESET_ALL}')
                 else:
                     if resources.cpus is not None:
-                        logger.info('Try specifying a different CPU count, '
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different CPU count, '
                                     'or add "+" to the end of the CPU count '
-                                    'to allow for larger instances.')
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                     if resources.memory is not None:
-                        logger.info('Try specifying a different memory size, '
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different memory size, '
                                     'or add "+" to the end of the memory size '
-                                    'to allow for larger instances.')
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{repr(cloud)}: {hint}')
 

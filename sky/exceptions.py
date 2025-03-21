@@ -9,7 +9,9 @@ from typing import Any, Dict, List, Optional, Sequence
 from sky.utils import env_options
 
 if typing.TYPE_CHECKING:
+    from sky import jobs as managed_jobs
     from sky.backends import backend
+    from sky.skylet import job_lib
     from sky.utils import status_lib
 
 # Return code for keyboard interruption and SIGTSTP
@@ -22,16 +24,25 @@ MOUNT_PATH_NON_EMPTY_CODE = 42
 INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
+# Return code from bash when a command is not found
+COMMAND_NOT_FOUND_EXIT_CODE = 127
 # Architecture, such as arm64, not supported by the dependency
 ARCH_NOT_SUPPORTED_EXIT_CODE = 133
 
 
-def is_safe_exception(exc: Exception) -> bool:
+def is_safe_exception(exc: BaseException) -> bool:
     """Returns True if the exception is safe to send to clients.
 
     Safe exceptions are:
     1. Built-in exceptions
     2. SkyPilot's own exceptions
+
+    Args:
+        exc: The exception to check, accept BaseException to handle SystemExit
+            and KeyboardInterrupt.
+
+    Returns:
+        True if the exception is safe to send to clients, False otherwise.
     """
     module = type(exc).__module__
 
@@ -46,7 +57,7 @@ def is_safe_exception(exc: Exception) -> bool:
     return False
 
 
-def wrap_exception(exc: Exception) -> Exception:
+def wrap_exception(exc: BaseException) -> BaseException:
     """Wraps non-safe exceptions into SkyPilot exceptions
 
     This is used to wrap exceptions that are not safe to deserialize at clients.
@@ -62,7 +73,8 @@ def wrap_exception(exc: Exception) -> Exception:
                       error_type=type(exc).__name__)
 
 
-def serialize_exception(e: Exception) -> Dict[str, Any]:
+# Accept BaseException to handle SystemExit and KeyboardInterrupt
+def serialize_exception(e: BaseException) -> Dict[str, Any]:
     """Serialize the exception.
 
     This function also wraps any unsafe exceptions (e.g., cloud exceptions)
@@ -154,6 +166,15 @@ class ResourcesUnavailableError(Exception):
         return self
 
 
+class KubeAPIUnreachableError(ResourcesUnavailableError):
+    """Raised when the Kubernetes API is currently unreachable.
+
+    This is a subclass of ResourcesUnavailableError to trigger same failover
+    behavior as other ResourcesUnavailableError.
+    """
+    pass
+
+
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
     pass
@@ -236,7 +257,7 @@ class CommandError(SkyPilotExcludeArgsBaseException):
         else:
             if (len(command) > 100 and
                     not env_options.Options.SHOW_DEBUG_INFO.get()):
-                # Chunck the command to avoid overflow.
+                # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
                        f'{returncode}.\n{error_msg}')
@@ -449,3 +470,80 @@ class ApiServerConnectionError(RuntimeError):
             f'Could not connect to SkyPilot API server at {server_url}. '
             f'Please ensure that the server is running. '
             f'Try: curl {server_url}/api/health')
+
+
+class JobExitCode(enum.IntEnum):
+    """Job exit code enum.
+
+    These codes are used as return codes for job-related operations and as
+    process exit codes to indicate job status.
+    """
+
+    SUCCEEDED = 0
+    """The job completed successfully"""
+
+    FAILED = 100
+    """The job failed (due to user code, setup, or driver failure)"""
+
+    NOT_FINISHED = 101
+    """The job has not finished yet"""
+
+    NOT_FOUND = 102
+    """The job was not found"""
+
+    CANCELLED = 103
+    """The job was cancelled by the user"""
+
+    @classmethod
+    def from_job_status(cls,
+                        status: Optional['job_lib.JobStatus']) -> 'JobExitCode':
+        """Convert a job status to an exit code."""
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky.skylet import job_lib
+
+        if status is None:
+            return cls.NOT_FOUND
+
+        if not status.is_terminal():
+            return cls.NOT_FINISHED
+
+        if status == job_lib.JobStatus.SUCCEEDED:
+            return cls.SUCCEEDED
+
+        if status == job_lib.JobStatus.CANCELLED:
+            return cls.CANCELLED
+
+        if status in job_lib.JobStatus.user_code_failure_states(
+        ) or status == job_lib.JobStatus.FAILED_DRIVER:
+            return cls.FAILED
+
+        # Should not hit this case, but included to avoid errors
+        return cls.FAILED
+
+    @classmethod
+    def from_managed_job_status(
+            cls,
+            status: Optional['managed_jobs.ManagedJobStatus']) -> 'JobExitCode':
+        """Convert a managed job status to an exit code."""
+        # Import here to avoid circular imports
+        # pylint: disable=import-outside-toplevel
+        from sky import jobs as managed_jobs
+
+        if status is None:
+            return cls.NOT_FOUND
+
+        if not status.is_terminal():
+            return cls.NOT_FINISHED
+
+        if status == managed_jobs.ManagedJobStatus.SUCCEEDED:
+            return cls.SUCCEEDED
+
+        if status == managed_jobs.ManagedJobStatus.CANCELLED:
+            return cls.CANCELLED
+
+        if status.is_failed():
+            return cls.FAILED
+
+        # Should not hit this case, but included to avoid errors
+        return cls.FAILED

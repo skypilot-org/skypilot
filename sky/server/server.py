@@ -6,6 +6,7 @@ import contextlib
 import dataclasses
 import datetime
 import logging
+import multiprocessing
 import os
 import pathlib
 import re
@@ -27,7 +28,6 @@ from sky import core
 from sky import exceptions
 from sky import execution
 from sky import global_user_state
-from sky import optimizer
 from sky import sky_logging
 from sky.clouds import service_catalog
 from sky.data import storage_utils
@@ -39,13 +39,17 @@ from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
+from sky.utils import admin_policy_utils
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import dag_utils
+from sky.utils import env_options
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 
 # pylint: disable=ungrouped-imports
 if sys.version_info >= (3, 10):
@@ -65,6 +69,10 @@ def _add_timestamp_prefix_for_server_logs() -> None:
     # Add date prefix to the log message printed by loggers under
     # server.
     stream_handler = logging.StreamHandler(sys.stdout)
+    if env_options.Options.SHOW_DEBUG_INFO.get():
+        stream_handler.setLevel(logging.DEBUG)
+    else:
+        stream_handler.setLevel(logging.INFO)
     stream_handler.flush = sys.stdout.flush  # type: ignore
     stream_handler.setFormatter(sky_logging.FORMATTER)
     server_logger.addHandler(stream_handler)
@@ -258,9 +266,22 @@ async def validate(validate_body: payloads.ValidateBody) -> None:
     """Validates the user's DAG."""
     # TODO(SKY-1035): validate if existing cluster satisfies the requested
     # resources, e.g. sky exec --gpus V100:8 existing-cluster-with-no-gpus
+
+    # TODO: Our current launch process is split into three calls:
+    # validate, optimize, and launch. This requires us to apply the admin policy
+    # in each step, which may be an expensive operation. We should consolidate
+    # these into a single call or have a TTL cache for (task, admin_policy)
+    # pairs.
     logger.debug(f'Validating tasks: {validate_body.dag}')
     try:
         dag = dag_utils.load_chain_dag_from_yaml_str(validate_body.dag)
+        # TODO: Admin policy may contain arbitrary code, which may be expensive
+        # to run and may block the server thread. However, moving it into the
+        # executor adds a ~150ms penalty on the local API server because of
+        # added RTTs. For now, we stick to doing the validation inline in the
+        # server thread.
+        dag, _ = admin_policy_utils.apply(
+            dag, request_options=validate_body.request_options)
         for task in dag.tasks:
             # Will validate workdir and file_mounts in the backend, as those
             # need to be validated after the files are uploaded to the SkyPilot
@@ -283,7 +304,7 @@ async def optimize(optimize_body: payloads.OptimizeBody,
         request_name='optimize',
         request_body=optimize_body,
         ignore_return_value=True,
-        func=optimizer.Optimizer.optimize,
+        func=core.optimize,
         schedule_type=requests_lib.ScheduleType.SHORT,
     )
 
@@ -478,13 +499,18 @@ async def launch(launch_body: payloads.LaunchBody,
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
+    cluster_name = exec_body.cluster_name
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
+        precondition=preconditions.ClusterStartCompletePrecondition(
+            request_id=request.state.request_id,
+            cluster_name=cluster_name,
+        ),
         schedule_type=requests_lib.ScheduleType.LONG,
-        request_cluster_name=exec_body.cluster_name,
+        request_cluster_name=cluster_name,
     )
 
 
@@ -1070,6 +1096,9 @@ async def complete_storage_name(incomplete: str,) -> List[str]:
 
 if __name__ == '__main__':
     import uvicorn
+
+    from sky.server import uvicorn as skyuvicorn
+
     requests_lib.reset_db_and_logs()
 
     parser = argparse.ArgumentParser()
@@ -1091,16 +1120,29 @@ if __name__ == '__main__':
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
-        uvicorn.run('sky.server.server:app',
-                    host=cmd_args.host,
-                    port=cmd_args.port,
-                    workers=num_workers)
+        config = uvicorn.Config('sky.server.server:app',
+                                host=cmd_args.host,
+                                port=cmd_args.port,
+                                workers=num_workers)
+        skyuvicorn.run(config)
     except Exception as exc:  # pylint: disable=broad-except
         logger.error(f'Failed to start SkyPilot API server: '
                      f'{common_utils.format_exception(exc, use_bracket=True)}')
         raise
     finally:
         logger.info('Shutting down SkyPilot API server...')
-        for sub_proc in sub_procs:
-            sub_proc.terminate()
-            sub_proc.join()
+
+        def cleanup(proc: multiprocessing.Process) -> None:
+            try:
+                proc.terminate()
+                proc.join()
+            finally:
+                # The process may not be started yet, close it anyway.
+                proc.close()
+
+        # Terminate processes in reverse order in case dependency, especially
+        # queue server. Terminate queue server first does not affect the
+        # correctness of cleanup but introduce redundant error messages.
+        subprocess_utils.run_in_parallel(cleanup,
+                                         list(reversed(sub_procs)),
+                                         num_threads=len(sub_procs))

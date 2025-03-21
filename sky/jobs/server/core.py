@@ -157,6 +157,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
+            'dashboard_user_id': common.SERVER_ID,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -305,10 +306,9 @@ def _maybe_restart_controller(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Starting dashboard...')):
         runner = handle.get_command_runners()[0]
-        user_hash = common_utils.get_user_hash()
         runner.run(
             f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={user_hash!r}; '
+            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
             f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
             stream_logs=True,
         )
@@ -341,6 +341,8 @@ def queue(refresh: bool,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
+                'user_name': (Optional[str]) job creator's user name,
+                'user_hash': (str) job creator's user hash,
             }
         ]
     Raises:
@@ -460,11 +462,16 @@ def cancel(name: Optional[str] = None,
 
 @usage_lib.entrypoint
 def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
-              controller: bool, refresh: bool) -> None:
+              controller: bool, refresh: bool) -> int:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Tail logs of managed jobs.
 
     Please refer to sky.cli.job_logs for documentation.
+
+    Returns:
+        Exit code based on success or failure of the job. 0 if success,
+        100 if the job failed. See exceptions.JobExitCode for possible exit
+        codes.
 
     Raises:
         ValueError: invalid arguments.
@@ -494,11 +501,11 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
 
-    backend.tail_managed_job_logs(handle,
-                                  job_id=job_id,
-                                  job_name=name,
-                                  follow=follow,
-                                  controller=controller)
+    return backend.tail_managed_job_logs(handle,
+                                         job_id=job_id,
+                                         job_name=name,
+                                         follow=follow,
+                                         controller=controller)
 
 
 def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
