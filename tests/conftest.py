@@ -371,7 +371,7 @@ def setup_docker_container(request):
         logger.info('Waiting for container to be ready...')
         url = docker_utils.get_api_server_endpoint_inside_docker()
         health_endpoint = f'{url}/api/health'
-        max_retries = 30
+        max_retries = 20
         retry_count = 0
 
         while retry_count < max_retries:
@@ -386,9 +386,10 @@ def setup_docker_container(request):
 
                 retry_count += 1
                 time.sleep(1)
-            except (requests.RequestException, ValueError):
+            except Exception as e:
+                logger.error(f'Error connecting to container: {e}, retrying...')
                 retry_count += 1
-                time.sleep(1)
+                time.sleep(10)
         else:
             raise Exception(
                 'Container failed to start properly - health check did not pass'
