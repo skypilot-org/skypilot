@@ -2,6 +2,7 @@
 
 import dataclasses
 import shlex
+import subprocess
 import time
 from typing import Any, Dict, List
 
@@ -52,6 +53,21 @@ class DockerLoginConfig:
             password=d[constants.DOCKER_PASSWORD_ENV_VAR],
             server=d[constants.DOCKER_SERVER_ENV_VAR],
         )
+
+    def process_credential(self) -> None:
+        """Process a Docker credential for login.
+        
+        Handles escaped command substitution syntax and returns the properly
+        quoted string for shell execution. If the string starts with '\\$(' and
+        ends with ')', it will remove the escape character, allowing the literal
+        '$(' to be used.
+        """
+        # Handle escaped command substitution by removing the escape character
+        if self.username.startswith('\\$(') and self.username.endswith(')'):
+            self.username = self.username[1:-1]  # Remove escape character
+
+        if self.password.startswith('\\$(') and self.password.endswith(')'):
+            self.password = self.password[1:-1]  # Remove escape character
 
 
 # Copied from ray.autoscaler._private.ray_constants
@@ -216,9 +232,11 @@ class DockerInitializer:
 
         # SkyPilot: Docker login if user specified a private docker registry.
         if 'docker_login_config' in self.docker_config:
-            # TODO(tian): Maybe support a command to get the login password?
             docker_login_config = DockerLoginConfig(
                 **self.docker_config['docker_login_config'])
+
+            docker_login_config.process_credential()
+
             self._run(
                 f'{self.docker_cmd} login --username '
                 f'{docker_login_config.username} '
