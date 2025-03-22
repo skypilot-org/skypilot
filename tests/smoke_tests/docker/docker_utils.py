@@ -68,45 +68,31 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         # Get current container ID
         current_container_id = get_current_container_id()
 
-        # Create the new container
-        create_cmd = (f'docker create '
-                      f'--name {target_container_name} '
-                      f'-p {host_port}:{container_port} '
-                      f'-e USERNAME={username} '
-                      f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
-                      f'{IMAGE_NAME}')
+        # Run the new container directly
+        run_cmd = (f'docker run -d '
+                   f'--name {target_container_name} '
+                   f'-p {host_port}:{container_port} '
+                   f'-e USERNAME={username} '
+                   f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
+                   f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
+                   f'{IMAGE_NAME}')
 
-        subprocess.check_call(create_cmd, shell=True)
+        subprocess.check_call(run_cmd, shell=True)
 
         # Copy directories and files from current container to the new one
         for src_path, dst_path in src_dst_paths.items():
-            # Check if it's a directory or file
-            if os.path.isdir(src_path):
-                if os.path.exists(src_path):
-                    # Create parent directories using tar pipe
-                    create_dir_cmd = (
-                        f'tar -c --no-recursion -f - '
-                        f'--transform "s,^,{src_path}/," /dev/null | '
-                        f'docker cp - {target_container_name}:/')
-                    subprocess.check_call(create_dir_cmd, shell=True)
-                else:
-                    logger.warning(
-                        f"Directory {src_path} does not exist, skipping copy")
-            elif os.path.isfile(src_path):
-                if os.path.exists(src_path):
-                    copy_file_cmd = (
-                        f'docker exec {current_container_id} tar -cf - -C {os.path.dirname(src_path)} '
-                        f'{os.path.basename(src_path)} | '
-                        f'docker cp - {target_container_name}:{os.path.dirname(dst_path)}/'
-                    )
-                    subprocess.check_call(copy_file_cmd, shell=True)
-                else:
-                    logger.warning(
-                        f"File {src_path} does not exist, skipping copy")
-
-        # Start the new container
-        subprocess.check_call(f'docker start {target_container_name}',
-                              shell=True)
+            if os.path.exists(src_path):
+                if os.path.isdir(src_path):
+                    # Copy directory contents - explicitly use current container ID
+                    # The "/." at the end copies the contents of the directory, not the directory itself
+                    copy_cmd = f'docker cp {current_container_id}:{src_path}/. {target_container_name}:{dst_path}'
+                    subprocess.check_call(copy_cmd, shell=True)
+                elif os.path.isfile(src_path):
+                    # Copy file - explicitly use current container ID
+                    copy_cmd = f'docker cp {current_container_id}:{src_path} {target_container_name}:{dst_path}'
+                    subprocess.check_call(copy_cmd, shell=True)
+            else:
+                logger.warning(f"Path {src_path} does not exist, skipping copy")
     else:
         # Prepare volume mounts with read-write mode
         volumes = []
