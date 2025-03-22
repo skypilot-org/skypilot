@@ -344,28 +344,15 @@ def setup_docker_container(request):
         # Start new container
         logger.info(
             f'Starting Docker container {docker_utils.CONTAINER_NAME}...')
-        workspace_path = os.path.abspath(
-            os.path.dirname(os.path.dirname(__file__)))
 
-        # Prepare volume mounts with read-write mode
-        volumes = [
-            f'{workspace_path}:/skypilot',
-            f'{os.path.expanduser("~/.aws")}:/home/{os.environ.get("USER", default_user)}/.aws',
-            f'{os.path.expanduser("~/.azure")}:/home/{os.environ.get("USER", default_user)}/.azure',
-            f'{os.path.expanduser("~/.config/gcloud")}:/home/{os.environ.get("USER", default_user)}/.config/gcloud',
-            f'{os.path.expanduser("~/.kube/config")}:/home/{os.environ.get("USER", default_user)}/.kube/config',
-        ]
+        # Use create_and_setup_new_container to create and start the container
+        docker_utils.create_and_setup_new_container(
+            target_container_name=docker_utils.CONTAINER_NAME,
+            host_port=46581,
+            container_port=46580,
+            username=default_user)
 
-        # Run the container
-        docker_cmd = [
-            'docker', 'run', '-d', '--name', docker_utils.CONTAINER_NAME,
-            '--platform', 'linux/amd64', *[f'-v={v}' for v in volumes], '-e',
-            f'USERNAME={os.environ.get("USER", default_user)}', '-e',
-            'SKYPILOT_DISABLE_USAGE_COLLECTION=1', '-p', '46581:46580',
-            docker_utils.IMAGE_NAME
-        ]
-        logger.info(f'Running Docker command: {" ".join(docker_cmd)}')
-        subprocess.run(docker_cmd, check=True)
+        logger.info(f'Container {docker_utils.CONTAINER_NAME} started')
 
         # Wait for container to be ready
         logger.info('Waiting for container to be ready...')
