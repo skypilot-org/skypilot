@@ -141,15 +141,17 @@ class _RevertibleStatus:
         return _statuses[self.status_type]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        global _status_nesting_level
-        _status_nesting_level -= 1
-        if _status_nesting_level <= 0:
-            _status_nesting_level = 0
-            if _statuses[self.status_type] is not None:
-                _statuses[self.status_type].__exit__(exc_type, exc_val, exc_tb)
-                _statuses[self.status_type] = None
-        else:
-            _statuses[self.status_type].update(self.previous_message)
+        with _logging_lock:
+            global _status_nesting_level
+            _status_nesting_level -= 1
+            if _status_nesting_level <= 0:
+                _status_nesting_level = 0
+                if _statuses[self.status_type] is not None:
+                    _statuses[self.status_type].__exit__(
+                        exc_type, exc_val, exc_tb)
+                    _statuses[self.status_type] = None
+            else:
+                _statuses[self.status_type].update(self.previous_message)
 
     def update(self, *args, **kwargs):
         _statuses[self.status_type].update(*args, **kwargs)
