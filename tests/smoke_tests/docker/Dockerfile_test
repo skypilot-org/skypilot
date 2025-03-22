@@ -1,0 +1,122 @@
+FROM ubuntu:latest
+
+# Add build arguments
+ARG USERNAME
+RUN if [ -z "$USERNAME" ]; then echo "ERROR: USERNAME build argument is required. Use --build-arg USERNAME=${USER}"; exit 1; fi
+RUN echo "Building for user: $USERNAME"
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install dependencies
+RUN apt update -y && \
+    apt install -y \
+    wget \
+    sudo \
+    curl \
+    unzip \
+    htop \
+    vim \
+    git \
+    dnsutils \
+    expect \
+    netcat-traditional \
+    socat \
+    uuid-runtime \
+    docker.io \
+    rsync
+
+# Install kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+
+# Add a custom user with sudo privileges
+RUN useradd -m ${USERNAME} && \
+    echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+
+# Switch to the new user
+USER ${USERNAME}
+
+# Set bash as the default shell
+SHELL ["/bin/bash", "-c"]
+
+# Set environment variables persistently
+ENV PATH="/home/${USERNAME}/miniconda3/bin:${PATH}"
+
+RUN mkdir -p ~/sky_workdir ~/log ~/tmp-workdir && \
+    touch ~/tmp-workdir/tmp\ file
+
+WORKDIR /home/${USERNAME}/sky_workdir
+
+# Install Miniconda
+RUN curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
+    chmod +x Miniconda3-latest-Linux-x86_64.sh && \
+    ./Miniconda3-latest-Linux-x86_64.sh -b -p ~/miniconda3 && \
+    rm Miniconda3-latest-Linux-x86_64.sh
+
+# Initialize conda & install Python
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda init bash && \
+    conda install -n base python=3.10 -y
+
+# Add conda initialization to .bashrc (for interactive shells)
+RUN echo "source /home/${USERNAME}/miniconda3/etc/profile.d/conda.sh" >> ~/.bashrc && \
+    echo "conda activate base" >> ~/.bashrc
+
+
+RUN git clone https://github.com/skypilot-org/skypilot.git ~/sky_workdir/skypilot
+
+WORKDIR /home/${USERNAME}/sky_workdir/skypilot
+
+# Activate the Conda environment before running pip commands
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    pip install uv && \
+    pip uninstall -y skypilot && \
+    uv pip install --prerelease=allow "azure-cli>=2.65.0" && \
+    uv pip install -r requirements-dev.txt && \
+    uv pip install -e ".[all]" && \
+    uv pip install httpx[socks]
+
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    conda install -c conda-forge google-cloud-sdk -y && \
+    gcloud components install gke-gcloud-auth-plugin --quiet
+
+# Fix the gsutil problem
+RUN source ~/miniconda3/etc/profile.d/conda.sh && \
+    conda activate base && \
+    uv pip install pyOpenSSL==23.1.1
+
+# Copy the entrypoint script
+COPY tests/smoke_tests/docker/entrypoint.sh /home/${USERNAME}/entrypoint.sh
+COPY tests/smoke_tests/docker/stop_sky_resource.sh /home/${USERNAME}/stop_sky_resource.sh
+
+# Debug and set permissions
+RUN sudo chown ${USERNAME}:${USERNAME} ~/entrypoint.sh && \
+    sudo chown ${USERNAME}:${USERNAME} ~/stop_sky_resource.sh && \
+    ls -la ~/entrypoint.sh && \
+    ls -la ~/stop_sky_resource.sh && \
+    chmod +x ~/entrypoint.sh && \
+    chmod +x ~/stop_sky_resource.sh
+
+# Set the entrypoint
+ENTRYPOINT /bin/bash ~/entrypoint.sh
+
+# Command on Mac:
+# docker build --platform linux/amd64 -t sky-remote-test-image --build-arg USERNAME=$(whoami) --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
+
+# Full command with all mounts, credential copying, and proxy settings:
+# export LINUX_USERNAME=buildkite
+# docker run --platform linux/amd64 -it --name sky-test \
+#   -v "$(pwd)":/skypilot:rw \
+#   -v "$HOME/.kube/config":"/home/${LINUX_USERNAME}/.kube/config" \
+#   -v "$HOME/.aws":"/home/${LINUX_USERNAME}/.aws" \
+#   -v "$HOME/.azure":"/home/${LINUX_USERNAME}/.azure" \
+#   -v "$HOME/.config/gcloud":"/home/${LINUX_USERNAME}/.config/gcloud" \
+#   -e https_proxy=http://host.docker.internal:7890 \
+#   -e http_proxy=http://host.docker.internal:7890 \
+#   -e all_proxy=socks5://host.docker.internal:7890 \
+#   -e no_proxy=localhost,127.0.0.1,0.0.0.0 \
+#   --add-host=host.docker.internal:host-gateway \
+#   -p 46581:46580 \
+#   sky-test-image
