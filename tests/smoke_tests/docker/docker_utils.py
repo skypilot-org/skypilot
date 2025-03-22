@@ -84,7 +84,7 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             if os.path.isdir(src_path):
                 if os.path.exists(src_path):
                     copy_dir_cmd = (
-                        f'docker exec {current_container_id} tar -cf - {dst_path} | '
+                        f'docker exec {current_container_id} tar -cf - {src_path} | '
                         f'docker cp - {target_container_name}:{dst_path}')
                     subprocess.check_call(copy_dir_cmd, shell=True)
                 else:
@@ -93,7 +93,7 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             elif os.path.isfile(src_path):
                 if os.path.exists(src_path):
                     copy_file_cmd = (
-                        f'docker exec {current_container_id} cat {dst_path} | '
+                        f'docker exec {current_container_id} cat {src_path} | '
                         f'docker cp - {target_container_name}:{dst_path}')
                     subprocess.check_call(copy_file_cmd, shell=True)
                 else:
