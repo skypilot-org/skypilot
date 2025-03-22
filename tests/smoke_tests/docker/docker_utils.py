@@ -83,8 +83,11 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             # Check if it's a directory or file
             if os.path.isdir(src_path):
                 if os.path.exists(src_path):
+                    mkdir_cmd = f'docker exec {target_container_name} mkdir -p {dst_path}'
+                    subprocess.check_call(mkdir_cmd, shell=True)
+
                     copy_dir_cmd = (
-                        f'docker exec {current_container_id} tar -cf - {src_path} | '
+                        f'docker exec {current_container_id} tar -cf - -C {src_path} . | '
                         f'docker cp - {target_container_name}:{dst_path}')
                     subprocess.check_call(copy_dir_cmd, shell=True)
                 else:
