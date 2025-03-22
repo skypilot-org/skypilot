@@ -83,21 +83,22 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             # Check if it's a directory or file
             if os.path.isdir(src_path):
                 if os.path.exists(src_path):
-                    mkdir_cmd = f'docker exec {target_container_name} mkdir -p {dst_path}'
-                    subprocess.check_call(mkdir_cmd, shell=True)
-
-                    copy_dir_cmd = (
-                        f'docker exec {current_container_id} tar -cf - -C {src_path} . | '
-                        f'docker cp - {target_container_name}:{dst_path}')
-                    subprocess.check_call(copy_dir_cmd, shell=True)
+                    # Create parent directories using tar pipe
+                    create_dir_cmd = (
+                        f'tar -c --no-recursion -f - '
+                        f'--transform "s,^,{src_path}/," /dev/null | '
+                        f'docker cp - {target_container_name}:/')
+                    subprocess.check_call(create_dir_cmd, shell=True)
                 else:
                     logger.warning(
                         f"Directory {src_path} does not exist, skipping copy")
             elif os.path.isfile(src_path):
                 if os.path.exists(src_path):
                     copy_file_cmd = (
-                        f'docker exec {current_container_id} cat {src_path} | '
-                        f'docker cp - {target_container_name}:{dst_path}')
+                        f'docker exec {current_container_id} tar -cf - -C {os.path.dirname(src_path)} '
+                        f'{os.path.basename(src_path)} | '
+                        f'docker cp - {target_container_name}:{os.path.dirname(dst_path)}/'
+                    )
                     subprocess.check_call(copy_file_cmd, shell=True)
                 else:
                     logger.warning(
