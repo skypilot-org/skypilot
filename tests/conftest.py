@@ -405,8 +405,8 @@ def setup_docker_container(request):
             subprocess.run(
                 ['docker', 'stop', '-t', '600', docker_utils.CONTAINER_NAME],
                 check=False)
-            subprocess.run(['docker', 'rm', docker_utils.CONTAINER_NAME],
-                           check=False)
+            # subprocess.run(['docker', 'rm', docker_utils.CONTAINER_NAME],
+            #                check=False)
             try:
                 os.remove(counter_file)
             except OSError:
