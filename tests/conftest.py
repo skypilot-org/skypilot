@@ -330,16 +330,30 @@ def setup_docker_container(request):
             logger.info(
                 f'Docker image {docker_utils.IMAGE_NAME} already exists')
         else:
-            logger.info(
-                f'Docker image {docker_utils.IMAGE_NAME} not found, building...'
-            )
-            subprocess.run([
-                'docker', 'build', '-t', docker_utils.IMAGE_NAME, '--build-arg',
-                f'USERNAME={default_user}', '-f', dockerfile_path, '.'
-            ],
-                           check=True)
-            logger.info(
-                f'Successfully built Docker image {docker_utils.IMAGE_NAME}')
+            in_container = docker_utils.is_running_inside_container()
+
+            if in_container:
+                # We're inside a container, so we can't build the Docker image
+                raise Exception(
+                    f"Docker image {docker_utils.IMAGE_NAME} must be built on "
+                    f"the host first when running inside a container. Please "
+                    f"run 'docker build -t {docker_utils.IMAGE_NAME} "
+                    f"--build-arg USERNAME={default_user} -f "
+                    f"tests/smoke_tests/docker/Dockerfile_test .' on the host "
+                    f"machine.")
+            else:
+                logger.info(
+                    f'Docker image {docker_utils.IMAGE_NAME} not found, building...'
+                )
+                subprocess.run([
+                    'docker', 'build', '-t', docker_utils.IMAGE_NAME,
+                    '--build-arg', f'USERNAME={default_user}', '-f',
+                    dockerfile_path, '.'
+                ],
+                               check=True)
+                logger.info(
+                    f'Successfully built Docker image {docker_utils.IMAGE_NAME}'
+                )
 
         # Start new container
         logger.info(
