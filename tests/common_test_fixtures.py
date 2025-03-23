@@ -141,7 +141,7 @@ def enable_all_clouds(monkeypatch, request, mock_client_requests):
     # Mock all the functions
     monkeypatch.setattr('sky.check.get_cached_enabled_clouds_or_refresh',
                         lambda *_, **__: enabled_clouds)
-    monkeypatch.setattr('sky.check.check', lambda *_, **__: None)
+    monkeypatch.setattr('sky.check.check_capability', lambda *_, **__: None)
     monkeypatch.setattr(
         'sky.clouds.service_catalog.aws_catalog._get_az_mappings',
         lambda *_, **__: pd.read_csv('tests/default_aws_az_mappings.csv'))

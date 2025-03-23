@@ -5,6 +5,7 @@ AI Applications
    :maxdepth: 1
 
    DeepSeek-R1 for RAG <rag>
+   Large-Scale Batch Inference <batch_inference>
    Image Vector Database <vector_database>
    Tabby: Coding Assistant <tabby>
    LocalGPT: Chat with PDF <localgpt>

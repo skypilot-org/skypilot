@@ -1136,9 +1136,9 @@ def local_down() -> None:
         # Run sky check
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Running sky check...')):
-            sky_check.check(clouds=['kubernetes'],
-                            quiet=True,
-                            capability=sky_cloud.CloudCapability.COMPUTE)
+            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                       clouds=['kubernetes'],
+                                       quiet=True)
         logger.info(
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,
