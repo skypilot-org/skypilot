@@ -145,7 +145,7 @@ def bulk_provision(
         except exceptions.NoClusterLaunchedError:
             # Skip the teardown if the cluster was never launched.
             raise
-        except exceptions.CloudCredentialExpired:
+        except exceptions.InvalidCloudCredentials:
             # Skip the teardown if the cloud config is expired and
             # the provisioner should failover to other clouds.
             raise

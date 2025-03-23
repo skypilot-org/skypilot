@@ -74,10 +74,10 @@ def handle_boto_error(exc: Exception, msg: str) -> None:
             f'{colorama.Style.RESET_ALL}\n'
             f'You can find a script that automates this at:'
             f'{aws_session_script_url}')
-        # Raise the CloudCredentialExpired exception so that
+        # Raise the InvalidCloudCredentials exception so that
         # the provisioner can failover to other clouds
-        raise exceptions.CloudCredentialExpired(
-            f'CloudCredentialExpired: {generic_message}') from exc
+        raise exceptions.InvalidCloudCredentials(
+            f'InvalidCloudCredentials: {generic_message}') from exc
 
     # todo: any other errors that we should catch separately?
 

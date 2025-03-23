@@ -180,8 +180,8 @@ class InvalidCloudConfigs(Exception):
     pass
 
 
-class CloudCredentialExpired(Exception):
-    """Raised when the cloud credentials have expired."""
+class InvalidCloudCredentials(Exception):
+    """Raised when the cloud credentials are invalid."""
     pass
 
 

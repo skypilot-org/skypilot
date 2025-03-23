@@ -1098,7 +1098,7 @@ class FailoverCloudErrorHandlerV2:
         output = str(error)
         logger.info(f'AWS handler error: {output}')
         # Block AWS if the credential has expired.
-        if output.find('CloudCredentialExpired') != -1:
+        if output.find('InvalidCloudCredentials') != -1:
             _add_to_blocked_resources(
                 blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
         else:
@@ -1435,6 +1435,17 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
+            except exceptions.InvalidCloudCredentials as e:
+                # Failed due to invalid cloud credentials.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud for invalid cloud credentials
+                _add_to_blocked_resources(
+                    self._blocked_resources,
+                    to_provision.copy(region=None, zone=None))
+                raise exceptions.ResourcesUnavailableError(
+                    f'Failed to provision on cloud {to_provision.cloud} due to '
+                    f'invalid cloud credentials: '
+                    f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
                 # Failed due to invalid user configs in ~/.sky/config.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
