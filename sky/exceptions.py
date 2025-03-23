@@ -180,6 +180,11 @@ class InvalidCloudConfigs(Exception):
     pass
 
 
+class CloudCredentialExpired(Exception):
+    """Raised when the cloud credentials have expired."""
+    pass
+
+
 class ProvisionPrechecksError(Exception):
     """Raised when a managed job fails prechecks before provision.
 

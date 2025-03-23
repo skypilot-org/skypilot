@@ -1090,6 +1090,22 @@ class FailoverCloudErrorHandlerV2:
                 blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
+    def _aws_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        output = str(error)
+        logger.info(f'AWS handler error: {output}')
+        # Block AWS if the credential has expired.
+        if output.find('CloudCredentialExpired') != -1:
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
                          launchable_resources: 'resources_lib.Resources',
                          region: 'clouds.Region',

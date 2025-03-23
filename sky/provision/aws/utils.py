@@ -1,6 +1,7 @@
 """Utils for AWS provisioner."""
 import colorama
 
+from sky import exceptions
 from sky import sky_logging
 
 logger = sky_logging.init_logger(__name__)
@@ -73,9 +74,10 @@ def handle_boto_error(exc: Exception, msg: str) -> None:
             f'{colorama.Style.RESET_ALL}\n'
             f'You can find a script that automates this at:'
             f'{aws_session_script_url}')
-        # Do not re-raise the exception here because it looks awful
-        # and we already print all the info in verbose
-        raise SystemExit(1)
+        # Raise the CloudCredentialExpired exception so that
+        # the provisioner can failover to other clouds
+        raise exceptions.CloudCredentialExpired(
+            f'CloudCredentialExpired: {generic_message}') from exc
 
     # todo: any other errors that we should catch separately?
 
