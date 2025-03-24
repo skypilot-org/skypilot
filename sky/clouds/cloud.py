@@ -47,8 +47,9 @@ class CloudImplementationFeatures(enum.Enum):
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
-    AUTO_STOP = 'auto_stop'  # Pod/VM can stop itself
-    AUTO_DOWN = 'auto_down'  # Pod/VM can down itself
+    AUTOSTOP = 'autostop'  # Pod/VM can stop itself
+    AUTODOWN = 'autodown'  # Pod/VM can down itself
+
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
 class CloudCapability(str, enum.Enum):
