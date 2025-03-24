@@ -141,6 +141,17 @@ class _RevertibleStatus:
         return _statuses[self.status_type]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        # We use the same lock with the `safe_logger` to avoid the following 2
+        # raice conditions. We refer loggers in another thread as "thread
+        # logger" hereafter.
+        # 1. When a thread logger stopped the status in `safe_logger`, and
+        #    here we exit the status and set it to None. Then the thread logger
+        #    will raise an error when it tries to restart the status.
+        # 2. When a thread logger stopped the status in `safe_logger`, and
+        #    here we exit the status and entered a new one. Then the thread
+        #    logger will raise an error when it tries to restart the old status,
+        #    since only one LiveStatus can be started at the same time.
+        # Please refer to #4995 for more information.
         with _logging_lock:
             global _status_nesting_level
             _status_nesting_level -= 1
