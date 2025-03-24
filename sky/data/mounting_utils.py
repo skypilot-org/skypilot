@@ -1,10 +1,12 @@
 """Helper functions for object store mounting in Sky Storage"""
+import os
 import random
 import shlex
 import textwrap
 from typing import Optional
 
 from sky import exceptions
+from sky.skylet import constants
 from sky.utils import command_runner
 
 # Values used to construct mounting commands
@@ -12,6 +14,12 @@ _STAT_CACHE_TTL = '5s'
 _STAT_CACHE_CAPACITY = 4096
 _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
+# https://github.com/rclone/rclone/releases
+# Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize
+# Rclone's mounting utility.
+FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
+                             'sudo ln -s /bin/fusermount /bin/fusermount3 || '
+                             'true')
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '2.2.0'
 # https://github.com/Azure/azure-storage-fuse/releases
@@ -203,14 +211,6 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     return mount_cmd
 
 
-def get_cos_mount_install_cmd() -> str:
-    """Returns a command to install IBM COS mount utility rclone."""
-    install_cmd = ('rclone version >/dev/null 2>&1 || '
-                   '(curl https://rclone.org/install.sh | '
-                   'sudo bash)')
-    return install_cmd
-
-
 def get_cos_mount_cmd(rclone_config_data: str,
                       rclone_config_path: str,
                       bucket_rclone_profile: str,
@@ -237,6 +237,44 @@ def get_cos_mount_cmd(rclone_config_data: str,
                  'rclone mount '
                  f'{bucket_rclone_profile}:{sub_path_arg} {mount_path} '
                  '--daemon')
+    return mount_cmd
+
+
+def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
+                         bucket_name: str, mount_path: str) -> str:
+    """Returns a command to mount a bucket using rclone with vfs cache."""
+    # stores bucket profile in rclone config file at the remote nodes.
+    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
+                                f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
+                                f'echo "{rclone_config}" >> '
+                                f'{constants.RCLONE_CONFIG_PATH}')
+    log_dir_path = '~/.sky/rclone_log'
+    log_file_path = os.path.join(log_dir_path, f'{bucket_name}.log')
+    create_log_cmd = f'mkdir -p {log_dir_path} && touch {log_file_path}'
+    # when mounting multiple directories with vfs cache mode, it's handled by
+    # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
+    # not necessary to specify separate cache directories.
+    mount_cmd = (
+        f'{create_log_cmd}; '
+        f'{configure_rclone_profile} && '
+        'nohup rclone mount '
+        f'{rclone_profile_name}:{bucket_name} {mount_path} '
+        # '--daemon' keeps the mounting process running in the background.
+        '--daemon --daemon-wait 0 '
+        f'--log-file {log_file_path} --log-level DEBUG '
+        # '--dir-cache-time' sets how long directory listings are cached before
+        # rclone checks the remote storage for changes again. A shorter
+        # interval allows for faster detection of new or updated files on the
+        # remote, but increases the frequency of metadata lookups.
+        '--allow-other --vfs-cache-mode full --dir-cache-time 10s '
+        # '--transfers 1' guarantees the files written at the local mount point
+        # to be uploaded to the backend storage in the order of creation.
+        # '--vfs-cache-poll-interval' specifies the frequency of how often
+        # rclone checks the local mount point for stale objects in cache.
+        # '--vfs-write-back' defines the time to write files on remote storage
+        # after last use of the file in local mountpoint.
+        '--transfers 1 --vfs-cache-poll-interval 30s --vfs-write-back 1s '
+        '> /dev/null 2>&1 &')
     return mount_cmd
 
 

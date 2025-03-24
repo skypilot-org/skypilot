@@ -1025,7 +1025,8 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # it was handled in step 6.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
-        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+        if ((storage_obj.mode == storage_lib.StorageMode.MOUNT or
+             storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED) and
                 not storage_obj.source):
             # Construct source URL with first store type and storage name
             # E.g., s3://my-storage-name

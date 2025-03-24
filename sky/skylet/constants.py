@@ -331,6 +331,9 @@ SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 # known after provisioning.
 SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
 
+RCLONE_CONFIG_DIR = '~/.config/rclone'
+RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
+
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
