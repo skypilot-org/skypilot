@@ -629,21 +629,8 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
-    # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
-    if not down and not is_cancel:
-        try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.STOP})
-        except exceptions.NotSupportedError as e:
-            raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
-                f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  {_stop_not_supported_message(handle.launched_resources)}.'
-            ) from e
-
-    # Check if autodown is required and supported
+    # Check if autostop/autodown is required and supported
     if not is_cancel:
         try:
             if down:
@@ -651,6 +638,9 @@ def autostop(
                     handle.launched_resources,
                     {clouds.CloudImplementationFeatures.AUTODOWN})
             else:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.STOP})
                 cloud.check_features_are_supported(
                     handle.launched_resources,
                     {clouds.CloudImplementationFeatures.AUTOSTOP})
