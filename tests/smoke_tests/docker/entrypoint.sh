@@ -77,12 +77,17 @@ pip uninstall -y skypilot
 uv pip install --prerelease=allow "azure-cli>=2.65.0"
 uv pip install -r requirements-dev.txt
 uv pip install -e ".[all]"
-sky api start --deploy
+sky api start
 sky check
+sky api stop
 
 # Execute the hash regeneration function
 regenerate_user_hash
 
 trap handle_sigterm SIGTERM
+
+# We only expose the API server to the host machine after setup is complete
+sky api start --deploy
+
 tail -f ~/.sky/api_server/server.log &
 wait
