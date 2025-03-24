@@ -267,11 +267,6 @@ available_node_types:
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
-        {% if k8s_fuse_device_required %}
-        annotations:
-            # Required for FUSE mounting to access /dev/fuse
-            container.apparmor.security.beta.kubernetes.io/ray-node: unconfined
-        {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
@@ -310,9 +305,12 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
-        - name: dev-fuse    # Required for fuse mounting
+        {% if k8s_fuse_device_required %}
+        - name: fusermount-shared-dir
           hostPath:
-            path: /dev/fuse
+            path: {{k8s_fusermount_shared_dir}}
+            type: DirectoryOrCreate
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -472,6 +470,17 @@ available_node_types:
                 }
               ) &
 
+              # STEP 4: Mask fusermount with fusermount-shim to forward mount/unmount requests
+              {% if k8s_fuse_device_required %}
+              (
+                (
+                set -e
+                $(prefix_cmd) cp -p /bin/fusermount /bin/fusermount-original
+                $(prefix_cmd) ln -s {{k8s_fusermount_shared_dir}}/fusermount-shim /bin/fusermount
+                )
+              ) &
+              {% endif %}
+
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
 
               # Tails file and checks every 5 sec for
@@ -539,10 +548,8 @@ available_node_types:
           - mountPath: /dev/shm
             name: dshm
           {% if k8s_fuse_device_required %}
-          securityContext:
-            capabilities:
-              add:
-                - "SYS_ADMIN"
+          - name: fusermount-shared-dir
+            mountPath: {{k8s_fusermount_shared_dir}}
           {% endif %}
           resources:
             requests:
@@ -556,19 +563,11 @@ available_node_types:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
-              {% if k8s_fuse_device_required %}
-              # Kubernetes resource exposed by the fuse device manager
-              # https://gitlab.com/arm-research/smarter/smarter-device-manager
-              smarter-devices/fuse: "1"
-              {% endif %}
-            {% if k8s_resource_key is not none or k8s_fuse_device_required %}
+            {% if k8s_resource_key is not none %}
             limits:
               # Limits need to be defined for GPU/TPU requests
               {% if k8s_resource_key is not none %}
               {{k8s_resource_key}}: {{accelerator_count}}
-              {% endif %}
-              {% if k8s_fuse_device_required %}
-              smarter-devices/fuse: "1"
               {% endif %}
             {% endif %}
             
@@ -578,7 +577,7 @@ setup_commands:
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
-  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line '[-f /etc/fuse.conf] ..': enable `-o allow_other` option for `goofys`
   # Line 'for step in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
   # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |

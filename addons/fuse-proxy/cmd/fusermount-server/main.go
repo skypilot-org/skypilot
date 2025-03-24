@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"os"
+	"os/exec"
 	"os/signal"
 	"syscall"
 
@@ -19,6 +20,17 @@ var (
 func main() {
 	log.InitFlags(nil)
 	flag.Parse()
+	shimInstallPath := common.MustGetShimInstallPath()
+
+	// Ensure the latest fusermount-shim is installed to shared path so that the
+	// caller container can access it.
+	// We assume the architecture of the caller container is the same as this
+	// server container since they are running on the same node.
+	cmd := exec.Command("cp", "-p", common.ShimBinPath, shimInstallPath)
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to copy shim: %v", err)
+	}
+
 	socketPath := common.MustGetServerSocketPath()
 
 	srv := server.NewServer(*fusermountPath, socketPath)

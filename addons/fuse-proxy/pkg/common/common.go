@@ -10,6 +10,8 @@ import (
 const (
 	EnvFuseCommFD = "_FUSE_COMMFD"
 	EnvSharedDir  = "FUSERMOUNT_SHARED_DIR"
+
+	ShimBinPath = "/usr/local/bin/fusermount-shim"
 )
 
 // MustGetServerSocketPath returns the path to the server socket for client-server communication, panic if not found
@@ -28,6 +30,11 @@ func MustGetFuseCommFD() int {
 		panic(fmt.Sprintf("Illegal value %s for %s environment variable", fdStr, EnvFuseCommFD))
 	}
 	return fd
+}
+
+// MustGetShimInstallPath returns the path to install the fusermount shim, panic if not found
+func MustGetShimInstallPath() string {
+	return filepath.Join(getSharedDir(), "fusermount-shim")
 }
 
 func getSharedDir() string {

@@ -551,7 +551,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_service_account_name': k8s_service_account_name,
             'k8s_automount_sa_token': k8s_automount_sa_token,
             'k8s_fuse_device_required': fuse_device_required,
-            # Namespace to run the FUSE device manager in
+            # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,

@@ -1,3 +1,4 @@
+# TODO(aylei): deprecated, remove this in v0.11.0
 # A daemonset for the smarter-device-manager agent. Used to expose FUSE devices
 # to SkyPilot pods, bypassing the need to run SkyPilot pods as privileged.
 # From smarter-device-manager daemonset: https://gitlab.com/arm-research/smarter/smarter-device-manager/-/blob/master/smarter-device-manager-ds.yaml
