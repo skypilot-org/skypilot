@@ -242,10 +242,7 @@ if __name__ == "__main__":
     parser.add_argument("--result-file", type=str, default="result.json")
     parser.add_argument("--num-questions", type=int, default=200)
     parser.add_argument("--num-branches", type=int, default=2)
-    # TODO(tian): Implement different users.
     parser.add_argument("--num-users", type=int, default=5)
     parser.add_argument("--backend-url", type=str, default=None)
-    # parser.add_argument("--parallel", type=int, default=64)
-    parser.add_argument("--n-ctx", type=int, default=4096)
     args = parser.parse_args()
     asyncio.run(main(args))

@@ -339,3 +339,31 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
             return super()._select_replica(request)
 
         return self._select_replica_from_key(key)
+
+
+class ProximateTreePolicy(LeastLoadPolicy, name='proximate_tree',
+                          default=False):
+    """Proximate tree load balancing policy."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        pass
+
+    async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
+        if set(self.ready_replicas) == set(ready_replicas):
+            return
+        pass
+
+    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+        del request  # Unused.
+        if not self.ready_replicas:
+            return None
+        return None
+
+    def pre_execute_hook(self, replica_url: str,
+                         request: 'fastapi.Request') -> None:
+        del request  # Unused.
+
+    def post_execute_hook(self, replica_url: str,
+                          request: 'fastapi.Request') -> None:
+        del request  # Unused.
