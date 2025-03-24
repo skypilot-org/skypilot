@@ -7,6 +7,15 @@ RUN echo "Building for user: $USERNAME"
 
 ENV DEBIAN_FRONTEND=noninteractive
 
+# Set architecture
+RUN ARCH=$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac) && \
+    echo "Using architecture: $ARCH" && \
+    echo "export ARCH=$ARCH" >> /etc/environment
+
 # Install dependencies
 RUN apt update -y && \
     apt install -y \
@@ -26,8 +35,13 @@ RUN apt update -y && \
     rsync
 
 # Install kubectl
-RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl" && \
-    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+RUN curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/$(case "$(uname -m)" in \
+        "x86_64") echo "amd64" ;; \
+        "aarch64") echo "arm64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac)/kubectl" && \
+    install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
+    rm kubectl
 
 # Add a custom user with sudo privileges
 RUN useradd -m ${USERNAME} && \
@@ -48,10 +62,16 @@ RUN mkdir -p ~/sky_workdir ~/log ~/tmp-workdir && \
 WORKDIR /home/${USERNAME}/sky_workdir
 
 # Install Miniconda
-RUN curl -O https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh && \
-    chmod +x Miniconda3-latest-Linux-x86_64.sh && \
-    ./Miniconda3-latest-Linux-x86_64.sh -b -p ~/miniconda3 && \
-    rm Miniconda3-latest-Linux-x86_64.sh
+RUN MINICONDA_ARCH=$(case "$(uname -m)" in \
+        "x86_64") echo "x86_64" ;; \
+        "aarch64") echo "aarch64" ;; \
+        *) echo "$(uname -m)" ;; \
+    esac) && \
+    echo "Installing Miniconda for architecture: $MINICONDA_ARCH" && \
+    curl -O "https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh" && \
+    chmod +x Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh && \
+    ./Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh -b -p ~/miniconda3 && \
+    rm Miniconda3-latest-Linux-${MINICONDA_ARCH}.sh
 
 # Initialize conda & install Python
 RUN source ~/miniconda3/etc/profile.d/conda.sh && \
@@ -103,20 +123,19 @@ RUN sudo chown ${USERNAME}:${USERNAME} ~/entrypoint.sh && \
 ENTRYPOINT /bin/bash ~/entrypoint.sh
 
 # Command on Mac:
-# docker build --platform linux/amd64 -t sky-remote-test-image --build-arg USERNAME=$(whoami) --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
+# docker build -t sky-remote-test-image --build-arg USERNAME=$(whoami) --build-arg ALL_PROXY=socks5://host.docker.internal:7890 -f tests/smoke_tests/docker/Dockerfile_test .
 
 # Full command with all mounts, credential copying, and proxy settings:
-# export LINUX_USERNAME=buildkite
-# docker run --platform linux/amd64 -it --name sky-test \
+# docker run -it --name sky-test \
 #   -v "$(pwd)":/skypilot:rw \
-#   -v "$HOME/.kube/config":"/home/${LINUX_USERNAME}/.kube/config" \
-#   -v "$HOME/.aws":"/home/${LINUX_USERNAME}/.aws" \
-#   -v "$HOME/.azure":"/home/${LINUX_USERNAME}/.azure" \
-#   -v "$HOME/.config/gcloud":"/home/${LINUX_USERNAME}/.config/gcloud" \
+#   -v "$HOME/.kube/config":"/home/$(whoami)/.kube/config" \
+#   -v "$HOME/.aws":"/home/$(whoami)/.aws" \
+#   -v "$HOME/.azure":"/home/$(whoami)/.azure" \
+#   -v "$HOME/.config/gcloud":"/home/$(whoami)/.config/gcloud" \
 #   -e https_proxy=http://host.docker.internal:7890 \
 #   -e http_proxy=http://host.docker.internal:7890 \
 #   -e all_proxy=socks5://host.docker.internal:7890 \
 #   -e no_proxy=localhost,127.0.0.1,0.0.0.0 \
 #   --add-host=host.docker.internal:host-gateway \
 #   -p 46581:46580 \
-#   sky-test-image
+#   sky-remote-test-image

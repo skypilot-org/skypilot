@@ -4,7 +4,7 @@ import socket
 import subprocess
 
 IMAGE_NAME = 'sky-remote-test-image'
-CONTAINER_NAME = 'sky-remote-test'
+CONTAINER_NAME_PREFIX = 'sky-remote-test'
 
 
 def is_inside_docker() -> bool:
@@ -15,23 +15,22 @@ def is_inside_docker() -> bool:
     return False
 
 
-if is_inside_docker():
-    # Buildkite have this env variable set to better identify the test container
-    container_name_env = os.environ.get('CONTAINER_NAME')
-    if container_name_env:
-        CONTAINER_NAME += f'-{container_name_env}'
+def get_container_name() -> str:
+    """Get the name of the container."""
+    container_name = CONTAINER_NAME_PREFIX
+    if is_inside_docker():
+        # Buildkite have this env variable set to better identify the test container
+        container_name_env = os.environ.get('CONTAINER_NAME')
+        if container_name_env:
+            container_name += f'-{container_name_env}'
+
+    return container_name
 
 
 def get_api_server_endpoint_inside_docker() -> str:
     """Get the API server endpoint inside a Docker container."""
     host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
     return f'http://{host}:46581'
-
-
-def get_current_container_id() -> str:
-    """Get the ID of the current Docker container."""
-    assert is_inside_docker()
-    return socket.gethostname()
 
 
 def create_and_setup_new_container(target_container_name: str, host_port: int,
@@ -65,9 +64,6 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
     }
 
     if is_inside_docker():
-        # Get current container ID
-        current_container_id = get_current_container_id()
-
         # Run the new container directly
         run_cmd = (f'docker run -d '
                    f'--name {target_container_name} '
@@ -83,14 +79,18 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         for src_path, dst_path in src_dst_paths.items():
             if os.path.exists(src_path):
                 if os.path.isdir(src_path):
-                    # Copy directory contents - explicitly use current container ID
+                    # Copy directory contents
                     # The "/." at the end copies the contents of the directory, not the directory itself
-                    copy_cmd = f'docker cp {current_container_id}:{src_path}/. {target_container_name}:{dst_path}'
-                    subprocess.check_call(copy_cmd, shell=True)
+                    copy_cmd = f'docker cp {src_path}/. {target_container_name}:{dst_path}'
                 elif os.path.isfile(src_path):
-                    # Copy file - explicitly use current container ID
-                    copy_cmd = f'docker cp {current_container_id}:{src_path} {target_container_name}:{dst_path}'
-                    subprocess.check_call(copy_cmd, shell=True)
+                    # Copy file
+                    # First create the parent directory in the container
+                    copy_cmd = (
+                        f'docker exec {target_container_name} mkdir -p {os.path.dirname(dst_path)} && '
+                        f'docker cp {src_path} {target_container_name}:{dst_path}'
+                    )
+                logger.info(f'Running copy command: {copy_cmd}')
+                subprocess.check_call(copy_cmd, shell=True)
             else:
                 logger.warning(f"Path {src_path} does not exist, skipping copy")
     else:
@@ -111,9 +111,6 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
             '--name',
             target_container_name,
         ]
-
-        # TODO(zeping): remove this once we have a platform-independent Docker file
-        docker_cmd.extend(['--platform', 'linux/amd64'])
 
         docker_cmd.extend([
             *[f'-v={v}' for v in volumes], '-e', f'USERNAME={username}', '-e',

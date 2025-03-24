@@ -305,14 +305,15 @@ def setup_docker_container(request):
             # Use docker ps with filter to check for running container
             result = subprocess.run([
                 'docker', 'ps', '--filter',
-                f'name={docker_utils.CONTAINER_NAME}', '--format', '{{.Names}}'
+                f'name={docker_utils.get_container_name()}', '--format',
+                '{{.Names}}'
             ],
                                     check=True,
                                     capture_output=True,
                                     text=True)
-            if docker_utils.CONTAINER_NAME in result.stdout:
+            if docker_utils.get_container_name() in result.stdout:
                 fcntl.flock(lock_fd, fcntl.LOCK_UN)
-                yield docker_utils.CONTAINER_NAME
+                yield docker_utils.get_container_name()
                 return
         except subprocess.CalledProcessError:
             pass
@@ -357,16 +358,16 @@ def setup_docker_container(request):
 
         # Start new container
         logger.info(
-            f'Starting Docker container {docker_utils.CONTAINER_NAME}...')
+            f'Starting Docker container {docker_utils.get_container_name()}...')
 
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
-            target_container_name=docker_utils.CONTAINER_NAME,
+            target_container_name=docker_utils.get_container_name(),
             host_port=46581,
             container_port=46580,
             username=default_user)
 
-        logger.info(f'Container {docker_utils.CONTAINER_NAME} started')
+        logger.info(f'Container {docker_utils.get_container_name()} started')
 
         # Wait for container to be ready
         logger.info('Waiting for container to be ready...')
@@ -398,7 +399,7 @@ def setup_docker_container(request):
 
         # Release the lock before yielding
         fcntl.flock(lock_fd, fcntl.LOCK_UN)
-        yield docker_utils.CONTAINER_NAME
+        yield docker_utils.get_container_name()
 
     except Exception as e:
         logger.error(f'Error in Docker setup: {e}')
@@ -416,11 +417,14 @@ def setup_docker_container(request):
 
         if worker_count == 0:
             logger.info('Last worker finished, cleaning up container...')
-            subprocess.run(
-                ['docker', 'stop', '-t', '600', docker_utils.CONTAINER_NAME],
-                check=False)
-            # subprocess.run(['docker', 'rm', docker_utils.CONTAINER_NAME],
-            #                check=False)
+            subprocess.run([
+                'docker', 'stop', '-t', '600',
+                docker_utils.get_container_name()
+            ],
+                           check=False)
+            subprocess.run(['docker', 'rm',
+                            docker_utils.get_container_name()],
+                           check=False)
             try:
                 os.remove(counter_file)
             except OSError:
