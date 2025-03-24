@@ -22,11 +22,11 @@ def test_setup_gcp_authentication():
             'credentials': '{"type": "service_account", "project_id": "test-project"}'
         }
     }
-    
-    with patch('sky.adaptors.gcp.build') as mock_build:       
+
+    with patch('sky.adaptors.gcp.build') as mock_build:
         # Mock the compute API response to raise RefreshError
-        mock_build.return_value.projects.return_value.get.return_value.execute.side_effect = google_exceptions.RefreshError('test')
-        
+        mock_build.return_value.projects.return_value.get.return_value.execute.side_effect = (
+            google_exceptions.RefreshError('test'))
+
         with pytest.raises(exceptions.InvalidCloudCredentials):
             auth.setup_gcp_authentication(mock_config)
-
