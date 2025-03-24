@@ -131,10 +131,11 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "daemonsets" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
-    # Required for managing configmaps of SkyPilot Pods and SkyPilot system components. 
+    # Required for managing configmaps for smarter-device-manager
+    # TODO(aylei): Remove this after we deprecate smarter-device-manager
     - apiGroups: [ "" ]
       resources: [ "configmaps" ]
-      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+      verbs: [ "get", "list", "watch", "create" ]
     # Required for managing service accounts for SkyPilot Pods and SkyPilot system components. 
     - apiGroups: [ "" ]
       resources: [ "serviceaccounts" ]
