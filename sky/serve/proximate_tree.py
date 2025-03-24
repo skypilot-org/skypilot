@@ -4,9 +4,10 @@ import collections
 import copy
 import dataclasses
 import heapq
+import random
 import threading
 import time
-from typing import Deque, Dict, Iterable, List, Optional, Tuple
+from typing import Deque, Dict, Iterable, List, Optional, Set, Tuple
 
 from sky import sky_logging
 
@@ -67,9 +68,9 @@ class ProximateTreeNode:
         with self.lock:
             self.replica_last_access_time.pop(replica)
 
-    def get_all_replicas(self) -> List[str]:
+    def get_all_replicas(self) -> Set[str]:
         with self.lock:
-            return list(self.replica_last_access_time.keys())
+            return set(self.replica_last_access_time.keys())
 
     def is_empty(self) -> bool:
         with self.lock:
@@ -224,17 +225,28 @@ class ProximateTree:
                     prev_node.replica_access(replica)
                     current_idx += shared_count
 
-    def prefix_match(self, text: str) -> Tuple[str, List[str]]:
+    def prefix_match(
+        self,
+        text: str,
+        available2load: Optional[Dict[str, int]] = None
+    ) -> Tuple[str, Optional[str]]:
         """Find the longest prefix of text that matches a node in the tree.
+
+        Args:
+            text: The text to match.
+            available2load: Dict of replicas to the current load of the replica.
+              If None, all replicas are considered.
 
         Returns:
             matched_text: The longest prefix of text that matches.
-            replicas: List of replicas that have accessed the matched node.
+            replica: The replica that has accessed the matched node.
         """
         current_idx = 0
         text_len = len(text)
         succ_node = self.root
         current_node = succ_node
+        available_replica_set = (set(available2load.keys())
+                                 if available2load is not None else None)
 
         while current_idx < text_len:
             first_char = text[current_idx]
@@ -243,6 +255,12 @@ class ProximateTree:
             matched_node = current_node.get_child(first_char)
             if matched_node is None:
                 break
+            # If available_replica_set is not None, check if the matched node
+            # has any available replicas.
+            if available_replica_set is not None:
+                if not (matched_node.get_all_replicas() &
+                        available_replica_set):
+                    break
             succ_node = matched_node
             shared_count = _shared_prefix_length(matched_node.get_text(),
                                                  remaining_text)
@@ -251,8 +269,28 @@ class ProximateTree:
                 # Partial match, stop here
                 break
         current_node = succ_node
-        replicas = current_node.get_all_replicas()
-        return text[:current_idx], replicas
+        if available_replica_set is None:
+            all_replicas = list(current_node.get_all_replicas())
+            replica = random.choice(all_replicas) if all_replicas else None
+        else:
+            available_replicas = list(current_node.get_all_replicas() &
+                                      available_replica_set)
+
+            def _get_load(r: str) -> int:
+                assert available2load is not None
+                return available2load[r]
+
+            replica = (min(available_replicas, key=_get_load)
+                       if available_replicas else None)
+
+        # Update the last access time for the replica on this path.
+        if replica is not None:
+            reverse_node: Optional[ProximateTreeNode] = current_node
+            while reverse_node is not None:
+                reverse_node.replica_access(replica)
+                reverse_node = reverse_node.get_parent()
+
+        return text[:current_idx], replica
 
     def _leaf_of(self, node: ProximateTreeNode) -> Iterable[str]:
         candidates = set(node.get_replica_last_access_time_dict().keys())

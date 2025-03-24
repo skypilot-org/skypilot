@@ -1,10 +1,7 @@
-import collections
 import random
 import string
 import threading
 import time
-
-import pytest
 
 from sky.serve.proximate_tree import ProximateTree  # adjust import as needed
 
@@ -98,9 +95,9 @@ def test_replica_char_count():
 
 def test_cold_start():
     tree = ProximateTree()
-    matched_text, replicas = tree.prefix_match("hello")
+    matched_text, replica = tree.prefix_match("hello")
     assert matched_text == ""
-    assert replicas == []
+    assert replica is None
 
 
 def test_exact_match_seq():
@@ -112,17 +109,40 @@ def test_exact_match_seq():
     tree.insert("banana", "replica3")
     tree.pretty_print()
 
-    matched_text, reps = tree.prefix_match("hello")
+    matched_text, replica = tree.prefix_match("hello")
     assert matched_text == "hello"
-    assert "replica1" in reps
+    assert replica == "replica1"
 
-    matched_text, reps = tree.prefix_match("apple")
+    matched_text, replica = tree.prefix_match("apple")
     assert matched_text == "apple"
-    assert "replica2" in reps
+    assert replica == "replica2"
 
-    matched_text, reps = tree.prefix_match("banana")
+    matched_text, replica = tree.prefix_match("banana")
     assert matched_text == "banana"
-    assert "replica3" in reps
+    assert replica == "replica3"
+
+
+def test_prefix_match_avail():
+    tree = ProximateTree()
+    tree.insert("helloa", "replica1")
+    tree.insert("helab", "replica2")
+    tree.insert("helcd", "replica1")
+    tree.insert("hello", "replica2")
+    matched_text, replica = tree.prefix_match("helloa")
+    assert matched_text == "helloa"
+    assert replica == "replica1"
+    matched_text, replica = tree.prefix_match("helab", {"replica1": 1})
+    assert matched_text == "hel"
+    assert replica == "replica1"
+    matched_text, replica = tree.prefix_match("helab")
+    assert matched_text == "helab"
+    assert replica == "replica2"
+    matched_text, replica = tree.prefix_match("hel", {
+        "replica1": 1,
+        "replica2": 2
+    })
+    assert matched_text == "hel"
+    assert replica == "replica1"
 
 
 def test_exact_match_concurrent():
@@ -144,9 +164,9 @@ def test_exact_match_concurrent():
     for text, replica in zip(texts, replicas):
 
         def match_func(text=text, replica=replica):
-            matched_text, rep_list = tree.prefix_match(text)
+            matched_text, replica_result = tree.prefix_match(text)
             assert matched_text == text
-            assert replica in rep_list
+            assert replica_result == replica
 
         t = threading.Thread(target=match_func)
         threads.append(t)
@@ -171,9 +191,9 @@ def test_partial_match_concurrent():
     for text in texts:
 
         def match_func(text=text):
-            matched_text, rep_list = tree.prefix_match(text)
+            matched_text, replica_result = tree.prefix_match(text)
             assert matched_text == text
-            assert replica in rep_list
+            assert replica_result == replica
 
         t = threading.Thread(target=match_func)
         threads.append(t)
@@ -214,9 +234,9 @@ def test_group_prefix_insert_match_concurrent():
         replica = f"replica{i}"
 
         def match_func(prefix=prefix, replica=replica):
-            matched_text, rep_list = tree.prefix_match(prefix)
+            matched_text, replica_result = tree.prefix_match(prefix)
             assert matched_text == prefix
-            assert replica in rep_list
+            assert replica_result == replica
 
         t = threading.Thread(target=match_func)
         threads.append(t)
@@ -270,9 +290,9 @@ def test_utf8_split_seq():
         tree.insert(text, replica)
     tree.pretty_print()
     for text, replica in test_pairs:
-        matched_text, rep_list = tree.prefix_match(text)
+        matched_text, replica_result = tree.prefix_match(text)
         assert matched_text == text
-        assert replica in rep_list
+        assert replica_result == replica
 
 
 def test_utf8_split_concurrent():
@@ -300,9 +320,9 @@ def test_utf8_split_concurrent():
         t.join()
 
 
-def assert_replica_in_prefix(tree, text, replica):
-    matched_text, rep_list = tree.prefix_match(text)
-    assert replica in rep_list
+def assert_replica_in_prefix(tree: ProximateTree, text: str, replica: str):
+    matched_text, replica_result = tree.prefix_match(text)
+    assert replica_result == replica
 
 
 def test_simple_eviction():
@@ -451,9 +471,8 @@ def test_simple_replica_eviction():
     assert "replica1" not in sizes_final
     assert sizes_final.get("replica2") == 6
 
-    matched_text, rep_list = tree.prefix_match("hello")
-    assert "replica1" not in rep_list
-    assert "replica2" in rep_list
+    _, replica_result = tree.prefix_match("hello")
+    assert replica_result == "replica2"
 
 
 def test_complex_replica_eviction():
