@@ -12,7 +12,7 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
 Prerequisites
 -------------
 
-* A Kubernetes cluster with ports 30050 and 30051 available for NodePort services
+* A Kubernetes cluster with LoadBalancer or NodePort service support
 * `Helm <https://helm.sh/docs/intro/install/>`_
 * `kubectl <https://kubernetes.io/docs/tasks/tools/>`_
 
@@ -215,9 +215,10 @@ Our default of using a NodePort service is the recommended way to expose the API
 
         .. code-block:: console
 
-            $ ENDPOINT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
+            $ HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
             $ echo $ENDPOINT
-            http://1.1.1.1
+            http://skypilot:yourpassword@1.1.1.1
         
         .. tip::
             
