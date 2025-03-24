@@ -18,10 +18,19 @@ spec:
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
       serviceAccountName: {{ .Release.Name }}-api-sa
+      {{- with .Values.podSecurityContext }}
+      securityContext:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}      
+      runtimeClassName: {{ .Values.runtimeClassName }}
       containers:
       - name: skypilot-api
         image: {{ .Values.apiService.image }}
         imagePullPolicy: Always
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}        
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
