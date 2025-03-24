@@ -16,8 +16,6 @@ _TYPE_CACHE_TTL = '5s'
 _RENAME_DIR_LIMIT = 10000
 # https://github.com/GoogleCloudPlatform/gcsfuse/releases
 GCSFUSE_VERSION = '2.2.0'
-# https://github.com/rclone/rclone/releases
-RCLONE_VERSION = '1.67.0'
 # Creates a fusermount3 soft link on older (<22) Ubuntu systems to utilize
 # Rclone's mounting utility.
 FUSERMOUNT3_SOFT_LINK_CMD = ('[ ! -f /bin/fusermount3 ] && '
@@ -28,6 +26,7 @@ BLOBFUSE2_VERSION = '2.2.0'
 _BLOBFUSE_CACHE_ROOT_DIR = '~/.sky/blobfuse2_cache'
 _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
                        '{storage_account_name}_{container_name}')
+# https://github.com/rclone/rclone/releases
 RCLONE_VERSION = 'v1.68.2'
 
 
@@ -212,15 +211,6 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     return mount_cmd
 
 
-def get_rclone_install_cmd() -> str:
-    """Returns a command to install Rclone."""
-    install_cmd = ('wget -nc https://github.com/rclone/rclone/releases'
-                   f'/download/v{RCLONE_VERSION}/rclone-v{RCLONE_VERSION}'
-                   '-linux-amd64.deb -O /tmp/rclone.deb && '
-                   'sudo dpkg --install /tmp/rclone.deb')
-    return install_cmd
-
-
 def get_cos_mount_cmd(rclone_config_data: str,
                       rclone_config_path: str,
                       bucket_rclone_profile: str,
@@ -229,7 +219,7 @@ def get_cos_mount_cmd(rclone_config_data: str,
                       _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # stores bucket profile in rclone config file at the cluster's nodes.
-    configure_rclone_profile = (f'{set_fuser3_soft_link}; '
+    configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 'mkdir -p ~/.config/rclone/ && '
                                 f'echo "{rclone_config_data}" >> '
                                 f'{rclone_config_path}')

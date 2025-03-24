@@ -3743,9 +3743,6 @@ class IBMCosStore(AbstractStore):
             data_utils.Rclone.RcloneStores.IBM.get_profile_name(self.name))
         super().__init__(name, source, region, is_sky_managed,
                          sync_on_reconstruction, _bucket_sub_path)
-        self.bucket_rclone_profile = \
-          data_utils.Rclone.generate_rclone_bucket_profile_name(
-            self.name, date_utils.Rclone.RcloneClouds.IBM)
 
     def _validate(self):
         if self.source is not None and isinstance(self.source, str):
@@ -3957,11 +3954,10 @@ class IBMCosStore(AbstractStore):
             # .git directory is excluded from the sync
             # wrapping src_dir_path with "" to support path with spaces
             src_dir_path = shlex.quote(src_dir_path)
-            sync_command = (
-                'rclone copy --exclude ".git/*" '
-                f'{src_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}{sub_path}'
-                f'/{dest_dir_name}')
+            sync_command = ('rclone copy --exclude ".git/*" '
+                            f'{src_dir_path} '
+                            f'{self.rclone_profile_name}:{self.name}{sub_path}'
+                            f'/{dest_dir_name}')
             return sync_command
 
         def get_file_sync_command(base_dir_path, file_names) -> str:
@@ -3987,10 +3983,9 @@ class IBMCosStore(AbstractStore):
                 for file_name in file_names
             ])
             base_dir_path = shlex.quote(base_dir_path)
-            sync_command = (
-                'rclone copy '
-                f'{includes} {base_dir_path} '
-                f'{self.bucket_rclone_profile}:{self.name}{sub_path}')
+            sync_command = ('rclone copy '
+                            f'{includes} {base_dir_path} '
+                            f'{self.rclone_profile_name}:{self.name}{sub_path}')
             return sync_command
 
         # Generate message for upload
@@ -4118,11 +4113,14 @@ class IBMCosStore(AbstractStore):
         rclone_config = data_utils.Rclone.RcloneStores.IBM.get_config(
             rclone_profile_name=self.rclone_profile_name,
             region=self.region)  # type: ignore
-        mount_cmd = mounting_utils.get_cos_mount_cmd(rclone_config,
-                                                     self.rclone_profile_name,
-                                                     self.bucket.name,
-                                                     mount_path,
-                                                     self._bucket_sub_path)
+        mount_cmd = (
+            mounting_utils.get_cos_mount_cmd(
+                rclone_config,
+                self.rclone_profile_name,
+                self.bucket.name,
+                mount_path,
+                self._bucket_sub_path,  # type: ignore
+            ))
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
@@ -4187,7 +4185,7 @@ class IBMCosStore(AbstractStore):
             if e.__class__.__name__ == 'NoSuchBucket':
                 logger.debug('bucket already removed')
         data_utils.Rclone.delete_rclone_bucket_profile(
-            self.name, data_utils.Rclone.RcloneClouds.IBM)
+            self.name, data_utils.Rclone.RcloneStores.IBM)
 
 
 class OciStore(AbstractStore):
