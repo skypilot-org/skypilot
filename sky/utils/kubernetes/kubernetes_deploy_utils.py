@@ -8,6 +8,7 @@ from typing import List, Optional
 from sky import check as sky_check
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.clouds import cloud as sky_cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -167,9 +168,9 @@ def deploy_local_cluster(gpus: bool):
                                f'\nError: {stderr}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check(clouds=['kubernetes'],
-                        quiet=True,
-                        capability=sky_check.CloudCapability.COMPUTE)
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=['kubernetes'])
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs

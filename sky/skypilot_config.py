@@ -53,17 +53,22 @@ import copy
 import os
 import pprint
 import tempfile
+import typing
 from typing import Any, Dict, Iterator, Optional, Tuple
-
-import yaml
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import yaml
+else:
+    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 

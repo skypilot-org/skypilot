@@ -9,12 +9,12 @@ from typing import (Any, Callable, Dict, Iterable, List, Optional, Set, Tuple,
                     Union)
 
 import colorama
-import yaml
 
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 import sky.dag
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -26,7 +26,11 @@ from sky.utils import schemas
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import yaml
+
     from sky import resources as resources_lib
+else:
+    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -974,8 +978,8 @@ class Task:
         # assert len(self.resources) == 1, self.resources
         storage_cloud = None
 
-        enabled_storage_clouds = (
-            storage_lib.get_cached_enabled_storage_clouds_or_refresh(
+        enabled_storage_cloud_names = (
+            storage_lib.get_cached_enabled_storage_cloud_names_or_refresh(
                 raise_if_no_cloud_access=True))
 
         if self.best_resources is not None:
@@ -987,13 +991,13 @@ class Task:
             storage_region = resources.region
 
         if storage_cloud is not None:
-            if str(storage_cloud) not in enabled_storage_clouds:
+            if str(storage_cloud) not in enabled_storage_cloud_names:
                 storage_cloud = None
 
         storage_cloud_str = None
         if storage_cloud is None:
-            storage_cloud_str = enabled_storage_clouds[0]
-            assert storage_cloud_str is not None, enabled_storage_clouds[0]
+            storage_cloud_str = enabled_storage_cloud_names[0]
+            assert storage_cloud_str is not None, enabled_storage_cloud_names[0]
             storage_region = None  # Use default region in the Store class
         else:
             storage_cloud_str = str(storage_cloud)
