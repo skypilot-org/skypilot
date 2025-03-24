@@ -2,9 +2,8 @@
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
 from sky import clouds
+from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
 from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import registry
@@ -12,8 +11,12 @@ from sky.utils import resources_utils
 from sky.utils import status_lib
 
 if typing.TYPE_CHECKING:
+    import requests
+
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 # Minimum set of files under ~/.lambda_cloud that grant Lambda Cloud access.
 _CREDENTIAL_FILES = [

@@ -11,10 +11,16 @@ import json
 import logging
 import os
 import time
+import typing
 from typing import Any, Dict, List, Optional
 from urllib import parse
 
-import requests
+from sky.adaptors import common as adaptors_common
+
+if typing.TYPE_CHECKING:
+    import requests
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 CREDENTIALS_PATH = '~/.scp/scp_credential'
 API_ENDPOINT = 'https://openapi.samsungsdscloud.com'
@@ -98,7 +104,7 @@ class Metadata:
             return list(metadata.keys())
 
 
-def raise_scp_error(response: requests.Response) -> None:
+def raise_scp_error(response: 'requests.Response') -> None:
     """Raise SCPCloudError if appropriate. """
     status_code = response.status_code
     if status_code in (200, 202):
