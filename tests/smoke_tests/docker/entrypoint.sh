@@ -86,7 +86,7 @@ regenerate_user_hash
 
 trap handle_sigterm SIGTERM
 
-# We only expose the API server to the host machine after setup is complete
+# We only bind the 0.0.0.0 host to expose to the host machine after setup is complete
 sky api start --deploy
 
 tail -f ~/.sky/api_server/server.log &
