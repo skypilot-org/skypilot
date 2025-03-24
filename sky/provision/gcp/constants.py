@@ -182,13 +182,7 @@ VM_MINIMAL_PERMISSIONS = [
 
 STORAGE_MINIMAL_PERMISSIONS = [
     'storage.buckets.create',
-    'storage.buckets.get',
     'storage.buckets.delete',
-    'storage.objects.create',
-    'storage.objects.update',
-    'storage.objects.delete',
-    'storage.objects.get',
-    'storage.objects.list',
 ]
 
 # Permissions implied by GCP built-in roles. We hardcode these here, as we
