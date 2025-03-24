@@ -266,6 +266,7 @@ class StoreType(enum.Enum):
 class StorageMode(enum.Enum):
     MOUNT = 'MOUNT'
     COPY = 'COPY'
+    MOUNT_CACHED = 'MOUNT_CACHED'
 
 
 class AbstractStore:
@@ -451,7 +452,19 @@ class AbstractStore:
     def mount_command(self, mount_path: str) -> str:
         """Returns the command to mount the Store to the specified mount_path.
 
-        Includes the setup commands to install mounting tools.
+        This command is used for MOUNT mode. Includes the setup commands to
+        install mounting tools.
+
+        Args:
+          mount_path: str; Mount path on remote server
+        """
+        raise NotImplementedError
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        """Returns the command to mount the Store to the specified mount_path.
+
+        This command is used for MOUNT_CACHED mode. Includes the setup commands
+        to install mounting tools.
 
         Args:
           mount_path: str; Mount path on remote server
