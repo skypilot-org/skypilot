@@ -148,7 +148,8 @@ def test_using_file_mounts_with_env_vars(generic_cloud: str):
 # ---------- storage ----------
 def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
                                        storage_name: str, ls_hello_command: str,
-                                       cloud: str, only_mount: bool):
+                                       cloud: str, only_mount: bool,
+                                       include_mount_cached: bool):
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -183,6 +184,18 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         # the mounted directory
         f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
     ]
+    rclone_stores = None
+    if cloud == 'aws':
+        rclone_stores = data_utils.Rclone.RcloneStores.S3
+    elif cloud == 'gcp':
+        rclone_stores = data_utils.Rclone.RcloneStores.GCS
+    elif cloud == 'azure':
+        rclone_stores = data_utils.Rclone.RcloneStores.AZURE
+    if rclone_stores is not None:
+        rclone_profile_name = rclone_stores.get_profile_name(storage_name)
+        test_commands.append(
+            f'sky exec {cluster_name} -- "set -ex; '
+            f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt;"')
     clean_command = (
         f'sky down -y {cluster_name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
@@ -198,7 +211,7 @@ def test_aws_storage_mounts_with_stop():
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False)
+            f, name, storage_name, ls_hello_command, cloud, False, True)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts',
             test_commands,
@@ -216,7 +229,7 @@ def test_aws_storage_mounts_with_stop_only_mount():
     ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, True)
+            f, name, storage_name, ls_hello_command, cloud, True, False)
         test = smoke_tests_utils.Test(
             'aws_storage_mounts_only_mount',
             test_commands,
@@ -234,7 +247,7 @@ def test_gcp_storage_mounts_with_stop():
     ls_hello_command = f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} ls gs://{storage_name}/hello.txt'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False)
+            f, name, storage_name, ls_hello_command, cloud, False, True)
         test = smoke_tests_utils.Test(
             'gcp_storage_mounts',
             test_commands,
@@ -261,7 +274,7 @@ def test_azure_storage_mounts_with_stop():
                         f'[ "$output" = "[]" ] && exit 1 || exit 0')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, cloud, False)
+            f, name, storage_name, ls_hello_command, cloud, False, True)
         test = smoke_tests_utils.Test(
             'azure_storage_mounts',
             test_commands,
@@ -302,7 +315,7 @@ def test_kubernetes_storage_mounts():
     ls_hello_command = f'{cloud_cmd_cluster_setup_cmd} && {ls_hello_command}'
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         test_commands, clean_command = _storage_mounts_commands_generator(
-            f, name, storage_name, ls_hello_command, 'kubernetes', False)
+            f, name, storage_name, ls_hello_command, 'kubernetes', False, False)
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
@@ -508,8 +521,8 @@ def test_nebius_storage_mounts(generic_cloud: str):
 def test_ibm_storage_mounts():
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-        storage_name, Rclone.RcloneClouds.IBM)
+    rclone_profile_name = data_utils.Rclone.RcloneStores.IBM.get_profile_name(
+        storage_name)
     template_str = pathlib.Path(
         'tests/test_yamls/test_ibm_cos_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
@@ -522,7 +535,7 @@ def test_ibm_storage_mounts():
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud ibm {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'rclone ls {bucket_rclone_profile}:{storage_name}/hello.txt',
+            f'rclone ls {rclone_profile_name}:{storage_name}/hello.txt',
         ]
         test = smoke_tests_utils.Test(
             'ibm_storage_mounts',
@@ -746,9 +759,9 @@ class TestStorageWithCredentials:
             return f'aws s3 rb {url} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
 
         if store_type == storage_lib.StoreType.IBM:
-            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-                bucket_name, Rclone.RcloneClouds.IBM)
-            return f'rclone purge {bucket_rclone_profile}:{bucket_name} && rclone config delete {bucket_rclone_profile}'
+            rclone_profile_name = (data_utils.Rclone.RcloneStores.IBM.
+                                   get_profile_name(bucket_name))
+            return f'rclone purge {rclone_profile_name}:{bucket_name} && rclone config delete {rclone_profile_name}'
 
     @classmethod
     def list_all_files(cls, store_type: storage_lib.StoreType,
@@ -843,9 +856,9 @@ class TestStorageWithCredentials:
 
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
-            bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
-                bucket_name, Rclone.RcloneClouds.IBM)
-            return f'rclone ls {bucket_rclone_profile}:{bucket_name}/{suffix}'
+            rclone_profile_name = data_utils.Rclone.RcloneStores.IBM.get_profile_name(
+                bucket_name)
+            return f'rclone ls {rclone_profile_name}:{bucket_name}/{suffix}'
 
     @staticmethod
     def cli_region_cmd(store_type, bucket_name=None, storage_account_name=None):
