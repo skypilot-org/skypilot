@@ -1,21 +1,31 @@
 """Utility functions for subprocesses."""
+import multiprocessing
 from multiprocessing import pool
 import os
 import random
 import resource
+import shlex
 import subprocess
+import threading
 import time
-from typing import Any, Callable, Dict, Iterable, List, Optional, Tuple, Union
+import typing
+from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
 import colorama
-import psutil
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import log_lib
+from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -97,11 +107,9 @@ def get_parallel_threads(cloud_str: Optional[str] = None) -> int:
 
 
 def run_in_parallel(func: Callable,
-                    args: Iterable[Any],
+                    args: List[Any],
                     num_threads: Optional[int] = None) -> List[Any]:
     """Run a function in parallel on a list of arguments.
-
-    The function 'func' should raise a CommandError if the command fails.
 
     Args:
         func: The function to run in parallel
@@ -111,14 +119,23 @@ def run_in_parallel(func: Callable,
 
     Returns:
       A list of the return values of the function func, in the same order as the
-      arguments.
+        arguments.
+
+    Raises:
+        Exception: The first exception encountered.
     """
-    # Reference: https://stackoverflow.com/questions/25790279/python-multiprocessing-early-termination # pylint: disable=line-too-long
-    processes = num_threads if num_threads is not None else get_parallel_threads(
-    )
+    # Short-circuit for short lists
+    if len(args) == 0:
+        return []
+    if len(args) == 1:
+        return [func(args[0])]
+
+    processes = (num_threads
+                 if num_threads is not None else get_parallel_threads())
+
     with pool.ThreadPool(processes=processes) as p:
-        # Run the function in parallel on the arguments, keeping the order.
-        return list(p.imap(func, args))
+        ordered_iterators = p.imap(func, args)
+        return list(ordered_iterators)
 
 
 def handle_returncode(returncode: int,
@@ -149,9 +166,9 @@ def handle_returncode(returncode: int,
                                           stderr)
 
 
-def kill_children_processes(
-        first_pid_to_kill: Optional[Union[int, List[Optional[int]]]] = None,
-        force: bool = False):
+def kill_children_processes(parent_pids: Optional[Union[
+    int, List[Optional[int]]]] = None,
+                            force: bool = False) -> None:
     """Kill children processes recursively.
 
     We need to kill the children, so that
@@ -161,41 +178,78 @@ def kill_children_processes(
        etc. while we are cleaning up the clusters.
 
     Args:
-        first_pid_to_kill: Optional PID of a process, or PIDs of a series of
-         processes to be killed first. If a list of PID is specified, it is
-         killed by the order in the list.
-         This is for guaranteeing the order of cleaning up and suppress
-         flaky errors.
+        parent_pids: Optional PIDs of a series of processes. The processes and
+          their children will be killed.  If a list of PID is specified, it is
+          killed by the order in the list. This is for guaranteeing the order
+          of cleaning up and suppress flaky errors.
+        force: bool, send SIGKILL if force, otherwise, use SIGTERM for
+          gracefully kill the process.
     """
-    pid_to_proc = dict()
-    child_processes = []
-    if isinstance(first_pid_to_kill, int):
-        first_pid_to_kill = [first_pid_to_kill]
-    elif first_pid_to_kill is None:
-        first_pid_to_kill = []
+    if isinstance(parent_pids, int):
+        parent_pids = [parent_pids]
 
-    def _kill_processes(processes: List[psutil.Process]) -> None:
-        for process in processes:
+    parent_processes = []
+    if parent_pids is None:
+        parent_processes = [psutil.Process()]
+    else:
+        for pid in parent_pids:
             try:
-                if force:
-                    process.kill()
-                else:
-                    process.terminate()
+                process = psutil.Process(pid)
             except psutil.NoSuchProcess:
-                # The process may have already been terminated.
-                pass
+                continue
+            parent_processes.append(process)
 
-    parent_process = psutil.Process()
-    for child in parent_process.children(recursive=True):
-        if child.pid in first_pid_to_kill:
-            pid_to_proc[child.pid] = child
+    for parent_process in parent_processes:
+        child_processes = parent_process.children(recursive=True)
+        if parent_pids is not None:
+            kill_process_with_grace_period(parent_process, force=force)
+        logger.debug(f'Killing child processes: {child_processes}')
+        for child in child_processes:
+            kill_process_with_grace_period(child, force=force)
+
+
+def kill_process_with_grace_period(proc: Union[multiprocessing.Process,
+                                               psutil.Process],
+                                   force: bool = False,
+                                   grace_period: int = 10) -> None:
+    """Kill a process with SIGTERM and wait for it to exit.
+
+    Args:
+        proc: The process to kill, either a multiprocessing.Process or a
+            psutil.Process.
+        force: Whether to force kill the process.
+        grace_period: The grace period seconds to wait for the process to exit.
+    """
+    if isinstance(proc, psutil.Process):
+        alive = proc.is_running
+        wait = proc.wait
+    else:
+        alive = proc.is_alive
+        wait = proc.join
+    if not alive():
+        # Skip if the process is not running.
+        return
+    logger.debug(f'Killing process {proc.pid}')
+    try:
+        if force:
+            proc.kill()
         else:
-            child_processes.append(child)
-
-    _kill_processes([
-        pid_to_proc[proc] for proc in first_pid_to_kill if proc in pid_to_proc
-    ])
-    _kill_processes(child_processes)
+            proc.terminate()
+        wait(timeout=grace_period)
+    except (psutil.NoSuchProcess, ValueError):
+        # The child process may have already been terminated.
+        return
+    except psutil.TimeoutExpired:
+        # Pass to finally to force kill the process.
+        pass
+    finally:
+        logger.debug(f'Process {proc.pid} did not terminate after '
+                     f'{grace_period} seconds')
+        # Attempt to force kill if the normal termination fails
+        if not force:
+            logger.debug(f'Force killing process {proc.pid}')
+            # Shorter timeout after force kill
+            kill_process_with_grace_period(proc, force=True, grace_period=5)
 
 
 def run_with_retries(
@@ -293,3 +347,92 @@ def kill_process_daemon(process_pid: int) -> None:
         # Disable input
         stdin=subprocess.DEVNULL,
     )
+
+
+def launch_new_process_tree(cmd: str, log_output: str = '/dev/null') -> int:
+    """Launch a new process that will not be a child of the current process.
+
+    This will launch bash in a new session, which will launch the given cmd.
+    This will ensure that cmd is in its own process tree, and once bash exits,
+    will not be an ancestor of the current process. This is useful for job
+    launching.
+
+    Returns the pid of the launched cmd.
+    """
+    # Use nohup to ensure the job driver process is a separate process tree,
+    # instead of being a child of the current process. This is important to
+    # avoid a chain of driver processes (job driver can call schedule_step() to
+    # submit new jobs, and the new job can also call schedule_step()
+    # recursively).
+    #
+    # echo $! will output the PID of the last background process started in the
+    # current shell, so we can retrieve it and record in the DB.
+    #
+    # TODO(zhwu): A more elegant solution is to use another daemon process to be
+    # in charge of starting these driver processes, instead of starting them in
+    # the current process.
+    wrapped_cmd = (f'nohup bash -c {shlex.quote(cmd)} '
+                   f'</dev/null >{log_output} 2>&1 & echo $!')
+    proc = subprocess.run(wrapped_cmd,
+                          stdout=subprocess.PIPE,
+                          stderr=subprocess.PIPE,
+                          stdin=subprocess.DEVNULL,
+                          start_new_session=True,
+                          check=True,
+                          shell=True,
+                          text=True)
+    # Get the PID of the detached process
+    return int(proc.stdout.strip())
+
+
+# A protocol for objects that can be started, designed to be used with
+# slow_start_processes() so that we can handle different wrappers of
+# multiprocessing.Process in a uniform way.
+class Startable(Protocol):
+
+    def start(self) -> None:
+        ...
+
+
+OnStartFn = Callable[[Startable], None]
+
+
+def slow_start_processes(processes: List[Startable],
+                         delay: float = 2.0,
+                         on_start: Optional[OnStartFn] = None,
+                         should_exit: Optional[threading.Event] = None) -> None:
+    """Start processes with slow start.
+
+    Profile shows that it takes 1~2 seconds to start a worker process when
+    CPU is relatively idle. However, starting all workers simultaneously will
+    overwhelm the CPU and cause the time for the first worker to be ready to
+    be delayed. Slow start start a group of workers slowly to accelerate the
+    start time (i.e. the time for the first worker to be ready), while
+    gradually increasing the batch size in exponential manner to make the
+    time of achieving full parallelism as short as possible.
+
+    Args:
+        processes: The list of processes to start.
+        delay: The delay between starting each process, default to 2.0 seconds,
+            based on profile.
+        on_start: An optional function to callback when a process starts.
+        should_exit: An optional event to check if the function should exit
+            before starting all the processes.
+    """
+    max_batch_size = max(1, int(common_utils.get_cpu_count() / 2))
+    batch_size = 1
+    left = len(processes)
+    while left > 0:
+        if should_exit and should_exit.is_set():
+            break
+        current_batch = min(batch_size, left)
+        for i in range(current_batch):
+            worker_idx = len(processes) - left + i
+            processes[worker_idx].start()
+            if on_start:
+                on_start(processes[worker_idx])
+        left -= current_batch
+        if left <= 0:
+            break
+        batch_size = min(batch_size * 2, max_batch_size)
+        time.sleep(delay)

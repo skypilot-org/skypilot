@@ -35,6 +35,7 @@ import time
 from typing import Any, Callable
 
 from sky.adaptors import common
+from sky.utils import annotations
 from sky.utils import common_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for AWS. '
@@ -59,7 +60,7 @@ class _ThreadLocalLRUCache(threading.local):
 
     def __init__(self, maxsize=32):
         super().__init__()
-        self.cache = functools.lru_cache(maxsize=maxsize)
+        self.cache = annotations.lru_cache(scope='global', maxsize=maxsize)
 
 
 def _thread_local_lru_cache(maxsize=32):
@@ -120,9 +121,17 @@ def _create_aws_object(creation_fn_or_cls: Callable[[], Any],
 # The LRU cache needs to be thread-local to avoid multiple threads sharing the
 # same session object, which is not guaranteed to be thread-safe.
 @_thread_local_lru_cache()
-def session():
+def session(check_credentials: bool = True):
     """Create an AWS session."""
-    return _create_aws_object(boto3.session.Session, 'session')
+    s = _create_aws_object(boto3.session.Session, 'session')
+    if check_credentials and s.get_credentials() is None:
+        # s.get_credentials() can be None if there are actually no credentials,
+        # or if we fail to get credentials from IMDS (e.g. due to throttling).
+        # Technically, it could be okay to have no credentials, as certain AWS
+        # APIs don't actually need them. But afaik everything we use AWS for
+        # needs credentials.
+        raise botocore_exceptions().NoCredentialsError()
+    return s
 
 
 # Avoid caching the resource/client objects. If we are using the assumed role,
@@ -149,11 +158,15 @@ def resource(service_name: str, **kwargs):
         config = botocore_config().Config(
             retries={'max_attempts': max_attempts})
         kwargs['config'] = config
+
+    check_credentials = kwargs.pop('check_credentials', True)
+
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.resource()
     # is not thread-safe). Reference: https://stackoverflow.com/a/59635814
     return _create_aws_object(
-        lambda: session().resource(service_name, **kwargs), 'resource')
+        lambda: session(check_credentials=check_credentials).resource(
+            service_name, **kwargs), 'resource')
 
 
 def client(service_name: str, **kwargs):
@@ -164,12 +177,16 @@ def client(service_name: str, **kwargs):
         kwargs: Other options.
     """
     _assert_kwargs_builtin_type(kwargs)
+
+    check_credentials = kwargs.pop('check_credentials', True)
+
     # Need to use the client retrieved from the per-thread session to avoid
     # thread-safety issues (Directly creating the client with boto3.client() is
     # not thread-safe). Reference: https://stackoverflow.com/a/59635814
 
-    return _create_aws_object(lambda: session().client(service_name, **kwargs),
-                              'client')
+    return _create_aws_object(
+        lambda: session(check_credentials=check_credentials).client(
+            service_name, **kwargs), 'client')
 
 
 @common.load_lazy_modules(modules=_LAZY_MODULES)

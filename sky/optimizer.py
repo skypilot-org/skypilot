@@ -1,13 +1,11 @@
 """Optimizer: assigns best resources to user tasks."""
 import collections
 import copy
-import enum
 import json
 import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
-import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -17,6 +15,9 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.clouds import cloud as sky_cloud
+from sky.usage import usage_lib
+from sky.utils import common
 from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import resources_utils
@@ -27,10 +28,12 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
+    import numpy as np
 
     from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
+    np = adaptors_common.LazyImport('numpy')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -43,12 +46,6 @@ _TaskToCostMap = Dict[task_lib.Task, Dict[resources_lib.Resources, float]]
 _PerCloudCandidates = Dict[clouds.Cloud, List[resources_lib.Resources]]
 # task -> per-cloud candidates
 _TaskToPerCloudCandidates = Dict[task_lib.Task, _PerCloudCandidates]
-
-
-# Constants: minimize what target?
-class OptimizeTarget(enum.Enum):
-    COST = 0
-    TIME = 1
 
 
 # For logging purposes.
@@ -107,11 +104,12 @@ class Optimizer:
 
     @staticmethod
     @timeline.event
+    @usage_lib.entrypoint('sky.optimizer.optimize')
     def optimize(dag: 'dag_lib.Dag',
-                 minimize: OptimizeTarget = OptimizeTarget.COST,
+                 minimize: common.OptimizeTarget = common.OptimizeTarget.COST,
                  blocked_resources: Optional[Iterable[
                      resources_lib.Resources]] = None,
-                 quiet: bool = False):
+                 quiet: bool = False) -> 'dag_lib.Dag':
         """Find the best execution plan for the given DAG.
 
         Args:
@@ -127,14 +125,13 @@ class Optimizer:
         """
         with rich_utils.safe_status(ux_utils.spinner_message('Optimizing')):
             _check_specified_clouds(dag)
-
             # This function is effectful: mutates every node in 'dag' by setting
             # node.best_resources if it is None.
             Optimizer._add_dummy_source_sink_nodes(dag)
             try:
                 unused_best_plan = Optimizer._optimize_dag(
                     dag=dag,
-                    minimize_cost=minimize == OptimizeTarget.COST,
+                    minimize_cost=minimize == common.OptimizeTarget.COST,
                     blocked_resources=blocked_resources,
                     quiet=quiet)
             finally:
@@ -290,8 +287,6 @@ class Optimizer:
 
             # Don't print for the last node, Sink.
             do_print = node_i != len(topo_order) - 1
-            if do_print:
-                logger.debug('#### {} ####'.format(node))
 
             fuzzy_candidates: List[str] = []
             if node_i < len(topo_order) - 1:
@@ -302,6 +297,10 @@ class Optimizer:
                         blocked_resources=blocked_resources,
                         quiet=quiet))
                 node_to_candidate_map[node] = cloud_candidates
+                # Has to call the printing after the launchable resources are
+                # computed, because the missing fields of the resources are
+                # inferred in the _fill_in_launchable_resources function.
+                logger.debug('#### {} ####'.format(node))
             else:
                 # Dummy sink node.
                 launchable_resources = {
@@ -371,7 +370,8 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = (
-                    sky_check.get_cached_enabled_clouds_or_refresh())
+                    sky_check.get_cached_enabled_clouds_or_refresh(
+                        sky_cloud.CloudCapability.COMPUTE))
                 if clouds.cloud_in_iterable(clouds.Kubernetes(),
                                             enabled_clouds):
                     if any(orig_resources.cloud is None
@@ -884,10 +884,8 @@ class Optimizer:
                 # Add a new line for better readability, when there are multiple
                 # tasks.
                 logger.info('')
-            logger.info(
-                f'{colorama.Style.BRIGHT}Considered resources {task_str}'
-                f'({task.num_nodes} node{plural}):'
-                f'{colorama.Style.RESET_ALL}')
+            logger.info(f'Considered resources {task_str}'
+                        f'({task.num_nodes} node{plural}):')
 
             # Only print 1 row per cloud.
             # The following code is to generate the table
@@ -1211,6 +1209,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         dag: The DAG specified by a user.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     global_disabled_clouds: Set[str] = set()
@@ -1228,10 +1227,12 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             all_clouds_specified.add(cloud_str)
 
         # Explicitly check again to update the enabled cloud list.
-        sky_check.check(quiet=True,
-                        clouds=list(clouds_need_recheck -
-                                    global_disabled_clouds))
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=list(clouds_need_recheck -
+                                               global_disabled_clouds))
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
                            {str(c) for c in enabled_clouds})
@@ -1273,6 +1274,7 @@ def _fill_in_launchable_resources(
         a cloud that is not enabled.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (
@@ -1283,6 +1285,9 @@ def _fill_in_launchable_resources(
     if blocked_resources is None:
         blocked_resources = []
     for resources in task.resources:
+        # Validate the resources first which may fill in missing fields
+        # automatically for the resources.
+        resources.validate()
         if (resources.cloud is not None and
                 not clouds.cloud_in_iterable(resources.cloud, enabled_clouds)):
             # Skip the resources that are on a cloud that is not enabled. The
@@ -1293,9 +1298,12 @@ def _fill_in_launchable_resources(
                        if resources.cloud is not None else enabled_clouds)
         # If clouds provide hints, store them for later printing.
         hints: Dict[clouds.Cloud, str] = {}
-        for cloud in clouds_list:
-            feasible_resources = cloud.get_feasible_launchable_resources(
-                resources, num_nodes=task.num_nodes)
+
+        feasible_list = subprocess_utils.run_in_parallel(
+            lambda cloud, r=resources, n=task.num_nodes:
+            (cloud, cloud.get_feasible_launchable_resources(r, n)),
+            clouds_list)
+        for cloud, feasible_resources in feasible_list:
             if feasible_resources.hint is not None:
                 hints[cloud] = feasible_resources.hint
             if feasible_resources.resources_list:
@@ -1325,17 +1333,21 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Fore.CYAN}'
                                 f'{sorted(all_fuzzy_candidates)}'
                                 f'{colorama.Style.RESET_ALL}')
+                else:
+                    if resources.cpus is not None:
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different CPU count, '
+                                    'or add "+" to the end of the CPU count '
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
+                    if resources.memory is not None:
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different memory size, '
+                                    'or add "+" to the end of the memory size '
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{repr(cloud)}: {hint}')
-            else:
-                if resources.cpus is not None:
-                    logger.info('Try specifying a different CPU count, '
-                                'or add "+" to the end of the CPU count '
-                                'to allow for larger instances.')
-                if resources.memory is not None:
-                    logger.info('Try specifying a different memory size, '
-                                'or add "+" to the end of the memory size '
-                                'to allow for larger instances.')
 
         launchable[resources] = _filter_out_blocked_launchable_resources(
             launchable[resources], blocked_resources)

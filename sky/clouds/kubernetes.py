@@ -1,11 +1,11 @@
 """Kubernetes."""
-import functools
 import os
 import re
 import typing
-from typing import Dict, Iterator, List, Optional, Tuple, Union
+from typing import Dict, Iterator, List, Optional, Set, Tuple, Union
 
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import kubernetes
@@ -14,7 +14,9 @@ from sky.provision import instance_setup
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import schemas
 
@@ -34,7 +36,7 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
 
-@clouds.CLOUD_REGISTRY.register(aliases=['k8s'])
+@registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""
 
@@ -77,18 +79,25 @@ class Kubernetes(clouds.Cloud):
     PROVISIONER_VERSION = clouds.ProvisionerVersion.SKYPILOT
     STATUS_VERSION = clouds.StatusVersion.SKYPILOT
 
+    _INDENT_PREFIX = ' ' * 4
+
+    # Set of contexts that has logged as temporarily unreachable
+    logged_unreachable_contexts: Set[str] = set()
+
     @property
     def ssh_key_secret_field_name(self):
         # Use a fresh user hash to avoid conflicts in the secret object naming.
         # This can happen when the controller is reusing the same user hash
         # through USER_ID_ENV_VAR but has a different SSH key.
-        fresh_user_hash = common_utils.get_user_hash(force_fresh_hash=True)
+        fresh_user_hash = common_utils.generate_user_hash()
         return f'ssh-publickey-{fresh_user_hash}'
 
     @classmethod
     def _unsupported_features_for_resources(
         cls, resources: 'resources_lib.Resources'
     ) -> Dict[clouds.CloudImplementationFeatures, str]:
+        # TODO(aylei): features need to be regional (per context) to make
+        # multi-kubernetes selection/failover work.
         unsupported_features = cls._CLOUD_UNSUPPORTED_FEATURES.copy()
         context = resources.region
         if context is None:
@@ -105,10 +114,13 @@ class Kubernetes(clouds.Cloud):
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTO_TERMINATE] = message
         # Allow spot instances if supported by the cluster
-        spot_label_key, _ = kubernetes_utils.get_spot_label(context)
-        if spot_label_key is not None:
-            unsupported_features.pop(
-                clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+        try:
+            spot_label_key, _ = kubernetes_utils.get_spot_label(context)
+            if spot_label_key is not None:
+                unsupported_features.pop(
+                    clouds.CloudImplementationFeatures.SPOT_INSTANCE, None)
+        except exceptions.KubeAPIUnreachableError as e:
+            cls._log_unreachable_context(context, str(e))
         return unsupported_features
 
     @classmethod
@@ -116,7 +128,7 @@ class Kubernetes(clouds.Cloud):
         return cls._MAX_CLUSTER_NAME_LEN_LIMIT
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def _log_skipped_contexts_once(cls, skipped_contexts: Tuple[str,
                                                                 ...]) -> None:
         """Log skipped contexts for only once.
@@ -131,7 +143,7 @@ class Kubernetes(clouds.Cloud):
                 'Ignoring these contexts.')
 
     @classmethod
-    def _existing_allowed_contexts(cls) -> List[str]:
+    def existing_allowed_contexts(cls) -> List[str]:
         """Get existing allowed contexts.
 
         If None is returned in the list, it means that we are running in a pod
@@ -170,12 +182,42 @@ class Kubernetes(clouds.Cloud):
         return existing_contexts
 
     @classmethod
+    def _log_unreachable_context(cls,
+                                 context: str,
+                                 reason: Optional[str] = None) -> None:
+        """Logs a Kubernetes context as unreachable.
+
+        Args:
+            context: The Kubernetes context to mark as unreachable.
+            reason: Optional reason for marking the context as unreachable.
+            silent: Whether to suppress the log message.
+        """
+        # Skip if this context has already been logged as unreachable
+        if context in cls.logged_unreachable_contexts:
+            return
+
+        cls.logged_unreachable_contexts.add(context)
+        msg = f'Excluding Kubernetes context {context}'
+        if reason is not None:
+            msg += f': {reason}'
+        logger.info(msg)
+
+        # Check if all existing allowed contexts are now unreachable
+        existing_contexts = cls.existing_allowed_contexts()
+        if existing_contexts and all(ctx in cls.logged_unreachable_contexts
+                                     for ctx in existing_contexts):
+            logger.warning(
+                'All Kubernetes contexts are unreachable. '
+                'Retry if it is a transient error, or run sky check to '
+                'refresh Kubernetes availability if permanent.')
+
+    @classmethod
     def regions_with_offering(cls, instance_type: Optional[str],
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
         del accelerators, zone, use_spot  # unused
-        existing_contexts = cls._existing_allowed_contexts()
+        existing_contexts = cls.existing_allowed_contexts()
 
         regions = []
         for context in existing_contexts:
@@ -187,28 +229,52 @@ class Kubernetes(clouds.Cloud):
         # Check if requested instance type will fit in the cluster.
         # TODO(zhwu,romilb): autoscaler type needs to be regional (per
         # kubernetes cluster/context).
-        regions_to_return = []
+        if instance_type is None:
+            return regions
+
         autoscaler_type = kubernetes_utils.get_autoscaler_type()
-        if autoscaler_type is None and instance_type is not None:
-            # If autoscaler is not set, check if the instance type fits in the
-            # cluster. Else, rely on the autoscaler to provision the right
-            # instance type without running checks. Worst case, if autoscaling
-            # fails, the pod will be stuck in pending state until
-            # provision_timeout, after which failover will be triggered.
-            for r in regions:
-                context = r.name
+        if (autoscaler_type is not None and not kubernetes_utils.get_autoscaler(
+                autoscaler_type).can_query_backend):
+            # Unsupported autoscaler type. Rely on the autoscaler to
+            # provision the right instance type without running checks.
+            # Worst case, if autoscaling fails, the pod will be stuck in
+            # pending state until provision_timeout, after which failover
+            # will be triggered.
+            #
+            # Removing this if statement produces the same behavior,
+            # because can_create_new_instance_of_type() always returns True
+            # for unsupported autoscaler types.
+            # This check is here as a performance optimization to avoid
+            # further code executions that is known to return this result.
+            return regions
+
+        regions_to_return = []
+        for r in regions:
+            context = r.name
+            try:
                 fits, reason = kubernetes_utils.check_instance_fits(
                     context, instance_type)
-                if fits:
-                    regions_to_return.append(r)
-                else:
-                    logger.debug(
-                        f'Instance type {instance_type} does '
-                        'not fit in the Kubernetes cluster with context: '
-                        f'{context}. Reason: {reason}')
-        else:
-            regions_to_return = regions
-
+            except exceptions.KubeAPIUnreachableError as e:
+                cls._log_unreachable_context(context, str(e))
+                continue
+            if fits:
+                regions_to_return.append(r)
+                continue
+            logger.debug(f'Instance type {instance_type} does '
+                         'not fit in the existing Kubernetes cluster '
+                         'with context: '
+                         f'{context}. Reason: {reason}')
+            if autoscaler_type is None:
+                continue
+            autoscaler = kubernetes_utils.get_autoscaler(autoscaler_type)
+            logger.debug(f'{context} has autoscaler of type: {autoscaler_type}')
+            if autoscaler.can_create_new_instance_of_type(
+                    context, instance_type):
+                logger.debug(f'Kubernetes cluster {context} can be '
+                             'autoscaled to create instance type '
+                             f'{instance_type}. Including {context} '
+                             'in the list of regions to return.')
+                regions_to_return.append(r)
         return regions_to_return
 
     def instance_type_to_hourly_cost(self,
@@ -240,7 +306,7 @@ class Kubernetes(clouds.Cloud):
             cls,
             cpus: Optional[str] = None,
             memory: Optional[str] = None,
-            disk_tier: Optional[resources_utils.DiskTier] = None) -> str:
+            disk_tier: Optional['resources_utils.DiskTier'] = None) -> str:
         # TODO(romilb): In the future, we may want to move the instance type
         #  selection + availability checking to a kubernetes_catalog module.
         del disk_tier  # Unused.
@@ -330,7 +396,7 @@ class Kubernetes(clouds.Cloud):
     def make_deploy_resources_variables(
             self,
             resources: 'resources_lib.Resources',
-            cluster_name: resources_utils.ClusterName,
+            cluster_name: 'resources_utils.ClusterName',
             region: Optional['clouds.Region'],
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
@@ -464,7 +530,9 @@ class Kubernetes(clouds.Cloud):
         # CPU resources on the node instead within the pod.
         custom_ray_options = {
             'object-store-memory': 500000000,
-            'num-cpus': str(int(cpus)),
+            # 'num-cpus' must be an integer, but we should not set it to 0 if
+            # cpus is <1.
+            'num-cpus': str(max(int(cpus), 1)),
         }
         deploy_vars = {
             'instance_type': resources.instance_type,
@@ -570,7 +638,6 @@ class Kubernetes(clouds.Cloud):
             chosen_instance_type = (
                 kubernetes_utils.KubernetesInstanceType.from_resources(
                     gpu_task_cpus, gpu_task_memory, acc_count, acc_type).name)
-
         # Check the availability of the specified instance type in all contexts.
         available_regions = self.regions_with_offering(
             chosen_instance_type,
@@ -588,10 +655,12 @@ class Kubernetes(clouds.Cloud):
                                                  [], None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Kubernetes."""
         # Test using python API
         try:
-            existing_allowed_contexts = cls._existing_allowed_contexts()
+            existing_allowed_contexts = cls.existing_allowed_contexts()
         except ImportError as e:
             return (False,
                     f'{common_utils.format_exception(e, use_bracket=True)}')
@@ -606,17 +675,52 @@ class Kubernetes(clouds.Cloud):
                     'Check if you have a valid kubeconfig file' +
                     check_skypilot_config_msg)
         reasons = []
+        hints = []
+        success = False
         for context in existing_allowed_contexts:
             try:
                 check_result = kubernetes_utils.check_credentials(context)
                 if check_result[0]:
-                    return check_result
-                reasons.append(f'{context}: {check_result[1]}')
+                    success = True
+                    if check_result[1] is not None:
+                        hints.append(f'Context {context}: {check_result[1]}')
+                else:
+                    reasons.append(f'Context {context}: {check_result[1]}')
             except Exception as e:  # pylint: disable=broad-except
                 return (False, f'Credential check failed for {context}: '
                         f'{common_utils.format_exception(e)}')
+        if success:
+            return (True, cls._format_credential_check_results(hints, reasons))
         return (False, 'Failed to find available context with working '
                 'credentials. Details:\n' + '\n'.join(reasons))
+
+    @classmethod
+    def _format_credential_check_results(cls, hints: List[str],
+                                         reasons: List[str]) -> str:
+        """Format credential check results with hints and reasons.
+
+        Args:
+            hints: List of successful context check messages.
+            reasons: List of failed context check reasons.
+
+        Returns:
+            A formatted string containing hints and by failure reasons.
+        """
+        message_parts = []
+        if len(hints) == 1 and not reasons:
+            return hints[0]
+        if hints:
+            message_parts.append(f'\n{cls._INDENT_PREFIX}  ' +
+                                 f'\n{cls._INDENT_PREFIX}  '.join(hints))
+        if reasons:
+            if hints:
+                message_parts.append('\n')
+            message_parts.append(
+                f'\n{cls._INDENT_PREFIX}Unavailable contexts (remove from '
+                '"allowed_contexts" config if permanently unavailable): '
+                f'\n{cls._INDENT_PREFIX}  ' +
+                f'\n{cls._INDENT_PREFIX}  '.join(reasons))
+        return ''.join(message_parts)
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         if os.path.exists(os.path.expanduser(CREDENTIAL_PATH)):

@@ -1,6 +1,5 @@
 """Google Cloud Platform."""
 import enum
-import functools
 import json
 import os
 import re
@@ -18,14 +17,16 @@ from sky import skypilot_config
 from sky.adaptors import gcp
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
+from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     from sky import resources
-    from sky import status_lib
+    from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -66,8 +67,20 @@ _GCLOUD_VERSION = '424.0.0'
 GOOGLE_SDK_INSTALLATION_COMMAND: str = f'pushd /tmp &>/dev/null && \
     {{ gcloud --help > /dev/null 2>&1 || \
     {{ mkdir -p {os.path.dirname(_GCLOUD_INSTALLATION_LOG)} && \
-    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz > {_GCLOUD_INSTALLATION_LOG} && \
-    tar xzf google-cloud-sdk-{_GCLOUD_VERSION}-linux-x86_64.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then \
+        echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="x86_64"; \
+    elif [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then \
+        echo "Installing Google Cloud SDK for $ARCH" > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="arm"; \
+    else \
+        echo "Architecture $ARCH not supported by Google Cloud SDK. Defaulting to x86_64." > {_GCLOUD_INSTALLATION_LOG} && \
+        ARCH_SUFFIX="x86_64"; \
+    fi && \
+    echo "Detected architecture: $ARCH, using package: $ARCH_SUFFIX" >> {_GCLOUD_INSTALLATION_LOG} && \
+    wget --quiet https://dl.google.com/dl/cloudsdk/channels/rapid/downloads/google-cloud-sdk-{_GCLOUD_VERSION}-linux-${{ARCH_SUFFIX}}.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
+    tar xzf google-cloud-sdk-{_GCLOUD_VERSION}-linux-${{ARCH_SUFFIX}}.tar.gz >> {_GCLOUD_INSTALLATION_LOG} && \
     rm -rf ~/google-cloud-sdk >> {_GCLOUD_INSTALLATION_LOG}  && \
     mv google-cloud-sdk ~/ && \
     ~/google-cloud-sdk/install.sh -q >> {_GCLOUD_INSTALLATION_LOG} 2>&1 && \
@@ -111,6 +124,7 @@ def _run_output(cmd):
 
 
 def is_api_disabled(endpoint: str, project_id: str) -> bool:
+    # requires serviceusage.services.list
     proc = subprocess.run((f'gcloud services list --project {project_id} '
                            f' | grep {endpoint}.googleapis.com'),
                           check=False,
@@ -132,8 +146,11 @@ class GCPIdentityType(enum.Enum):
 
     SHARED_CREDENTIALS_FILE = ''
 
+    def can_credential_expire(self) -> bool:
+        return self == GCPIdentityType.SHARED_CREDENTIALS_FILE
 
-@clouds.CLOUD_REGISTRY.register
+
+@registry.CLOUD_REGISTRY.register
 class GCP(clouds.Cloud):
     """Google Cloud Platform."""
 
@@ -345,7 +362,7 @@ class GCP(clouds.Cloud):
         return find_machine is not None
 
     @classmethod
-    @functools.lru_cache(maxsize=1)
+    @annotations.lru_cache(scope='global', maxsize=1)
     def _get_image_size(cls, image_id: str) -> float:
         if image_id.startswith('skypilot:'):
             return DEFAULT_GCP_IMAGE_GB
@@ -702,7 +719,28 @@ class GCP(clouds.Cloud):
         return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's compute service."""
+        return cls._check_credentials(
+            [
+                ('compute', 'Compute Engine'),
+                ('cloudresourcemanager', 'Cloud Resource Manager'),
+                ('iam', 'Identity and Access Management (IAM)'),
+                ('tpu', 'Cloud TPU'),  # Keep as final element.
+            ],
+            gcp_utils.get_minimal_compute_permissions())
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's storage service."""
+        return cls._check_credentials(
+            [('storage', 'Cloud Storage')],
+            gcp_utils.get_minimal_storage_permissions())
+
+    @classmethod
+    def _check_credentials(
+            cls, apis: List[Tuple[str, str]],
+            gcp_minimal_permissions: List[str]) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -767,13 +805,37 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        # Check APIs.
-        apis = (
-            ('compute', 'Compute Engine'),
-            ('cloudresourcemanager', 'Cloud Resource Manager'),
-            ('iam', 'Identity and Access Management (IAM)'),
-            ('tpu', 'Cloud TPU'),  # Keep as final element.
-        )
+        # pylint: disable=import-outside-toplevel,unused-import
+        import google.auth
+
+        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
+        credentials, project = google.auth.default()
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
+        permissions = {'permissions': gcp_minimal_permissions}
+        request = crm.projects().testIamPermissions(resource=project,
+                                                    body=permissions)
+        try:
+            ret_permissions = request.execute().get('permissions', [])
+        except gcp.gcp_auth_refresh_error_exception() as e:
+            return False, common_utils.format_exception(e, use_bracket=True)
+
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
+        if diffs:
+            identity_str = identity[0] if identity else None
+            return False, (
+                'The following permissions are not enabled for the current '
+                f'GCP identity ({identity_str}):\n    '
+                f'{diffs}\n    '
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+
+        # This code must be executed after the iam check above,
+        # as the check below for api enablement itself needs:
+        # - serviceusage.services.enable
+        # - serviceusage.services.list
+        # iam permissions.
         enabled_api = False
         for endpoint, display_name in apis:
             if is_api_disabled(endpoint, project_id):
@@ -785,6 +847,7 @@ class GCP(clouds.Cloud):
                     suffix = ' (free of charge)'
                 print(f'\nEnabling {display_name} API{suffix}...')
                 t1 = time.time()
+                # requires serviceusage.services.enable
                 proc = subprocess.run(
                     f'gcloud services enable {endpoint}.googleapis.com '
                     f'--project {project_id}',
@@ -814,29 +877,6 @@ class GCP(clouds.Cloud):
                   'effect. If any SkyPilot commands/calls failed, retry after '
                   'some time.')
 
-        # pylint: disable=import-outside-toplevel,unused-import
-        import google.auth
-
-        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
-        credentials, project = google.auth.default()
-        crm = gcp.build('cloudresourcemanager',
-                        'v1',
-                        credentials=credentials,
-                        cache_discovery=False)
-        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
-        permissions = {'permissions': gcp_minimal_permissions}
-        request = crm.projects().testIamPermissions(resource=project,
-                                                    body=permissions)
-        ret_permissions = request.execute().get('permissions', [])
-
-        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if diffs:
-            identity_str = identity[0] if identity else None
-            return False, (
-                'The following permissions are not enabled for the current '
-                f'GCP identity ({identity_str}):\n    '
-                f'{diffs}\n    '
-                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
@@ -863,6 +903,12 @@ class GCP(clouds.Cloud):
             pass
         return credentials
 
+    @annotations.lru_cache(scope='global', maxsize=1)
+    def can_credential_expire(self) -> bool:
+        identity_type = self._get_identity_type()
+        return (identity_type is not None and
+                identity_type.can_credential_expire())
+
     @classmethod
     def _get_identity_type(cls) -> Optional[GCPIdentityType]:
         try:
@@ -877,7 +923,8 @@ class GCP(clouds.Cloud):
         return GCPIdentityType.SHARED_CREDENTIALS_FILE
 
     @classmethod
-    @functools.lru_cache(maxsize=1)  # Cache since getting identity is slow.
+    @annotations.lru_cache(scope='request',
+                           maxsize=1)  # Cache since getting identity is slow.
     def get_user_identities(cls) -> List[List[str]]:
         """Returns the email address + project id of the active user."""
         try:

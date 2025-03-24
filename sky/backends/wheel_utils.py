@@ -17,7 +17,7 @@ import re
 import shutil
 import subprocess
 import tempfile
-from typing import Tuple
+from typing import Optional, Tuple
 
 import filelock
 from packaging import version
@@ -149,13 +149,29 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         - wheel_hash: The wheel content hash.
     """
 
-    def _get_latest_modification_time(path: pathlib.Path) -> float:
+    def _get_latest_modification_time(path: pathlib.Path) -> Optional[float]:
+        max_time = -1.
         if not path.exists():
-            return -1.
-        try:
-            return max(os.path.getmtime(root) for root, _, _ in os.walk(path))
-        except ValueError:
-            return -1.
+            return max_time
+        for root, dirs, files in os.walk(path):
+            # Prune __pycache__ directories to prevent walking into them and
+            # exclude them from processing
+            if '__pycache__' in dirs:
+                dirs.remove('__pycache__')
+            # Filter out .pyc files
+            filtered_files = [f for f in files if not f.endswith('.pyc')]
+            # Process remaining directories and files
+            for entry in (*dirs, *filtered_files):
+                entry_path = os.path.join(root, entry)
+                try:
+                    mtime = os.path.getmtime(entry_path)
+                    if mtime > max_time:
+                        max_time = mtime
+                except OSError:
+                    # Handle cases where file might have been deleted after
+                    # listing
+                    return None
+        return max_time
 
     # This lock prevents that the wheel is updated while being copied.
     # Although the current caller already uses a lock, we still lock it here
@@ -167,10 +183,12 @@ def build_sky_wheel() -> Tuple[pathlib.Path, str]:
         last_modification_time = _get_latest_modification_time(SKY_PACKAGE_PATH)
         last_wheel_modification_time = _get_latest_modification_time(WHEEL_DIR)
 
-        # Only build wheels if the wheel is outdated or wheel does not exist
-        # for the requested version.
-        if (last_wheel_modification_time < last_modification_time) or not any(
-                WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}')):
+        # Only build wheels if the wheel is outdated, wheel does not exist
+        # for the requested version, or files were deleted during checking.
+        if ((last_modification_time is None or
+             last_wheel_modification_time is None) or
+            (last_wheel_modification_time < last_modification_time) or
+                not any(WHEEL_DIR.glob(f'**/{_WHEEL_PATTERN}'))):
             if not WHEEL_DIR.exists():
                 WHEEL_DIR.mkdir(parents=True, exist_ok=True)
             latest_wheel = _build_sky_wheel()

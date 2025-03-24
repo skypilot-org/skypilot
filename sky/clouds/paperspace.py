@@ -3,15 +3,19 @@
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
 from sky import clouds
+from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
 from sky.provision.paperspace import utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
+    import requests
+
     from sky import resources as resources_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 _CREDENTIAL_FILES = [
     # credential files for Paperspace,
@@ -19,7 +23,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Paperspace(clouds.Cloud):
     """Paperspace GPU Cloud"""
 
@@ -248,8 +252,9 @@ class Paperspace(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Verify that the user has valid credentials for Paperspace."""
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Paperspace's compute service."""
         try:
             # attempt to make a CURL request for listing instances
             utils.PaperspaceCloudClient().list_instances()

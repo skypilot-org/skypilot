@@ -1,0 +1,60 @@
+name: Smoke Tests Trigger
+
+on:
+  schedule:
+    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
+  workflow_dispatch:
+    inputs:
+      param:
+        description: 'Parameter to pass to the smoke tests, example: --aws'
+        required: true
+        type: string
+  # uncomment this for PR triggers testing
+  # pull_request:
+  #   types: [opened, synchronize, reopened]
+
+jobs:
+  smoke-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger Smoke Tests
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+          BUILDKITE_API_URL: ${{ github.event_name == 'workflow_dispatch'
+            && 'https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds'
+            || 'https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/full-smoke-tests-run/builds' }}
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            data='{
+              "commit": "HEAD",
+              "branch": "master",
+              "message": "Manual Smoke Tests: ${{ github.event.inputs.param }}",
+              "ignore_pipeline_branch_filters": true,
+              "env": {
+                "ARGS": "${{ github.event.inputs.param }}"
+              }
+            }'
+          else
+            data='{
+              "commit": "HEAD",
+              "branch": "master",
+              "message": "Biweekly Smoke Tests",
+              "ignore_pipeline_branch_filters": true
+            }'
+          fi
+
+          response=$(curl -w "%{http_code}" -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+            -X POST "$BUILDKITE_API_URL" \
+            -d "$data")
+
+          http_code=$(echo "$response" | tail -n 1)
+          response_body=$(echo "$response" | head -n -1)
+
+          if [ "$http_code" != "201" ]; then
+            echo "Error: Buildkite API returned HTTP status code $http_code"
+            echo "Response body:"
+            echo "$response_body"
+            exit 1
+          fi
+
+          echo "Build triggered successfully (HTTP status code: $http_code)"

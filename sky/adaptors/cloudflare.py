@@ -2,12 +2,14 @@
 # pylint: disable=import-outside-toplevel
 
 import contextlib
-import functools
 import os
 import threading
 from typing import Dict, Optional, Tuple
 
+from sky import exceptions
 from sky.adaptors import common
+from sky.clouds import cloud
+from sky.utils import annotations
 from sky.utils import ux_utils
 
 _IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Cloudflare.'
@@ -23,7 +25,6 @@ R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 NAME = 'Cloudflare'
-SKY_CHECK_NAME = 'Cloudflare (for R2 object store)'
 
 
 @contextlib.contextmanager
@@ -62,7 +63,7 @@ def get_r2_credentials(boto3_session):
 # lru_cache() is thread-safe and it will return the same session object
 # for different threads.
 # Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def session():
     """Create an AWS session."""
     # Creating the session object is not thread-safe for boto3,
@@ -76,7 +77,7 @@ def session():
         return session_
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def resource(resource_name: str, **kwargs):
     """Create a Cloudflare resource.
 
@@ -102,7 +103,7 @@ def resource(resource_name: str, **kwargs):
         **kwargs)
 
 
-@functools.lru_cache()
+@annotations.lru_cache(scope='global')
 def client(service_name: str, region):
     """Create an CLOUDFLARE client of a certain service.
 
@@ -130,8 +131,8 @@ def client(service_name: str, region):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    from botocore import exceptions
-    return exceptions
+    from botocore import exceptions as boto_exceptions
+    return boto_exceptions
 
 
 def create_endpoint():
@@ -148,7 +149,21 @@ def create_endpoint():
     return endpoint
 
 
-def check_credentials() -> Tuple[bool, Optional[str]]:
+def check_credentials(
+        cloud_capability: cloud.CloudCapability) -> Tuple[bool, Optional[str]]:
+    if cloud_capability == cloud.CloudCapability.COMPUTE:
+        # for backward compatibility,
+        # we check storage credentials for compute.
+        # TODO(seungjin): properly return not supported error for compute.
+        return check_storage_credentials()
+    elif cloud_capability == cloud.CloudCapability.STORAGE:
+        return check_storage_credentials()
+    else:
+        raise exceptions.NotSupportedError(
+            f'{NAME} does not support {cloud_capability}.')
+
+
+def check_storage_credentials() -> Tuple[bool, Optional[str]]:
     """Checks if the user has access credentials to Cloudflare R2.
 
     Returns:

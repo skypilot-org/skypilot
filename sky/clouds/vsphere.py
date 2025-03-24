@@ -3,19 +3,23 @@ import subprocess
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
 from sky import clouds
+from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
 from sky.provision.vsphere import vsphere_utils
 from sky.provision.vsphere.vsphere_utils import get_vsphere_credentials
 from sky.provision.vsphere.vsphere_utils import initialize_vsphere_data
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
+    import requests
+
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 _CLOUD_VSPHERE = 'vsphere'
 _CREDENTIAL_FILES = [
@@ -24,7 +28,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Vsphere(clouds.Cloud):
     """Vsphere cloud"""
 
@@ -253,8 +257,9 @@ class Vsphere(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        vSphere's compute service."""
 
         try:
             # pylint: disable=import-outside-toplevel,unused-import

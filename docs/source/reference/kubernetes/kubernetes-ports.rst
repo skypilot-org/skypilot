@@ -52,7 +52,7 @@ These load balancers will be automatically terminated when the cluster is delete
 
     To work around this issue, make sure all your ports have services running behind them.
 
-Internal Load Balancers
+Internal load balancers
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
@@ -114,7 +114,7 @@ To use this mode:
     and the endpoint may not be accessible from outside the cluster.
 
 
-3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config` to use the ingress mode.
+3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config.yaml` to use the ingress mode.
 
 .. code-block:: yaml
 

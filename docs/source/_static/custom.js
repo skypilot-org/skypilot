@@ -8,6 +8,7 @@ document.addEventListener('DOMContentLoaded', function () {
        script.setAttribute('data-modal-disclaimer', 'Results are automatically generated and may be inaccurate or contain inappropriate information. Do not include any sensitive information in your query.\n**To get further assistance, you can chat directly with the development team** by joining the [SkyPilot Slack](https://slack.skypilot.co/).');
        script.setAttribute('data-modal-title', 'SkyPilot Docs AI - Ask a Question.');
        script.setAttribute('data-button-position-bottom', '100px');
+       script.setAttribute('data-user-analytics-fingerprint-enabled', 'true');
        script.async = true;
        document.head.appendChild(script);
 });
@@ -26,8 +27,11 @@ document.addEventListener('DOMContentLoaded', () => {
     // New items:
     const newItems = [
         { selector: '.toctree-l1 > a', text: 'Many Parallel Jobs' },
-        { selector: '.toctree-l1 > a', text: 'Admin Policy Enforcement' },
-        { selector: '.toctree-l1 > a', text: 'Using Existing Machines' },
+        { selector: '.toctree-l2 > a', text: 'HTTPS Encryption' },
+        { selector: '.toctree-l1 > a', text: 'Asynchronous Execution' },
+        { selector: '.toctree-l1 > a', text: 'Team Deployment' },
+        { selector: '.toctree-l1 > a', text: 'Examples' },
+        { selector: '.toctree-l3 > a', text: 'DeepSeek-R1 for RAG' },
     ];
     newItems.forEach(({ selector, text }) => {
         document.querySelectorAll(selector).forEach((el) => {

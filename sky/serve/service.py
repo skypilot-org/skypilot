@@ -73,6 +73,12 @@ def cleanup_storage(task_yaml: str) -> bool:
     try:
         task = task_lib.Task.from_yaml(task_yaml)
         backend = cloud_vm_ray_backend.CloudVmRayBackend()
+        # Need to re-construct storage object in the controller process
+        # because when SkyPilot API server machine sends the yaml config to the
+        # controller machine, only storage metadata is sent, not the storage
+        # object itself.
+        for storage in task.storage_mounts.values():
+            storage.construct()
         backend.teardown_ephemeral_storage(task)
     except Exception as e:  # pylint: disable=broad-except
         logger.error('Failed to clean up storage: '
@@ -141,7 +147,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     # Already checked before submit to controller.
     assert task.service is not None, task
     service_spec = task.service
-    if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
+    if (len(serve_state.get_services()) >=
+            serve_utils.get_num_service_threshold()):
         cleanup_storage(tmp_task_yaml)
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError('Max number of services reached.')
@@ -151,7 +158,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         policy=service_spec.autoscaling_policy_str(),
         requested_resources_str=backend_utils.get_task_resources_str(task),
         load_balancing_policy=service_spec.load_balancing_policy,
-        status=serve_state.ServiceStatus.CONTROLLER_INIT)
+        status=serve_state.ServiceStatus.CONTROLLER_INIT,
+        tls_encrypted=service_spec.tls_credential is not None)
     # Directly throw an error here. See sky/serve/api.py::up
     # for more details.
     if not success:
@@ -214,7 +222,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             serve_state.set_service_controller_port(service_name,
                                                     controller_port)
 
-            # TODO(tian): Support HTTPS.
             controller_addr = f'http://{controller_host}:{controller_port}'
 
             load_balancer_port = common_utils.find_free_port(
@@ -231,7 +238,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 target=ux_utils.RedirectOutputForProcess(
                     load_balancer.run_load_balancer,
                     load_balancer_log_file).run,
-                args=(controller_addr, load_balancer_port, policy_name))
+                args=(controller_addr, load_balancer_port, policy_name,
+                      service_spec.tls_credential))
             load_balancer_process.start()
             serve_state.set_service_load_balancer_port(service_name,
                                                        load_balancer_port)
@@ -250,7 +258,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             if proc is not None
         ]
         subprocess_utils.kill_children_processes(
-            [process.pid for process in process_to_kill], force=True)
+            parent_pids=[process.pid for process in process_to_kill],
+            force=True)
         for process in process_to_kill:
             process.join()
         failed = _cleanup(service_name)

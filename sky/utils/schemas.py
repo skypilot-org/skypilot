@@ -86,11 +86,6 @@ def _get_single_resources_schema():
             'use_spot': {
                 'type': 'boolean',
             },
-            # Deprecated: use 'job_recovery' instead. This is for backward
-            # compatibility, and can be removed in 0.8.0.
-            'spot_recovery': {
-                'type': 'string',
-            },
             'job_recovery': {
                 # Either a string or a dict.
                 'anyOf': [{
@@ -256,8 +251,6 @@ def get_resources_schema():
                 'items': multi_resources_schema,
             }
         },
-        # Avoid job_recovery and spot_recovery being present at the same time.
-        **_check_not_both_fields_present('job_recovery', 'spot_recovery')
     }
 
 
@@ -298,6 +291,12 @@ def get_storage_schema():
                 'case_insensitive_enum': [
                     mode.value for mode in storage.StorageMode
                 ]
+            },
+            '_is_sky_managed': {
+                'type': 'boolean',
+            },
+            '_bucket_sub_path': {
+                'type': 'string',
             },
             '_force_delete': {
                 'type': 'boolean',
@@ -382,6 +381,9 @@ def get_service_schema():
                     },
                 }
             },
+            'ports': {
+                'type': 'integer',
+            },
             'replicas': {
                 'type': 'integer',
             },
@@ -389,6 +391,19 @@ def get_service_schema():
                 'type': 'string',
                 'case_insensitive_enum': list(
                     load_balancing_policies.LB_POLICIES.keys())
+            },
+            'tls': {
+                'type': 'object',
+                'required': ['keyfile', 'certfile'],
+                'additionalProperties': False,
+                'properties': {
+                    'keyfile': {
+                        'type': 'string',
+                    },
+                    'certfile': {
+                        'type': 'string',
+                    },
+                },
             },
         }
     }
@@ -448,8 +463,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
-    config_override_schema = _filter_schema(get_config_schema(),
-                                            constants.OVERRIDEABLE_CONFIG_KEYS)
+    config_override_schema = _filter_schema(
+        get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
         'experimental': {
             'type': 'object',
@@ -526,6 +541,9 @@ def get_task_schema():
                 'additionalProperties': {
                     'type': 'number'
                 }
+            },
+            'file_mounts_mapping': {
+                'type': 'object',
             },
             **_experimental_task_schema(),
         }
@@ -609,15 +627,6 @@ _NETWORK_CONFIG_SCHEMA = {
 }
 
 _LABELS_SCHEMA = {
-    # Deprecated: 'instance_tags' is replaced by 'labels'. Keeping for backward
-    # compatibility. Will be removed after 0.8.0.
-    'instance_tags': {
-        'type': 'object',
-        'required': [],
-        'additionalProperties': {
-            'type': 'string',
-        },
-    },
     'labels': {
         'type': 'object',
         'required': [],
@@ -721,6 +730,11 @@ def get_config_schema():
                     'resources': resources_schema,
                 }
             },
+            'bucket': {
+                'type': 'string',
+                'pattern': '^(https|s3|gs|r2|cos)://.+',
+                'required': [],
+            }
         }
     }
     cloud_configs = {
@@ -875,6 +889,9 @@ def get_config_schema():
                     'image_tag_gpu': {
                         'type': 'string',
                     },
+                    'vcn_ocid': {
+                        'type': 'string',
+                    },
                     'vcn_subnet': {
                         'type': 'string',
                     },
@@ -928,6 +945,19 @@ def get_config_schema():
         }
     }
 
+    api_server = {
+        'type': 'object',
+        'required': [],
+        'additionalProperties': False,
+        'properties': {
+            'endpoint': {
+                'type': 'string',
+                # Apply validation for URL
+                'pattern': r'^https?://.*$',
+            },
+        }
+    }
+
     for cloud, config in cloud_configs.items():
         if cloud == 'aws':
             config['properties'].update({
@@ -944,14 +974,12 @@ def get_config_schema():
         'additionalProperties': False,
         'properties': {
             'jobs': controller_resources_schema,
-            'spot': controller_resources_schema,
             'serve': controller_resources_schema,
             'allowed_clouds': allowed_clouds,
             'admin_policy': admin_policy_schema,
             'docker': docker_configs,
             'nvidia_gpus': gpu_configs,
+            'api_server': api_server,
             **cloud_configs,
         },
-        # Avoid spot and jobs being present at the same time.
-        **_check_not_both_fields_present('spot', 'jobs')
     }

@@ -5,6 +5,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky.clouds import service_catalog
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -15,7 +16,7 @@ _CREDENTIAL_FILES = [
 ]
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class RunPod(clouds.Cloud):
     """ RunPod GPU Cloud
 
@@ -177,6 +178,11 @@ class RunPod(clouds.Cloud):
         hourly_cost = self.instance_type_to_hourly_cost(
             instance_type=instance_type, use_spot=use_spot)
 
+        # default to root
+        docker_username_for_runpod = (resources.docker_username_for_runpod
+                                      if resources.docker_username_for_runpod
+                                      is not None else 'root')
+
         return {
             'instance_type': instance_type,
             'custom_resources': custom_resources,
@@ -184,6 +190,7 @@ class RunPod(clouds.Cloud):
             'image_id': image_id,
             'use_spot': use_spot,
             'bid_per_gpu': str(hourly_cost),
+            'docker_username_for_runpod': docker_username_for_runpod,
         }
 
     def _get_feasible_launchable_resources(
@@ -241,7 +248,13 @@ class RunPod(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        RunPod's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """ Verify that the user has valid credentials for RunPod. """
         try:
             import runpod  # pylint: disable=import-outside-toplevel

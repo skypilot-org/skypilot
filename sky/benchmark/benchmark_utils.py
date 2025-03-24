@@ -23,8 +23,8 @@ from sky import backends
 from sky import clouds
 from sky import data
 from sky import global_user_state
+from sky import optimizer
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.benchmark import benchmark_state
 from sky.data import storage as storage_lib
@@ -34,6 +34,7 @@ from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
@@ -100,7 +101,9 @@ def _get_optimized_resources(
             task = sky.Task()
             task.set_resources(resources)
 
-        dag = sky.optimize(dag, quiet=True)
+        # Do not use `sky.optimize` here, as this should be called on the API
+        # server side.
+        dag = optimizer.Optimizer.optimize(dag, quiet=True)
         task = dag.tasks[0]
         optimized_resources.append(task.best_resources)
     return optimized_resources
@@ -169,8 +172,9 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     bucket_name = f'sky-bench-{uuid.uuid4().hex[:4]}-{getpass.getuser()}'
 
     # Select the bucket type.
-    enabled_clouds = storage_lib.get_cached_enabled_storage_clouds_or_refresh(
-        raise_if_no_cloud_access=True)
+    enabled_clouds = (
+        storage_lib.get_cached_enabled_storage_cloud_names_or_refresh(
+            raise_if_no_cloud_access=True))
     # Sky Benchmark only supports S3 (see _download_remote_dir and
     # _delete_remote_dir).
     enabled_clouds = [
@@ -183,6 +187,7 @@ def _create_benchmark_bucket() -> Tuple[str, str]:
     # Create a benchmark bucket.
     logger.info(f'Creating a bucket {bucket_name} to save the benchmark logs.')
     storage = data.Storage(bucket_name, source=None, persistent=True)
+    storage.construct()
     storage.add_store(bucket_type)
 
     # Save the bucket name and type to the config.

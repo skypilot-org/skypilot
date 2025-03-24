@@ -29,6 +29,8 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # Note that "-" is mandatory for rsync and means all patterns in the ignore
 # files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
 # do_not_exclude" doesn't work, even though git allows it.
+# TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
+# consistency between bucket upload and rsync.
 RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
 RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
@@ -70,6 +72,9 @@ def ssh_options_list(
         connect_timeout = _DEFAULT_CONNECT_TIMEOUT
     # Forked from Ray SSHOptions:
     # https://github.com/ray-project/ray/blob/master/python/ray/autoscaler/_private/command_runner.py
+    # Do not allow agent forwarding because SkyPilot API server has access to
+    # all user cluster private keys, which should not be all forwarded to
+    # individual user clusters.
     arg_dict = {
         # SSH port
         'Port': port,
@@ -87,10 +92,6 @@ def ssh_options_list(
         'LogLevel': 'ERROR',
         # Try fewer extraneous key pairs.
         'IdentitiesOnly': 'yes',
-        # Add the current private key used for this SSH connection to the
-        # SSH agent, so that forward agent parameter will then make SSH
-        # agent forward it.
-        'AddKeysToAgent': 'yes',
         # Abort if port forwarding fails (instead of just printing to
         # stderr).
         'ExitOnForwardFailure': 'yes',
@@ -100,8 +101,6 @@ def ssh_options_list(
         'ServerAliveCountMax': 3,
         # ConnectTimeout.
         'ConnectTimeout': f'{connect_timeout}s',
-        # Agent forwarding for git.
-        'ForwardAgent': 'yes',
     }
     # SSH Control will have a severe delay when using docker_ssh_proxy_command.
     # TODO(tian): Investigate why.
@@ -422,6 +421,18 @@ class CommandRunner:
         """Close the cached connection to the remote machine."""
         pass
 
+    def port_forward_command(self,
+                             port_forward: List[Tuple[int, int]],
+                             connect_timeout: int = 1) -> List[str]:
+        """Command for forwarding ports from localhost to the remote machine.
+
+        Args:
+            port_forward: A list of ports to forward from the localhost to the
+                remote host.
+            connect_timeout: The timeout for the connection.
+        """
+        raise NotImplementedError
+
 
 class SSHCommandRunner(CommandRunner):
     """Runner for SSH commands."""
@@ -490,9 +501,27 @@ class SSHCommandRunner(CommandRunner):
             self.port = port
             self._docker_ssh_proxy_command = None
 
-    def _ssh_base_command(self, *, ssh_mode: SshMode,
-                          port_forward: Optional[List[int]],
-                          connect_timeout: Optional[int]) -> List[str]:
+    def port_forward_command(self,
+                             port_forward: List[Tuple[int, int]],
+                             connect_timeout: int = 1) -> List[str]:
+        """Command for forwarding ports from localhost to the remote machine.
+
+        Args:
+            port_forward: A list of ports to forward from the local port to the
+                remote port.
+            connect_timeout: The timeout for the ssh connection.
+
+        Returns:
+            The command for forwarding ports from localhost to the remote
+            machine.
+        """
+        return self.ssh_base_command(ssh_mode=SshMode.INTERACTIVE,
+                                     port_forward=port_forward,
+                                     connect_timeout=connect_timeout)
+
+    def ssh_base_command(self, *, ssh_mode: SshMode,
+                         port_forward: Optional[List[Tuple[int, int]]],
+                         connect_timeout: Optional[int]) -> List[str]:
         ssh = ['ssh']
         if ssh_mode == SshMode.NON_INTERACTIVE:
             # Disable pseudo-terminal allocation. Otherwise, the output of
@@ -502,11 +531,10 @@ class SSHCommandRunner(CommandRunner):
             # Force pseudo-terminal allocation for interactive/login mode.
             ssh += ['-tt']
         if port_forward is not None:
-            for port in port_forward:
-                local = remote = port
+            for local, remote in port_forward:
                 logger.info(
-                    f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-L', f'{remote}:localhost:{local}']
+                    f'Forwarding local port {local} to remote port {remote}.')
+                ssh += ['-NL', f'{local}:localhost:{remote}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:
@@ -550,7 +578,7 @@ class SSHCommandRunner(CommandRunner):
             cmd: Union[str, List[str]],
             *,
             require_outputs: bool = False,
-            port_forward: Optional[List[int]] = None,
+            port_forward: Optional[List[Tuple[int, int]]] = None,
             # Advanced options.
             log_path: str = os.devnull,
             # If False, do not redirect stdout/stderr to optimize performance.
@@ -591,7 +619,7 @@ class SSHCommandRunner(CommandRunner):
             or
             A tuple of (returncode, stdout, stderr).
         """
-        base_ssh_command = self._ssh_base_command(
+        base_ssh_command = self.ssh_base_command(
             ssh_mode=ssh_mode,
             port_forward=port_forward,
             connect_timeout=connect_timeout)
@@ -709,6 +737,35 @@ class KubernetesCommandRunner(CommandRunner):
     @property
     def node_id(self) -> str:
         return f'{self.context}-{self.namespace}-{self.pod_name}'
+
+    def port_forward_command(self,
+                             port_forward: List[Tuple[int, int]],
+                             connect_timeout: int = 1) -> List[str]:
+        """Command for forwarding ports from localhost to the remote machine.
+
+        Args:
+            port_forward: A list of ports to forward from the local port to the
+                remote port. Currently, only one port is supported, i.e. the
+                list should have only one element.
+            connect_timeout: The timeout for the ssh connection.
+        """
+        assert port_forward and len(port_forward) == 1, (
+            'Only one port is supported for Kubernetes port-forward.')
+        kubectl_args = [
+            '--pod-running-timeout', f'{connect_timeout}s', '-n', self.namespace
+        ]
+        if self.context:
+            kubectl_args += ['--context', self.context]
+        local_port, remote_port = port_forward[0]
+        local_port_str = f'{local_port}' if local_port is not None else ''
+        kubectl_cmd = [
+            'kubectl',
+            *kubectl_args,
+            'port-forward',
+            f'pod/{self.pod_name}',
+            f'{local_port_str}:{remote_port}',
+        ]
+        return kubectl_cmd
 
     @timeline.event
     def run(

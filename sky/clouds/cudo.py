@@ -6,6 +6,7 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 from sky import clouds
 from sky.clouds import service_catalog
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
 
 if typing.TYPE_CHECKING:
@@ -27,7 +28,7 @@ def _run_output(cmd):
     return proc.stdout.decode('ascii')
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class Cudo(clouds.Cloud):
     """Cudo Compute"""
     _REPR = 'Cudo'
@@ -266,8 +267,9 @@ class Cudo(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Cudo's compute service."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
             from cudo_compute import cudo_api

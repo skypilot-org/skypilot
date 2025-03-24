@@ -7,13 +7,13 @@ import time
 from typing import Any, Callable, Dict, Iterable, List, Optional, Type
 
 from sky import sky_logging
-from sky import status_lib
 from sky.adaptors import gcp
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.gcp import constants
 from sky.provision.gcp import instance_utils
 from sky.utils import common_utils
+from sky.utils import status_lib
 
 logger = sky_logging.init_logger(__name__)
 
@@ -586,8 +586,11 @@ def open_ports(
     }
     handlers: List[Type[instance_utils.GCPInstance]] = [
         instance_utils.GCPComputeInstance,
-        instance_utils.GCPTPUVMInstance,
     ]
+    use_tpu_vms = provider_config.get('_has_tpus', False)
+    if use_tpu_vms:
+        handlers.append(instance_utils.GCPTPUVMInstance)
+
     handler_to_instances = _filter_instances(handlers, project_id, zone,
                                              label_filters, lambda _: None)
     operations = collections.defaultdict(list)

@@ -23,6 +23,7 @@ Install SkyPilot using pip:
 
           # Choose your cloud:
 
+          pip install "skypilot[kubernetes]"
           pip install "skypilot[aws]"
           pip install "skypilot[gcp]"
           pip install "skypilot[azure]"
@@ -35,7 +36,7 @@ Install SkyPilot using pip:
           pip install "skypilot[ibm]"
           pip install "skypilot[scp]"
           pip install "skypilot[vsphere]"
-          pip install "skypilot[kubernetes]"
+          pip install "skypilot[nebius]"
           pip install "skypilot[all]"
 
 
@@ -51,6 +52,7 @@ Install SkyPilot using pip:
 
           # Choose your cloud:
 
+          pip install "skypilot-nightly[kubernetes]"
           pip install "skypilot-nightly[aws]"
           pip install "skypilot-nightly[gcp]"
           pip install "skypilot-nightly[azure]"
@@ -59,11 +61,12 @@ Install SkyPilot using pip:
           pip install "skypilot-nightly[runpod]"
           pip install "skypilot-nightly[fluidstack]"
           pip install "skypilot-nightly[paperspace]"
+          pip install "skypilot-nightly[do]"
           pip install "skypilot-nightly[cudo]"
           pip install "skypilot-nightly[ibm]"
           pip install "skypilot-nightly[scp]"
           pip install "skypilot-nightly[vsphere]"
-          pip install "skypilot-nightly[kubernetes]"
+          pip install "skypilot-nightly[nebius]"
           pip install "skypilot-nightly[all]"
 
 
@@ -82,6 +85,7 @@ Install SkyPilot using pip:
 
           # Choose your cloud:
 
+          pip install -e ".[kubernetes]"
           pip install -e ".[aws]"
           pip install -e ".[gcp]"
           pip install -e ".[azure]"
@@ -94,7 +98,7 @@ Install SkyPilot using pip:
           pip install -e ".[ibm]"
           pip install -e ".[scp]"
           pip install -e ".[vsphere]"
-          pip install -e ".[kubernetes]"
+          pip install -e ".[nebius]"
           pip install -e ".[all]"
 
 To use more than one cloud, combine the pip extras:
@@ -106,27 +110,58 @@ To use more than one cloud, combine the pip extras:
 
         .. code-block:: shell
 
-          pip install -U "skypilot[aws,gcp]"
+          pip install -U "skypilot[kubernetes,aws,gcp]"
 
     .. tab-item:: Nightly
         :sync: nightly-tab
 
         .. code-block:: shell
 
-          pip install -U "skypilot-nightly[aws,gcp]"
+          pip install -U "skypilot-nightly[kubernetes,aws,gcp]"
 
     .. tab-item:: From Source
         :sync: from-source-tab
 
         .. code-block:: shell
 
-          pip install -e ".[aws,gcp]"
+          pip install -e ".[kubernetes,aws,gcp]"
+
+
+Installing via ``uv`` is also supported:
+
+.. code-block:: shell
+
+  uv venv --seed --python 3.10
+  uv pip install "skypilot[kubernetes,aws,gcp]"
+  # Azure CLI has an issue with uv, and requires '--prerelease allow'.
+  uv pip install --prerelease allow azure-cli
+  uv pip install "skypilot[all]"
+
 
 Alternatively, we also provide a :ref:`Docker image <docker-image>` as a quick way to try out SkyPilot.
 
+.. note::
+
+  After upgrading SkyPilot, use ``sky api stop`` to enable the new version.
+  See :ref:`upgrade-skypilot` for more details.
+
+
+Connect to a remote API server (optional)
+--------------------------------------------------
+
+If your team has set up a remote :ref:`SkyPilot API server <sky-api-server>`, connect to it by running:
+
+.. code-block:: shell
+
+  sky api login
+
+This is an optional step---by default, SkyPilot automatically starts and uses a local API server.  See more details in :ref:`sky-api-server-connect`.
+
+
+
 .. _verify-cloud-access:
 
-Verifying cloud access
+Verify cloud access
 ------------------------------------
 
 After installation, run :code:`sky check` to verify that credentials are correctly set up:
@@ -145,6 +180,7 @@ This will produce a summary like:
     Azure: enabled
     OCI: enabled
     Lambda: enabled
+    Nebius: enabled
     RunPod: enabled
     Paperspace: enabled
     Fluidstack: enabled
@@ -154,8 +190,6 @@ This will produce a summary like:
     vSphere: enabled
     Cloudflare (for R2 object store): enabled
     Kubernetes: enabled
-
-  SkyPilot will use only the enabled clouds to run tasks. To change this, configure cloud credentials, and run sky check.
 
 If any cloud's credentials or dependencies are missing, ``sky check`` will
 output hints on how to resolve them. You can also refer to the cloud setup
@@ -172,19 +206,32 @@ section :ref:`below <cloud-account-setup>`.
 
 .. _cloud-account-setup:
 
-Cloud account setup
--------------------
+Set up Kubernetes or clouds
+---------------------------
 
-SkyPilot currently supports these cloud providers: AWS, GCP, Azure, OCI, Lambda Cloud, RunPod, Fluidstack, Paperspace, Cudo,
-IBM, SCP, VMware vSphere and Cloudflare (for R2 object store).
-
-If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can properly access your enabled clouds<verify-cloud-access>`.
+SkyPilot supports most major cloud providers.
+If you already have cloud access set up on your local machine, run ``sky check`` to :ref:`verify that SkyPilot can access your enabled clouds<verify-cloud-access>`.
 
 Otherwise, configure access to at least one cloud using the following guides.
 
+Kubernetes
+~~~~~~~~~~
+
+SkyPilot can run workloads on on-prem or cloud-hosted Kubernetes clusters
+(e.g., EKS, GKE). The only requirement is a valid kubeconfig at
+:code:`~/.kube/config`.
+
+.. code-block:: shell
+
+  # Place your kubeconfig at ~/.kube/config
+  mkdir -p ~/.kube
+  cp /path/to/kubeconfig ~/.kube/config
+
+See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+
 .. _aws-installation:
 
-Amazon Web Services (AWS)
+AWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
@@ -204,7 +251,7 @@ To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructi
 
 .. _installation-gcp:
 
-Google Cloud Platform (GCP)
+GCP
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. code-block:: shell
@@ -245,7 +292,7 @@ Azure
 Hint: run ``az account subscription list`` to get a list of subscription IDs under your account.
 
 
-Oracle Cloud Infrastructure (OCI)
+OCI
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 To access Oracle Cloud Infrastructure (OCI), setup the credentials by following `this guide <https://docs.oracle.com/en-us/iaas/Content/API/Concepts/apisigningkey.htm>`__. After completing the steps in the guide, the :code:`~/.oci` folder should contain the following files:
@@ -296,14 +343,24 @@ Paperspace
   mkdir -p ~/.paperspace
   echo "{'api_key' : <your_api_key_here>}" > ~/.paperspace/config.json
 
+Vast
+~~~~~~~~~~
+
+`Vast <https://vast.ai/>`__ is a cloud provider that offers low-cost GPUs. To configure Vast access, go to the `Account <https://cloud.vast.ai/account/>`_ page on your Vast console to get your **API key**. Then, run:
+
+.. code-block:: shell
+
+  pip install "vastai-sdk>=0.1.12"
+  echo "<your_api_key_here>" > ~/.vast_api_key
+
 RunPod
 ~~~~~~~~~~
 
 `RunPod <https://runpod.io/>`__ is a specialized AI cloud provider that offers low-cost GPUs. To configure RunPod access, go to the `Settings <https://www.runpod.io/console/user/settings>`_ page on your RunPod console and generate an **API key**. Then, run:
 
 .. code-block:: shell
-  
-  pip install "runpod>=1.5.1"
+
+  pip install "runpod>=1.6.1"
   runpod config
 
 
@@ -383,10 +440,10 @@ Finally, install `rclone <https://rclone.org/>`_ via: ``curl https://rclone.org/
 
 
 
-Samsung Cloud Platform (SCP)
+SCP (Samsung Cloud Platform)
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Samsung Cloud Platform(SCP) provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
+Samsung Cloud Platform, or SCP, provides cloud services optimized for enterprise customers. You can learn more about SCP `here <https://cloud.samsungsds.com/>`__.
 
 To configure SCP access, you need access keys and the ID of the project your tasks will run. Go to the `Access Key Management <https://cloud.samsungsds.com/console/#/common/access-key-manage/list?popup=true>`_ page on your SCP console to generate the access keys, and the Project Overview page for the project ID. Then, add them to :code:`~/.scp/scp_credential` by running:
 
@@ -473,22 +530,80 @@ Next, get your `Account ID <https://developers.cloudflare.com/fundamentals/get-s
 
   Support for R2 is in beta. Please report and issues on `Github <https://github.com/skypilot-org/skypilot/issues>`_ or reach out to us on `Slack <http://slack.skypilot.co/>`_.
 
+Nebius
+~~~~~~
 
-Kubernetes
-~~~~~~~~~~
-
-SkyPilot can also run tasks on on-prem or cloud hosted Kubernetes clusters (e.g., EKS, GKE). The only requirement is a valid kubeconfig at :code:`~/.kube/config`.
+`Nebius <https://nebius.com/>`__ is the ultimate cloud for AI explorers. To configure Nebius access, install and configure `Nebius CLI <https://docs.nebius.com/cli/quickstart>`__:
 
 .. code-block:: shell
 
-  # Place your kubeconfig at ~/.kube/config
-  mkdir -p ~/.kube
-  cp /path/to/kubeconfig ~/.kube/config
+  mkdir -p ~/.nebius
+  nebius iam get-access-token > ~/.nebius/NEBIUS_IAM_TOKEN.txt
 
-See :ref:`SkyPilot on Kubernetes <kubernetes-overview>` for more.
+If you have one tenant you can run:
+
+.. code-block:: shell
+
+  nebius --format json iam whoami|jq -r '.user_profile.tenants[0].tenant_id' > ~/.nebius/NEBIUS_TENANT_ID.txt
+
+You can specify a preferable project ID, which will be used if a project ID is required in the designated region.
+
+.. code-block:: shell
+
+  echo $NEBIUS_PROJECT_ID > ~/.nebius/NEBIUS_PROJECT_ID.txt
+
+To use *Service Account* authentication, follow these steps:
+
+1. **Create a Service Account** using the Nebius web console.
+2. **Generate PEM Keys**:
+
+.. code-block:: shell
+
+   openssl genrsa -out private.pem 4096 && openssl rsa -in private.pem -outform PEM -pubout -out public.pem
+
+3.  **Generate and Save the Credentials File**:
+
+* Save the file as `~/.nebius/credentials.json`.
+* Ensure the file matches the expected format below:
+
+.. code-block:: json
+
+     {
+         "subject-credentials": {
+             "alg": "RS256",
+             "private-key": "PKCS#8 PEM with new lines escaped as \n",
+             "kid": "public-key-id",
+             "iss": "service-account-id",
+             "sub": "service-account-id"
+         }
+     }
 
 
-Requesting quotas for first time users
+**Important Notes:**
+
+* The `NEBIUS_IAM_TOKEN` file, if present, will take priority for authentication.
+* Service Accounts are restricted to a single region. Ensure you configure the Service Account for the appropriate region during creation.
+
+Nebius offers `Object Storage <https://nebius.com/services/storage>`_, an S3-compatible object storage without any egress charges.
+SkyPilot can download/upload data to Nebius buckets and mount them as local filesystem on clusters launched by SkyPilot. To set up Nebius support, run:
+
+.. code-block:: shell
+
+  # Install boto
+  pip install boto3
+  # Configure your Nebius Object Storage credentials
+  aws configure --profile nebius
+
+In the prompt, enter your Nebius Access Key ID and Secret Access Key (see `instructions to generate Nebius credentials <https://docs.nebius.com/object-storage/quickstart#env-configure>`_). Select :code:`auto` for the default region and :code:`json` for the default output format.
+
+.. code-block:: bash
+
+  aws configure set aws_access_key_id $NB_ACCESS_KEY_AWS_ID --profile nebius
+  aws configure set aws_secret_access_key $NB_SECRET_ACCESS_KEY --profile nebius
+  aws configure set region eu-west1 --profile nebius
+  aws configure set endpoint_url https://storage.eu-west1.nebius.cloud:443  --profile nebius
+
+Request quotas for first time users
 --------------------------------------
 
 If your cloud account has not been used to launch instances before, the
@@ -500,8 +615,8 @@ increases before proceeding.
 
 .. _docker-image:
 
-Quick alternative: trying in Docker
-------------------------------------------------------
+Using SkyPilot in Docker
+-------------------------
 
 As a **quick alternative to installing SkyPilot on your laptop**, we also
 provide a Docker image with SkyPilot main branch automatically cloned.
@@ -546,7 +661,7 @@ See more details about the dev container image
 
 .. _shell-completion:
 
-Enabling shell completion
+Enable shell completion
 -------------------------
 
 SkyPilot supports shell completion for Bash (Version 4.4 and up), Zsh and Fish. This is only available for :code:`click` versions 8.0 and up (use :code:`pip install click==8.0.4` to install).

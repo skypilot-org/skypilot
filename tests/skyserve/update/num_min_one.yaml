@@ -1,14 +1,13 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 20
+    initial_delay_seconds: 60
   replica_policy:
     min_replicas: 1
 
 resources:
   ports: 8080
   cloud: gcp
-  cpus: 2+
 
 workdir: examples/serve/http_server
 

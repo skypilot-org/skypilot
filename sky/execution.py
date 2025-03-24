@@ -3,27 +3,31 @@
 See `Stage` for a Task's life cycle.
 """
 import enum
+import typing
 from typing import List, Optional, Tuple, Union
 
 import colorama
 
-import sky
 from sky import admin_policy
 from sky import backends
 from sky import clouds
 from sky import global_user_state
 from sky import optimizer
 from sky import sky_logging
-from sky import status_lib
 from sky.backends import backend_utils
 from sky.usage import usage_lib
 from sky.utils import admin_policy_utils
+from sky.utils import common
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import resources_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import sky
 
 logger = sky_logging.init_logger(__name__)
 
@@ -100,7 +104,7 @@ def _execute(
     handle: Optional[backends.ResourceHandle] = None,
     backend: Optional[backends.Backend] = None,
     retry_until_up: bool = False,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     stages: Optional[List[Stage]] = None,
     cluster_name: Optional[str] = None,
     detach_setup: bool = False,
@@ -111,6 +115,7 @@ def _execute(
     skip_unnecessary_provisioning: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
@@ -167,16 +172,19 @@ def _execute(
     """
 
     dag = dag_utils.convert_entrypoint_to_dag(entrypoint)
-    if not dag.policy_applied:
-        dag, _ = admin_policy_utils.apply(
-            dag,
-            request_options=admin_policy.RequestOptions(
-                cluster_name=cluster_name,
-                idle_minutes_to_autostop=idle_minutes_to_autostop,
-                down=down,
-                dryrun=dryrun,
-            ),
-        )
+    for task in dag.tasks:
+        if task.storage_mounts is not None:
+            for storage in task.storage_mounts.values():
+                # Ensure the storage is constructed.
+                storage.construct()
+    dag, _ = admin_policy_utils.apply(
+        dag,
+        request_options=admin_policy.RequestOptions(
+            cluster_name=cluster_name,
+            idle_minutes_to_autostop=idle_minutes_to_autostop,
+            down=down,
+            dryrun=dryrun,
+        ))
     assert len(dag) == 1, f'We support 1 task for now. {dag}'
     task = dag.tasks[0]
 
@@ -259,8 +267,8 @@ def _execute(
             bold = colorama.Style.BRIGHT
             reset = colorama.Style.RESET_ALL
             logger.info(
-                f'{yellow}Launching an unmanaged spot task, which does not '
-                f'automatically recover from preemptions.{reset}\n{yellow}To '
+                f'{yellow}Launching a spot job that does not '
+                f'automatically recover from preemptions. To '
                 'get automatic recovery, use managed job instead: '
                 f'{reset}{bold}sky jobs launch{reset} {yellow}or{reset} '
                 f'{bold}sky.jobs.launch(){reset}.')
@@ -274,14 +282,15 @@ def _execute(
                     # no-credential machine should not enter optimize(), which
                     # would directly error out ('No cloud is enabled...').  Fix
                     # by moving `sky check` checks out of optimize()?
-
                     controller = controller_utils.Controllers.from_name(
                         cluster_name)
                     if controller is not None:
                         logger.info(
                             f'Choosing resources for {controller.value.name}...'
                         )
-                    dag = sky.optimize(dag, minimize=optimize_target)
+                    dag = optimizer.Optimizer.optimize(dag,
+                                                       minimize=optimize_target,
+                                                       quiet=_quiet_optimizer)
                     task = dag.tasks[0]  # Keep: dag may have been deep-copied.
                     assert task.best_resources is not None, task
 
@@ -320,7 +329,7 @@ def _execute(
                           (task.file_mounts is not None or
                            task.storage_mounts is not None))
         if do_workdir or do_file_mounts:
-            logger.info(ux_utils.starting_message('Mounting files.'))
+            logger.info(ux_utils.starting_message('Syncing files.'))
 
         if do_workdir:
             backend.sync_workdir(handle, task.workdir)
@@ -374,20 +383,19 @@ def launch(
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    optimize_target: optimizer.OptimizeTarget = optimizer.OptimizeTarget.COST,
-    detach_setup: bool = False,
-    detach_run: bool = False,
+    optimize_target: common.OptimizeTarget = common.OptimizeTarget.COST,
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
     # Internal only:
     # pylint: disable=invalid-name
+    _quiet_optimizer: bool = False,
     _is_launched_by_jobs_controller: bool = False,
     _is_launched_by_sky_serve_controller: bool = False,
     _disable_controller_check: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Launch a cluster or task.
+    """Launches a cluster or task.
 
     The task's setup and run commands are executed under the task's workdir
     (when specified, it is synced to remote cluster).  The task undergoes job
@@ -396,6 +404,16 @@ def launch(
     Currently, the first argument must be a sky.Task, or (EXPERIMENTAL advanced
     usage) a sky.Dag. In the latter case, currently it must contain a single
     task; support for pipelines/general DAGs are in experimental branches.
+
+    Example:
+        .. code-block:: python
+
+            import sky
+            task = sky.Task(run='echo hello SkyPilot')
+            task.set_resources(
+                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
+            sky.launch(task, cluster_name='my-cluster')
+
 
     Args:
         task: sky.Task, or sky.Dag (experimental; 1-task only) to launch.
@@ -408,7 +426,7 @@ def launch(
             cluster's job queue. Idleness gets reset whenever setting-up/
             running/pending jobs are found in the job queue. Setting this
             flag is equivalent to running
-            ``sky.launch(..., detach_run=True, ...)`` and then
+            ``sky.launch(...)`` and then
             ``sky.autostop(idle_minutes=<minutes>)``. If not set, the cluster
             will not be autostopped.
         down: Tear down the cluster after all jobs finish (successfully or
@@ -422,29 +440,12 @@ def launch(
             (CloudVMRayBackend).
         optimize_target: target to optimize for. Choices: OptimizeTarget.COST,
             OptimizeTarget.TIME.
-        detach_setup: If True, run setup in non-interactive mode as part of the
-            job itself. You can safely ctrl-c to detach from logging, and it
-            will not interrupt the setup process. To see the logs again after
-            detaching, use `sky logs`. To cancel setup, cancel the job via
-            `sky cancel`. Useful for long-running setup
-            commands.
-        detach_run: If True, as soon as a job is submitted, return from this
-            function and do not stream execution logs.
         no_setup: if True, do not re-run setup commands.
         clone_disk_from: [Experimental] if set, clone the disk from the
             specified cluster. This is useful to migrate the cluster to a
             different availability zone or region.
         fast: [Experimental] If the cluster is already up and available,
             skip provisioning and setup steps.
-
-    Example:
-        .. code-block:: python
-
-            import sky
-            task = sky.Task(run='echo hello SkyPilot')
-            task.set_resources(
-                sky.Resources(cloud=sky.AWS(), accelerators='V100:4'))
-            sky.launch(task, cluster_name='my-cluster')
 
     Raises:
         exceptions.ClusterOwnerIdentityMismatchError: if the cluster is
@@ -474,7 +475,9 @@ def launch(
       handle: Optional[backends.ResourceHandle]; the handle to the cluster. None
         if dryrun.
     """
+
     entrypoint = task
+    entrypoint.validate()
     if not _disable_controller_check:
         controller_utils.check_cluster_name_not_controller(
             cluster_name, operation_str='sky.launch')
@@ -526,6 +529,11 @@ def launch(
             ]
             skip_unnecessary_provisioning = True
 
+    # Attach to setup if the cluster is a controller, so that user can
+    # see the setup logs when inspecting the launch process to know
+    # excatly what the job is waiting for.
+    detach_setup = controller_utils.Controllers.from_name(cluster_name) is None
+
     return _execute(
         entrypoint=entrypoint,
         dryrun=dryrun,
@@ -538,11 +546,12 @@ def launch(
         stages=stages,
         cluster_name=cluster_name,
         detach_setup=detach_setup,
-        detach_run=detach_run,
+        detach_run=True,
         idle_minutes_to_autostop=idle_minutes_to_autostop,
         no_setup=no_setup,
         clone_disk_from=clone_disk_from,
         skip_unnecessary_provisioning=skip_unnecessary_provisioning,
+        _quiet_optimizer=_quiet_optimizer,
         _is_launched_by_jobs_controller=_is_launched_by_jobs_controller,
         _is_launched_by_sky_serve_controller=
         _is_launched_by_sky_serve_controller,
@@ -557,10 +566,9 @@ def exec(  # pylint: disable=redefined-builtin
     down: bool = False,
     stream_logs: bool = True,
     backend: Optional[backends.Backend] = None,
-    detach_run: bool = False,
 ) -> Tuple[Optional[int], Optional[backends.ResourceHandle]]:
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
-    """Execute a task on an existing cluster.
+    """Executes a task on an existing cluster.
 
     This function performs two actions:
 
@@ -595,8 +603,6 @@ def exec(  # pylint: disable=redefined-builtin
         stream_logs: if True, show the logs in the terminal.
         backend: backend to use.  If None, use the default backend
             (CloudVMRayBackend).
-        detach_run: if True, detach from logging once the task has been
-            submitted.
 
     Raises:
         ValueError: if the specified cluster is not in UP status.
@@ -613,11 +619,7 @@ def exec(  # pylint: disable=redefined-builtin
         if dryrun.
     """
     entrypoint = task
-    if isinstance(entrypoint, sky.Dag):
-        logger.warning(
-            f'{colorama.Fore.YELLOW}Passing a sky.Dag to sky.exec() is '
-            'deprecated. Pass sky.Task instead.'
-            f'{colorama.Style.RESET_ALL}')
+    entrypoint.validate(workdir_only=True)
     controller_utils.check_cluster_name_not_controller(cluster_name,
                                                        operation_str='sky.exec')
 
@@ -638,5 +640,5 @@ def exec(  # pylint: disable=redefined-builtin
             Stage.EXEC,
         ],
         cluster_name=cluster_name,
-        detach_run=detach_run,
+        detach_run=True,
     )

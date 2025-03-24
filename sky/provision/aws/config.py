@@ -8,7 +8,6 @@ _default_ec2_resource() to avoid version mismatch issues.
 # https://github.com/ray-project/ray/tree/ray-2.0.1/python/ray/autoscaler/_private/aws/config.py
 # Git commit of the release 2.0.1: 03b6bc7b5a305877501110ec04710a9c57011479
 import copy
-import functools
 import json
 import logging
 import time
@@ -21,6 +20,7 @@ from sky import sky_logging
 from sky.adaptors import aws
 from sky.provision import common
 from sky.provision.aws import utils
+from sky.utils import annotations
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -222,7 +222,7 @@ def _configure_iam_role(iam) -> Dict[str, Any]:
     return {'Arn': profile.arn}
 
 
-@functools.lru_cache(maxsize=128)  # Keep bounded.
+@annotations.lru_cache(scope='request', maxsize=128)  # Keep bounded.
 def _get_route_tables(ec2, vpc_id: Optional[str], region: str,
                       main: bool) -> List[Any]:
     """Get route tables associated with a VPC and region
@@ -383,10 +383,13 @@ def _usable_subnets(
         raise exc
 
     if not subnets:
+        vpc_msg = (f'Does a default VPC exist in region '
+                   f'{ec2.meta.client.meta.region_name}? ') if (
+                       vpc_id_of_sg is None) else ''
         _skypilot_log_error_and_exit_for_failover(
-            'No usable subnets found, try '
-            'manually creating an instance in your specified region to '
-            'populate the list of subnets and trying this again. '
+            f'No usable subnets found. {vpc_msg}'
+            'Try manually creating an instance in your specified region to '
+            'populate the list of subnets and try again. '
             'Note that the subnet must map public IPs '
             'on instance launch unless you set `use_internal_ips: true` in '
             'the `provider` config.')
@@ -495,6 +498,11 @@ def _get_subnet_and_vpc_id(ec2, security_group_ids: Optional[List[str]],
         vpc_id_of_sg = None
 
     all_subnets = list(ec2.subnets.all())
+    # If no VPC is specified, use the default VPC.
+    # We filter only for default VPCs to avoid using subnets that users may
+    # not want SkyPilot to use.
+    if vpc_id_of_sg is None:
+        all_subnets = [s for s in all_subnets if s.vpc.is_default]
     subnets, vpc_id = _usable_subnets(
         ec2,
         user_specified_subnets=None,
@@ -545,17 +553,28 @@ def _configure_security_group(ec2, vpc_id: str, expected_sg_name: str,
 
 def _get_or_create_vpc_security_group(ec2, vpc_id: str,
                                       expected_sg_name: str) -> Any:
-    # Figure out which security groups with this name exist for each VPC...
-    vpc_to_existing_sg = {
-        sg.vpc_id: sg for sg in _get_security_groups_from_vpc_ids(
-            ec2,
-            [vpc_id],
-            [expected_sg_name],
-        )
-    }
+    """Find or create a security group in the specified VPC.
 
-    if vpc_id in vpc_to_existing_sg:
-        return vpc_to_existing_sg[vpc_id]
+    Args:
+        ec2: The initialized EC2 client object.
+        vpc_id: The ID of the VPC where the security group should be queried
+            or created.
+        expected_sg_name: The expected name of the security group.
+
+    Returns:
+        The security group object containing the details of the security group.
+
+    Raises:
+        exceptions.NoClusterLaunchedError: If the security group creation fails
+            and is not due to an existing duplicate.
+        botocore.exceptions.ClientError: If the security group creation fails
+            due to AWS service issues.
+    """
+    # Figure out which security groups with this name exist for each VPC...
+    security_group = _get_security_group_from_vpc_id(ec2, vpc_id,
+                                                     expected_sg_name)
+    if security_group is not None:
+        return security_group
 
     try:
         # create a new security group
@@ -565,34 +584,45 @@ def _get_or_create_vpc_security_group(ec2, vpc_id: str,
             VpcId=vpc_id,
         )
     except ec2.meta.client.exceptions.ClientError as e:
+        if e.response['Error']['Code'] == 'InvalidGroup.Duplicate':
+            # The security group already exists, but we didn't see it
+            # because of eventual consistency.
+            logger.warning(f'{expected_sg_name} already exists when creating.')
+            security_group = _get_security_group_from_vpc_id(
+                ec2, vpc_id, expected_sg_name)
+            assert (security_group is not None and
+                    security_group.group_name == expected_sg_name), (
+                        f'Expected {expected_sg_name} but got {security_group}')
+            logger.info(
+                f'Found existing security group {colorama.Style.BRIGHT}'
+                f'{security_group.group_name}{colorama.Style.RESET_ALL} '
+                f'[id={security_group.id}]')
+            return security_group
         message = ('Failed to create security group. Error: '
                    f'{common_utils.format_exception(e)}')
         logger.warning(message)
         raise exceptions.NoClusterLaunchedError(message) from e
 
-    security_group = _get_security_groups_from_vpc_ids(ec2, [vpc_id],
-                                                       [expected_sg_name])
-
-    assert security_group, 'Failed to create security group'
-    security_group = security_group[0]
-
+    security_group = _get_security_group_from_vpc_id(ec2, vpc_id,
+                                                     expected_sg_name)
+    assert security_group is not None, 'Failed to create security group'
     logger.info(f'Created new security group {colorama.Style.BRIGHT}'
                 f'{security_group.group_name}{colorama.Style.RESET_ALL} '
                 f'[id={security_group.id}]')
     return security_group
 
 
-def _get_security_groups_from_vpc_ids(ec2, vpc_ids: List[str],
-                                      group_names: List[str]) -> List[Any]:
-    unique_vpc_ids = list(set(vpc_ids))
-    unique_group_names = set(group_names)
-
+def _get_security_group_from_vpc_id(ec2, vpc_id: str,
+                                    group_name: str) -> Optional[Any]:
+    """Get security group by VPC ID and group name."""
     existing_groups = list(
         ec2.security_groups.filter(Filters=[{
             'Name': 'vpc-id',
-            'Values': unique_vpc_ids
+            'Values': [vpc_id]
         }]))
-    filtered_groups = [
-        sg for sg in existing_groups if sg.group_name in unique_group_names
-    ]
-    return filtered_groups
+
+    for sg in existing_groups:
+        if sg.group_name == group_name:
+            return sg
+
+    return None

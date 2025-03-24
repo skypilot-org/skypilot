@@ -1,19 +1,24 @@
 """Lazy import for modules to avoid import error when not used."""
 import functools
 import importlib
+import threading
 from typing import Any, Callable, Optional, Tuple
 
 
 class LazyImport:
-    """Lazy importer for heavy modules or cloud modules only when enabled.
+    """Lazy importer for modules.
 
-    We use this for pandas and networkx, as they can be time-consuming to import
-    (0.1-0.2 seconds). With this class, we can avoid the unnecessary import time
-    when the module is not used (e.g., `networkx` should not be imported for
-    `sky status and `pandas` should not be imported for `sky exec`).
+    This is mainly used in two cases:
+    1. Heavy 3rd party modules: They can be time-consuming to import
+    and not necessary for all `sky` imports, e.g., numpy(700+ms),
+    pendulum(500+ms), cryptography(500+ms), pandas(200+ms), and
+    networkx(100+ms), etc. With this class, we can avoid the
+    unnecessary import time when the module is not used (e.g.,
+    `networkx` should not be imported for `sky status` and `pandas`
+    should not be imported for `sky exec`).
 
-    We also use this for cloud adaptors, because we do not want to import the
-    cloud dependencies when it is not enabled.
+    2. Cloud modules in cloud adaptors: cloud dependencies are only required
+    when a cloud is enabled, so we only import them when actually needed.
     """
 
     def __init__(self,
@@ -24,17 +29,22 @@ class LazyImport:
         self._module = None
         self._import_error_message = import_error_message
         self._set_loggers = set_loggers
+        self._lock = threading.RLock()
 
     def load_module(self):
-        if self._module is None:
-            try:
-                self._module = importlib.import_module(self._module_name)
-                if self._set_loggers is not None:
-                    self._set_loggers()
-            except ImportError as e:
-                if self._import_error_message is not None:
-                    raise ImportError(self._import_error_message) from e
-                raise
+        # Avoid extra imports when multiple threads try to import the same
+        # module. The overhead is minor since import can only run in serial
+        # due to GIL even in multi-threaded environments.
+        with self._lock:
+            if self._module is None:
+                try:
+                    self._module = importlib.import_module(self._module_name)
+                    if self._set_loggers is not None:
+                        self._set_loggers()
+                except ImportError as e:
+                    if self._import_error_message is not None:
+                        raise ImportError(self._import_error_message) from e
+                    raise
         return self._module
 
     def __getattr__(self, name: str) -> Any:

@@ -8,6 +8,7 @@ import pytest
 from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
+from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
 from sky.utils import resources_utils
 
@@ -39,14 +40,16 @@ def _run_label_test(allowed_labels: Dict[str, str],
                     cloud: clouds.Cloud = None):
     """Run a test for labels with the given allowed and invalid labels."""
     r_allowed = Resources(cloud=cloud, labels=allowed_labels)  # Should pass
+    r_allowed.validate()
     assert r_allowed.labels == allowed_labels, ('Allowed labels '
                                                 'should be the same')
 
     # Check for each invalid label
     for invalid_label, value in invalid_labels.items():
         l = {invalid_label: value}
+        r = Resources(cloud=cloud, labels=l)
         with pytest.raises(ValueError):
-            _ = Resources(cloud=cloud, labels=l)
+            r.validate()
             assert False, (f'Resources were initialized with '
                            f'invalid label {invalid_label}={value}')
 
@@ -95,7 +98,8 @@ def test_kubernetes_labels_resources():
 
 
 def test_no_cloud_labels_resources():
-    global_user_state.set_enabled_clouds(['aws', 'gcp'])
+    global_user_state.set_enabled_clouds(['aws', 'gcp'],
+                                         sky_cloud.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -108,7 +112,8 @@ def test_no_cloud_labels_resources():
 
 
 def test_no_cloud_labels_resources_single_enabled_cloud():
-    global_user_state.set_enabled_clouds(['aws'])
+    global_user_state.set_enabled_clouds(['aws'],
+                                         sky_cloud.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS

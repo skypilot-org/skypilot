@@ -9,7 +9,7 @@ History:
    file path resolution (by os.path.expanduser) when construct the file
    mounts. This bug will cause the created workder nodes located in different
    compartment and VCN than the header node if user specifies compartment_id
-   in the sky config file, because the ~/.sky/config is not sync-ed to the
+   in the sky config file, because the ~/.sky/config.yaml is not sync-ed to the
    remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
@@ -27,13 +27,14 @@ from typing import Dict, Iterator, List, Optional, Tuple, Union
 
 from sky import clouds
 from sky import exceptions
-from sky import status_lib
 from sky.adaptors import oci as oci_adaptor
 from sky.clouds import service_catalog
 from sky.clouds.utils import oci_utils
 from sky.provision.oci.query_utils import query_helper
 from sky.utils import common_utils
+from sky.utils import registry
 from sky.utils import resources_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -45,7 +46,7 @@ logger = logging.getLogger(__name__)
 _tenancy_prefix: Optional[str] = None
 
 
-@clouds.CLOUD_REGISTRY.register
+@registry.CLOUD_REGISTRY.register
 class OCI(clouds.Cloud):
     """OCI: Oracle Cloud Infrastructure """
 
@@ -232,6 +233,14 @@ class OCI(clouds.Cloud):
             listing_id = None
             res_ver = None
 
+        os_type = None
+        if ':' in image_id:
+            # OS type provided in the --image-id. This is the case where
+            # custom image's ocid provided in the --image-id parameter.
+            #  - ocid1.image...aaa:oraclelinux (os type is oraclelinux)
+            #  - ocid1.image...aaa (OS not provided)
+            image_id, os_type = image_id.replace(' ', '').split(':')
+
         cpus = resources.cpus
         instance_type_arr = resources.instance_type.split(
             oci_utils.oci_config.INSTANCE_TYPE_RES_SPERATOR)
@@ -297,15 +306,18 @@ class OCI(clouds.Cloud):
             cpus=None if cpus is None else float(cpus),
             disk_tier=resources.disk_tier)
 
-        image_str = self._get_image_str(image_id=resources.image_id,
-                                        instance_type=resources.instance_type,
-                                        region=region.name)
+        if os_type is None:
+            # OS type is not determined yet. So try to get it from vms.csv
+            image_str = self._get_image_str(
+                image_id=resources.image_id,
+                instance_type=resources.instance_type,
+                region=region.name)
 
-        # pylint: disable=import-outside-toplevel
-        from sky.clouds.service_catalog import oci_catalog
-        os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
-                                                    region=region.name)
-        logger.debug(f'OS type for the image {image_str} is {os_type}')
+            # pylint: disable=import-outside-toplevel
+            from sky.clouds.service_catalog import oci_catalog
+            os_type = oci_catalog.get_image_os_from_tag(tag=image_str,
+                                                        region=region.name)
+        logger.debug(f'OS type for the image {image_id} is {os_type}')
 
         return {
             'instance_type': instance_type,
@@ -384,7 +396,21 @@ class OCI(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to OCI Object Storage.
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         short_credential_help_str = (

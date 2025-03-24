@@ -90,12 +90,12 @@ sky launch -c gpt2-data gpt2-data.yaml --env BUCKET_NAME=your-bucket-name
 After the data is processed, you can then train the model on a GPU VM with 8 A100 GPUs (replace `your-bucket-name` with your bucket name):
 
 ```bash
-sky launch -c gpt2-train --detach-setup gpt2-train.yaml --env BUCKET_NAME=your-bucket-name
+sky launch -c gpt2-train gpt2-train.yaml --env BUCKET_NAME=your-bucket-name
 ```
 
 Or, you can train the model with a single A100, by adding `--gpus A100`:
 ```bash
-sky launch -c gpt2-train --detach-setup gpt2-train.yaml --gpus A100 --env BUCKET_NAME=your-bucket-name
+sky launch -c gpt2-train gpt2-train.yaml --gpus A100 --env BUCKET_NAME=your-bucket-name
 ```
 
 

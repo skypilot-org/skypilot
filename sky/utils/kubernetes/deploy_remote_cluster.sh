@@ -9,21 +9,38 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No color
 
 # Variables
+CLEANUP=false
+INSTALL_GPU=false
+POSITIONAL_ARGS=()
+
+# Process all arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --cleanup)
+            CLEANUP=true
+            shift
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            shift
+            ;;
+    esac
+done
+
+# Restore positional arguments in correct order
+set -- "${POSITIONAL_ARGS[@]}"
+
+# Assign positional arguments to variables
 IPS_FILE=$1
 USER=$2
 SSH_KEY=$3
+CONTEXT_NAME=${4:-default}
 K3S_TOKEN=mytoken  # Any string can be used as the token
-CLEANUP=false
-INSTALL_GPU=false
-
-if [[ "$4" == "--cleanup" ]]; then
-    CLEANUP=true
-fi
 
 # Basic argument checks
 if [ -z "$IPS_FILE" ] || [ -z "$USER" ] || [ -z "$SSH_KEY" ]; then
     >&2 echo -e "${RED}Error: Missing required arguments.${NC}"
-    >&2 echo "Usage: ./deploy_remote_cluster.sh ips.txt username path/to/ssh/key [--cleanup]"
+    >&2 echo "Usage: ./deploy_remote_cluster.sh ips.txt username path/to/ssh/key [context-name] [--cleanup]"
     exit 1
 fi
 
@@ -64,7 +81,7 @@ run_remote() {
     local NODE_IP=$1
     local CMD=$2
     # echo -e "${YELLOW}Running command on $NODE_IP...${NC}"
-    ssh -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER@$NODE_IP" "$CMD"
+    ssh -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_KEY" "$USER@$NODE_IP" "$CMD"
 }
 
 # Function to uninstall k3s and clean up the state on a remote machine
@@ -93,11 +110,11 @@ cleanup_agent_node() {
 
 check_gpu() {
     local NODE_IP=$1
-    run_remote "$NODE_IP" "
-        if command -v nvidia-smi &> /dev/null; then
-            nvidia-smi --list-gpus | grep 'GPU 0'
-        fi
-    "
+    if run_remote "$NODE_IP" "command -v nvidia-smi &> /dev/null && nvidia-smi --query-gpu=gpu_name --format=csv,noheader &> /dev/null"; then
+        return 0  # GPU detected
+    else
+        return 1  # No GPU detected
+    fi
 }
 
 # Pre-flight checks
@@ -115,6 +132,17 @@ if [ "$CLEANUP" == "true" ]; then
     for NODE in $WORKER_NODES; do
         cleanup_agent_node "$NODE"
     done
+
+    # Remove the context from local kubeconfig if it exists
+    if [ -f "$HOME/.kube/config" ]; then
+        progress_message "Removing context '$CONTEXT_NAME' from local kubeconfig..."
+        kubectl config delete-context "$CONTEXT_NAME" 2>/dev/null || true
+        kubectl config delete-cluster "$CONTEXT_NAME" 2>/dev/null || true
+        kubectl config delete-user "$CONTEXT_NAME" 2>/dev/null || true
+        # Update the current context to the first available context
+        kubectl config use-context $(kubectl config view -o jsonpath='{.contexts[0].name}') 2>/dev/null || true
+        success_message "Context '$CONTEXT_NAME' removed from local kubeconfig."
+    fi
 
     echo -e "${GREEN}Cleanup completed successfully.${NC}"
     exit 0
@@ -167,22 +195,25 @@ for NODE in $WORKER_NODES; do
 done
 # Step 3: Configure local kubectl to connect to the cluster
 progress_message "Configuring local kubectl to connect to the cluster..."
-scp -o StrictHostKeyChecking=no -i "$SSH_KEY" "$USER@$HEAD_NODE":~/.kube/config ~/.kube/config
 
-# Back up the original kubeconfig file if it exists
+# Create temporary directory for kubeconfig operations
+TEMP_DIR=$(mktemp -d)
+TEMP_KUBECONFIG="$TEMP_DIR/kubeconfig"
+
+# Get the kubeconfig from remote server
+scp -o StrictHostKeyChecking=no -o IdentitiesOnly=yes -i "$SSH_KEY" "$USER@$HEAD_NODE":~/.kube/config "$TEMP_KUBECONFIG"
+
+# Create .kube directory if it doesn't exist
+mkdir -p "$HOME/.kube"
+
+# Create empty kubeconfig if it doesn't exist
 KUBECONFIG_FILE="$HOME/.kube/config"
-if [[ -f "$KUBECONFIG_FILE" ]]; then
-    echo "Backing up existing kubeconfig to $KUBECONFIG_FILE.bak"
-    cp "$KUBECONFIG_FILE" "$KUBECONFIG_FILE.bak"
+if [[ ! -f "$KUBECONFIG_FILE" ]]; then
+    touch "$KUBECONFIG_FILE"
 fi
 
-# Update kubeconfig for the local machine to use the master node's IP
-# Temporary file to hold the modified kubeconfig
-TEMP_FILE=$(mktemp)
-
-# Remove the certificate-authority-data, and replace the server with the master address
-awk '
-  BEGIN { in_cluster = 0 }
+# Modify the temporary kubeconfig to update server address and context name
+awk -v context="$CONTEXT_NAME" '
   /^clusters:/ { in_cluster = 1 }
   /^users:/ { in_cluster = 0 }
   in_cluster && /^ *certificate-authority-data:/ { next }
@@ -191,13 +222,24 @@ awk '
     print "    insecure-skip-tls-verify: true"
     next
   }
+  /name: default/ { sub("name: default", "name: " context) }
+  /cluster: default/ { sub("cluster: default", "cluster: " context) }
+  /user: default/ { sub("user: default", "user: " context) }
+  /current-context: default/ { sub("current-context: default", "current-context: " context) }
   { print }
-' "$KUBECONFIG_FILE" > "$TEMP_FILE"
+' "$TEMP_KUBECONFIG" > "$TEMP_DIR/modified_config"
 
-# Replace the original kubeconfig with the modified one
-mv "$TEMP_FILE" "$KUBECONFIG_FILE"
+# Merge the configurations using kubectl
+KUBECONFIG="$KUBECONFIG_FILE:$TEMP_DIR/modified_config" kubectl config view --flatten > "$TEMP_DIR/merged_config"
+mv "$TEMP_DIR/merged_config" "$KUBECONFIG_FILE"
 
-success_message "kubectl configured to connect to the cluster."
+# Set the new context as the current context
+kubectl config use-context "$CONTEXT_NAME"
+
+# Clean up temporary files
+rm -rf "$TEMP_DIR"
+
+success_message "kubectl configured with new context '$CONTEXT_NAME'."
 
 echo "Cluster deployment completed. You can now run 'kubectl get nodes' to verify the setup."
 

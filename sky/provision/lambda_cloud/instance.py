@@ -3,12 +3,11 @@
 import time
 from typing import Any, Dict, List, Optional
 
-from sky import authentication as auth
 from sky import sky_logging
-from sky import status_lib
 from sky.provision import common
 import sky.provision.lambda_cloud.lambda_utils as lambda_utils
 from sky.utils import common_utils
+from sky.utils import status_lib
 from sky.utils import ux_utils
 
 POLL_INTERVAL = 1
@@ -53,15 +52,19 @@ def _get_head_instance_id(instances: Dict[str, Any]) -> Optional[str]:
     return head_instance_id
 
 
-def _get_ssh_key_name(prefix: str = '') -> str:
-    lambda_client = _get_lambda_client()
-    _, public_key_path = auth.get_or_generate_keys()
-    with open(public_key_path, 'r', encoding='utf-8') as f:
-        public_key = f.read()
-    name, exists = lambda_client.get_unique_ssh_key_name(prefix, public_key)
-    if not exists:
-        raise lambda_utils.LambdaCloudError('SSH key not found')
-    return name
+def _get_private_ip(instance_info: Dict[str, Any], single_node: bool) -> str:
+    private_ip = instance_info.get('private_ip')
+    if private_ip is None:
+        if single_node:
+            # The Lambda cloud API may return an instance info without
+            # private IP. It does not align with their docs, but we still
+            # allow single-node cluster to proceed with provisioning, by using
+            # 127.0.0.1, as private IP is not critical for single-node case.
+            return '127.0.0.1'
+        msg = f'Failed to retrieve private IP for instance {instance_info}.'
+        logger.error(msg)
+        raise RuntimeError(msg)
+    return private_ip
 
 
 def run_instances(region: str, cluster_name_on_cloud: str,
@@ -100,7 +103,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
         )
 
     created_instance_ids = []
-    ssh_key_name = _get_ssh_key_name()
+    remote_ssh_key_name = config.authentication_config['remote_key_name']
 
     def launch_nodes(node_type: str, quantity: int) -> List[str]:
         try:
@@ -109,7 +112,7 @@ def run_instances(region: str, cluster_name_on_cloud: str,
                 region=region,
                 name=f'{cluster_name_on_cloud}-{node_type}',
                 quantity=quantity,
-                ssh_key_name=ssh_key_name,
+                ssh_key_name=remote_ssh_key_name,
             )
             logger.info(f'Launched {len(instance_ids)} {node_type} node(s), '
                         f'instance_ids: {instance_ids}')
@@ -197,13 +200,14 @@ def get_cluster_info(
 ) -> common.ClusterInfo:
     del region  # unused
     running_instances = _filter_instances(cluster_name_on_cloud, ['active'])
+    single_node = len(running_instances) == 1
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
         instances[instance_id] = [
             common.InstanceInfo(
                 instance_id=instance_id,
-                internal_ip=instance_info['private_ip'],
+                internal_ip=_get_private_ip(instance_info, single_node),
                 external_ip=instance_info['ip'],
                 ssh_port=22,
                 tags={},
