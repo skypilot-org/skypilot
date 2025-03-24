@@ -13,21 +13,29 @@ import re
 import socket
 import sys
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
-import jinja2
-import jsonschema
-import psutil
-import yaml
-
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
 from sky.utils import annotations
 from sky.utils import ux_utils
 from sky.utils import validator
+
+if typing.TYPE_CHECKING:
+    import jinja2
+    import jsonschema
+    import psutil
+    import yaml
+else:
+    jinja2 = adaptors_common.LazyImport('jinja2')
+    jsonschema = adaptors_common.LazyImport('jsonschema')
+    psutil = adaptors_common.LazyImport('psutil')
+    yaml = adaptors_common.LazyImport('yaml')
 
 _USER_HASH_FILE = os.path.expanduser('~/.sky/user_hash')
 USER_HASH_LENGTH = 8
@@ -598,7 +606,7 @@ def validate_schema(obj, schema, err_msg_prefix='', skip_none=True):
         obj = {k: v for k, v in obj.items() if v is not None}
     err_msg = None
     try:
-        validator.SchemaValidator(schema).validate(obj)
+        validator.get_schema_validator()(schema).validate(obj)
     except jsonschema.ValidationError as e:
         if e.validator == 'additionalProperties':
             if tuple(e.schema_path) == ('properties', 'envs',

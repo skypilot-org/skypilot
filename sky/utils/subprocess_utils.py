@@ -8,18 +8,24 @@ import shlex
 import subprocess
 import threading
 import time
+import typing
 from typing import Any, Callable, Dict, List, Optional, Protocol, Tuple, Union
 
 import colorama
-import psutil
 
 from sky import exceptions
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.skylet import log_lib
 from sky.utils import common_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 

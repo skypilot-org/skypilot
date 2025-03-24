@@ -2,17 +2,22 @@
 import json
 import os
 import textwrap
+import typing
 from typing import Any, Dict, List, Optional
 
-import yaml
-
 from sky import serve
+from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
 from sky.serve import serve_utils
 from sky.utils import common_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import yaml
+else:
+    yaml = adaptors_common.LazyImport('yaml')
 
 
 class SkyServiceSpec:
