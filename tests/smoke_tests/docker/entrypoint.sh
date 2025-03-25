@@ -1,6 +1,8 @@
 #!/bin/bash
 source $HOME/miniconda3/etc/profile.d/conda.sh
 conda activate base
+# Add uv to PATH
+export PATH="$PATH:$HOME/.local/bin"
 USER_HASH_FILE="$HOME/.sky/user_hash"
 
 # Function to handle SIGTERM
