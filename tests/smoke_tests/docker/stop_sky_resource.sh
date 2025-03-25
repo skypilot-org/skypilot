@@ -11,7 +11,7 @@ execute_sky_cleanup() {
     sky down -a -y -u
     sky storage delete -a -y
     sky jobs cancel -a -y -u
-    sky serve down -a -y -u
+    sky serve down -a -y
 }
 
 execute_sky_cleanup
@@ -62,7 +62,7 @@ EOF
 
             if echo "$output" | grep -q "Please terminate the services first with"; then
                 echo "$output"
-                stop_command="sky serve down -a -y -u"
+                stop_command="sky serve down -a -y"
                 echo "Please terminate the services. Running: $stop_command"
                 stop_coutput=$($stop_command 2>&1)
                 echo "Command output: $stop_coutput"
