@@ -6,7 +6,6 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
-import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -16,6 +15,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
@@ -28,10 +28,12 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
+    import numpy as np
 
     from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
+    np = adaptors_common.LazyImport('numpy')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -368,7 +370,8 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = (
-                    sky_check.get_cached_enabled_clouds_or_refresh())
+                    sky_check.get_cached_enabled_clouds_or_refresh(
+                        sky_cloud.CloudCapability.COMPUTE))
                 if clouds.cloud_in_iterable(clouds.Kubernetes(),
                                             enabled_clouds):
                     if any(orig_resources.cloud is None
@@ -1206,6 +1209,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         dag: The DAG specified by a user.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     global_disabled_clouds: Set[str] = set()
@@ -1223,10 +1227,12 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             all_clouds_specified.add(cloud_str)
 
         # Explicitly check again to update the enabled cloud list.
-        sky_check.check(quiet=True,
-                        clouds=list(clouds_need_recheck -
-                                    global_disabled_clouds))
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=list(clouds_need_recheck -
+                                               global_disabled_clouds))
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
                            {str(c) for c in enabled_clouds})
@@ -1268,6 +1274,7 @@ def _fill_in_launchable_resources(
         a cloud that is not enabled.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (

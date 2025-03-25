@@ -1,7 +1,11 @@
 """Nebius cloud adaptor."""
 import os
+import threading
+from typing import Optional
 
 from sky.adaptors import common
+from sky.utils import annotations
+from sky.utils import ux_utils
 
 NEBIUS_TENANT_ID_FILENAME = 'NEBIUS_TENANT_ID.txt'
 NEBIUS_IAM_TOKEN_FILENAME = 'NEBIUS_IAM_TOKEN.txt'
@@ -11,6 +15,10 @@ NEBIUS_TENANT_ID_PATH = '~/.nebius/' + NEBIUS_TENANT_ID_FILENAME
 NEBIUS_IAM_TOKEN_PATH = '~/.nebius/' + NEBIUS_IAM_TOKEN_FILENAME
 NEBIUS_PROJECT_ID_PATH = '~/.nebius/' + NEBIUS_PROJECT_ID_FILENAME
 NEBIUS_CREDENTIALS_PATH = '~/.nebius/' + NEBIUS_CREDENTIALS_FILENAME
+
+DEFAULT_REGION = 'eu-north1'
+
+NEBIUS_PROFILE_NAME = 'nebius'
 
 MAX_RETRIES_TO_DISK_CREATE = 120
 MAX_RETRIES_TO_INSTANCE_STOP = 120
@@ -23,15 +31,27 @@ MAX_RETRIES_TO_INSTANCE_WAIT = 120  # Maximum number of retries
 POLL_INTERVAL = 5
 
 _iam_token = None
+_sdk = None
 _tenant_id = None
 _project_id = None
 
+_IMPORT_ERROR_MESSAGE = ('Failed to import dependencies for Nebius AI Cloud.'
+                         'Try pip install "skypilot[nebius]"')
+
 nebius = common.LazyImport(
     'nebius',
-    import_error_message='Failed to import dependencies for Nebius AI Cloud. '
-    'Try running: pip install "skypilot[nebius]"',
+    import_error_message=_IMPORT_ERROR_MESSAGE,
     # https://github.com/grpc/grpc/issues/37642 to avoid spam in console
     set_loggers=lambda: os.environ.update({'GRPC_VERBOSITY': 'NONE'}))
+boto3 = common.LazyImport('boto3', import_error_message=_IMPORT_ERROR_MESSAGE)
+botocore = common.LazyImport('botocore',
+                             import_error_message=_IMPORT_ERROR_MESSAGE)
+
+_LAZY_MODULES = (boto3, botocore, nebius)
+_session_creation_lock = threading.RLock()
+_INDENT_PREFIX = '    '
+NAME = 'Nebius'
+SKY_CHECK_NAME = 'Nebius (for Nebius Object Storae)'
 
 
 def request_error():
@@ -104,7 +124,109 @@ def get_tenant_id():
 
 
 def sdk():
-    if get_iam_token() is not None:
-        return nebius.sdk.SDK(credentials=get_iam_token())
-    return nebius.sdk.SDK(
-        credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
+    global _sdk
+    if _sdk is None:
+        if get_iam_token() is not None:
+            _sdk = nebius.sdk.SDK(credentials=get_iam_token())
+            return _sdk
+        _sdk = nebius.sdk.SDK(
+            credentials_file_name=os.path.expanduser(NEBIUS_CREDENTIALS_PATH))
+    return _sdk
+
+
+def get_nebius_credentials(boto3_session):
+    """Gets the Nebius credentials from the boto3 session object.
+
+    Args:
+        boto3_session: The boto3 session object.
+    Returns:
+        botocore.credentials.ReadOnlyCredentials object with the R2 credentials.
+    """
+    nebius_credentials = boto3_session.get_credentials()
+    if nebius_credentials is None:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError('Nebius credentials not found. Run '
+                             '`sky check` to verify credentials are '
+                             'correctly set up.')
+    return nebius_credentials.get_frozen_credentials()
+
+
+# lru_cache() is thread-safe and it will return the same session object
+# for different threads.
+# Reference: https://docs.python.org/3/library/functools.html#functools.lru_cache # pylint: disable=line-too-long
+@annotations.lru_cache(scope='global')
+def session():
+    """Create an AWS session."""
+    # Creating the session object is not thread-safe for boto3,
+    # so we add a reentrant lock to synchronize the session creation.
+    # Reference: https://github.com/boto/boto3/issues/1592
+    # However, the session object itself is thread-safe, so we are
+    # able to use lru_cache() to cache the session object.
+    with _session_creation_lock:
+        session_ = boto3.session.Session(profile_name=NEBIUS_PROFILE_NAME)
+    return session_
+
+
+@annotations.lru_cache(scope='global')
+def resource(resource_name: str, region: str = DEFAULT_REGION, **kwargs):
+    """Create a Nebius resource.
+
+    Args:
+        resource_name: Nebius resource name (e.g., 's3').
+        kwargs: Other options.
+    """
+    # Need to use the resource retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.resource() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+
+    session_ = session()
+    nebius_credentials = get_nebius_credentials(session_)
+    endpoint = create_endpoint(region)
+
+    return session_.resource(
+        resource_name,
+        endpoint_url=endpoint,
+        aws_access_key_id=nebius_credentials.access_key,
+        aws_secret_access_key=nebius_credentials.secret_key,
+        region_name=region,
+        **kwargs)
+
+
+@annotations.lru_cache(scope='global')
+def client(service_name: str, region):
+    """Create an Nebius client of a certain service.
+
+    Args:
+        service_name: Nebius service name (e.g., 's3').
+        kwargs: Other options.
+    """
+    # Need to use the client retrieved from the per-thread session
+    # to avoid thread-safety issues (Directly creating the client
+    # with boto3.client() is not thread-safe).
+    # Reference: https://stackoverflow.com/a/59635814
+
+    session_ = session()
+    nebius_credentials = get_nebius_credentials(session_)
+    endpoint = create_endpoint(region)
+
+    return session_.client(service_name,
+                           endpoint_url=endpoint,
+                           aws_access_key_id=nebius_credentials.access_key,
+                           aws_secret_access_key=nebius_credentials.secret_key,
+                           region_name=region)
+
+
+@common.load_lazy_modules(_LAZY_MODULES)
+def botocore_exceptions():
+    """AWS botocore exception."""
+    # pylint: disable=import-outside-toplevel
+    from botocore import exceptions
+    return exceptions
+
+
+def create_endpoint(region: Optional[str] = DEFAULT_REGION) -> str:
+    """Reads accountid necessary to interact with Nebius Object Storage"""
+    if region is None:
+        region = DEFAULT_REGION
+    return f'https://storage.{region}.nebius.cloud:443'

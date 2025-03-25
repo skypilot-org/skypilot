@@ -12,7 +12,7 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
 Prerequisites
 -------------
 
-* A Kubernetes cluster with ports 30050 and 30051 available for NodePort services
+* A Kubernetes cluster with LoadBalancer or NodePort service support
 * `Helm <https://helm.sh/docs/intro/install/>`_
 * `kubectl <https://kubernetes.io/docs/tasks/tools/>`_
 
@@ -163,11 +163,13 @@ Install the SkyPilot Helm chart with the following command:
 
 .. code-block:: bash
 
+    # The following variables will be used throughout the guide
     NAMESPACE=skypilot
+    RELEASE_NAME=skypilot
     WEB_USERNAME=skypilot
     WEB_PASSWORD=yourpassword
     AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-    helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
       --namespace $NAMESPACE \
       --create-namespace \
       --set ingress.authCredentials=$AUTH_STRING
@@ -195,6 +197,8 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
+.. _sky-get-api-server-url:
+
 Step 4: Get the API server URL
 ------------------------------
 
@@ -204,16 +208,45 @@ Our default of using a NodePort service is the recommended way to expose the API
 
 .. tab-set::
 
-    .. tab-item:: NodePort (Default)
-        :sync: nodeport-tab
+    .. tab-item:: LoadBalancer (Default)
+        :sync: loadbalancer-tab
 
-        1. Make sure ports 30050 and 30051 are open on your nodes.
-
-        2. Fetch the ingress controller URL with:
+        Fetch the ingress controller URL:
 
         .. code-block:: console
 
-            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
+            $ HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
+            $ echo $ENDPOINT
+            http://skypilot:yourpassword@1.1.1.1
+        
+        .. tip::
+            
+            If you're using a Kubernetes cluster without LoadBalancer support, you may get an empty IP address in the output above.
+            In that case, use the NodePort option instead.
+        
+        .. tip::
+
+            For fine-grained control over the LoadBalancer service, refer to the `helm values of ingress-nginx <https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx#values>`_. Note that all values should be put under ``ingress-nginx.`` prefix since the ingress-nginx chart is installed as a subchart.
+
+    .. tab-item:: NodePort
+        :sync: nodeport-tab
+
+        1. Select two ports on your nodes that are not in use and allow network inbound traffic to them. 30050 and 30051 will be used in this example.
+
+        2. Upgrade the API server to use NodePort, and set the node ports to the selected ports:
+
+        .. code-block:: bash
+
+            $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --set ingress-nginx.controller.service.type=NodePort \
+              --set ingress-nginx.controller.service.nodePorts.http=30050 \
+              --set ingress-nginx.controller.service.nodePorts.https=30051
+
+        3. Fetch the ingress controller URL with:
+
+        .. code-block:: console
+
             $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np -n $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
             $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
@@ -221,40 +254,12 @@ Our default of using a NodePort service is the recommended way to expose the API
             http://skypilot:yourpassword@1.1.1.1:30050
 
         .. tip::
-
-            You can customize the node ports with ``--set ingress.httpNodePort=<port> --set ingress.httpsNodePort=<port>`` to the helm upgrade command.
-
-            If set to null, Kubernetes will assign random ports in the NodePort range (default 30000-32767). Make sure to open these ports on your nodes.
+            
+            You can also omit ``ingress-nginx.controller.service.nodePorts.http`` and ``ingress-nginx.controller.service.nodePorts.https`` to use random ports in the NodePort range (default 30000-32767). Make sure these ports are open on your nodes if you do so.
 
         .. tip::
 
             To avoid frequent IP address changes on nodes by your cloud provider, you can attach a static IP address to your nodes (`instructions for GKE <https://cloud.google.com/compute/docs/ip-addresses/configure-static-external-ip-address>`_) and use it as the ``NODE_IP`` in the command above.
-
-    .. tab-item:: LoadBalancer
-        :sync: loadbalancer-tab
-
-        .. warning::
-
-            Using LoadBalancer service type may not support SSH access to SkyPilot clusters. Only use this option if you do not need SSH access.
-
-
-        1. Deploy the API server with LoadBalancer configuration:
-
-        .. code-block:: bash
-
-            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-              --set ingress.httpNodePort=null \
-              --set ingress.httpsNodePort=null \
-              --set ingress-nginx.controller.service.type=LoadBalancer
-
-        2. Fetch the ingress controller URL:
-
-        .. code-block:: console
-
-            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
-            $ ENDPOINT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
-            $ echo $ENDPOINT
-            http://1.1.1.1
 
 
 Step 5: Test the API server
@@ -411,6 +416,28 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
     helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
+.. _sky-migrate-legacy-service:
+
+Migrate from legacy NodePort service
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
+
+- Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
+
+  Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
+  
+- Disable the legacy NodePort service:
+
+  Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
+
+.. note::
+
+    Make sure there is no clients using the NodePort service before disabling it.
+
+.. note::
+
+    Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-cloud-deploy:
 

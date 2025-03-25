@@ -12,15 +12,13 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
-import jinja2
-import yaml
-
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
@@ -38,8 +36,14 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import jinja2
+    import yaml
+
     from sky import backends
     from sky import resources as resources_lib
+else:
+    jinja2 = adaptors_common.LazyImport('jinja2')
+    yaml = adaptors_common.LazyImport('yaml')
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'
@@ -663,18 +667,25 @@ class GKEAutoscaler(Autoscaler):
 
         # Check if any node pool with autoscaling enabled can
         # fit the instance type.
-        for node_pool in cluster['nodePools']:
-            logger.debug(f'checking if node pool {node_pool["name"]} '
+        node_pools = cluster.get('nodePools', [])
+        for node_pool in node_pools:
+            name = node_pool.get('name', '')
+            logger.debug(f'checking if node pool {name} '
                          'has autoscaling enabled.')
-            if (node_pool['autoscaling'] is not None and
-                    'enabled' in node_pool['autoscaling'] and
-                    node_pool['autoscaling']['enabled']):
-                logger.debug(
-                    f'node pool {node_pool["name"]} has autoscaling enabled. '
-                    'Checking if it can create a node '
-                    f'satisfying {instance_type}')
-                if cls._check_instance_fits_gke_autoscaler_node_pool(
-                        instance_type, node_pool):
+            autoscaling_enabled = (node_pool.get('autoscaling',
+                                                 {}).get('enabled', False))
+            if autoscaling_enabled:
+                logger.debug(f'node pool {name} has autoscaling enabled. '
+                             'Checking if it can create a node '
+                             f'satisfying {instance_type}')
+                try:
+                    if cls._check_instance_fits_gke_autoscaler_node_pool(
+                            instance_type, node_pool):
+                        return True
+                except KeyError:
+                    logger.debug('encountered KeyError while checking if '
+                                 f'node pool {name} can create a node '
+                                 f'satisfying {instance_type}.')
                     return True
         return False
 
@@ -776,9 +787,9 @@ class GKEAutoscaler(Autoscaler):
         to fit the instance type.
         """
         for accelerator in node_pool_accelerators:
-            node_accelerator_type = GKELabelFormatter. \
-                get_accelerator_from_label_value(
-                    accelerator['acceleratorType'])
+            node_accelerator_type = (
+                GKELabelFormatter.get_accelerator_from_label_value(
+                    accelerator['acceleratorType']))
             node_accelerator_count = accelerator['acceleratorCount']
             if node_accelerator_type == requested_gpu_type and int(
                     node_accelerator_count) >= requested_gpu_count:
@@ -812,24 +823,22 @@ class GKEAutoscaler(Autoscaler):
     @classmethod
     def _tpu_chip_count_from_instance_type(cls, machine_type: str) -> int:
         """Infer the number of TPU chips from the instance type."""
-        machine_type_parts = machine_type.split('-')
         # according to
         # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#machine_type
         # GKE TPU machine types have the format of
         # ct<version>-<type>-<node-chip-count>t
         logger.debug(
             f'inferring TPU chip count from machine type: {machine_type}')
-        if (len(machine_type_parts) != 3 or
-                not machine_type_parts[0].startswith('ct') or
-                not machine_type_parts[2].endswith('t') or
-                not machine_type_parts[2].strip('t').isdigit()):
+        pattern = r'ct[a-z0-9]+-[a-z]+-([0-9]+)t'
+        search = re.search(pattern, machine_type)
+        if search is None:
             logger.debug(f'machine type {machine_type} is not a '
                          'valid TPU machine type format.')
             return 0
-        num_tpu_chips = int(machine_type_parts[2].strip('t'))
+        num_tpu_chips = search.group(1)
         logger.debug(
             f'machine type {machine_type} has {num_tpu_chips} TPU chips.')
-        return num_tpu_chips
+        return int(num_tpu_chips)
 
     @classmethod
     def _is_node_multi_host_tpu(cls, resource_labels: dict) -> bool:

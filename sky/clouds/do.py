@@ -259,8 +259,9 @@ class DO(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Verify that the user has valid credentials for DO."""
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Verify that the user has valid credentials for
+        DO's compute service."""
 
         try:
             do.exceptions()

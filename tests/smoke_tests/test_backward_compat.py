@@ -1,5 +1,6 @@
 import pathlib
 import subprocess
+from typing import Sequence
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -31,6 +32,16 @@ class TestBackwardCompatibility:
     ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
     SKY_API_RESTART = 'sky api stop || true && sky api start'
+
+    # Shorthand of switching to base environment and running a list of commands in environment.
+    def _switch_to_base(self, *cmds: str) -> list[str]:
+        cmds = [self.SKY_API_RESTART] + list(cmds)
+        return [f'{self.ACTIVATE_BASE} && {c}' for c in cmds]
+
+    # Shorthand of switching to current environment and running a list of commands in environment.
+    def _switch_to_current(self, *cmds: str) -> list[str]:
+        cmds = [self.SKY_API_RESTART] + list(cmds)
+        return [f'{self.ACTIVATE_CURRENT} && {c}' for c in cmds]
 
     def _run_cmd(self, cmd: str):
         subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
@@ -219,42 +230,63 @@ class TestBackwardCompatibility:
     def test_managed_jobs(self, generic_cloud: str):
         """Test managed jobs functionality across versions"""
         managed_job_name = smoke_tests_utils.get_cluster_name()
+
+        def launch_job(job_name: str, command: str):
+            return (
+                f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--num-nodes 2 -n {job_name} "{command}"')
+
+        def wait_for_status(job_name: str,
+                            status: Sequence[sky.ManagedJobStatus]):
+            return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_name, job_status=status, timeout=300)
+
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
-            f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
-            f"""
-            {self.ACTIVATE_BASE} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-0",
-                    job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-1",
-                    job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=300)}
-            """,
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
-            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
-            f'{self.ACTIVATE_CURRENT} && sky jobs launch -d --cloud {generic_cloud} --num-nodes 2 -y -n {managed_job_name}-2 \'echo hi; sleep 40\'',
-            f"""
-            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-2",
-                    job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=300)}
-            """,
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
-            f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {managed_job_name}-0',
-            f"""
-            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-1",
-                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-2",
-                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=300)}
-            """,
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 1',
+            *self._switch_to_base(
+                # Cover jobs launched in the old version and ran to terminal states
+                launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-old-1', 'echo hi'),
+                wait_for_status(f'{managed_job_name}-old-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-old-0',
+                                [sky.ManagedJobStatus.RUNNING]),
+                f'sky jobs cancel -n {managed_job_name}-old-0 -y',
+                wait_for_status(f'{managed_job_name}-old-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                # Cover jobs launched in the new version and still running after upgrade
+                launch_job(f'{managed_job_name}-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-1', 'echo hi; sleep 400'),
+                wait_for_status(f'{managed_job_name}-0',
+                                [sky.ManagedJobStatus.RUNNING]),
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.RUNNING]),
+            ),
+            *self._switch_to_current(
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
+                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+                # Cover cancelling jobs launched in the new version
+                launch_job(f'{managed_job_name}-3', 'echo hi; sleep 1000'),
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
+                f'sky jobs cancel -y -n {managed_job_name}-0',
+                f'sky jobs cancel -y -n {managed_job_name}-3',
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-2',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                wait_for_status(f'{managed_job_name}-3', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
+            ),
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
