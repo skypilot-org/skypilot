@@ -275,19 +275,28 @@ class PrefixTree:
                 # Partial match, stop here
                 break
         current_node = succ_node
+        replica = None
         if available_replica_set is None:
             all_replicas = list(current_node.get_all_replicas())
-            replica = random.choice(all_replicas) if all_replicas else None
+            if all_replicas:
+                replica = random.choice(all_replicas)
         else:
             available_replicas = list(current_node.get_all_replicas() &
                                       available_replica_set)
-
-            def _get_load(r: str) -> int:
+            if available_replicas:
                 assert available2load is not None
-                return available2load[r]
+                min_load = float('inf')
+                min_load_replicas = []
 
-            replica = (min(available_replicas, key=_get_load)
-                       if available_replicas else None)
+                for r in available_replicas:
+                    load = available2load[r]
+                    if load < min_load:
+                        min_load = load
+                        min_load_replicas = [r]
+                    elif load == min_load:
+                        min_load_replicas.append(r)
+
+                replica = random.choice(min_load_replicas)
 
         # Update the last access time for the replica on this path.
         if replica is not None:
