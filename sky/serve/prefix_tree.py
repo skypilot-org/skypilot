@@ -314,7 +314,7 @@ class PrefixTree:
                 candidates.discard(replica)
         return candidates
 
-    def evict_tenant_by_size(self, max_size: int) -> None:
+    def evict_replica_by_size(self, max_size: int) -> None:
         with self.tree_lock:
             stack: List[PrefixTreeNode] = [self.root]
             pq: List[EvictionEntry] = []
@@ -339,10 +339,19 @@ class PrefixTree:
                 replica_usage = self.replica_char_count[entry.replica]
                 if replica_usage <= max_size:
                     continue
+                node_text_len = len(entry.node.get_text())
+                # If after removing the whole node, the replica usage is smaller
+                # than max_size, we only shrink the text size on the node but
+                # keep the node in the tree.
+                if replica_usage - node_text_len < max_size:
+                    removed_size = replica_usage - max_size
+                    remaining_size = node_text_len - removed_size
+                    entry.node.set_text(entry.node.get_text()[:remaining_size])
+                    self.replica_char_count[entry.replica] -= removed_size
+                    continue
                 if entry.node.get_replica_last_access_time(
                         entry.replica) is not None:
-                    self.replica_char_count[entry.replica] -= len(
-                        entry.node.get_text())
+                    self.replica_char_count[entry.replica] -= node_text_len
                 entry.node.remove_replica(entry.replica)
                 parent = entry.node.get_parent()
                 if parent is None:

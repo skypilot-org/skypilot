@@ -382,7 +382,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='proximate_tree',
     def _background_eviction_thread(self) -> None:
         while True:
             time.sleep(self.config.eviction_interval_secs)
-            self.tree.evict_tenant_by_size(self.config.max_tree_size)
+            self.tree.evict_replica_by_size(self.config.max_tree_size)
 
     def __init__(self) -> None:
         super().__init__()

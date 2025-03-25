@@ -41,7 +41,7 @@ def test_get_smallest_replica():
     assert smallest == "replica3", "Expected replica3 to be smallest with 2 characters"
 
     # Test eviction: remove nodes so that usage above max_size (3) is evicted.
-    tree.evict_tenant_by_size(3)
+    tree.evict_replica_by_size(3)
     smallest_after = tree.get_smallest_replica()
     print("Smallest replica after eviction:", smallest_after)
 
@@ -87,7 +87,7 @@ def test_replica_char_count():
     assert maintained_counts == computed_sizes, "Phase 3: Overlapping insertions"
 
     # Phase 4: Eviction test.
-    tree.evict_tenant_by_size(10)
+    tree.evict_replica_by_size(10)
     computed_sizes = tree.get_used_size_per_replica()
     maintained_counts = dict(tree.replica_char_count)
     print("Phase 4 - Maintained vs Computed counts:")
@@ -343,7 +343,7 @@ def test_simple_eviction():
     assert sizes_before.get("replica2") == 10
 
     # Evict nodes so that any replica with usage > max_size gets trimmed.
-    tree.evict_tenant_by_size(max_size)
+    tree.evict_replica_by_size(max_size)
     tree.pretty_print()
     sizes_after = tree.get_used_size_per_replica()
     assert sizes_after.get("replica1") == 5
@@ -366,7 +366,7 @@ def test_advanced_eviction():
             replica = f"replica{j+1}"
             tree.insert(text, replica)
 
-    tree.evict_tenant_by_size(max_size)
+    tree.evict_replica_by_size(max_size)
     sizes_after = tree.get_used_size_per_replica()
     for replica, size in sizes_after.items():
         assert size <= max_size, f"Replica {replica} exceeds size limit: {size} > {max_size}"
@@ -381,7 +381,7 @@ def test_concurrent_operations_with_eviction():
 
     def eviction_thread():
         while time.time() - start_time < test_duration:
-            tree.evict_tenant_by_size(max_size)
+            tree.evict_replica_by_size(max_size)
             time.sleep(5)
 
     t = threading.Thread(target=eviction_thread)
@@ -411,7 +411,7 @@ def test_concurrent_operations_with_eviction():
     for t in threads:
         t.join()
 
-    tree.evict_tenant_by_size(max_size)
+    tree.evict_replica_by_size(max_size)
     final_sizes = tree.get_used_size_per_replica()
     print("Final sizes after test completion:", final_sizes)
     for size in final_sizes.values():
@@ -532,9 +532,8 @@ def test_partial_prefix_match():
     # Test prefix that doesn't match at all
     matched_text, replica = tree.prefix_match("xyz123")
     assert matched_text == "", "Should not match anything"
-    assert replica in [
-        "replica1", "replica2", "replica3", "replica4"
-    ], f"Expected replica1, replica2, replica3, or replica4, got {replica}"
+    assert replica in ["replica1", "replica2", "replica3", "replica4"
+                      ], "Should return one of the available replicas"
 
 
 def test_multi_replica_same_prefix():
@@ -801,3 +800,414 @@ def test_load_based_replica_selection():
     matched_text, replica = tree.prefix_match(text, partial_load)
     assert matched_text == text, "Should match the full text"
     assert replica == "replica3", "Should select replica3 (lowest load of available replicas)"
+
+
+def test_empty_string_handling():
+    """Test handling of empty strings."""
+    tree = PrefixTree()
+
+    # Insert empty string
+    tree.insert("", "replica1")
+
+    # Match empty string
+    matched_text, replica = tree.prefix_match("")
+    assert matched_text == "", "Should match empty string"
+    assert replica == "replica1", "Should return replica1"
+
+    # Insert non-empty after empty
+    tree.insert("hello", "replica2")
+    matched_text, replica = tree.prefix_match("hello")
+    assert matched_text == "hello", "Should match full string"
+    assert replica == "replica2", "Should return replica2"
+
+    # Empty string should still match
+    matched_text, replica = tree.prefix_match("")
+    assert matched_text == "", "Should still match empty string"
+    assert replica in ["replica1", "replica2"], "Should return either replica"
+
+
+def test_single_character_strings():
+    """Test with single character strings."""
+    tree = PrefixTree()
+
+    # Insert single characters for different replicas
+    chars = "abcdefghij"
+    replicas = [f"replica{i}" for i in range(len(chars))]
+
+    for char, replica in zip(chars, replicas):
+        tree.insert(char, replica)
+
+    # Verify each character matches to the correct replica
+    for char, replica in zip(chars, replicas):
+        matched_text, matched_replica = tree.prefix_match(char)
+        assert matched_text == char, f"Should match character '{char}'"
+        assert matched_replica == replica, f"Should return {replica}"
+
+    # Test with a character not in the tree
+    matched_text, replica = tree.prefix_match("z")
+    assert matched_text == "", "Should not match anything"
+    assert replica in replicas, "Should return one of the available replicas"
+
+
+def test_case_sensitivity():
+    """Test case sensitivity in the prefix tree."""
+    tree = PrefixTree()
+
+    # Insert mixed case strings
+    tree.insert("Hello", "replica1")
+    tree.insert("hello", "replica2")
+    tree.insert("HELLO", "replica3")
+
+    # Check exact matches
+    matched_text, replica = tree.prefix_match("Hello")
+    assert matched_text == "Hello", "Should match 'Hello'"
+    assert replica == "replica1", "Should return replica1"
+
+    matched_text, replica = tree.prefix_match("hello")
+    assert matched_text == "hello", "Should match 'hello'"
+    assert replica == "replica2", "Should return replica2"
+
+    matched_text, replica = tree.prefix_match("HELLO")
+    assert matched_text == "HELLO", "Should match 'HELLO'"
+    assert replica == "replica3", "Should return replica3"
+
+    # Check partial case-sensitive matches
+    matched_text, replica = tree.prefix_match("Hell")
+    assert matched_text == "Hell", "Should match 'Hell'"
+    assert replica == "replica1", "Should return replica1 (first match)"
+
+    matched_text, replica = tree.prefix_match("hell")
+    assert matched_text == "hell", "Should match 'hell'"
+    assert replica == "replica2", "Should return replica2"
+
+
+def test_special_characters():
+    """Test handling of special characters."""
+    tree = PrefixTree()
+
+    # Insert strings with special characters
+    special_strings = [
+        "hello!@#",
+        "world$%^",
+        "*&()_+",
+        "\\n\\t\\r",
+        "😀🙂🙁😢"  # Emoji test
+    ]
+
+    for i, text in enumerate(special_strings):
+        tree.insert(text, f"replica{i}")
+
+    # Test exact matches
+    for i, text in enumerate(special_strings):
+        matched_text, replica = tree.prefix_match(text)
+        assert matched_text == text, f"Should match '{text}'"
+        assert replica == f"replica{i}", f"Should return replica{i}"
+
+    # Test mixed special characters query
+    matched_text, replica = tree.prefix_match("hello!@#$%^")
+    assert matched_text == "hello!@#", "Should match the longest prefix"
+    assert replica == "replica0", "Should return replica0"
+
+    # Test emoji query
+    matched_text, replica = tree.prefix_match("😀🙂🥹")
+    assert matched_text == "😀🙂", "Should match only the first two emojis"
+    assert replica == "replica4", "Should return replica4"
+
+
+def test_deep_path_tree():
+    """Test a tree with very deep paths."""
+    tree = PrefixTree()
+
+    # Create a deep path with 100 levels
+    num_levels = 100
+    path_parts = [f"level{i}" for i in range(num_levels)]
+    deep_path = "/".join(path_parts)
+    tree.insert(deep_path, "replica_deep")
+
+    # Test exact match of the deep path
+    matched_text, replica = tree.prefix_match(deep_path)
+    assert matched_text == deep_path, "Should match the entire deep path"
+    assert replica == "replica_deep", "Should return replica_deep"
+
+    # Test partial matches at different depths
+    for i in range(1, 10):
+        partial_path = "/".join(path_parts[:i])
+        matched_text, replica = tree.prefix_match(partial_path)
+        assert matched_text == partial_path, f"Should match up to level {i-1}"
+        assert replica == "replica_deep", "Should return replica_deep"
+
+    # Test slightly beyond each level
+    for i in range(1, 10):
+        partial_path = "/".join(path_parts[:i]) + "/x"
+        matched_text, replica = tree.prefix_match(partial_path)
+        expected_match = "/".join(
+            path_parts[:i]) + ("/" if i != num_levels - 1 else "")
+        assert matched_text == expected_match, f"Should match up to level {i-1}"
+        assert replica == "replica_deep", "Should return replica_deep"
+
+
+def test_heavily_branched_tree():
+    """Test a tree with heavy branching at the root."""
+    tree = PrefixTree()
+
+    # Create 1000 branches from the root
+    num_branches = 1000
+    # Use printable ASCII characters (33-126)
+    printable_chars = [chr(i) for i in range(33, 127)]
+    for i in range(num_branches):
+        # Use different first characters to create branches
+        branch_key = printable_chars[i % len(printable_chars)] + f"branch{i}"
+        tree.insert(branch_key, f"replica{i%10}")
+
+    # Test random access to branches
+    for _ in range(100):
+        i = random.randint(0, num_branches - 1)
+        branch_key = printable_chars[i % len(printable_chars)] + f"branch{i}"
+        matched_text, replica = tree.prefix_match(branch_key)
+        assert matched_text == branch_key, f"Should match branch {i}"
+        assert replica == f"replica{i%10}", f"Should return replica{i%10}"
+
+
+def test_cascading_eviction():
+    """Test cascading eviction where parent nodes become empty."""
+    tree = PrefixTree()
+
+    # Create a structure with multiple levels
+    tree.insert("a/b/c/d", "replica1")
+    tree.insert("a/b/c/e", "replica1")
+    tree.insert("a/b/f", "replica1")
+    tree.insert("a/g", "replica1")
+
+    # Insert something for replica2 to avoid completely removing the tree
+    tree.insert("x/y/z", "replica2")
+
+    # Evict with a small size limit to force cascading eviction
+    tree.evict_replica_by_size(3)
+
+    # Check that the tree is still functional
+    matched_text, replica = tree.prefix_match("x/y/z")
+    assert matched_text == "x/y", "Should still match replica2's data"
+    assert replica == "replica2", "Should return replica2"
+
+    # replica1 should have reduced size
+    sizes = tree.get_used_size_per_replica()
+    assert sizes.get("replica1",
+                     0) <= 3, "replica1 should be reduced to <= 3 chars"
+
+
+def test_replica_removal_with_concurrent_queries():
+    """Test removing a replica while concurrent queries are happening."""
+    tree = PrefixTree()
+
+    # Set up initial data
+    for i in range(10):
+        tree.insert(f"text{i}", "replica1")
+        tree.insert(f"data{i}", "replica2")
+
+    # Start query threads
+    query_results = []
+    query_lock = threading.Lock()
+    query_event = threading.Event()
+
+    def query_worker():
+        while not query_event.is_set():
+            for i in range(10):
+                # Try both replica's data
+                _, replica1 = tree.prefix_match(f"text{i}")
+                _, replica2 = tree.prefix_match(f"data{i}")
+
+                with query_lock:
+                    query_results.append((f"text{i}", replica1))
+                    query_results.append((f"data{i}", replica2))
+            time.sleep(0.01)
+
+    # Start query threads
+    query_threads = []
+    for _ in range(5):
+        t = threading.Thread(target=query_worker)
+        t.daemon = True
+        query_threads.append(t)
+        t.start()
+
+    # Give queries a chance to start
+    time.sleep(0.1)
+
+    # Remove replica1
+    tree.remove_replica("replica1")
+
+    # Let queries continue for a bit
+    time.sleep(0.1)
+
+    # Signal threads to stop and wait for them
+    query_event.set()
+    for t in query_threads:
+        t.join()
+
+    # Check results - after removal, replica1 should no longer appear in results
+    removal_happened = False
+    for query_text, replica in query_results:
+        if query_text.startswith("text") and replica == "replica2":
+            removal_happened = True
+
+    assert removal_happened, "Should have at least one query after replica removal"
+
+    # Final verification
+    for i in range(10):
+        _, replica = tree.prefix_match(f"text{i}")
+        assert replica == "replica2", f"replica1 should be gone and result should be replica2 for text{i}"
+
+        _, replica = tree.prefix_match(f"data{i}")
+        assert replica == "replica2", f"replica2 should still work for data{i}"
+
+
+def test_concurrent_insertion_and_eviction():
+    """Test concurrent insertion and eviction operations."""
+    tree = PrefixTree()
+    test_duration = 3  # seconds
+    max_size = 50
+    stop_event = threading.Event()
+    eviction_stop_event = threading.Event()
+
+    # Track statistics
+    stats = {"inserts": 0, "evictions": 0}
+    stats_lock = threading.Lock()
+
+    def insertion_worker(thread_id):
+        replica = f"replica{thread_id%5}"
+        while not stop_event.is_set():
+            # Insert random strings
+            text = f"thread{thread_id}_{random_string(10)}"
+            tree.insert(text, replica)
+            with stats_lock:
+                stats["inserts"] += 1
+            time.sleep(random.uniform(0.01, 0.05))
+
+    def eviction_worker():
+        while not eviction_stop_event.is_set():
+            tree.evict_replica_by_size(max_size)
+            with stats_lock:
+                stats["evictions"] += 1
+            time.sleep(random.uniform(0.1, 0.3))
+
+    # Start insertion threads
+    threads = []
+    for i in range(10):
+        t = threading.Thread(target=insertion_worker, args=(i,))
+        threads.append(t)
+        t.start()
+
+    # Start eviction thread
+    eviction_thread = threading.Thread(target=eviction_worker)
+    threads.append(eviction_thread)
+    eviction_thread.start()
+
+    # Let the test run for the specified duration
+    time.sleep(test_duration)
+    stop_event.set()
+    # Wait for the eviction function to run at least once
+    time.sleep(1)
+    eviction_stop_event.set()
+
+    # Wait for all threads to complete
+    for t in threads:
+        t.join()
+
+    print(f"Concurrent insertion and eviction stats: {stats}")
+
+    # Final verification - all replicas should be under the size limit
+    sizes = tree.get_used_size_per_replica()
+    for replica, size in sizes.items():
+        assert size <= max_size, f"Replica {replica} exceeds size limit: {size} > {max_size}"
+
+
+def test_replica_contention():
+    """Test contention when multiple replicas are eligible for selection."""
+    tree = PrefixTree()
+
+    # Insert the same text for 10 replicas
+    text = "contested_resource"
+    replicas = [f"replica{i}" for i in range(10)]
+
+    for replica in replicas:
+        tree.insert(text, replica)
+
+    # Perform many queries and track which replicas are selected
+    selected_counts = {replica: 0 for replica in replicas}
+
+    for _ in range(1000):
+        _, selected_replica = tree.prefix_match(text)
+        selected_counts[selected_replica] += 1
+
+    # Verify distribution - should be roughly uniform
+    print("Replica selection distribution:", selected_counts)
+    for count in selected_counts.values():
+        # Allow some variability but ensure each replica gets selected
+        assert count > 0, "Each replica should be selected at least once"
+        # Rough check for uniform distribution (not too biased)
+        assert count < 200, "No replica should be selected too frequently"
+
+
+def test_short_overlapping_prefixes():
+    """Test behavior with very short overlapping prefixes."""
+    tree = PrefixTree()
+
+    # Create overlapping prefixes
+    tree.insert("a", "replica1")
+    tree.insert("ab", "replica2")
+    tree.insert("abc", "replica3")
+    tree.insert("abd", "replica4")
+    tree.insert("ac", "replica5")
+
+    # Test matching "a" - could match any prefix starting with "a"
+    matched_text, replica = tree.prefix_match("a")
+    assert matched_text == "a", "Should match 'a'"
+    assert replica in [
+        "replica1", "replica2", "replica3", "replica4", "replica5"
+    ], "Should return any replica"
+
+    # Test matching "ab" - could match any prefix starting with "ab"
+    matched_text, replica = tree.prefix_match("ab")
+    assert matched_text == "ab", "Should match 'ab'"
+    assert replica in ["replica2", "replica3", "replica4"
+                      ], "Should return replica2, replica3 or replica4"
+
+    # Test longer match "abcd" - could match "abc"
+    matched_text, replica = tree.prefix_match("abcd")
+    assert matched_text == "abc", "Should match 'abc'"
+    assert replica == "replica3", "Should return replica3"
+
+    # Test branching with "abe" - should match "ab"
+    matched_text, replica = tree.prefix_match("abe")
+    assert matched_text == "ab", "Should match 'ab'"
+    assert replica in ["replica2", "replica3", "replica4"
+                      ], "Should return replica2, replica3 or replica4"
+
+
+def test_timestamp_based_selection():
+    """Test replica selection when timestamps are manipulated."""
+    tree = PrefixTree()
+
+    # Insert same text for different replicas
+    text = "timestamp_test"
+    tree.insert(text, "replica1")
+    tree.insert(text, "replica2")
+    tree.insert(text, "replica3")
+
+    # Artificially manipulate last access timestamps by performing queries
+    # This should update timestamps for replica1
+    for _ in range(5):
+        matched_text, _ = tree.prefix_match(text, {"replica1": 1})
+        time.sleep(0.01)  # Small delay to ensure timestamp difference
+
+    # Query without load info - most recently accessed should be preferred
+    # This is an implementation detail that may not be guaranteed by the API,
+    # but can be checked if that's how the internal random choice is influenced
+    counter = {r: 0 for r in ["replica1", "replica2", "replica3"]}
+
+    for _ in range(100):
+        _, selected = tree.prefix_match(text)
+        counter[selected] += 1
+
+    print("Selection after timestamp manipulation:", counter)
+    # We can't make strong assertions about the distribution since it might be random,
+    # but we can print the results for inspection
