@@ -2,9 +2,6 @@ name: fusermount-server-image
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - improve-k8s-fuse
 
 jobs:
   build:
