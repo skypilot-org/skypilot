@@ -567,6 +567,9 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     configurable in the provider config. This allows the daemonset to be
     shared across multiple tenants. The default namespace is
     'skypilot-system' (populated in clouds.Kubernetes).
+
+    For legacy smarter-device-manager daemonset, we keep it as is since it may
+    still be used by other tenants.
     """
 
     logger.info('_configure_fuse_mounting: Setting up fusermount-server daemonset.')
