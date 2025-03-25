@@ -10,6 +10,7 @@ from sky.backends import backend_utils
 
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
+ENDPOINT = 'http://127.0.0.1:46580/api/health'
 
 
 class TestBackwardCompatibility:
@@ -31,7 +32,17 @@ class TestBackwardCompatibility:
     # Command templates
     ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
-    SKY_API_RESTART = 'sky api stop || true && sky api start'
+
+    # Single-line version that can be safely concatenated with other bash commands
+    WAIT_FOR_API = (
+        'for i in $(seq 1 30); do '
+        'if curl -s {ENDPOINT} > /dev/null; then '
+        'echo "API is up and running"; break; fi; '
+        'echo "Waiting for API to be ready... ($i/30)"; '
+        '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
+        'sleep 1; done')
+
+    SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
 
     # Shorthand of switching to base environment and running a list of commands in environment.
     def _switch_to_base(self, *cmds: str) -> list[str]:
@@ -322,15 +333,14 @@ class TestBackwardCompatibility:
         """Test client server compatibility across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
-        endpoint = 'http://127.0.0.1:46580/api/health'
         commands = [
             # Check API version compatibility
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            'result="$(curl -s ' + endpoint + ')" && '
+            'result="$(curl -s ' + ENDPOINT + ')" && '
             'echo "$result" && '
             'base_version=$(echo "$result" | grep -o \'"api_version":"[^"]*"\' | cut -d":" -f2 | tr -d \'"\') && '
             f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
-            'result="$(curl -s ' + endpoint + ')" && '
+            'result="$(curl -s ' + ENDPOINT + ')" && '
             'echo "$result" && '
             'current_version=$(echo "$result" | grep -o \'"api_version":"[^"]*"\' | cut -d":" -f2 | tr -d \'"\') && '
             'if [ "$base_version" != "$current_version" ]; then '
