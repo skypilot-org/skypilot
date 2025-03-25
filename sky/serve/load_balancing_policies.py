@@ -17,7 +17,7 @@ import aiohttp
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.serve import constants
-from sky.serve import proximate_tree
+from sky.serve import prefix_tree
 
 if typing.TYPE_CHECKING:
     import fastapi
@@ -386,7 +386,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='proximate_tree',
 
     def __init__(self) -> None:
         super().__init__()
-        self.tree = proximate_tree.ProximateTree()
+        self.tree = prefix_tree.PrefixTree()
         self.config = ProximateTreeConfig()
         self._eviction_thread = threading.Thread(
             target=self._background_eviction_thread, daemon=True)

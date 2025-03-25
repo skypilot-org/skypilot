@@ -23,7 +23,7 @@ def _shared_prefix_length(s1: str, s2: str) -> int:
     return min_len
 
 
-class ProximateTreeNode:
+class PrefixTreeNode:
     """A node in approximate multi-replica prefix tree. Each node:
       - Stores text (string)
       - Maintains a dictionary of children, keyed by the next character
@@ -42,15 +42,15 @@ class ProximateTreeNode:
     def __init__(
             self,
             text: str,
-            parent: Optional['ProximateTreeNode'] = None,
+            parent: Optional['PrefixTreeNode'] = None,
             replica_last_access_time: Optional[Dict[str,
                                                     float]] = None) -> None:
         self.text = text
-        self.children: Dict[str, 'ProximateTreeNode'] = {}
+        self.children: Dict[str, 'PrefixTreeNode'] = {}
         self.replica_last_access_time: Dict[str, float] = {}
         if replica_last_access_time is not None:
             self.replica_last_access_time = copy.copy(replica_last_access_time)
-        self.parent: Optional['ProximateTreeNode'] = parent
+        self.parent: Optional['PrefixTreeNode'] = parent
         self.lock = threading.Lock()
 
     def replica_access(self, replica: str) -> None:
@@ -77,27 +77,27 @@ class ProximateTreeNode:
         with self.lock:
             return not self.children and not self.replica_last_access_time
 
-    def get_parent(self) -> Optional['ProximateTreeNode']:
+    def get_parent(self) -> Optional['PrefixTreeNode']:
         with self.lock:
             return self.parent
 
-    def set_parent(self, parent: 'ProximateTreeNode') -> None:
+    def set_parent(self, parent: 'PrefixTreeNode') -> None:
         with self.lock:
             self.parent = parent
 
-    def get_child(self, char: str) -> Optional['ProximateTreeNode']:
+    def get_child(self, char: str) -> Optional['PrefixTreeNode']:
         with self.lock:
             return self.children.get(char)
 
-    def get_children(self) -> Dict[str, 'ProximateTreeNode']:
+    def get_children(self) -> Dict[str, 'PrefixTreeNode']:
         with self.lock:
             return self.children
 
-    def set_child(self, char: str, node: 'ProximateTreeNode') -> None:
+    def set_child(self, char: str, node: 'PrefixTreeNode') -> None:
         with self.lock:
             self.children[char] = node
 
-    def remove_child(self, char: str) -> Optional['ProximateTreeNode']:
+    def remove_child(self, char: str) -> Optional['PrefixTreeNode']:
         with self.lock:
             return self.children.pop(char)
 
@@ -152,15 +152,15 @@ class ProximateTreeNode:
 class EvictionEntry:
     timestamp: float
     replica: str = dataclasses.field(compare=False)
-    node: ProximateTreeNode = dataclasses.field(compare=False)
+    node: PrefixTreeNode = dataclasses.field(compare=False)
 
 
-class ProximateTree:
+class PrefixTree:
     """Approximate multi-replica prefix tree."""
 
     def __init__(self) -> None:
         # Root: empty string
-        self.root = ProximateTreeNode('')
+        self.root = PrefixTreeNode('')
         self.replica_char_count: Dict[str, int] = collections.defaultdict(int)
         self.tree_lock = threading.RLock()
 
@@ -187,7 +187,7 @@ class ProximateTree:
                     self.replica_char_count[replica] += len(remaining_text)
                     logger.debug(f'replica: {replica}, '
                                  f'create new node: {remaining_text}')
-                    new_node = ProximateTreeNode(remaining_text, current_node)
+                    new_node = PrefixTreeNode(remaining_text, current_node)
                     new_node.replica_access(replica)
                     current_node.set_child(first_char, new_node)
                     break
@@ -209,7 +209,7 @@ class ProximateTree:
                         logger.debug(f'replica: {replica}, '
                                      f'split node: {shared_text}'
                                      f' + {unique_text}')
-                        new_node = ProximateTreeNode(
+                        new_node = PrefixTreeNode(
                             shared_text, current_node,
                             matched_node.replica_last_access_time)
                         new_node.set_child(unique_text[0], matched_node)
@@ -291,14 +291,14 @@ class ProximateTree:
 
         # Update the last access time for the replica on this path.
         if replica is not None:
-            reverse_node: Optional[ProximateTreeNode] = current_node
+            reverse_node: Optional[PrefixTreeNode] = current_node
             while reverse_node is not None:
                 reverse_node.replica_access(replica)
                 reverse_node = reverse_node.get_parent()
 
         return text[:current_idx], replica
 
-    def _leaf_of(self, node: ProximateTreeNode) -> Iterable[str]:
+    def _leaf_of(self, node: PrefixTreeNode) -> Iterable[str]:
         candidates = set(node.get_replica_last_access_time_dict().keys())
         for child in node.get_children().values():
             for replica in child.get_replica_last_access_time_dict():
@@ -307,7 +307,7 @@ class ProximateTree:
 
     def evict_tenant_by_size(self, max_size: int) -> None:
         with self.tree_lock:
-            stack: List[ProximateTreeNode] = [self.root]
+            stack: List[PrefixTreeNode] = [self.root]
             pq: List[EvictionEntry] = []
             while stack:
                 node = stack.pop()
@@ -363,8 +363,8 @@ class ProximateTree:
     def remove_replica(self, replica: str) -> None:
         """Remove a replica from the tree."""
         with self.tree_lock:
-            stack: List[ProximateTreeNode] = [self.root]
-            queue: Deque[ProximateTreeNode] = collections.deque()
+            stack: List[PrefixTreeNode] = [self.root]
+            queue: Deque[PrefixTreeNode] = collections.deque()
 
             # 1. Find all the leaves for the tenant
             while stack:
@@ -417,7 +417,7 @@ class ProximateTree:
         used by each replica."""
         with self.tree_lock:
             used_size_per_replica: Dict[str, int] = collections.defaultdict(int)
-            stack: List[ProximateTreeNode] = [self.root]
+            stack: List[PrefixTreeNode] = [self.root]
             while stack:
                 current_node = stack.pop()
                 for replica in current_node.get_all_replicas():
