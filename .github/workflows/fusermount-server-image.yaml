@@ -1,11 +1,6 @@
 name: fusermount-server-image
-description: Build and publish docker image for skypilot fusermount-server.
 
-on:
-  push:
-    branches:
-      - improve-k8s-fuse
-  workflow_dispatch:
+on: workflow_dispatch
 
 jobs:
   build:
