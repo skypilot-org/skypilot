@@ -322,9 +322,22 @@ class TestBackwardCompatibility:
         """Test client server compatibility across versions"""
         cluster_name = smoke_tests_utils.get_cluster_name()
         job_name = f"{cluster_name}-job"
-
+        endpoint = 'http://127.0.0.1:46580/api/health'
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} &&'
+            # Check API version compatibility
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            'result="$(curl -s ' + endpoint + ')" && '
+            'echo "$result" && '
+            'base_version=$(echo "$result" | grep -o \'"api_version":"[^"]*"\' | cut -d":" -f2 | tr -d \'"\') && '
+            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
+            'result="$(curl -s ' + endpoint + ')" && '
+            'echo "$result" && '
+            'current_version=$(echo "$result" | grep -o \'"api_version":"[^"]*"\' | cut -d":" -f2 | tr -d \'"\') && '
+            'if [ "$base_version" != "$current_version" ]; then '
+            '  echo "API version mismatch: base=$base_version, current=$current_version" && '
+            '  exit 1; '
+            'fi',
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
             f'{self.ACTIVATE_CURRENT} && sky api status',
