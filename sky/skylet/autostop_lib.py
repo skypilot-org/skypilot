@@ -2,14 +2,19 @@
 import pickle
 import shlex
 import time
+import typing
 from typing import List, Optional
 
-import psutil
-
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.skylet import configs
 from sky.skylet import constants
 from sky.utils import message_utils
+
+if typing.TYPE_CHECKING:
+    import psutil
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 

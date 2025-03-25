@@ -18,16 +18,16 @@ import uuid
 
 import colorama
 import filelock
-import psutil
-import requests
 
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
+from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import serve_state
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
+from sky.utils import annotations
 from sky.utils import common_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
@@ -37,12 +37,22 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import fastapi
+    import psutil
+    import requests
 
     from sky.serve import replica_managers
+else:
+    psutil = adaptors_common.LazyImport('psutil')
+    requests = adaptors_common.LazyImport('requests')
 
-_SYSTEM_MEMORY_GB = psutil.virtual_memory().total // (1024**3)
-NUM_SERVICE_THRESHOLD = (_SYSTEM_MEMORY_GB //
-                         constants.CONTROLLER_MEMORY_USAGE_GB)
+
+@annotations.lru_cache(scope='request')
+def get_num_service_threshold():
+    """Get number of services threshold, calculating it only when needed."""
+    system_memory_gb = psutil.virtual_memory().total // (1024**3)
+    return system_memory_gb // constants.CONTROLLER_MEMORY_USAGE_GB
+
+
 _CONTROLLER_URL = 'http://localhost:{CONTROLLER_PORT}'
 
 # NOTE(dev): We assume log paths are either in ~/sky_logs/... or ~/.sky/...
@@ -607,7 +617,7 @@ def wait_service_registration(service_name: str, job_id: int) -> str:
             lb_port = record['load_balancer_port']
             if lb_port is not None:
                 return message_utils.encode_payload(lb_port)
-        elif len(serve_state.get_services()) >= NUM_SERVICE_THRESHOLD:
+        elif len(serve_state.get_services()) >= get_num_service_threshold():
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached. '
                                    'To spin up more services, please '

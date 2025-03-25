@@ -12,15 +12,13 @@ import typing
 from typing import Any, Dict, List, Optional, Set, Tuple, Union
 from urllib.parse import urlparse
 
-import jinja2
-import yaml
-
 import sky
 from sky import clouds
 from sky import exceptions
 from sky import models
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import gcp
 from sky.adaptors import kubernetes
 from sky.provision import constants as provision_constants
@@ -38,8 +36,14 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import jinja2
+    import yaml
+
     from sky import backends
     from sky import resources as resources_lib
+else:
+    jinja2 = adaptors_common.LazyImport('jinja2')
+    yaml = adaptors_common.LazyImport('yaml')
 
 # TODO(romilb): Move constants to constants.py
 DEFAULT_NAMESPACE = 'default'

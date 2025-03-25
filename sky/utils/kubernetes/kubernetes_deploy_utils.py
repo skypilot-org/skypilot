@@ -168,9 +168,9 @@ def deploy_local_cluster(gpus: bool):
                                f'\nError: {stderr}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check(clouds=['kubernetes'],
-                        quiet=True,
-                        capability=sky_cloud.CloudCapability.COMPUTE)
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=['kubernetes'])
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs
