@@ -4365,7 +4365,8 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                         'Failed abnormal non-terminated nodes cleanup. '
                         'Skipping and cleaning up as purge is set. '
                         f'Details: {msg}')
-                    logger.debug(f'Full exception details: {msg}',
+                    logger.debug(
+                        f'Full exception details: {msg}',
                         exc_info=True)
                 else:
                     raise
