@@ -15,9 +15,11 @@ from typing import Dict, List
 
 import numpy as np
 
+import sky
 from sky import jobs as managed_jobs
 from sky import serve as serve_lib
 from sky.client import sdk
+from sky.jobs.client import sdk as jobs_sdk
 
 results_lock = threading.Lock()
 request_latencies: Dict[str, List[float]] = defaultdict(list)
@@ -105,6 +107,7 @@ def run_concurrent_api_requests(num_requests, fn, kind):
                                   args=(i + 1, fn, kind))
         threads.append(thread)
         thread.start()
+        time.sleep(0.2)
     for thread in threads:
         thread.join()
 
@@ -112,7 +115,7 @@ def run_concurrent_api_requests(num_requests, fn, kind):
 def run_single_api_request(idx, fn, kind):
     print(f"API Request {idx} submitted")
     begin = time.time()
-    fn()
+    fn(idx)
     duration = time.time() - begin
     with results_lock:
         request_latencies[kind].append(duration)
@@ -169,7 +172,7 @@ def test_serve_requests(num_requests, cloud):
 def test_status_api(num_requests):
     print(f"Testing {num_requests} status API requests")
 
-    def status():
+    def status(idx: int):
         request_id = sdk.status()
         sdk.stream_and_get(request_id)
 
@@ -185,7 +188,7 @@ def test_status_api(num_requests):
 def test_cli_status_in_api(num_requests):
     print(f"Testing {num_requests} CLI status in API requests")
 
-    def cli_status():
+    def cli_status(idx: int):
         job_request_id = managed_jobs.queue(refresh=False, skip_finished=True)
         serve_request_id = serve_lib.status(service_names=None)
         status_request_id = sdk.status()
@@ -211,7 +214,7 @@ def test_tail_logs_api(num_requests, cloud):
     setup_cmd = f'sky launch -c {cluster_name} --cloud={cloud} --cpus=2 -y && sky logs {cluster_name} {job_id}'
     run_single_request(0, setup_cmd)
 
-    def tail_logs():
+    def tail_logs(idx: int):
         sdk.tail_logs(cluster_name, job_id, follow=True)
 
     run_concurrent_api_requests(num_requests, tail_logs, 'API /tail_logs')
@@ -220,8 +223,20 @@ def test_tail_logs_api(num_requests, cloud):
     run_single_request(0, cleanup_cmd)
 
 
+def test_jobs_launch_api(num_requests, cloud, is_async=True):
+    print(f"Testing {num_requests} jobs launch API requests, is_async={is_async}")
+    def jobs_launch(idx: int):
+        req_id = jobs_sdk.launch(task=sky.Task(run='echo hello && sleep 60').set_resources(
+                sky.Resources(cpus='1+', cloud=cloud)), name=f'test-job-{idx}')
+        if not is_async:
+            print(f"Waiting for job {idx} to finish")
+            sdk.stream_and_get(req_id)
+
+    run_concurrent_api_requests(num_requests, jobs_launch, 'API /jobs/launch')
+
+
 all_requests = ['launch', 'status', 'logs', 'jobs', 'serve']
-all_apis = ['status', 'cli_status', 'tail_logs']
+all_apis = ['status', 'cli_status', 'tail_logs', 'jobs.launch']
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -250,6 +265,11 @@ if __name__ == '__main__':
                         choices=all_apis + ['all'],
                         default=[],
                         help='List of APIs to test')
+    parser.add_argument('--sync',
+                        action='store_false',
+                        dest='is_async',
+                        default=True,
+                        help='Whether to run requests synchronously')
 
     args = parser.parse_args()
 
@@ -270,7 +290,7 @@ if __name__ == '__main__':
             thread = None
             if request_type == 'launch':
                 thread = threading.Thread(target=test_launch_requests,
-                                          args=(args.n, cloud, True))
+                                          args=(args.n, cloud, args.is_async))
             elif request_type == 'status':
                 thread = threading.Thread(target=test_status_requests,
                                           args=(args.n,))
@@ -299,6 +319,9 @@ if __name__ == '__main__':
             elif api == 'tail_logs':
                 thread = threading.Thread(target=test_tail_logs_api,
                                           args=(args.n, cloud))
+            elif api == 'jobs.launch':
+                thread = threading.Thread(target=test_jobs_launch_api,
+                                          args=(args.n, cloud, args.is_async))
             if thread:
                 test_threads.append(thread)
                 thread.start()
