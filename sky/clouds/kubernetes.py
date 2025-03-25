@@ -35,6 +35,9 @@ CREDENTIAL_PATH = os.environ.get('KUBECONFIG', DEFAULT_KUBECONFIG_PATH)
 # E.g., FUSE device manager daemonset is run in this namespace.
 _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 
+# Shared directory to communicate with fusermount-server, refer to
+# addons/fuse-proxy/README.md for more details.
+_FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
@@ -553,6 +556,7 @@ class Kubernetes(clouds.Cloud):
             'k8s_fuse_device_required': fuse_device_required,
             # Namespace to run the fusermount-server daemonset in
             'k8s_skypilot_system_namespace': _SKYPILOT_SYSTEM_NAMESPACE,
+            'k8s_fusermount_shared_dir': _FUSERMOUNT_SHARED_DIR,
             'k8s_spot_label_key': spot_label_key,
             'k8s_spot_label_value': spot_label_value,
             'tpu_requested': tpu_requested,
