@@ -48,7 +48,7 @@ Prerequisites
 
 * Debian-based OS (tested on Debian 11)
 * SSH access from local machine to all remote machines with key-based authentication
-* It's recommended to use passwordless sudo for all remote machines. If passwordless sudo cannot be used, all machines must use the same password for the SSH username.
+* It's recommended to use passwordless sudo for all remote machines. If passwordless sudo cannot be used, all machines must use the same password for the SSH username to use sudo.
 * All machines must use the same SSH key and username
 * All machines must have network access to each other
 * Port 6443 must be accessible on at least one node from your local machine
@@ -70,6 +70,7 @@ Deploying SkyPilot
    In this example, the first node (``192.168.1.1``) has port 6443 open and will be used as the head node.
 
 2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH key as arguments:
+
    If passwordless sudo is available:
 
    .. code-block:: bash
