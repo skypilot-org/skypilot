@@ -92,7 +92,7 @@ if [ ! -d "/skypilot" ]; then
 fi
 
 cd /skypilot
-pip uninstall -y skypilot
+uv pip uninstall skypilot
 uv pip install --prerelease=allow "azure-cli>=2.65.0"
 uv pip install -r requirements-dev.txt
 uv pip install -e ".[all]"
