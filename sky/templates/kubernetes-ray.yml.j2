@@ -480,7 +480,7 @@ available_node_types:
                 # Wait for the server to setup the fusermount shim binary in case:
                 # 1. The server daemonset was just deployed and is still starting up.
                 # 2. The node was just started and the server Pod is still starting up.
-                wait_for_fusermount() {{
+                wait_for_fusermount() {
                     local timeout=60
                     local start_time=$(date +%s)
                     while ! command -v fusermount >/dev/null 2>&1; do
@@ -492,7 +492,7 @@ available_node_types:
                         fi
                         sleep 1
                     done
-                }}
+                }
                 wait_for_fusermount
                 )
               ) &
