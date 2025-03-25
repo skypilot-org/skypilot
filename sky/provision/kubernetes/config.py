@@ -608,7 +608,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
                          'Please check the permissions of the SkyPilot service '
                          'account or contact your cluster admin to create the '
                          'DaemonSet manually. '
-                         'Reference: https://docs.skypilot.co/reference/kubernetes/kubernetes-setup.html#set-up-fuse-proxy')  # pylint: disable=line-too-long
+                         'Reference: https://docs.skypilot.co/reference/kubernetes/kubernetes-setup.html#kubernetes-setup-fuse')  # pylint: disable=line-too-long
             raise
         else:
             raise

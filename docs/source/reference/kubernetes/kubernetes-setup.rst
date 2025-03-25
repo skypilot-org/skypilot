@@ -243,7 +243,7 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-priority`
 * :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-ports`
-
+* :ref:`kubernetes-setup-fuse`
 
 .. _kubernetes-setup-volumes:
 
