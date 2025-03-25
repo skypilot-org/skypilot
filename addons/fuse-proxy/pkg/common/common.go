@@ -12,6 +12,11 @@ const (
 	EnvSharedDir  = "FUSERMOUNT_SHARED_DIR"
 
 	ShimBinPath = "/usr/local/bin/fusermount-shim"
+
+	// Some fuse implementations like gcsfuse does not pass env var to fusermount binary,
+	// we use a constant path as a fallback.
+	// TODO(aylei): find a better way to handle this.
+	HackConstSharedDir = "/var/run/fusermount"
 )
 
 // MustGetServerSocketPath returns the path to the server socket for client-server communication, panic if not found
@@ -39,7 +44,7 @@ func MustGetShimInstallPath() string {
 
 func getSharedDir() string {
 	if os.Getenv(EnvSharedDir) == "" {
-		panic("FUSERMOUNT_SHARED_DIR environment variable must be set")
+		return HackConstSharedDir
 	}
 	return os.Getenv(EnvSharedDir)
 }

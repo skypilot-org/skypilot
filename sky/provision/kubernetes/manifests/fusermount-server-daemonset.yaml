@@ -18,7 +18,7 @@ spec:
     spec:
       containers:
       - name: server
-        image: aylei/fusermount-server:20240324
+        image: berkeleyskypilot/fusermount-server:latest
         securityContext:
           privileged: true
         volumeMounts:

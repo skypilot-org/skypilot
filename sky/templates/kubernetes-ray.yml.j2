@@ -479,8 +479,14 @@ available_node_types:
               (
                 (
                 set -e
-                $(prefix_cmd) cp -p /bin/fusermount /bin/fusermount-original
-                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim /bin/fusermount
+                # Find fusermount binary location
+                FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
+                if [ -z "$FUSERMOUNT_PATH" ]; then
+                    echo "Error: fusermount binary not found"
+                    exit 1
+                fi
+                $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
                 # Wait for the server to setup the fusermount shim binary in case:
                 # 1. The server daemonset was just deployed and is still starting up.
                 # 2. The node was just started and the server Pod is still starting up.
