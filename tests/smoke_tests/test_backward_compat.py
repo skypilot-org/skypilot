@@ -33,7 +33,7 @@ class TestBackwardCompatibility:
     ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
 
-    # Single-line version that can be safely concatenated with other bash commands
+    # Fix the flakyness of the test, server may not ready when we run the command after restart.
     WAIT_FOR_API = (
         'for i in $(seq 1 30); do '
         'if curl -s {ENDPOINT} > /dev/null; then '
