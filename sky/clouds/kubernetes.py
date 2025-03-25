@@ -39,6 +39,7 @@ _SKYPILOT_SYSTEM_NAMESPACE = 'skypilot-system'
 # addons/fuse-proxy/README.md for more details.
 _FUSERMOUNT_SHARED_DIR = '/var/run/fusermount'
 
+
 @registry.CLOUD_REGISTRY.register(aliases=['k8s'])
 class Kubernetes(clouds.Cloud):
     """Kubernetes."""

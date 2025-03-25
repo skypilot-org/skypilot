@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: DaemonSet
 metadata:
   name: fusermount-server
-  namespace: skypilot-system
   labels:
     app: fusermount-server
     role: agent
@@ -16,6 +15,12 @@ spec:
       labels:
         app: fusermount-server
     spec:
+      # Add tolerations to run on all nodes
+      tolerations:
+      - operator: Exists
+        effect: NoSchedule
+      - operator: Exists
+        effect: NoExecute
       containers:
       - name: server
         image: berkeleyskypilot/fusermount-server:latest
@@ -31,6 +36,15 @@ spec:
           requests:
             cpu: 50m
             memory: 50Mi
+        livenessProbe:
+          exec:
+            command:
+            - /bin/sh
+            - -c
+            - "test -S /var/run/fusermount/server.sock"
+          initialDelaySeconds: 30
+          periodSeconds: 15
+          timeoutSeconds: 2
       volumes:
       - name: shared-dir
         hostPath:

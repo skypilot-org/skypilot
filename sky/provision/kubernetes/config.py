@@ -577,9 +577,10 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     still be used by other tenants.
     """
 
-    logger.info('_configure_fuse_mounting: Setting up fusermount-server daemonset.')
+    logger.info(
+        '_configure_fuse_mounting: Setting up fusermount-server daemonset.')
 
-    fuse_device_manager_namespace = provider_config['skypilot_system_namespace']
+    fuse_proxy_namespace = provider_config['skypilot_system_namespace']
     context = kubernetes_utils.get_context_from_config(provider_config)
 
     # Read the YAMLs from the manifests directory
@@ -595,19 +596,28 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     kubernetes_utils.merge_custom_metadata(daemonset['metadata'])
     try:
         kubernetes.apps_api(context).create_namespaced_daemon_set(
-            fuse_device_manager_namespace, daemonset)
+            fuse_proxy_namespace, daemonset)
     except kubernetes.api_exception() as e:
         if e.status == 409:
             logger.info('_configure_fuse_mounting: DaemonSet already exists '
-                        f'in namespace {fuse_device_manager_namespace!r}')
+                        f'in namespace {fuse_proxy_namespace!r}')
+        elif e.status == 403 or e.status == 401:
+            logger.error('SkyPilot does not have permission to create '
+                         'fusermount-server DaemonSet in namespace '
+                         f'{fuse_proxy_namespace!r}, Error: {e.reason}. '
+                         'Please check the permissions of the SkyPilot service '
+                         'account or contact your cluster admin to create the '
+                         'DaemonSet manually. '
+                         'Reference: https://docs.skypilot.co/reference/kubernetes/kubernetes-setup.html#set-up-fuse-proxy')  # pylint: disable=line-too-long
+            raise
         else:
             raise
     else:
         logger.info('_configure_fuse_mounting: DaemonSet created '
-                    f'in namespace {fuse_device_manager_namespace!r}')
+                    f'in namespace {fuse_proxy_namespace!r}')
 
     logger.info('fusermount-server daemonset setup complete '
-                f'in namespace {fuse_device_manager_namespace!r}')
+                f'in namespace {fuse_proxy_namespace!r}')
 
 
 def _configure_services(namespace: str, context: Optional[str],

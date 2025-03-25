@@ -466,6 +466,17 @@ SkyPilot supports either of two modes to expose ports:
 
 Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
 
+.. _kubernetes-setup-fuse:
+
+Set up FUSE proxy
+^^^^^^^^^^^^^^^^^
+
+By default, SkyPilot automatically sets up a FUSE proxy to allow Pods created by SkyPilot to perform FUSE mounts/unmounts operations without root privileges. However, the proxy itself requires root privileges and ``SYS_ADMIN`` capabilities, which may require additional security audits. You can deploy the DaemonSet externally to avoid granting SkyPilot to create privileged DaemonSets. SkyPilot will automatically discover the DaemonSet and use it as the FUSE proxy:
+
+.. code-block:: console
+
+    $ kubectl create namespace skypilot-system || true
+    $ kubectl -n skypilot-system apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/provision/kubernetes/manifests/fusermount-server-daemonset.yaml
 
 .. _kubernetes-observability:
 
