@@ -21,10 +21,10 @@ _CREDENTIAL_FILES = [
 
 
 @registry.CLOUD_REGISTRY.register
-class SimplePod(clouds.Cloud):
+class Simplepod(clouds.Cloud):
     """ SimplePod GPU Cloud """
 
-    _REPR = 'SimplePod'
+    _REPR = 'Simplepod'
     _CLOUD_UNSUPPORTED_FEATURES = {
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:

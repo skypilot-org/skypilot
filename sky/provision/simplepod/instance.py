@@ -4,14 +4,13 @@ import time
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from sky import exceptions
-from sky import status_lib
-from sky.adaptors import simplepod
 from sky.provision import common
 from sky.provision.simplepod import simplepod_utils
 from sky.utils import command_runner
 from sky.utils import common_utils
 from sky.utils import subprocess_utils
 from sky.utils import resources_utils
+from sky.utils import status_lib  # Changed from sky import status_lib
 
 _TIMEOUT_SECONDS = 600
 
