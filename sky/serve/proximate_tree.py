@@ -7,7 +7,8 @@ import heapq
 import random
 import threading
 import time
-from typing import Deque, Dict, Iterable, List, Optional, Set, Tuple
+from typing import (Deque, Dict, Iterable, List, Mapping, Optional, Set, Tuple,
+                    Union)
 
 from sky import sky_logging
 
@@ -165,6 +166,7 @@ class ProximateTree:
 
     def insert(self, text: str, replica: str) -> None:
         """Insert a text into the tree."""
+        logger.info(f'insert: {text} with replica: {replica}')
         with self.tree_lock:
             current_idx = 0
             text_len = len(text)
@@ -241,6 +243,8 @@ class ProximateTree:
             matched_text: The longest prefix of text that matches.
             replica: The replica that has accessed the matched node.
         """
+        logger.info(f'prefix_match: {text} with '
+                    f'available2load: {available2load}')
         current_idx = 0
         text_len = len(text)
         succ_node = self.root
@@ -388,12 +392,23 @@ class ProximateTree:
             # 3. Remove the replica from the replica_char_count map
             self.replica_char_count.pop(replica)
 
-    def get_smallest_replica(self) -> Optional[str]:
+    def get_smallest_replica(
+            self,
+            available_replicas: Optional[List[str]] = None) -> Optional[str]:
         """Get the smallest replica in the tree."""
         with self.tree_lock:
             if not self.replica_char_count:
                 return None
-            return min(self.replica_char_count.items(), key=lambda x: x[1])[0]
+            available_replica_to_char_count: Mapping[str, Union[int, float]]
+            if available_replicas is None:
+                available_replica_to_char_count = self.replica_char_count
+            else:
+                available_replica_to_char_count = {
+                    r: self.replica_char_count.get(r, float('inf'))
+                    for r in available_replicas
+                }
+            return min(available_replica_to_char_count.items(),
+                       key=lambda x: x[1])[0]
 
     def get_used_size_per_replica(self) -> Dict[str, int]:
         """Perform a DFS to traverse all nodes and calculate the total size

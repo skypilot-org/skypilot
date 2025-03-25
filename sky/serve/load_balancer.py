@@ -134,13 +134,13 @@ class ClientPool:
                     self._available_replicas.remove(replica_url)
         return close_client_tasks
 
-    def select_replica(self, request: fastapi.Request) -> Optional[str]:
+    async def select_replica(self, request: fastapi.Request) -> Optional[str]:
         with self._lock:
             # Get available replicas (those with capacity)
             # Only select from replicas that have capacity
             if not self._available_replicas:
                 return None
-            return self._load_balancing_policy.select_replica_from_subset(
+            return await self._load_balancing_policy.select_replica_from_subset(
                 request, self._available_replicas)
 
     def empty(self) -> bool:
@@ -170,11 +170,12 @@ class ClientPool:
         with self._lock:
             self.set_replica_unavailable_no_lock(url)
 
-    def pre_execute_hook(self, url: str, request: fastapi.Request) -> None:
+    async def pre_execute_hook(self, url: str,
+                               request: fastapi.Request) -> None:
         with self._lock:
             logger.info(f'Active requests: {self._active_requests}, '
                         f'Available replicas: {self._available_replicas}')
-            self._load_balancing_policy.pre_execute_hook(url, request)
+            await self._load_balancing_policy.pre_execute_hook(url, request)
             self._active_requests[url] = self._active_requests.get(url, 0) + 1
             if _USE_IE_QUEUE_INDICATOR:
                 return
@@ -362,7 +363,7 @@ class SkyServeLoadBalancer:
         try:
             request, request_event, response_future = entry
             pool_to_use = self._lb_pool if is_from_lb else self._replica_pool
-            pool_to_use.pre_execute_hook(url, request)
+            await pool_to_use.pre_execute_hook(url, request)
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_put_request_to_queue` but refreshed before
             # entering this function. In that case we will return an error here
@@ -461,7 +462,7 @@ class SkyServeLoadBalancer:
                     request_event.set()
 
                 # Attempt to find an available replica
-                ready_replica_url = pool_to_use.select_replica(request)
+                ready_replica_url = await pool_to_use.select_replica(request)
 
                 if ready_replica_url is not None:
                     # Process the request if a replica is available
