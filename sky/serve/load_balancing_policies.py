@@ -417,15 +417,17 @@ class ProximateTreePolicy(LeastLoadPolicy, name='proximate_tree',
         replica2load = {r: self.load_map.get(r, 0) for r in self.ready_replicas}
         matched_text, replica = self.tree.prefix_match(text, replica2load)
         matched_rate = len(matched_text) / len(text)
+        logger.info(f'Matched rate: {matched_rate} for request '
+                    f'{_request_repr(request)}.')
         if matched_rate > self.config.cache_threshold:
             return replica
-        logger.info(f'Matched rate: {matched_rate} for request '
-                    f'{_request_repr(request)}. '
-                    'Falling back to least char count load.')
+        logger.info('Falling back to least char count load. '
+                    f'{self.tree.replica_char_count}')
         return self.tree.get_smallest_replica(self.ready_replicas)
 
     async def pre_execute_hook(self, replica_url: str,
                                request: 'fastapi.Request') -> None:
+        await super().pre_execute_hook(replica_url, request)
         text = await _get_text(request)
         if text is None:
             logger.warning(f'No text found in request {_request_repr(request)} '

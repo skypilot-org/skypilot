@@ -172,6 +172,8 @@ class ProximateTree:
             text_len = len(text)
             current_node = self.root
             current_node.replica_access(replica)
+            # Create an entry in replica_char_count for the replica.
+            _ = self.replica_char_count[replica]
             prev_node = current_node
 
             while current_idx < text_len:
