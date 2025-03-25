@@ -1062,6 +1062,7 @@ def local_up(gpus: bool,
              ips: Optional[List[str]],
              ssh_user: Optional[str],
              ssh_key: Optional[str],
+             password: Optional[str],
              cleanup: bool,
              context_name: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
@@ -1089,7 +1090,8 @@ def local_up(gpus: bool,
     if ips:
         assert ssh_user is not None and ssh_key is not None
         kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name)
+                                                      password, cleanup,
+                                                      context_name)
     else:
         # Run local deployment (kind) if no remote args are specified
         kubernetes_deploy_utils.deploy_local_cluster(gpus)

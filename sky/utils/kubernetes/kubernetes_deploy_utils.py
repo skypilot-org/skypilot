@@ -23,6 +23,7 @@ logger = sky_logging.init_logger(__name__)
 def deploy_remote_cluster(ip_list: List[str],
                           ssh_user: str,
                           ssh_key: str,
+                          password: Optional[str],
                           cleanup: bool,
                           context_name: Optional[str] = None):
     success = False
@@ -47,6 +48,8 @@ def deploy_remote_cluster(ip_list: List[str],
                           f'{ssh_user} {key_file.name}')
         if context_name is not None:
             deploy_command += f' {context_name}'
+        if password is not None:
+            deploy_command += f' --password {password}'
         if cleanup:
             deploy_command += ' --cleanup'
 

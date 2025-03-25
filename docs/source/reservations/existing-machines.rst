@@ -47,7 +47,8 @@ Prerequisites
 **Remote machines (your cluster, optionally with GPUs):**
 
 * Debian-based OS (tested on Debian 11)
-* SSH access from local machine to all remote machines with key-based authentication and passwordless sudo
+* SSH access from local machine to all remote machines with key-based authentication
+* It's recommended to use passwordless sudo for all remote machines. If passwordless sudo cannot be used, all machines must use the same password for the SSH username.
 * All machines must use the same SSH key and username
 * All machines must have network access to each other
 * Port 6443 must be accessible on at least one node from your local machine
@@ -69,6 +70,7 @@ Deploying SkyPilot
    In this example, the first node (``192.168.1.1``) has port 6443 open and will be used as the head node.
 
 2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH key as arguments:
+   If passwordless sudo is available:
 
    .. code-block:: bash
 
@@ -77,6 +79,17 @@ Deploying SkyPilot
       SSH_KEY=path/to/ssh/key
       CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
       sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
+
+   If passwordless sudo is not available:
+
+   .. code-block:: bash
+
+      IP_FILE=ips.txt
+      SSH_USER=username
+      SSH_KEY=path/to/ssh/key
+      PASSWORD=password
+      CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
+      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME --password $PASSWORD
 
    SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
@@ -143,12 +156,24 @@ Cleanup
 
 To clean up all state created by SkyPilot on your machines, use the ``--cleanup`` flag:
 
+If passwordless sudo is available:
+
 .. code-block:: bash
 
     IP_FILE=ips.txt
     SSH_USER=username
     SSH_KEY=path/to/ssh/key
     sky local up --ip $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --cleanup
+
+If passwordless sudo is not available:
+
+.. code-block:: bash
+
+    IP_FILE=ips.txt
+    SSH_USER=username
+    SSH_KEY=path/to/ssh/key
+    PASSWORD=password
+    sky local up --ip $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --password $PASSWORD --cleanup
 
 This will stop all Kubernetes services on the remote machines.
 
