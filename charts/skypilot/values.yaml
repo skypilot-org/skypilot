@@ -76,23 +76,45 @@ ingress:
   authCredentials: "username:$apr1$encrypted_password"
   # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
   path: '/'
-  # GKE load balancer used for ingress does not work with websocket connections
-  # (required for our k8s SSH tunneling), in such case NodePort should be enabled
-  # to exposes the ingress controller.
-  # Note: nodePort svc will only be created when both ingress.nodePortEnabled=true AND ingress-nginx.enabled=true
-  nodePortEnabled: true
+
+  # Whether enable an additional NodePort service for the ingress controller
+  # Default to null for backward compatibility:
+  # - For existing deployments, error out and ask users to set ingress.nodePortEnabled explicitly
+  # - For new deployments, disable the NodePort service, equivalent to ingress.nodePortEnabled=false
+  # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
+  # - Ask users to set ingress.nodePortEnabled explicitly
+  # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
+  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and swtich to ingress-nginx.controller.service.type
+  # if you are upgrading from 0.8.0 nightly.
+  # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
+  # TODO(aylei): document the migration steps in v0.9.0 release note and remove these fields
+  nodePortEnabled: null
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
+  # Deprecated: use ingress-nginx.controller.service.nodePorts.http instead
   httpNodePort: 30050 # Set to null to automatically assign a random port
+  # Deprecated: use ingress-nginx.controller.service.nodePorts.https instead
   httpsNodePort: 30051 # Set to null to automatically assign a random port
 
 ingress-nginx:
   enabled: true
   controller:
     service:
-      # Use ClusterIP here to disable the LoadBalancer created by nginx. 
-      # If not using NodePort, set this to LoadBalancer.
-      type: ClusterIP  
+      type: LoadBalancer
+      # Default annotations for the ingress controller service. We want an L4 loadbalancer by default for maximum compatibility,
+      # especially for websocket SSH tunneling. Different cloud providers may require different annotations. 
+      # Annotations with no side effects are aggregated below to simplify the usage.
+      annotations:
+        # For AWS service reconciled by cloud-controller-manager, use NLB by default.
+        # If you are using AWS Load Balancer Controller, refer to the following doc to configure annotations:
+        # https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+        # For GKE, use backend service-based external passthrough Network Load Balancer as per best practices.
+        # Ref: https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer#load_balancer_types
+        cloud.google.com/l4-rbs: "enabled"
+        # For Azure, override the healthz check protocol to TCP probe to avoid HTTP auth issues.
+        service.beta.kubernetes.io/port_443_health-probe_protocol: "TCP"
+        service.beta.kubernetes.io/port_80_health-probe_protocol: "TCP"
     config:
       http-snippet: |
         map $http_upgrade $connection_upgrade {
