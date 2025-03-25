@@ -5,7 +5,6 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	"io"
 	"net"
@@ -14,14 +13,19 @@ import (
 	"github.com/pfnet-research/meta-fuse-csi-plugin/pkg/util"
 	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/client"
 	"github.com/skypilot-org/skypilot/addons/fuse-proxy/pkg/common"
+	flag "github.com/spf13/pflag"
 	log "k8s.io/klog/v2"
 )
 
 var (
-	printHelp    = flag.Bool("h", false, "print help")
-	printVersion = flag.Bool("V", false, "print version")
+	printHelp    = flag.BoolP("help", "h", false, "print help")
+	printVersion = flag.BoolP("version", "V", false, "print version")
 	// Parse unmount flag to determine if the operation is a mount or unmount
-	unmount = flag.Bool("u", false, "unmount")
+	unmount = flag.BoolP("unmount", "u", false, "unmount")
+	// Unused flags, to make pflag parse flags like -uz correctly
+	_ = flag.BoolP("quiet", "q", false, "quiet")
+	_ = flag.BoolP("lazy", "z", false, "lazy unmount")
+	_ = flag.StringP("options", "o", "", "mount options")
 )
 
 func usage() {

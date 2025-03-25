@@ -9,5 +9,6 @@ require (
 
 require (
 	github.com/go-logr/logr v1.2.4 // indirect
+	github.com/spf13/pflag v1.0.6
 	k8s.io/apimachinery v0.28.1 // indirect
 )
