@@ -324,6 +324,10 @@ available_node_types:
             - name: {{ key }}
               value: {{ value }}
             {% endfor %}
+            {% if k8s_fuse_device_required %}
+            - name: FUSERMOUNT_SHARED_DIR
+              value: {{k8s_fusermount_shared_dir}}
+            {% endif %}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
