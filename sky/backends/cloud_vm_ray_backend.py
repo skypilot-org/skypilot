@@ -4380,7 +4380,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.
         if handle.cluster_yaml is not None:
-            _detect_abnormal_non_terminated_nodes(handle)
+            try:
+                _detect_abnormal_non_terminated_nodes(handle)
+            except exceptions.ClusterStatusFetchingError as e:
+                if purge:
+                    msg = common_utils.format_exception(e, use_bracket=True)
+                    logger.warning(
+                        'Failed abnormal non-terminated nodes cleanup. '
+                        'Skipping and cleaning up as purge is set. '
+                        f'Details: {msg}')
+                    logger.debug(f'Full exception details: {msg}',
+                                 exc_info=True)
+                else:
+                    raise
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,
