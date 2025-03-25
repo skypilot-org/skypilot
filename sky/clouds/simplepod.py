@@ -111,23 +111,36 @@ class SimplePod(clouds.Cloud):
 
     @classmethod
     def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Validates SimplePod credentials by checking API key and testing API access.
+
+        Returns:
+            Tuple[bool, Optional[str]]: (is_valid, error_message)
+            - is_valid: True if credentials are valid
+            - error_message: None if credentials are valid, otherwise error message
+        """
         try:
-            import simplepod  # pylint: disable=import-outside-toplevel
-            valid, error = simplepod.check_credentials()
-
-            if not valid:
-                return False, (
-                    f'{error} \n'
-                    '    Credentials can be set up by running: \n'
-                    f'        $ pip install simplepod \n'
-                    f'        $ simplepod config\n'
-                    '    For more information, see https://docs.skypilot.co/getting-started/installation.html#simplepod'
-                )
-            return True, None
-
+            # Import check
+            from sky.provision.simplepod import simplepod_utils
         except ImportError:
             return False, ('Failed to import simplepod. '
-                           'To install, run: pip install skypilot[simplepod]')
+                         'To install, run: pip install skypilot[simplepod]')
+
+        # Check if API key file exists and can be read
+        try:
+            simplepod_utils.SimplePodClient()
+        except (simplepod_utils.SimplePodError, FileNotFoundError) as e:
+            return False, (
+                'Failed to access SimplePod Cloud with credentials. '
+                'To configure credentials, go to:\n'
+                '    https://simplepod.ai/ \n'
+                'to generate API key and add the line\n'
+                '    api_key = [YOUR API KEY]\n'
+                'to ~/.simplepod/simplepod_keys')
+        except requests.exceptions.ConnectionError:
+            return False, ('Failed to verify SimplePod Cloud credentials. '
+                         'Check your network connection '
+                         'and try again.')
+        return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         return {
@@ -142,21 +155,11 @@ class SimplePod(clouds.Cloud):
 
     @classmethod
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to SimplePod's compute service."""
-        try:
-            simplepod_utils.SimplePodClient().list_instances()
-        except (AssertionError, KeyError, simplepod_utils.SimplePodError):
-            return False, ('Failed to access SimplePod Cloud with credentials. '
-                         'To configure credentials, go to:\n    '
-                         '  https://simplepod.ai/ \n    '
-                         'to generate API key and add the line\n    '
-                         '  api_key = [YOUR API KEY]\n    '
-                         'to ~/.simplepod_cloud/simplepod_keys')
-        except requests.exceptions.ConnectionError:
-            return False, ('Failed to verify SimplePod Cloud credentials. '
-                         'Check your network connection '
-                         'and try again.')
-        return True, None
+        """Check access to compute service.
+
+        Returns same as _check_credentials()
+        """
+        return cls._check_credentials()
 
     @classmethod
     def query_status(cls, name: str, tag_filters: Dict[str, str],
