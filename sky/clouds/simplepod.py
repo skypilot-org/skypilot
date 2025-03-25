@@ -181,3 +181,26 @@ class SimplePod(clouds.Cloud):
                 if node_status is not None:
                     status_list.append(node_status)
         return status_list
+
+    @classmethod
+    def _cloud_unsupported_features(cls) -> Dict[clouds.CloudImplementationFeatures, str]:
+        return {
+            clouds.CloudImplementationFeatures.STOP: 'SimplePod does not support stopping instances',
+            clouds.CloudImplementationFeatures.IMAGE_ID: 'SimplePod does not support custom images',
+        }
+
+    @classmethod
+    def _get_inference_types(cls) -> Optional[Dict[str, List[str]]]:
+        return None
+
+    @classmethod
+    def instance_type_exists(cls, instance_type: str) -> bool:
+        return True  # Since SimplePod uses dynamic instance types
+
+    @classmethod
+    def accelerator_in_region_or_zone(cls,
+                                    accelerator: str,
+                                    acc_count: int,
+                                    region: Optional[str] = None,
+                                    zone: Optional[str] = None) -> bool:
+        return True  # Since SimplePod has dynamic availability

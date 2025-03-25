@@ -144,6 +144,7 @@ Vast = clouds.Vast
 Vsphere = clouds.Vsphere
 Fluidstack = clouds.Fluidstack
 Nebius = clouds.Nebius
+Simplepod = clouds.Simplepod
 
 __all__ = [
     '__version__',
@@ -158,6 +159,7 @@ __all__ = [
     'OCI',
     'Paperspace',
     'RunPod',
+    'Simplepod',
     'Vast',
     'SCP',
     'Vsphere',
