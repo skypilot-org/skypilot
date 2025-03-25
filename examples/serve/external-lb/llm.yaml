@@ -24,11 +24,11 @@ service:
     - resources:
         cloud: aws
         region: us-east-2
-      load_balancing_policy: consistent_hashing
+      load_balancing_policy: prefix_tree
     - resources:
         cloud: aws
         region: ap-northeast-1
-      load_balancing_policy: consistent_hashing
+      load_balancing_policy: prefix_tree
   # max_concurrent_requests: 50
   # max_queue_size: 10000
 

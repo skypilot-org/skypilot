@@ -2,7 +2,6 @@
 import asyncio
 import copy
 import logging
-import threading
 import time
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar
 
@@ -105,16 +104,19 @@ class ClientPool:
         self._max_concurrent_requests = max_concurrent_requests
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
-        self._lock: threading.Lock = threading.Lock()
+        self._lock: asyncio.Lock = asyncio.Lock()
 
-    def active_requests(self) -> Dict[str, int]:
-        with self._lock:
+    async def background_task(self):
+        await self._load_balancing_policy.background_task()
+
+    async def active_requests(self) -> Dict[str, int]:
+        async with self._lock:
             return copy.copy(self._active_requests)
 
     async def refresh_with_new_urls(
             self, ready_urls: List[str]) -> List[asyncio.Task]:
         close_client_tasks = []
-        with self._lock:
+        async with self._lock:
             await self._load_balancing_policy.set_ready_replicas(ready_urls)
             for replica_url in ready_urls:
                 if replica_url not in self._pool:
@@ -135,7 +137,7 @@ class ClientPool:
         return close_client_tasks
 
     async def select_replica(self, request: fastapi.Request) -> Optional[str]:
-        with self._lock:
+        async with self._lock:
             # Get available replicas (those with capacity)
             # Only select from replicas that have capacity
             if not self._available_replicas:
@@ -143,36 +145,36 @@ class ClientPool:
             return await self._load_balancing_policy.select_replica_from_subset(
                 request, self._available_replicas)
 
-    def empty(self) -> bool:
-        with self._lock:
+    async def empty(self) -> bool:
+        async with self._lock:
             return not self._pool
 
     def ready_replicas(self) -> List[str]:
         return self._load_balancing_policy.ready_replicas
 
-    def get_client(self, url: str) -> Optional[httpx.AsyncClient]:
-        with self._lock:
+    async def get_client(self, url: str) -> Optional[httpx.AsyncClient]:
+        async with self._lock:
             return self._pool.get(url, None)
 
     def set_replica_available_no_lock(self, url: str) -> None:
         if url not in self._available_replicas:
             self._available_replicas.append(url)
 
-    def set_replica_available(self, url: str) -> None:
-        with self._lock:
+    async def set_replica_available(self, url: str) -> None:
+        async with self._lock:
             self.set_replica_available_no_lock(url)
 
     def set_replica_unavailable_no_lock(self, url: str) -> None:
         if url in self._available_replicas:
             self._available_replicas.remove(url)
 
-    def set_replica_unavailable(self, url: str) -> None:
-        with self._lock:
+    async def set_replica_unavailable(self, url: str) -> None:
+        async with self._lock:
             self.set_replica_unavailable_no_lock(url)
 
     async def pre_execute_hook(self, url: str,
                                request: fastapi.Request) -> None:
-        with self._lock:
+        async with self._lock:
             logger.info(f'Active requests: {self._active_requests}, '
                         f'Available replicas: {self._available_replicas}')
             await self._load_balancing_policy.pre_execute_hook(url, request)
@@ -182,9 +184,10 @@ class ClientPool:
             if self._active_requests[url] >= self._max_concurrent_requests:
                 self.set_replica_unavailable_no_lock(url)
 
-    def post_execute_hook(self, url: str, request: fastapi.Request) -> None:
-        with self._lock:
-            self._load_balancing_policy.post_execute_hook(url, request)
+    async def post_execute_hook(self, url: str,
+                                request: fastapi.Request) -> None:
+        async with self._lock:
+            await self._load_balancing_policy.post_execute_hook(url, request)
             if url in self._active_requests and self._active_requests[url] > 0:
                 self._active_requests[url] -= 1
                 if _USE_IE_QUEUE_INDICATOR:
@@ -333,7 +336,7 @@ class SkyServeLoadBalancer:
 
         async def background_func():
             await proxy_response.aclose()
-            pool_to_use.post_execute_hook(url, request)
+            await pool_to_use.post_execute_hook(url, request)
 
         proxy_response.headers.update(extra_header)
         return fastapi.responses.StreamingResponse(
@@ -369,7 +372,7 @@ class SkyServeLoadBalancer:
             # entering this function. In that case we will return an error here
             # and retry to find next ready replica. We also need to wait for the
             # update of the client pool to finish before getting the client.
-            client = pool_to_use.get_client(url)
+            client = await pool_to_use.get_client(url)
             if client is None:
                 response_future.set_exception(
                     RuntimeError(f'Client for {url} not found.'))
@@ -449,7 +452,7 @@ class SkyServeLoadBalancer:
                 source_identity = 'User'
 
                 # TODO(tian): Handle no replica case.
-                if pool_to_use.empty():
+                if await pool_to_use.empty():
                     await self._request_queue.get_and_remove()
                     exception = fastapi.HTTPException(
                         # 503 means that the server is currently
@@ -617,7 +620,9 @@ class SkyServeLoadBalancer:
         assert self._request_queue is not None
         return fastapi.responses.JSONResponse(
             status_code=200,
-            content={'replica_queue': self._replica_pool.active_requests()})
+            content={
+                'replica_queue': await self._replica_pool.active_requests()
+            })
 
     async def _configuration(self) -> fastapi.responses.Response:
         """Return the configuration of the load balancer."""
@@ -626,7 +631,7 @@ class SkyServeLoadBalancer:
             status_code=200,
             content={
                 'queue_size': await self._request_queue.qsize(),
-                'replica_queue': self._replica_pool.active_requests(),
+                'replica_queue': await self._replica_pool.active_requests(),
                 'max_queue_size': self._max_queue_size,
                 'max_concurrent_requests': self._max_concurrent_requests,
                 'load_balancing_policy_name': self._load_balancing_policy_name
@@ -718,9 +723,10 @@ class SkyServeLoadBalancer:
                     logger.debug(f'Inference engine queue size for {replica}: '
                                  f'{queue_size}')
                     if queue_size > 0:
-                        self._replica_pool.set_replica_unavailable(replica)
+                        await self._replica_pool.set_replica_unavailable(replica
+                                                                        )
                     else:
-                        self._replica_pool.set_replica_available(replica)
+                        await self._replica_pool.set_replica_available(replica)
             time_end_set_replica = time.perf_counter()
             time_elapsed_set_replica = (time_end_set_replica -
                                         time_start_set_replica)
@@ -785,6 +791,9 @@ class SkyServeLoadBalancer:
             if _USE_IE_QUEUE_INDICATOR:
                 self._tasks.append(
                     self._loop.create_task(self._probe_ie_queue()))
+
+            self._tasks.append(
+                self._loop.create_task(self._replica_pool.background_task()))
 
         @self._app.on_event('shutdown')
         async def shutdown():
