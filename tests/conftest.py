@@ -279,7 +279,7 @@ def setup_docker_container(request):
     os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
 
     # Docker image and container names
-    dockerfile_path = 'tests/Dockerfile_test'
+    dockerfile_path = 'tests/smoke_tests/docker/Dockerfile_test'
     default_user = os.environ.get('USER', 'buildkite')
 
     # Create a lockfile and counter file in a temporary directory that all processes can access
@@ -331,7 +331,7 @@ def setup_docker_container(request):
             logger.info(
                 f'Docker image {docker_utils.IMAGE_NAME} already exists')
         else:
-            in_container = docker_utils.is_running_inside_container()
+            in_container = docker_utils.is_inside_docker()
 
             if in_container:
                 # We're inside a container, so we can't build the Docker image
