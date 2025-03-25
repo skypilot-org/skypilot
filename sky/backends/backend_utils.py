@@ -820,9 +820,6 @@ def write_cluster_config(
         _add_auth_to_cluster_config(cloud, tmp_yaml_path)
     except exceptions.InvalidCloudCredentials as e:
         raise e
-    except Exception as e:  # pylint: disable=broad-except
-        logger.warning(f'Failed to add auth to cluster config: {e}')
-        logger.debug('Full exception:', exc_info=e)
 
     # Restore the old yaml content for backward compatibility.
     if os.path.exists(yaml_path) and keep_launch_fields_in_existing_config:
