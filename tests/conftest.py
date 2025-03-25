@@ -402,7 +402,7 @@ def setup_docker_container(request):
         yield docker_utils.get_container_name()
 
     except Exception as e:
-        logger.error(f'Error in Docker setup: {e}')
+        logger.exception(f'Error in Docker setup: {e}')
         raise
     finally:
         # Reacquire lock for file operations
