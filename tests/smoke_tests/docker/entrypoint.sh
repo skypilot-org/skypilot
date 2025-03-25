@@ -1,13 +1,25 @@
 #!/bin/bash
-source ~/miniconda3/etc/profile.d/conda.sh
+source $HOME/miniconda3/etc/profile.d/conda.sh
 conda activate base
 USER_HASH_FILE="$HOME/.sky/user_hash"
 
 # Function to handle SIGTERM
 handle_sigterm() {
     echo "Received SIGTERM, cleaning up resources..."
-    bash ~/stop_sky_resource.sh
+    kill -TERM $TAIL_PID
+    wait $TAIL_PID
+    bash $HOME/stop_sky_resource.sh
     exit 0
+}
+
+start_sky_api_server() {
+    # We only bind the 0.0.0.0 host to expose to the host machine after setup is complete
+    sky api start --deploy
+    trap handle_sigterm SIGTERM
+    tail -f $HOME/.sky/api_server/server.log &
+    TAIL_PID=$!
+    echo "Tail PID: $TAIL_PID"
+    wait $TAIL_PID
 }
 
 # Function to regenerate user hash
@@ -42,6 +54,13 @@ regenerate_user_hash() {
 
     return 0
 }
+
+# if TEMP_FILE_FOR_TEST exists, skip the following steps
+if [ -f "$HOME/TEMP_FILE_FOR_TEST" ]; then
+    echo "TEMP_FILE_FOR_TEST exists, skipping the following steps"
+    start_sky_api_server
+    exit 0
+fi
 
 # Check if LAUNCHED_BY_DOCKER_CONTAINER environment variable is set
 if [ -n "$LAUNCHED_BY_DOCKER_CONTAINER" ]; then
@@ -84,10 +103,7 @@ sky api stop
 # Execute the hash regeneration function
 regenerate_user_hash
 
-trap handle_sigterm SIGTERM
+# Create a temporary file to initialize only once
+touch $HOME/TEMP_FILE_FOR_TEST
 
-# We only bind the 0.0.0.0 host to expose to the host machine after setup is complete
-sky api start --deploy
-
-tail -f ~/.sky/api_server/server.log &
-wait
+start_sky_api_server

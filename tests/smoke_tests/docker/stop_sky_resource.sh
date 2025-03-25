@@ -8,10 +8,10 @@ fi
 
 # Execute SkyPilot cleanup commands
 execute_sky_cleanup() {
-    sky down -a -y
+    sky down -a -y -u
     sky storage delete -a -y
-    sky jobs cancel -a -y
-    sky serve down -a -y
+    sky jobs cancel -a -y -u
+    sky serve down -a -y -u
 }
 
 execute_sky_cleanup
@@ -21,7 +21,7 @@ handle_sky_controllers() {
     # Execute sky cleanup commands before handling controllers
     execute_sky_cleanup
     echo "Checking for specific controllers in the sky status output..."
-    sky status --refresh | while read -r line; do
+    sky status --refresh -u | while read -r line; do
         if echo "$line" | grep -qE 'sky-(serve|jobs)-controller-[a-zA-Z0-9]+'; then
             NAME=$(echo "$line" | awk '{print $1}' | sed 's/[:.]$//')
             echo "Found controller: $NAME. Executing sky down $NAME."
@@ -62,7 +62,7 @@ EOF
 
             if echo "$output" | grep -q "Please terminate the services first with"; then
                 echo "$output"
-                stop_command="sky serve down -a -y"
+                stop_command="sky serve down -a -y -u"
                 echo "Please terminate the services. Running: $stop_command"
                 stop_coutput=$($stop_command 2>&1)
                 echo "Command output: $stop_coutput"
@@ -101,7 +101,7 @@ ATTEMPTS=$((TOTAL_DURATION / INTERVAL))
 
 # Function to check the status
 check_status() {
-    sky status --refresh
+    sky status --refresh -u
 }
 
 # Loop to check the status every 30 seconds

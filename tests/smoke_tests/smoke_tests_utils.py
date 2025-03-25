@@ -433,6 +433,7 @@ def run_one_test(test: Test) -> None:
             stderr=subprocess.STDOUT,
             timeout=10 * 60,  # 10 mins
             shell=True,
+            env=env_dict,
         )
 
     if proc.returncode:
