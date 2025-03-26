@@ -184,6 +184,9 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
     ]
     clean_command = (
+        'kubectl get po -n skypilot-system -owide && '
+        'kubectl get pods -n skypilot-system -oyaml && '
+        'kubectl -n skypilot-system logs -l app=fusermount-server && '
         f'sky down -y {cluster_name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
         f'sky storage delete -y {storage_name}')
@@ -306,7 +309,7 @@ def test_kubernetes_storage_mounts():
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
-            ['kubectl get po -n skypilot-system -owide', 'kubectl get pods -n skypilot-system -oyaml', *clean_command],
+            clean_command,
             timeout=20 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)
