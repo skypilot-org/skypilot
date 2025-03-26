@@ -562,10 +562,10 @@ def down(
         argument_str += ' all' if all else ''
         raise ValueError('Can only specify one of service_names or all. '
                          f'Provided {argument_str!r}.')
-    
+
     # Clear cache if we have a valid set of inputs. We can always recache.
     serve_state.delete_endpoint_cache(None if all else service_names)
-    
+
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
     service_names = None if all else service_names
@@ -640,10 +640,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 
 
 @usage_lib.entrypoint
-def status(
-    service_names: Optional[Union[str,
-                                  List[str]]] = None,
-    use_endpoint_cache: bool = False) -> List[Dict[str, Any]]:
+def status(service_names: Optional[Union[str, List[str]]] = None,
+           use_endpoint_cache: bool = False) -> List[Dict[str, Any]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -709,10 +707,12 @@ def status(
 
     if use_endpoint_cache:
         cached_records = serve_state.get_endpoint_cache(service_names)
-        if (service_names is None or len(service_names) == 0) and not cached_records:
+        if (service_names is None or
+                len(service_names) == 0) and not cached_records:
             logger.debug('Unspecified status check returned 0 cached '
                          'entries. Querying controller.')
-        elif service_names is not None and len(service_names) > 0 and len(service_names) != len(cached_records):
+        elif service_names is not None and len(service_names) > 0 and len(
+                service_names) != len(cached_records):
             logger.debug('Number of services queried did not match number of '
                          'cached records. Querying controller.')
         else:
@@ -766,7 +766,9 @@ def status(
                 protocol = ('https'
                             if service_record['tls_encrypted'] else 'http')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
-                serve_state.set_endpoint_cache(service_name=service_record['name'], endpoint=service_record['endpoint'])
+                serve_state.set_endpoint_cache(
+                    service_name=service_record['name'],
+                    endpoint=service_record['endpoint'])
 
     return service_records
 

@@ -560,9 +560,11 @@ def delete_all_versions(service_name: str) -> None:
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
 
+
 # == Endpoint Cache functions ==
 def get_endpoint_cache(
-        service_names: Optional[Union[str, List[str]]] = None) -> Dict[str, str]:
+    service_names: Optional[Union[str,
+                                  List[str]]] = None) -> List[Dict[str, str]]:
     """Gets endpoint cache values for services."""
     if service_names is not None:
         if isinstance(service_names, str):
@@ -570,20 +572,19 @@ def get_endpoint_cache(
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = None
         if service_names is None or len(service_names) == 0:
-            rows = cursor.execute(
-                """SELECT * FROM endpoint_cache""")
+            rows = cursor.execute("""SELECT * FROM endpoint_cache""")
         else:
-            placeholder = ", ".join(["?"] * len(service_names))
+            placeholder = ', '.join(['?'] * len(service_names))
             rows = cursor.execute(
                 f"""\
                 SELECT * FROM endpoint_cache
-                WHERE service_name IN ({placeholder})""",
-                tuple(service_names))
+                WHERE service_name IN ({placeholder})""", tuple(service_names))
     endpoints = []
     for row in rows:
         (name, endpoint) = row[:2]
-        endpoints.append({ name: endpoint })
+        endpoints.append({name: endpoint})
     return endpoints
+
 
 def set_endpoint_cache(service_name: str, endpoint: str) -> None:
     """Sets endpoint cache value for a specific service."""
@@ -593,6 +594,7 @@ def set_endpoint_cache(service_name: str, endpoint: str) -> None:
             INSERT or REPLACE INTO endpoint_cache
             (service_name, endpoint)
             VALUES (?, ?)""", (service_name, endpoint))
+
 
 def delete_endpoint_cache(
         service_names: Optional[Union[str, List[str]]] = None) -> None:
@@ -604,9 +606,9 @@ def delete_endpoint_cache(
 
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         if not service_names:
-            cursor.execute("DELETE FROM endpoint_cache")
+            cursor.execute("""DELETE FROM endpoint_cache""")
         else:
-            placeholder = ", ".join(["?"] * len(service_names))
+            placeholder = ', '.join(['?'] * len(service_names))
             cursor.execute(
                 f"""\
                 DELETE FROM endpoint_cache

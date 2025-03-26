@@ -1800,7 +1800,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
     if show_services:
         # Run the sky serve service query in parallel to speed up the
         # status query.
-        service_status_request_id = serve_lib.status(service_names=None, 
+        service_status_request_id = serve_lib.status(service_names=None,
                                                      use_endpoint_cache=False)
 
     if ip or show_endpoints:
@@ -2899,7 +2899,7 @@ def _hint_or_raise_for_down_sky_serve_controller(controller_name: str,
     assert controller is not None, controller_name
     with rich_utils.client_status('[bold cyan]Checking for live services[/]'):
         try:
-            request_id = serve_lib.status(service_names=None, 
+            request_id = serve_lib.status(service_names=None,
                                           use_endpoint_cache=False)
             services = sdk.stream_and_get(request_id)
         except exceptions.ClusterNotUpError as e:

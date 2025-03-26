@@ -213,10 +213,8 @@ def terminate_replica(service_name: str, replica_id: int,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def status(
-        service_names: Optional[Union[str,
-                                      List[str]]],
-        use_endpoint_cache: bool) -> server_common.RequestId:
+def status(service_names: Optional[Union[str, List[str]]],
+           use_endpoint_cache: bool) -> server_common.RequestId:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
