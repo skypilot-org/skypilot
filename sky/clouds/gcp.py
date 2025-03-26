@@ -124,6 +124,7 @@ def _run_output(cmd):
 
 
 def is_api_disabled(endpoint: str, project_id: str) -> bool:
+    # requires serviceusage.services.list
     proc = subprocess.run((f'gcloud services list --project {project_id} '
                            f' | grep {endpoint}.googleapis.com'),
                           check=False,
@@ -718,7 +719,28 @@ class GCP(clouds.Cloud):
         return DEFAULT_GCP_APPLICATION_CREDENTIAL_PATH
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's compute service."""
+        return cls._check_credentials(
+            [
+                ('compute', 'Compute Engine'),
+                ('cloudresourcemanager', 'Cloud Resource Manager'),
+                ('iam', 'Identity and Access Management (IAM)'),
+                ('tpu', 'Cloud TPU'),  # Keep as final element.
+            ],
+            gcp_utils.get_minimal_compute_permissions())
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this cloud's storage service."""
+        return cls._check_credentials(
+            [('storage', 'Cloud Storage')],
+            gcp_utils.get_minimal_storage_permissions())
+
+    @classmethod
+    def _check_credentials(
+            cls, apis: List[Tuple[str, str]],
+            gcp_minimal_permissions: List[str]) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
@@ -783,13 +805,37 @@ class GCP(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}Details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
 
-        # Check APIs.
-        apis = (
-            ('compute', 'Compute Engine'),
-            ('cloudresourcemanager', 'Cloud Resource Manager'),
-            ('iam', 'Identity and Access Management (IAM)'),
-            ('tpu', 'Cloud TPU'),  # Keep as final element.
-        )
+        # pylint: disable=import-outside-toplevel,unused-import
+        import google.auth
+
+        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
+        credentials, project = google.auth.default()
+        crm = gcp.build('cloudresourcemanager',
+                        'v1',
+                        credentials=credentials,
+                        cache_discovery=False)
+        permissions = {'permissions': gcp_minimal_permissions}
+        request = crm.projects().testIamPermissions(resource=project,
+                                                    body=permissions)
+        try:
+            ret_permissions = request.execute().get('permissions', [])
+        except gcp.gcp_auth_refresh_error_exception() as e:
+            return False, common_utils.format_exception(e, use_bracket=True)
+
+        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
+        if diffs:
+            identity_str = identity[0] if identity else None
+            return False, (
+                'The following permissions are not enabled for the current '
+                f'GCP identity ({identity_str}):\n    '
+                f'{diffs}\n    '
+                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
+
+        # This code must be executed after the iam check above,
+        # as the check below for api enablement itself needs:
+        # - serviceusage.services.enable
+        # - serviceusage.services.list
+        # iam permissions.
         enabled_api = False
         for endpoint, display_name in apis:
             if is_api_disabled(endpoint, project_id):
@@ -801,6 +847,7 @@ class GCP(clouds.Cloud):
                     suffix = ' (free of charge)'
                 print(f'\nEnabling {display_name} API{suffix}...')
                 t1 = time.time()
+                # requires serviceusage.services.enable
                 proc = subprocess.run(
                     f'gcloud services enable {endpoint}.googleapis.com '
                     f'--project {project_id}',
@@ -830,29 +877,6 @@ class GCP(clouds.Cloud):
                   'effect. If any SkyPilot commands/calls failed, retry after '
                   'some time.')
 
-        # pylint: disable=import-outside-toplevel,unused-import
-        import google.auth
-
-        # This takes user's credential info from "~/.config/gcloud/application_default_credentials.json".  # pylint: disable=line-too-long
-        credentials, project = google.auth.default()
-        crm = gcp.build('cloudresourcemanager',
-                        'v1',
-                        credentials=credentials,
-                        cache_discovery=False)
-        gcp_minimal_permissions = gcp_utils.get_minimal_permissions()
-        permissions = {'permissions': gcp_minimal_permissions}
-        request = crm.projects().testIamPermissions(resource=project,
-                                                    body=permissions)
-        ret_permissions = request.execute().get('permissions', [])
-
-        diffs = set(gcp_minimal_permissions).difference(set(ret_permissions))
-        if diffs:
-            identity_str = identity[0] if identity else None
-            return False, (
-                'The following permissions are not enabled for the current '
-                f'GCP identity ({identity_str}):\n    '
-                f'{diffs}\n    '
-                'For more details, visit: https://docs.skypilot.co/en/latest/cloud-setup/cloud-permissions/gcp.html')  # pylint: disable=line-too-long
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:

@@ -435,6 +435,9 @@ def test_image_no_conda():
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
 @pytest.mark.no_nebius  # Nebius does not support autostop
 def test_custom_default_conda_env(generic_cloud: str):
+    timeout = 80
+    if generic_cloud == 'azure':
+        timeout *= 3
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
         f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
@@ -447,7 +450,7 @@ def test_custom_default_conda_env(generic_cloud: str):
         smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
             cluster_status=[sky.ClusterStatus.STOPPED],
-            timeout=80),
+            timeout=timeout),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',

@@ -396,7 +396,6 @@ pathlib.Path(_DB_PATH).parents[0].mkdir(parents=True, exist_ok=True)
 
 
 def create_table(cursor, conn):
-    del conn
     # Enable WAL mode to avoid locking issues.
     # See: issue #1441 and PR #1509
     # https://github.com/microsoft/WSL/issues/2395
@@ -428,6 +427,9 @@ def create_table(cursor, conn):
         {COL_USER_ID} TEXT,
         {COL_STATUS_MSG} TEXT)""")
 
+    db_utils.add_column_to_table(cursor, conn, REQUEST_TABLE, COL_STATUS_MSG,
+                                 'TEXT')
+
 
 _DB = None
 
@@ -447,7 +449,7 @@ def init_db(func):
 
 def reset_db_and_logs():
     """Create the database."""
-    common_utils.remove_file_if_exists(_DB_PATH)
+    server_common.clear_local_api_server_database()
     shutil.rmtree(pathlib.Path(REQUEST_LOG_PATH_PREFIX).expanduser(),
                   ignore_errors=True)
     shutil.rmtree(server_common.API_SERVER_CLIENT_DIR.expanduser(),

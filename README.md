@@ -22,6 +22,10 @@
     <img alt="Downloads" src="https://img.shields.io/pypi/dm/skypilot">
   </a>
 
+  <a href="https://buildkite.com/skypilot-1/full-smoke-tests-run">
+    <img alt="Smoke Tests" src="https://badge.buildkite.com/d3aa9d2370e4a9ac4fb5e210381f955082a63a9a46673b197a.svg?theme=github&branch=master">
+  </a>
+
 </p>
 
 <h3 align="center">
@@ -30,6 +34,7 @@
 
 ----
 :fire: *News* :fire:
+- [Mar 2025] Run and serve **Google Gemma 3** using SkyPilot [**example**](./llm/gemma3/)
 - [Feb 2025] Prepare and serve **Retrieval Augmented Generation (RAG) with DeepSeek-R1**: [**blog post**](https://blog.skypilot.co/deepseek-rag), [**example**](./llm/rag/)
 - [Feb 2025] Run and serve **DeepSeek-R1 671B** using SkyPilot and SGLang with high throughput: [**example**](./llm/deepseek-r1/)
 - [Feb 2025] Prepare and serve large-scale image search with **vector databases**: [**blog post**](https://blog.skypilot.co/large-scale-vector-database/), [**example**](./examples/vector_database/)
@@ -46,20 +51,22 @@
 
 ----
 
-SkyPilot is a framework for running AI and batch workloads on any infra, offering unified execution, high cost savings, and high GPU availability.
+SkyPilot is an open-source framework for running AI and batch workloads on any infra.
 
-SkyPilot **abstracts away AI infra burden**:
-- Launch [clusters](https://docs.skypilot.co/en/latest/examples/interactive-development.html), [jobs](https://docs.skypilot.co/en/latest/examples/managed-jobs.html), and [serving](https://docs.skypilot.co/en/latest/serving/sky-serve.html) on any infra
+SkyPilot **is easy to use for AI users**:
+- Quickly spin up compute on your own infra
+- Environment and job as code — simple and portable
 - Easy job management: queue, run, and auto-recover many jobs
 
-SkyPilot **supports multiple clusters, clouds, and hardware**:
-- Bring reserved GPUs, Kubernetes clusters, or 15+ clouds
+SkyPilot **unifies multiple clusters, clouds, and hardware**:
+- One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
 - [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with auto-retry
+- [Team deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server.html) and resource sharing
 
 SkyPilot **cuts your cloud costs & maximizes GPU availability**:
-* [Autostop](https://docs.skypilot.co/en/latest/reference/auto-stop.html): automatic cleanup of idle resources
-* [Managed Spot](https://docs.skypilot.co/en/latest/examples/managed-jobs.html): 3-6x cost savings using spot instances, with preemption auto-recovery
-* [Optimizer](https://docs.skypilot.co/en/latest/examples/auto-failover.html): 2x cost savings by auto-picking the cheapest & most available infra
+* Autostop: automatic cleanup of idle resources
+* [Spot instance support](https://docs.skypilot.co/en/latest/examples/managed-jobs.html#running-on-spot-instances): 3-6x cost savings, with preemption auto-recovery
+* Intelligent scheduling: automatically run on the cheapest & most available infra
 
 SkyPilot supports your existing GPU, TPU, and CPU workloads, with no code changes.
 
@@ -74,6 +81,9 @@ To get the latest features and fixes, use the nightly build or [install from sou
 pip install "skypilot-nightly[kubernetes,aws,gcp,azure,oci,lambda,runpod,fluidstack,paperspace,cudo,ibm,scp,nebius]"
 ```
 
+<p align="center">
+  <img src="docs/source/_static/intro.gif" alt="SkyPilot">
+</p>
 
 Current supported infra: Kubernetes, AWS, GCP, Azure, OCI, Lambda Cloud, Fluidstack,
 RunPod, Cudo, Digital Ocean, Paperspace, Cloudflare, Samsung, IBM, Vast.ai,
@@ -138,10 +148,6 @@ SkyPilot then performs the heavy-lifting for you, including:
 3. Sync the local `workdir` to the VM
 4. Run the task's `setup` commands to prepare the VM for running the task
 5. Run the task's `run` commands
-
-<p align="center">
-  <img src="https://i.imgur.com/TgamzZ2.gif" alt="SkyPilot Demo"/>
-</p>
 
 
 See [Quickstart](https://docs.skypilot.co/en/latest/getting-started/quickstart.html) to get started with SkyPilot.

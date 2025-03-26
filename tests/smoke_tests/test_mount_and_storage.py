@@ -41,6 +41,7 @@ from sky import skypilot_config
 from sky.adaptors import azure
 from sky.adaptors import cloudflare
 from sky.adaptors import ibm
+from sky.adaptors import nebius
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -277,9 +278,24 @@ def test_kubernetes_storage_mounts():
     # built for x86_64 only.
     name = smoke_tests_utils.get_cluster_name()
     storage_name = f'sky-test-{int(time.time())}'
-    ls_hello_command = (f'aws s3 ls {storage_name}/hello.txt || {{ '
-                        f'{ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
-                        f'ls gs://{storage_name}/hello.txt; }}')
+
+    s3_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(storage_lib.StoreType.S3,
+                                                      storage_name, 'hello.txt')
+    gcs_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.GCS, storage_name, 'hello.txt')
+    azure_ls_cmd = TestStorageWithCredentials.cli_ls_cmd(
+        storage_lib.StoreType.AZURE, storage_name, 'hello.txt')
+
+    # For Azure, we need to check if the output is empty list, as it returns []
+    # instead of a non-zero exit code when the file doesn't exist
+    azure_check_cmd = (f'output=$({azure_ls_cmd}); '
+                       f'exit_code=$?; '
+                       f'[ "$output" != "[]" ] && '
+                       f'[ $exit_code -eq 0 ]')
+
+    ls_hello_command = (f'{s3_ls_cmd} || {{ '
+                        f'{gcs_ls_cmd}; }} || {{ '
+                        f'{azure_check_cmd}; }}')
     cloud_cmd_cluster_setup_cmd_list = controller_utils._get_cloud_dependencies_installation_commands(
         controller_utils.Controllers.JOBS_CONTROLLER)
     cloud_cmd_cluster_setup_cmd = ' && '.join(cloud_cmd_cluster_setup_cmd_list)
@@ -452,6 +468,35 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
 
         test = smoke_tests_utils.Test(
             'cloudflare_storage_mounts',
+            test_commands,
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.nebius
+def test_nebius_storage_mounts(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    storage_name = f'sky-test-{int(time.time())}'
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_nebius_storage_mounting.yaml').read_text()
+    template = jinja2.Template(template_str)
+    content = template.render(storage_name=storage_name)
+    endpoint_url = nebius.create_endpoint()
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        f.write(content)
+        f.flush()
+        file_path = f.name
+        test_commands = [
+            *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+            f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
+            f'sky logs {name} 1 --status',  # Ensure job succeeded.
+            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+        ]
+
+        test = smoke_tests_utils.Test(
+            'nebius_storage_mounts',
             test_commands,
             f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
@@ -695,6 +740,11 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
+        if store_type == storage_lib.StoreType.NEBIUS:
+            endpoint_url = nebius.create_endpoint()
+            url = f's3://{bucket_name}'
+            return f'aws s3 rb {url} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+
         if store_type == storage_lib.StoreType.IBM:
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
                 bucket_name, Rclone.RcloneClouds.IBM)
@@ -782,6 +832,15 @@ class TestStorageWithCredentials:
                 url = f's3://{bucket_name}'
             recursive_flag = '--recursive' if recursive else ''
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2 {recursive_flag}'
+        if store_type == storage_lib.StoreType.NEBIUS:
+            endpoint_url = nebius.create_endpoint()
+            if suffix:
+                url = f's3://{bucket_name}/{suffix}'
+            else:
+                url = f's3://{bucket_name}'
+            recursive_flag = '--recursive' if recursive else ''
+            return f'aws s3 ls {url} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
+
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
             bucket_rclone_profile = Rclone.generate_rclone_bucket_profile_name(
@@ -845,6 +904,12 @@ class TestStorageWithCredentials:
                 return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
             else:
                 return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
+        elif store_type == storage_lib.StoreType.NEBIUS:
+            endpoint_url = nebius.create_endpoint()
+            if suffix:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+            else:
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -866,6 +931,9 @@ class TestStorageWithCredentials:
         elif store_type == storage_lib.StoreType.R2:
             endpoint_url = cloudflare.create_endpoint()
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
+        elif store_type == storage_lib.StoreType.NEBIUS:
+            endpoint_url = nebius.create_endpoint()
+            return f'aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1113,6 +1181,19 @@ class TestStorageWithCredentials:
             shell=True)
 
     @pytest.fixture
+    def tmp_awscli_bucket_nebius(self, tmp_bucket_name):
+        # Creates a temporary bucket using awscli
+        endpoint_url = nebius.create_endpoint()
+        bucket_uri = f's3://{tmp_bucket_name}'
+        subprocess.check_call(
+            f'aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
+            shell=True)
+        yield tmp_bucket_name, f'nebius://{tmp_bucket_name}'
+        subprocess.check_call(
+            f'aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
+            shell=True)
+
+    @pytest.fixture
     def tmp_ibm_cos_bucket(self, tmp_bucket_name):
         # Creates a temporary bucket using IBM COS API
         storage_obj = storage_lib.IBMCosStore(source="", name=tmp_bucket_name)
@@ -1134,7 +1215,8 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_new_bucket_creation_and_deletion(self, tmp_local_storage_obj,
                                               store_type):
@@ -1161,7 +1243,8 @@ class TestStorageWithCredentials:
         pytest.param(storage_lib.StoreType.GCS, marks=pytest.mark.gcp),
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_sub_path(self, tmp_local_storage_obj_with_sub_path,
                              store_type):
@@ -1222,6 +1305,7 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm)
     ])
     def test_multiple_buckets_creation_and_deletion(
@@ -1264,7 +1348,8 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_upload_source_with_spaces(self, store_type,
                                        tmp_multiple_custom_source_storage_obj):
@@ -1291,7 +1376,8 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_external_deletion(self, tmp_scratch_storage_obj,
                                       store_type):
@@ -1323,7 +1409,8 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_bucket_bulk_deletion(self, store_type, tmp_bulk_del_storage_obj):
         # Creates a temp folder with over 256 files and folders, upload
@@ -1369,7 +1456,8 @@ class TestStorageWithCredentials:
                 'https://{account_name}.blob.core.windows.net/{random_name}',  # pylint: disable=line-too-long
                 marks=pytest.mark.azure),
             pytest.param('cos://us-east/{random_name}', marks=pytest.mark.ibm),
-            pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare)
+            pytest.param('r2://{random_name}', marks=pytest.mark.cloudflare),
+            pytest.param('nebius://{random_name}', marks=pytest.mark.nebius)
         ])
     def test_nonexistent_bucket(self, nonexist_bucket_url):
         # Attempts to create fetch a stroage with a non-existent source.
@@ -1393,6 +1481,10 @@ class TestStorageWithCredentials:
             elif nonexist_bucket_url.startswith('r2'):
                 endpoint_url = cloudflare.create_endpoint()
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
+                expected_output = '404'
+            elif nonexist_bucket_url.startswith('nebius'):
+                endpoint_url = nebius.create_endpoint()
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('cos'):
                 # Using API calls, since using rclone requires a profile's name
@@ -1482,7 +1574,10 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.ibm),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param('tmp_awscli_bucket_nebius',
+                                           storage_lib.StoreType.NEBIUS,
+                                           marks=pytest.mark.nebius)])
     def test_upload_to_existing_bucket(self, ext_bucket_fixture, request,
                                        tmp_source, store_type):
         # Tries uploading existing files to newly created bucket (outside of
@@ -1537,7 +1632,8 @@ class TestStorageWithCredentials:
         storage_lib.StoreType.S3, storage_lib.StoreType.GCS,
         pytest.param(storage_lib.StoreType.AZURE, marks=pytest.mark.azure),
         pytest.param(storage_lib.StoreType.IBM, marks=pytest.mark.ibm),
-        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare)
+        pytest.param(storage_lib.StoreType.R2, marks=pytest.mark.cloudflare),
+        pytest.param(storage_lib.StoreType.NEBIUS, marks=pytest.mark.nebius)
     ])
     def test_list_source(self, tmp_local_list_storage_obj, store_type):
         # Uses a list in the source field to specify a file and a directory to
@@ -1579,7 +1675,10 @@ class TestStorageWithCredentials:
                                            marks=pytest.mark.ibm),
                               pytest.param(AWS_INVALID_NAMES,
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param(AWS_INVALID_NAMES,
+                                           storage_lib.StoreType.NEBIUS,
+                                           marks=pytest.mark.nebius)])
     def test_invalid_names(self, invalid_name_list, store_type):
         # Uses a list in the source field to specify a file and a directory to
         # be uploaded to the storage object.
@@ -1598,7 +1697,10 @@ class TestStorageWithCredentials:
          (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.AZURE),
          pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
                       storage_lib.StoreType.R2,
-                      marks=pytest.mark.cloudflare)])
+                      marks=pytest.mark.cloudflare),
+         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                      storage_lib.StoreType.NEBIUS,
+                      marks=pytest.mark.nebius)])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
                                                      store_type,
                                                      tmp_gitignore_storage_obj):
@@ -1639,7 +1741,10 @@ class TestStorageWithCredentials:
                               ('tmp_gsutil_bucket', storage_lib.StoreType.GCS),
                               pytest.param('tmp_awscli_bucket_r2',
                                            storage_lib.StoreType.R2,
-                                           marks=pytest.mark.cloudflare)])
+                                           marks=pytest.mark.cloudflare),
+                              pytest.param('tmp_awscli_bucket_nebius',
+                                           storage_lib.StoreType.NEBIUS,
+                                           marks=pytest.mark.nebius)])
     def test_externally_created_bucket_mount_without_source(
             self, ext_bucket_fixture, request, store_type):
         # Non-sky managed buckets(buckets created outside of Skypilot CLI)

@@ -66,7 +66,8 @@ def test_managed_jobs_basic(generic_cloud: str):
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                 job_name=f'{name}-2',
                 job_status=[sky.ManagedJobStatus.RUNNING],
-                timeout=180 if generic_cloud == 'azure' else 120),
+                timeout=360
+                if generic_cloud in ['azure', 'kubernetes'] else 120),
             f'sky jobs cancel -y -n {name}-1',
             smoke_tests_utils.
             get_cmd_wait_until_managed_job_status_contains_matching_job_name(
@@ -889,15 +890,25 @@ def test_managed_jobs_storage(generic_cloud: str):
         non_persistent_bucket_removed_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name,
             f'{non_persistent_bucket_removed_check_cmd} && exit 1 || true')
+        timeout *= 2
     elif generic_cloud == 'kubernetes':
         # With Kubernetes, we don't know which object storage provider is used.
-        # Check both S3 and GCS if bucket exists in either.
+        # Check S3, GCS and Azure if bucket exists in any of them.
         s3_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.S3, output_storage_name, 'output.txt')
         s3_output_check_cmd = f'{s3_check_file_count} | grep 1'
         gcs_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
             storage_lib.StoreType.GCS, output_storage_name, 'output.txt')
         gcs_output_check_cmd = f'{gcs_check_file_count} | grep 1'
+        # For Azure, we need to get the storage account name for the region
+        storage_account_name = test_mount_and_storage.TestStorageWithCredentials.get_az_storage_account_name(
+        )
+        az_check_file_count = test_mount_and_storage.TestStorageWithCredentials.cli_count_name_in_bucket(
+            storage_lib.StoreType.AZURE,
+            output_storage_name,
+            'output.txt',
+            storage_account_name=storage_account_name)
+        az_output_check_cmd = f'{az_check_file_count} | grep 1'
         cloud_dependencies_setup_cmd = ' && '.join(
             controller_utils._get_cloud_dependencies_installation_commands(
                 controller_utils.Controllers.JOBS_CONTROLLER))
@@ -909,16 +920,20 @@ def test_managed_jobs_storage(generic_cloud: str):
         output_check_cmd = smoke_tests_utils.run_cloud_cmd_on_cluster(
             name, f'{cloud_dependencies_setup_cmd}; '
             f'{try_activating_gcp_service_account}; '
-            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd}; }}')
+            f'{{ {s3_output_check_cmd} || {gcs_output_check_cmd} || {az_output_check_cmd}; }}'
+        )
         use_spot = ' --no-use-spot'
         storage_removed_check_s3_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.S3, storage_name)
         storage_removed_check_gcs_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
             storage_lib.StoreType.GCS, storage_name)
+        storage_removed_check_az_cmd = test_mount_and_storage.TestStorageWithCredentials.cli_ls_cmd(
+            storage_lib.StoreType.AZURE, storage_name)
         non_persistent_bucket_removed_check_cmd = (
             smoke_tests_utils.run_cloud_cmd_on_cluster(
                 name, f'{{ {storage_removed_check_s3_cmd} && exit 1; }} || '
-                f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || true'))
+                f'{{ {storage_removed_check_gcs_cmd} && exit 1; }} || '
+                f'{{ {storage_removed_check_az_cmd} && exit 1; }} || true'))
         timeout *= 2
 
     yaml_str = yaml_str.replace('sky-workdir-zhwu', storage_name)

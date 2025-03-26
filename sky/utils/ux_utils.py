@@ -8,16 +8,14 @@ import typing
 from typing import Callable, Optional, Union
 
 import colorama
-import rich.console as rich_console
 
 from sky import sky_logging
 from sky.skylet import constants
 from sky.utils import common_utils
+from sky.utils import rich_console_utils
 
 if typing.TYPE_CHECKING:
     import pathlib
-
-console = rich_console.Console()
 
 INDENT_SYMBOL = f'{colorama.Style.DIM}├── {colorama.Style.RESET_ALL}'
 INDENT_LAST_SYMBOL = f'{colorama.Style.DIM}└── {colorama.Style.RESET_ALL}'
@@ -40,7 +38,7 @@ def console_newline():
 
     Useful when catching exceptions inside console.status()
     """
-    console.print()
+    rich_console_utils.get_console().print()
 
 
 @contextlib.contextmanager
