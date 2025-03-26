@@ -508,6 +508,7 @@ available_node_types:
                 # Some distributions may might hostPath with noexec, copy the binary in this case.
                 if ! fusermount -V; then
                     echo "fusermount -V failed, copying fusermount-shim directly"
+                    $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
                     $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
                 fi
                 )
