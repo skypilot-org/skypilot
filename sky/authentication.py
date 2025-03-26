@@ -216,8 +216,6 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
         else:
             raise
     except gcp.auth_error_exception() as e:
-        logger.error(
-            f'Error getting GCP project: {common_utils.format_exception(e)}')
         raise exceptions.InvalidCloudCredentials(
             f'{common_utils.format_exception(e)}')
     except socket.timeout:

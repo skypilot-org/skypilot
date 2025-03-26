@@ -1098,7 +1098,7 @@ class FailoverCloudErrorHandlerV2:
         output = str(error)
         logger.info(f'AWS handler error: {output}')
         # Block AWS if the credential has expired.
-        if output.find('InvalidCloudCredentials') != -1:
+        if isinstance(error, exceptions.InvalidCloudCredentials):
             _add_to_blocked_resources(
                 blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
         else:

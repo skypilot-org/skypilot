@@ -25,18 +25,17 @@ def handle_boto_error(exc: Exception, msg: str) -> None:
     generic_message = (f'{msg}\nError code: {colorama.Style.BRIGHT}{error_code}'
                        f'{colorama.Style.RESET_ALL}')
 
-    # apparently
-    # ExpiredTokenException
-    # ExpiredToken
-    # RequestExpired
-    # are all the same pretty much
-    credentials_expiration_codes = [
+    # For invalid credentials, like expired tokens or
+    # invalid tokens, raise InvalidCloudCredentials exception
+    invalid_credentials_codes = [
         'ExpiredTokenException',
         'ExpiredToken',
         'RequestExpired',
+        'InvalidClientTokenId',
+        'InvalidClientToken',
     ]
 
-    if error_code in credentials_expiration_codes:
+    if error_code in invalid_credentials_codes:
         # 'An error occurred (ExpiredToken) when calling the
         # GetInstanceProfile operation: The security token
         # included in the request is expired'
