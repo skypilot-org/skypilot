@@ -5,7 +5,8 @@ import copy
 import logging
 import time
 import traceback
-from typing import Dict, Generic, List, Optional, Tuple, TypeVar
+import typing
+from typing import Dict, Generic, List, Optional, Tuple, TypeVar, Union
 
 import aiohttp
 import fastapi
@@ -22,8 +23,10 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
-RequestQueueEntry = Tuple[fastapi.Request, asyncio.Event,
-                          asyncio.Future[fastapi.responses.Response]]
+RequestEntry = Tuple[fastapi.Request, asyncio.Event,
+                     asyncio.Future[fastapi.responses.Response]]
+StealBarrierEntry = Tuple[str, None, None]
+RequestQueueEntry = Union[RequestEntry, StealBarrierEntry]
 
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
@@ -266,9 +269,12 @@ class SkyServeLoadBalancer:
         self._max_queue_size: int = max_queue_size
         self._external_host: str = serve_utils.get_external_host()
         self._handle_request_tasks: List[asyncio.Task] = []
-        # Mapping from LB URL to the number of requests to be stolen.
-        self._lb_to_steal_requests: Dict[str,
-                                         int] = collections.defaultdict(int)
+        # Mapping from LB URL to a list of number of requests to be stolen.
+        # Each entry in the list represents a round of stealing. We put a
+        # corresponding barrier in the request queue for each round. After the
+        # barrier, any un-stolen requests will be discarded.
+        self._lb_to_steal_requests: Dict[
+            str, List[int]] = collections.defaultdict(list)
         self._lb_to_last_steal_time: Dict[str, float] = collections.defaultdict(
             float)
         self._steal_requests_lock: asyncio.Lock = asyncio.Lock()
@@ -281,8 +287,8 @@ class SkyServeLoadBalancer:
         """Return the LBs that have requests to steal."""
         async with self._steal_requests_lock:
             return [
-                lb for lb, num_steal in self._lb_to_steal_requests.items()
-                if num_steal > 0
+                lb for lb, num_steals in self._lb_to_steal_requests.items()
+                if num_steals
             ]
 
     async def _sync_with_controller(self):
@@ -397,7 +403,7 @@ class SkyServeLoadBalancer:
         response_future.set_result(response)
         request_event.set()
 
-    async def _handle_requests(self, url: str, entry: RequestQueueEntry,
+    async def _handle_requests(self, url: str, entry: RequestEntry,
                                is_from_lb: bool) -> None:
         """Handle the request."""
         assert self._loop is not None
@@ -484,6 +490,23 @@ class SkyServeLoadBalancer:
 
                 # Peek at the first item in the queue without removing it
                 entry: RequestQueueEntry = await self._request_queue.peek()
+
+                # Barrier Entry
+                if isinstance(entry[0], str):
+                    await self._request_queue.get_and_remove()
+                    lb_url = entry[0]
+                    logger.info(f'Processing barrier for lb {lb_url}. '
+                                f'Current steal requests: '
+                                f'{self._lb_to_steal_requests} (to be popped).')
+                    if lb_url in self._lb_to_steal_requests:
+                        if self._lb_to_steal_requests[lb_url]:
+                            self._lb_to_steal_requests[lb_url].pop(0)
+                        if not self._lb_to_steal_requests[lb_url]:
+                            await self._lb_pool.set_replica_unavailable(lb_url)
+                    continue
+
+                # TODO(tian): Use dataclass to avoid this.
+                entry = typing.cast(RequestEntry, entry)
                 request, request_event, response_future = entry
 
                 # TODO(tian): In this no replica case, if there is any replica
@@ -529,28 +552,136 @@ class SkyServeLoadBalancer:
                 # the remote region LB. Not necessarily to let them steal - some
                 # requests with high match rate might worth to wait for a while.
                 # And for low match rate, we can let them steal.
-                lb_wants_to_steal = await self._lb_pool.select_replica(request)
-                if lb_wants_to_steal is not None:
+                lb = await self._lb_pool.select_replica(request)
+                if lb is not None:
                     await self._request_queue.get_and_remove()
                     try:
                         logger.info(f'Processing queued request {request.url} '
                                     'from User to LB '
-                                    f'{lb_wants_to_steal}.')
-                        await self._handle_requests(lb_wants_to_steal,
-                                                    entry,
-                                                    is_from_lb=True)
+                                    f'{lb}.')
+                        await self._handle_requests(lb, entry, is_from_lb=True)
                         async with self._steal_requests_lock:
-                            self._lb_to_steal_requests[lb_wants_to_steal] -= 1
-                            if self._lb_to_steal_requests[
-                                    lb_wants_to_steal] <= 0:
-                                await self._lb_pool.set_replica_unavailable(
-                                    lb_wants_to_steal)
+                            if not self._lb_to_steal_requests[lb]:
+                                logger.error(f'{lb} has no steal entries. '
+                                             'Skip decreasing size.')
+                                continue
+                            self._lb_to_steal_requests[lb][0] -= 1
+                            logger.info(f'{lb} steals one '
+                                        'request. Current steal requests: '
+                                        f'{self._lb_to_steal_requests}')
+                            if self._lb_to_steal_requests[lb][0] <= 0:
+                                self._lb_to_steal_requests[lb].pop(0)
+                            if not self._lb_to_steal_requests[lb]:
+                                await self._lb_pool.set_replica_unavailable(lb)
+                                logger.info(f'{lb} has no steal '
+                                            'requests. Set it to unavailable.')
                     except Exception as e:  # pylint: disable=broad-except
                         response_future.set_exception(e)
                         request_event.set()
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in queue processor: '
                              f'{common_utils.format_exception(e)}')
+
+    async def _put_request_to_queue(
+            self, request: fastapi.Request) -> fastapi.responses.Response:
+        """Queue the request for processing by the queue processor."""
+        assert self._request_queue is not None
+        self._request_aggregator.add(request)
+        logger.info(f'Received request {request.url}.')
+
+        try:
+            # Create future and event in the current event loop context
+            assert self._loop is not None
+            response_future: asyncio.Future[
+                fastapi.responses.Response] = self._loop.create_future()
+            request_event: asyncio.Event = asyncio.Event()
+            entry: RequestQueueEntry = (request, request_event, response_future)
+
+            # Queue the request for processing
+            await self._request_queue.put(entry)
+
+            # Wait for the request to be processed by the queue processor
+            await request_event.wait()
+
+            # Get the result or exception
+            assert response_future.done(), (
+                'Request processing completed but future not set')
+            return await response_future
+
+        except asyncio.TimeoutError:
+            # Queue is full
+            return fastapi.responses.Response(
+                status_code=429,
+                content='Too many requests. Queue is full. '
+                'Please try again later.')
+        except Exception as e:
+            # Other errors during queue processing
+            logger.error(f'Error processing queued request: '
+                         f'{common_utils.format_exception(e)}\n'
+                         f'  Traceback: {traceback.format_exc()}')
+            raise fastapi.HTTPException(
+                status_code=500, detail=f'Error processing request: {str(e)}')
+
+    async def _health_check(self) -> fastapi.responses.Response:
+        """Health check endpoint."""
+        return fastapi.responses.Response(status_code=200)
+
+    async def _queue_size(self) -> fastapi.responses.Response:
+        """Return the size of the request queue."""
+        assert self._request_queue is not None
+        num = 0
+        lb_to_barrier_idx: Dict[str, int] = collections.defaultdict(int)
+        # TODO(tian): Maintain a counter on this.
+        async with self._steal_requests_lock:
+            for i in range(await self._request_queue.qsize()):
+                request, _, _ = await self._request_queue.get(i)
+                # Barrier entry for steal requests.
+                if isinstance(request, str):
+                    lb_url = request
+                    num -= self._lb_to_steal_requests[lb_url][
+                        lb_to_barrier_idx[lb_url]]
+                    lb_to_barrier_idx[lb_url] += 1
+                    continue
+                if not request.headers.get(_IS_FROM_LB_HEADER, False):
+                    num += 1
+        return fastapi.responses.JSONResponse(status_code=200,
+                                              content={'queue_size': num})
+
+    async def _raw_queue_size(self) -> fastapi.responses.Response:
+        """Return the size of the request queue."""
+        assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={'queue_size': await self._request_queue.qsize()})
+
+    async def _replica_queue(self) -> fastapi.responses.Response:
+        """Return the request queue for each replica."""
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={
+                'replica_queue': await self._replica_pool.active_requests()
+            })
+
+    async def _configuration(self) -> fastapi.responses.Response:
+        """Return the configuration of the load balancer."""
+        assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={
+                'queue_size': await self._request_queue.qsize(),
+                'replica_queue': await self._replica_pool.active_requests(),
+                'max_queue_size': self._max_queue_size,
+                'max_concurrent_requests': self._max_concurrent_requests,
+                'load_balancing_policy_name': self._load_balancing_policy_name
+            })
+
+    async def _cleanup_completed_tasks(self) -> None:
+        """Cleanup completed tasks."""
+        while True:
+            for task in self._handle_request_tasks:
+                if task.done():
+                    self._handle_request_tasks.remove(task)
+            await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
 
     async def _request_stealing_loop(self) -> None:
         """Background task to process request stealing."""
@@ -610,103 +741,10 @@ class SkyServeLoadBalancer:
                 logger.error(f'Error in request stealing loop: '
                              f'{common_utils.format_exception(e)}')
 
-    async def _cleanup_completed_tasks(self) -> None:
-        """Cleanup completed tasks."""
-        while True:
-            for task in self._handle_request_tasks:
-                if task.done():
-                    self._handle_request_tasks.remove(task)
-            await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
-
-    async def _put_request_to_queue(
-            self, request: fastapi.Request) -> fastapi.responses.Response:
-        """Queue the request for processing by the queue processor."""
-        assert self._request_queue is not None
-        self._request_aggregator.add(request)
-        logger.info(f'Received request {request.url}.')
-
-        try:
-            # Create future and event in the current event loop context
-            assert self._loop is not None
-            response_future: asyncio.Future[
-                fastapi.responses.Response] = self._loop.create_future()
-            request_event: asyncio.Event = asyncio.Event()
-            entry: RequestQueueEntry = (request, request_event, response_future)
-
-            # Queue the request for processing
-            await self._request_queue.put(entry)
-
-            # Wait for the request to be processed by the queue processor
-            await request_event.wait()
-
-            # Get the result or exception
-            assert response_future.done(), (
-                'Request processing completed but future not set')
-            return await response_future
-
-        except asyncio.TimeoutError:
-            # Queue is full
-            return fastapi.responses.Response(
-                status_code=429,
-                content='Too many requests. Queue is full. '
-                'Please try again later.')
-        except Exception as e:
-            # Other errors during queue processing
-            logger.error(f'Error processing queued request: '
-                         f'{common_utils.format_exception(e)}\n'
-                         f'  Traceback: {traceback.format_exc()}')
-            raise fastapi.HTTPException(
-                status_code=500, detail=f'Error processing request: {str(e)}')
-
-    async def _health_check(self) -> fastapi.responses.Response:
-        """Health check endpoint."""
-        return fastapi.responses.Response(status_code=200)
-
-    async def _queue_size(self) -> fastapi.responses.Response:
-        """Return the size of the request queue."""
-        assert self._request_queue is not None
-        num = 0
-        # TODO(tian): Maintain a counter on this.
-        for i in range(await self._request_queue.qsize()):
-            request, _, _ = await self._request_queue.get(i)
-            if not request.headers.get(_IS_FROM_LB_HEADER, False):
-                num += 1
-        return fastapi.responses.JSONResponse(status_code=200,
-                                              content={'queue_size': num})
-
-    async def _raw_queue_size(self) -> fastapi.responses.Response:
-        """Return the size of the request queue."""
-        assert self._request_queue is not None
-        return fastapi.responses.JSONResponse(
-            status_code=200,
-            content={'queue_size': await self._request_queue.qsize()})
-
-    async def _replica_queue(self) -> fastapi.responses.Response:
-        """Return the request queue for each replica."""
-        assert self._request_queue is not None
-        return fastapi.responses.JSONResponse(
-            status_code=200,
-            content={
-                'replica_queue': await self._replica_pool.active_requests()
-            })
-
-    async def _configuration(self) -> fastapi.responses.Response:
-        """Return the configuration of the load balancer."""
-        assert self._request_queue is not None
-        return fastapi.responses.JSONResponse(
-            status_code=200,
-            content={
-                'queue_size': await self._request_queue.qsize(),
-                'replica_queue': await self._replica_pool.active_requests(),
-                'max_queue_size': self._max_queue_size,
-                'max_concurrent_requests': self._max_concurrent_requests,
-                'load_balancing_policy_name': self._load_balancing_policy_name
-            })
-
     async def _steal_request(
             self, steal_request: fastapi.Request) -> fastapi.responses.Response:
         """Let other LBs steal requests from this LB."""
-        assert self._loop is not None
+        # assert self._loop is not None
         assert self._request_queue is not None
         req_json = await steal_request.json()
         num_steal = req_json['num_steal']
@@ -723,7 +761,7 @@ class SkyServeLoadBalancer:
             # honored and the remaining_to_steal will be set to 0.
             interval = time.time() - self._lb_to_last_steal_time[source_lb_url]
             if interval > _MIN_STEAL_INTERVAL:
-                self._lb_to_steal_requests[source_lb_url] += num_steal
+                self._lb_to_steal_requests[source_lb_url].append(num_steal)
                 self._lb_to_last_steal_time[source_lb_url] = time.time()
                 await self._lb_pool.set_replica_available(source_lb_url)
                 remaining_to_steal = 0
@@ -732,11 +770,13 @@ class SkyServeLoadBalancer:
                             f'{self._lb_to_steal_requests}, '
                             f'Last steal time: '
                             f'{self._lb_to_last_steal_time}')
+                await self._request_queue.put((source_lb_url, None, None))
             else:
-                logger.info(f'Not stealing requests from {source_lb_url} '
-                            f'because of the minimum steal interval ({interval}'
-                            f'/{_MIN_STEAL_INTERVAL}). Last steal time: '
-                            f'{self._lb_to_last_steal_time[source_lb_url]}')
+                # logger.info(f'Not stealing requests from {source_lb_url} '
+                #             f'because of the minimum steal interval '
+                #             f'({interval}/{_MIN_STEAL_INTERVAL}). '
+                #             'Last steal time: '
+                #             f'{self._lb_to_last_steal_time[source_lb_url]}')
                 remaining_to_steal = num_steal
         return fastapi.responses.JSONResponse(
             status_code=200, content={'remaining_to_steal': remaining_to_steal})
@@ -795,8 +835,6 @@ class SkyServeLoadBalancer:
 
     async def _probe_ie_queue(self) -> None:
         """Probe the inference engine queue."""
-        assert self._loop is not None
-        assert self._request_queue is not None
         while True:
             await asyncio.sleep(_IE_QUEUE_PROBE_INTERVAL)
             time_start = time.perf_counter()

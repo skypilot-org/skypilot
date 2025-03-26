@@ -23,12 +23,14 @@ async def send_request(session, sleep_time):
     st = random.choice(list(range(1, 10)))
     # async with session.post(f'http://{host}:{port}/sleep',
     #                        json={'time_to_sleep': st}) as response:
+    time_to_wait = random.random()
+    await asyncio.sleep(time_to_wait)
     async with session.get(
-        f'http://{host}:{port}/',
-        headers={
-            # async with session.get(f'http://{host}:{port}/stream', headers={
-            'x-hash-key': 'true'
-        }) as response:
+            f'http://{host}:{port}/',
+            headers={
+                # async with session.get(f'http://{host}:{port}/stream', headers={
+                'x-hash-key': 'true'
+            }) as response:
         # async with session.get(f'http://{host}:{port}/non-stream') as response:
         try:
             js = await response.json()
