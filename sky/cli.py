@@ -3943,6 +3943,7 @@ def jobs_launch(
               required=False,
               help='Show jobs from all users.')
 @click.option('--all',
+              '-a',
               default=False,
               is_flag=True,
               required=False,
