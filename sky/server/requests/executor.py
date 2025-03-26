@@ -305,7 +305,7 @@ class RequestWorker:
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
 
-    def process_request(self, executor: BurstableProcessPoolExecutor,
+    def process_request(self, executor: ProcessPoolExecutor,
                         queue: RequestQueue) -> None:
         try:
             request_element = queue.get()
@@ -362,7 +362,7 @@ class RequestWorker:
             # to avoid broken state in such cases.
             logger.info(f'[{self}] Worker process interrupted')
             executor.shutdown()
-    
+
     def executor(self) -> ProcessPoolExecutor:
         proc_group = f'{self.schedule_type.value}'
         setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
@@ -374,11 +374,10 @@ class RequestWorker:
                 initargs=(proc_group,))
         else:
             # For low resource mode, use a disposable pool.
-            return ProcessPoolExecutor(
-                max_workers=self.burstable_parallelism,
-                reuse_worker=False,
-                initializer=executor_initializer,
-                initargs=(proc_group,))
+            return ProcessPoolExecutor(max_workers=self.burstable_parallelism,
+                                       reuse_worker=False,
+                                       initializer=executor_initializer,
+                                       initargs=(proc_group,))
 
 
 @annotations.lru_cache(scope='global', maxsize=None)
@@ -570,7 +569,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     """Start the request workers.
 
     Args:
-        deploy: If True, indicates the API server is deployed and have dedicated 
+        deploy: If True, indicates the API server is deployed and have dedicated
                 resources.
     """
     # Determine the job capacity of the workers based on the system resources.
@@ -591,8 +590,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             raise RuntimeError(
                 f'Not enough memory to deploy the API server. '
                 f'{mem_size_gb}GB available, '
-                f'but {server_constants.MIN_AVAIL_MEM_GB}GB required.'
-            )
+                f'but {server_constants.MIN_AVAIL_MEM_GB}GB required.')
         else:
             # Permanent worker process may have significant memory consumption
             # after running commands like `sky check`, so we don't start any
@@ -610,8 +608,8 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
                 f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
     else:
         logger.info(
-            f'SkyPilot API server will start {max_parallel_for_long} workers for '
-            f'long requests and will allow at max '
+            f'SkyPilot API server will start {max_parallel_for_long} workers '
+            f'for long requests and will allow at max '
             f'{max_parallel_for_short} short requests in parallel.')
 
     sub_procs = []
