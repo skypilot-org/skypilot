@@ -593,3 +593,11 @@ def set_endpoint_cache(service_name: str, endpoint: str) -> None:
             INSERT or REPLACE INTO endpoint_cache
             (service_name, endpoint)
             VALUES (?, ?)""", (service_name, endpoint))
+
+def delete_endpoint_cache(service_name: str) -> None:
+    """Removes endpoint cache (ignores missing case)."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            DELETE FROM endpoint_cache
+            WHERE service_name=(?)""", (service_name,))
