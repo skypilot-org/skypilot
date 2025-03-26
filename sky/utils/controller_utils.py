@@ -1044,7 +1044,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
-                'mode': storage_lib.StorageMode.MOUNT.value,
+                'mode': storage_obj.mode.value,
                 # We enable force delete to allow the controller to delete
                 # the object store in case persistent is set to False.
                 '_force_delete': True

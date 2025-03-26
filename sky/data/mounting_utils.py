@@ -269,6 +269,11 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # '--vfs-write-back' defines the time to write files on remote storage
         # after last use of the file in local mountpoint.
         '--transfers 1 --vfs-cache-poll-interval 30s --vfs-write-back 1s '
+        # Have rclone evict files if the cache size exceeds 10G.
+        # This is to prevent cache from growing too large and
+        # using up all the disk space. Note that files that opened
+        # by a process is not evicted from the cache.
+        '--vfs-cache-max-size 10G '
         '> /dev/null 2>&1 &')
     return mount_cmd
 
