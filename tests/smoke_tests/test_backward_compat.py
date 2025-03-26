@@ -358,9 +358,9 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && sky exec {cluster_name} "echo from base"',
-            # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo from base"',
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_BASE} && sky autostop -i 1 -y {cluster_name}',
             # serve test
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky serve up --cloud {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
