@@ -645,34 +645,28 @@ class SkyPilotReplicaManager(ReplicaManager):
 
         # execution.launch should be robust enough to handle the case where the
         # provisioning is partially done.
-        to_up_replicas = serve_state.get_replicas_at_statuses(
-            self._service_name, [
-                serve_state.ReplicaStatus.PENDING,
-                serve_state.ReplicaStatus.PROVISIONING
-            ])
-        for replica_info in to_up_replicas:
+        for replica_info in serve_state.get_replicas_at_statuses(
+                self._service_name, serve_state.ReplicaStatus.PROVISIONING):
             replica_id = replica_info.replica_id
-            try:
-                self._launch_replica(replica_id, resources_override=None)
-            # pylint: disable=broad-except
-            except Exception as e:
-                logger.error(
-                    f'Failed to launch replica {replica_id} in recovery'
-                    f'run: {e}')
-        to_down_replicas = serve_state.get_replicas_at_statuses(
-            self._service_name, [serve_state.ReplicaStatus.SHUTTING_DOWN])
-        for replica_info in to_down_replicas:
+            self._launch_replica(replica_id, resources_override=None)
+
+        # _launch_replica has a FIFO queue with capacity _MAX_NUM_LAUNCH.
+        # We need to first ensure all PROVISIONING replicas are launched,
+        # since they have already been launched but may have been interrupted,
+        # and we need to restart them.
+        # That's why we process PENDING replicas after PROVISIONING replicas.
+        for replica_info in serve_state.get_replicas_at_statuses(
+                self._service_name, serve_state.ReplicaStatus.PENDING):
             replica_id = replica_info.replica_id
-            try:
-                self._terminate_replica(replica_id,
-                                        sync_down_logs=False,
-                                        purge=True,
-                                        replica_drain_delay_seconds=0)
-            # pylint: disable=broad-except
-            except Exception as e:
-                logger.error(
-                    f'Failed to terminate replica {replica_id} in recovery'
-                    f'run: {e}')
+            self._launch_replica(replica_id, resources_override=None)
+
+        for replica_info in serve_state.get_replicas_at_statuses(
+                self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
+            replica_id = replica_info.replica_id
+            self._terminate_replica(replica_id,
+                                    sync_down_logs=False,
+                                    purge=True,
+                                    replica_drain_delay_seconds=0)
 
     ################################
     # Replica management functions #
