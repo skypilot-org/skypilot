@@ -2,7 +2,6 @@
 
 import dataclasses
 import shlex
-import subprocess
 import time
 from typing import Any, Dict, List
 
@@ -56,7 +55,7 @@ class DockerLoginConfig:
 
     def process_credential(self) -> None:
         """Process a Docker credential for login.
-        
+
         Handles escaped command substitution syntax and returns the properly
         quoted string for shell execution. If the string starts with '\\$(' and
         ends with ')', it will remove the escape character, allowing the literal
