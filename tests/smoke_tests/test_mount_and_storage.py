@@ -306,7 +306,7 @@ def test_kubernetes_storage_mounts():
         test = smoke_tests_utils.Test(
             'kubernetes_storage_mounts',
             test_commands,
-            clean_command,
+            ['kubectl get po -n skypilot-system -owide', 'kubectl get pods -n skypilot-system -oyaml', *clean_command],
             timeout=20 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)
