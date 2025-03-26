@@ -64,10 +64,10 @@ class DockerLoginConfig:
         """
         # Handle escaped command substitution by removing the escape character
         if self.username.startswith('\\$(') and self.username.endswith(')'):
-            self.username = self.username[1:-1]  # Remove escape character
+            self.username = self.username[1:]  # Remove escape character
 
         if self.password.startswith('\\$(') and self.password.endswith(')'):
-            self.password = self.password[1:-1]  # Remove escape character
+            self.password = self.password[1:]  # Remove escape character
 
 
 # Copied from ray.autoscaler._private.ray_constants
