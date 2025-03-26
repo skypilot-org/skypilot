@@ -203,7 +203,7 @@ class StoreType(enum.Enum):
             return 'oci://'
         # Nebius storages use 's3://' as a prefix for various aws cli commands
         elif self == StoreType.NEBIUS:
-            return 's3://'
+            return 'nebius://'
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')

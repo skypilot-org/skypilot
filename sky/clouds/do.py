@@ -280,7 +280,7 @@ class DO(clouds.Cloud):
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
         try:
-            do_utils.client()
+            # do_utils.client()
             return {
                 f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
             }
