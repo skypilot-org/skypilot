@@ -187,6 +187,9 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         'kubectl get po -n skypilot-system -owide && '
         'kubectl get pods -n skypilot-system -oyaml && '
         'kubectl -n skypilot-system logs -l app=fusermount-server && '
+        'kubectl logs -l skypilot-head-node=1 &&'
+        'kubectl get po -l skypilot-head-node=1 -oname | xargs -I {} kubectl exec -it {} -- fusermount || true &&'
+        'kubectl get po -l skypilot-head-node=1 -oname | xargs -I {} kubectl exec -it {} -- ls -l /bin/fusermount || true &&'
         f'sky down -y {cluster_name} && '
         f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
         f'sky storage delete -y {storage_name}')
