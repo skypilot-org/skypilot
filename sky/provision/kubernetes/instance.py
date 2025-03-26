@@ -85,7 +85,7 @@ def is_high_availability_cluster_by_kubectl(
     `kubectl get deployment`.
     """
     try:
-        kubernetes.core_api(context).list_namespaced_deployment(
+        kubernetes.apps_api(context).list_namespaced_deployment(
             namespace, label_selector=ray_tag_filter(cluster_name))
     except kubernetes.api_exception():
         return False
@@ -604,13 +604,18 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         cluster_name_on_cloud, context, namespace)
     if is_provisioned_cluster_ha != to_create_deployment:
         ha_str = lambda x: 'high availability' if x else 'non-high availability'
-        raise RuntimeError(
+        message = (
             f'The cluster "{cluster_name_on_cloud}" is configured to be '
             f'{ha_str(to_create_deployment)} but the cluster has already been '
             f'provisioned as {ha_str(is_provisioned_cluster_ha)}. '
             'If you want to make the provisioned cluster '
             f'{ha_str(to_create_deployment)}, please first down the cluster '
             'and then up the cluster again.')
+        # TODO(andyl): Currently the exceptions raised inside the provisioner
+        # are hided as `StopFailoverError` and not shown to the user.
+        # We use `logger.error` as a temporary solution.
+        logger.error(message)
+        raise RuntimeError(message)
 
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
