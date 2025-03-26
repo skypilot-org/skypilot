@@ -19,7 +19,7 @@ service:
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
-  # load_balancing_policy: proximate_first
+  load_balancing_policy: prefix_tree
   external_load_balancers:
     - resources:
         cloud: aws

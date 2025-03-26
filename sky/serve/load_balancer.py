@@ -1,8 +1,10 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
 import asyncio
+import collections
 import copy
 import logging
 import time
+import traceback
 from typing import Dict, Generic, List, Optional, Tuple, TypeVar
 
 import aiohttp
@@ -29,6 +31,7 @@ _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
 # indicator for available replicas.
 _USE_IE_QUEUE_INDICATOR = True
 _IE_QUEUE_PROBE_INTERVAL = 0.2
+_MIN_STEAL_INTERVAL = 1.0
 
 
 class QueueSizeFilter(logging.Filter):
@@ -152,6 +155,10 @@ class ClientPool:
     def ready_replicas(self) -> List[str]:
         return self._load_balancing_policy.ready_replicas
 
+    async def available_replicas(self) -> List[str]:
+        async with self._lock:
+            return self._available_replicas
+
     async def get_client(self, url: str) -> Optional[httpx.AsyncClient]:
         async with self._lock:
             return self._pool.get(url, None)
@@ -172,11 +179,18 @@ class ClientPool:
         async with self._lock:
             self.set_replica_unavailable_no_lock(url)
 
+    async def set_all_replicas_unavailable_except(self,
+                                                  urls: List[str]) -> None:
+        async with self._lock:
+            self._available_replicas = [
+                url for url in self._available_replicas if url in urls
+            ]
+
     async def pre_execute_hook(self, url: str,
                                request: fastapi.Request) -> None:
         async with self._lock:
-            logger.info(f'Active requests: {self._active_requests}, '
-                        f'Available replicas: {self._available_replicas}')
+            # logger.info(f'Active requests: {self._active_requests}, '
+            #             f'Available replicas: {self._available_replicas}')
             await self._load_balancing_policy.pre_execute_hook(url, request)
             self._active_requests[url] = self._active_requests.get(url, 0) + 1
             if _USE_IE_QUEUE_INDICATOR:
@@ -252,10 +266,24 @@ class SkyServeLoadBalancer:
         self._max_queue_size: int = max_queue_size
         self._external_host: str = serve_utils.get_external_host()
         self._handle_request_tasks: List[asyncio.Task] = []
+        # Mapping from LB URL to the number of requests to be stolen.
+        self._lb_to_steal_requests: Dict[str,
+                                         int] = collections.defaultdict(int)
+        self._lb_to_last_steal_time: Dict[str, float] = collections.defaultdict(
+            float)
+        self._steal_requests_lock: asyncio.Lock = asyncio.Lock()
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
         self._is_local_debug_mode = is_local_debug_mode
+
+    async def _lbs_with_steal_requests(self) -> List[str]:
+        """Return the LBs that have requests to steal."""
+        async with self._steal_requests_lock:
+            return [
+                lb for lb, num_steal in self._lb_to_steal_requests.items()
+                if num_steal > 0
+            ]
 
     async def _sync_with_controller(self):
         """Sync with controller periodically.
@@ -319,6 +347,13 @@ class SkyServeLoadBalancer:
                     logger.info(f'Available LB URLs: {all_lb_urls}')
                     close_client_tasks.extend(
                         await self._lb_pool.refresh_with_new_urls(all_lb_urls))
+                    await self._lb_pool.set_all_replicas_unavailable_except(
+                        await self._lbs_with_steal_requests())
+                    async with self._steal_requests_lock:
+                        available_lbs = await self._lb_pool.available_replicas()
+                        logger.info(f'LBs with steal requests: '
+                                    f'{self._lb_to_steal_requests}, '
+                                    f'Available LBs: {available_lbs}')
 
             await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
             # Await those tasks after the interval to avoid blocking.
@@ -451,11 +486,10 @@ class SkyServeLoadBalancer:
                 entry: RequestQueueEntry = await self._request_queue.peek()
                 request, request_event, response_future = entry
 
-                pool_to_use = self._replica_pool
-                source_identity = 'User'
-
-                # TODO(tian): Handle no replica case.
-                if await pool_to_use.empty():
+                # TODO(tian): In this no replica case, if there is any replica
+                # in other LB region, we should let them steal instead of
+                # returning 503.
+                if await self._replica_pool.empty():
                     await self._request_queue.get_and_remove()
                     exception = fastapi.HTTPException(
                         # 503 means that the server is currently
@@ -468,7 +502,8 @@ class SkyServeLoadBalancer:
                     request_event.set()
 
                 # Attempt to find an available replica
-                ready_replica_url = await pool_to_use.select_replica(request)
+                ready_replica_url = await self._replica_pool.select_replica(
+                    request)
 
                 if ready_replica_url is not None:
                     # Process the request if a replica is available
@@ -476,7 +511,7 @@ class SkyServeLoadBalancer:
                     await self._request_queue.get_and_remove()
                     try:
                         logger.info(f'Processing queued request {request.url} '
-                                    f'from {source_identity} to '
+                                    'from User to Replica '
                                     f'{ready_replica_url}.')
                         await self._handle_requests(ready_replica_url,
                                                     entry,
@@ -485,7 +520,34 @@ class SkyServeLoadBalancer:
                         # Set exception to propagate to the waiting handler
                         response_future.set_exception(e)
                         request_event.set()
-
+                    continue
+                # Let other LBs steal requests from this LB.
+                lbs = await self._lbs_with_steal_requests()
+                if not lbs:
+                    continue
+                # TODO(tian): Maybe we can select from the local region LB and
+                # the remote region LB. Not necessarily to let them steal - some
+                # requests with high match rate might worth to wait for a while.
+                # And for low match rate, we can let them steal.
+                lb_wants_to_steal = await self._lb_pool.select_replica(request)
+                if lb_wants_to_steal is not None:
+                    await self._request_queue.get_and_remove()
+                    try:
+                        logger.info(f'Processing queued request {request.url} '
+                                    'from User to LB '
+                                    f'{lb_wants_to_steal}.')
+                        await self._handle_requests(lb_wants_to_steal,
+                                                    entry,
+                                                    is_from_lb=True)
+                        async with self._steal_requests_lock:
+                            self._lb_to_steal_requests[lb_wants_to_steal] -= 1
+                            if self._lb_to_steal_requests[
+                                    lb_wants_to_steal] <= 0:
+                                await self._lb_pool.set_replica_unavailable(
+                                    lb_wants_to_steal)
+                    except Exception as e:  # pylint: disable=broad-except
+                        response_future.set_exception(e)
+                        request_event.set()
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in queue processor: '
                              f'{common_utils.format_exception(e)}')
@@ -591,7 +653,8 @@ class SkyServeLoadBalancer:
         except Exception as e:
             # Other errors during queue processing
             logger.error(f'Error processing queued request: '
-                         f'{common_utils.format_exception(e)}')
+                         f'{common_utils.format_exception(e)}\n'
+                         f'  Traceback: {traceback.format_exc()}')
             raise fastapi.HTTPException(
                 status_code=500, detail=f'Error processing request: {str(e)}')
 
@@ -648,36 +711,64 @@ class SkyServeLoadBalancer:
         req_json = await steal_request.json()
         num_steal = req_json['num_steal']
         source_lb_url = req_json['source_lb_url']
+        if num_steal <= 0:
+            return fastapi.responses.JSONResponse(
+                status_code=200, content={'remaining_to_steal': 0})
         logger.info(f'Received steal request from {source_lb_url} with '
                     f'{num_steal} requests.')
-        for i in range(await self._request_queue.qsize()):
-            # Re-getting the queue size since it is possible the queue changed
-            # during the loop, e.g. a request from head is popped out.
-            idx = await self._request_queue.qsize() - 1 - i
-            if idx < 0:
-                break
-            entry = await self._request_queue.get(idx)
-            request, _, _ = entry
-            # Check if the request is from the source LB.
-            if request.headers.get(_IS_FROM_LB_HEADER, False):
-                continue
-            await self._request_queue.get_and_remove(idx)
-            await self._handle_requests(source_lb_url, entry, is_from_lb=True)
-            num_steal -= 1
-            if not num_steal:
-                break
-        if num_steal != 0:
-            logger.info(f'{num_steal} requests was NOT stolen and remained '
-                        f'from {source_lb_url}.')
-
-        # if num_steal:
-        #     raise fastapi.HTTPException(
-        #         status_code=429,
-        #         detail=f'Not enough requests to steal. '
-        #         f'Requested {num_steal}, but only {num_steal} requests '
-        #         f'available.')
+        # Option 1. Return immediately and let the queue processor handle it.
+        async with self._steal_requests_lock:
+            # The last steal time will be initialized to 0.0 if the key does
+            # not exist. This guarantees that the first steal request will be
+            # honored and the remaining_to_steal will be set to 0.
+            interval = time.time() - self._lb_to_last_steal_time[source_lb_url]
+            if interval > _MIN_STEAL_INTERVAL:
+                self._lb_to_steal_requests[source_lb_url] += num_steal
+                self._lb_to_last_steal_time[source_lb_url] = time.time()
+                await self._lb_pool.set_replica_available(source_lb_url)
+                remaining_to_steal = 0
+                logger.info(f'{source_lb_url} steals {num_steal} requests. '
+                            f'Current steal requests: '
+                            f'{self._lb_to_steal_requests}, '
+                            f'Last steal time: '
+                            f'{self._lb_to_last_steal_time}')
+            else:
+                logger.info(f'Not stealing requests from {source_lb_url} '
+                            f'because of the minimum steal interval ({interval}'
+                            f'/{_MIN_STEAL_INTERVAL}). Last steal time: '
+                            f'{self._lb_to_last_steal_time[source_lb_url]}')
+                remaining_to_steal = num_steal
         return fastapi.responses.JSONResponse(
-            status_code=200, content={'remaining_to_steal': num_steal})
+            status_code=200, content={'remaining_to_steal': remaining_to_steal})
+        # Option 2 (legacy implementation): Directly steal requests.
+        # for i in range(await self._request_queue.qsize()):
+        #     # Re-getting the queue size since it is possible the queue changed
+        #     # during the loop, e.g. a request from head is popped out.
+        #     idx = await self._request_queue.qsize() - 1 - i
+        #     if idx < 0:
+        #         break
+        #     entry = await self._request_queue.get(idx)
+        #     request, _, _ = entry
+        #     # Check if the request is from the source LB.
+        #     if request.headers.get(_IS_FROM_LB_HEADER, False):
+        #         continue
+        #     await self._request_queue.get_and_remove(idx)
+        #     await self._handle_requests(source_lb_url, entry, is_from_lb=True)
+        #     num_steal -= 1
+        #     if not num_steal:
+        #         break
+        # if num_steal != 0:
+        #     logger.info(f'{num_steal} requests was NOT stolen and remained '
+        #                 f'from {source_lb_url}.')
+
+        # # if num_steal:
+        # #     raise fastapi.HTTPException(
+        # #         status_code=429,
+        # #         detail=f'Not enough requests to steal. '
+        # #         f'Requested {num_steal}, but only {num_steal} requests '
+        # #         f'available.')
+        # return fastapi.responses.JSONResponse(
+        #     status_code=200, content={'remaining_to_steal': num_steal})
 
     async def _probe_ie_queue_one_replica(
             self, replica: str) -> Tuple[Optional[float], str]:
@@ -799,6 +890,9 @@ class SkyServeLoadBalancer:
 
             self._tasks.append(
                 self._loop.create_task(self._replica_pool.background_task()))
+
+            self._tasks.append(
+                self._loop.create_task(self._lb_pool.background_task()))
 
         @self._app.on_event('shutdown')
         async def shutdown():

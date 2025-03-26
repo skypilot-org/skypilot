@@ -434,6 +434,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         text = await _get_text(request)
         if text is None:
             logger.warning(f'No text found in request {_request_repr(request)} '
-                           'when executing pre_execute_hook.')
+                           'when executing pre_execute_hook. Request json: '
+                           f'{await request.body()}')
             return
         await self.tree.insert(text, replica_url)

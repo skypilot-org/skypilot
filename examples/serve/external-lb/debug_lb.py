@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import multiprocessing
 import random
 import threading
@@ -13,8 +14,14 @@ PROCESSES = []
 CONTROLLER_PORT = 20018
 LB_PORTS = [6001, 6002]
 WORD_TO_STREAM = 'Hello world! Nice to meet you!'
-TIME_TO_SLEEP = 0.2
+TIME_TO_SLEEP = 1.2
 REPLICA_KEY = 'self'
+
+
+class MetricsFilter(logging.Filter):
+
+    def filter(self, record):
+        return '/metrics' not in record.getMessage()
 
 
 def _start_streaming_replica(port):
@@ -41,7 +48,9 @@ def _start_streaming_replica(port):
 
     @app.get('/metrics')
     async def metrics():
-        return {'gauge_gpu_cache_usage': random.choice([0.2, 0.3, 0.5])}
+        return fastapi.responses.PlainTextResponse(
+            "# HELP vllm:num_requests_waiting Number of requests waiting in queue\n# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0.0\n"
+        )
 
     @app.get('/non-stream')
     async def non_stream():
@@ -51,6 +60,13 @@ def _start_streaming_replica(port):
     async def error():
         raise fastapi.HTTPException(status_code=500,
                                     detail='Internal Server Error')
+
+    @app.on_event('startup')
+    def on_startup():
+        uvicorn_access_logger = logging.getLogger('uvicorn.access')
+        for handler in uvicorn_access_logger.handlers:
+            # handler.setFormatter(sky_logging.FORMATTER)
+            handler.addFilter(MetricsFilter())
 
     uvicorn.run(app, host='0.0.0.0', port=port)
 
@@ -110,8 +126,8 @@ def _start_lb_in_process(lb_port):
     lb = load_balancer.SkyServeLoadBalancer(
         controller_url=f'http://0.0.0.0:{CONTROLLER_PORT}',
         load_balancer_port=lb_port,
-        # meta_load_balancing_policy_name='proximate_first',
-        load_balancing_policy_name='consistent_hashing',
+        meta_load_balancing_policy_name='prefix_tree',
+        load_balancing_policy_name='prefix_tree',
         # load_balancing_policy_name='least_load',
         region=f'{REPLICA_KEY}-{lb_port}',
         max_concurrent_requests=2,
