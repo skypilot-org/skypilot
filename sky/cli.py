@@ -1472,6 +1472,7 @@ def _handle_services_request(
         service_names: Optional[List[str]],
         show_all: bool,
         show_endpoint: bool,
+        use_endpoint_cache: bool,
         is_called_by_user: bool = False) -> Tuple[Optional[int], str]:
     """Get service statuses.
 
@@ -1479,6 +1480,8 @@ def _handle_services_request(
         service_names: If not None, only show the statuses of these services.
         show_all: Show all information of each service.
         show_endpoint: If True, only show the endpoint of the service.
+        use_endpoint_cache: If True, return the endpoint of the service stored
+            in the cache. Only used when show_endpoint is True.
         is_called_by_user: If this function is called by user directly, or an
             internal call.
 
@@ -1919,6 +1922,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         service_names=None,
                         show_all=False,
                         show_endpoint=False,
+                        use_endpoint_cache=False,
                         is_called_by_user=False)
                 except KeyboardInterrupt:
                     sdk.api_cancel(service_status_request_id, silent=True)
@@ -4518,15 +4522,23 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
               is_flag=True,
               required=False,
               help='Show service endpoint.')
+@click.option('--force-refresh',
+              default=False,
+              is_flag=True,
+              required=False,
+              help='Force refresh of endpoint cache.')
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
+def serve_status(verbose: bool, endpoint: bool, force_refresh: bool,
+                 service_names: List[str]):
     """Show statuses of SkyServe services.
 
     Show detailed statuses of one or more services. If SERVICE_NAME is not
     provided, show all services' status. If --endpoint is specified, output
-    the endpoint of the service only.
+    the endpoint of the service only. When the command is invoked with
+    --endpoint, the returned endpoint will be cached for future invocations.
+    The cache can be refreshed by using the --force-refresh flag.
 
     Each service can have one of the following statuses:
 
@@ -4612,6 +4624,12 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
       \b
       # Only show status of my-service
       sky serve status my-service
+      \b
+      # Show endpoint only
+      sky serve status --endpoint
+      \b
+      # Show endpoint only (with refresh)
+      sky serve status --endpoint --force-refresh
     """
     service_names_to_query: Optional[List[str]] = service_names
     if not service_names:
@@ -4619,10 +4637,12 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
         service_status_request_id = serve_lib.status(service_names_to_query)
+        use_cache = not force_refresh
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
                                           show_all=verbose,
                                           show_endpoint=endpoint,
+                                          use_endpoint_cache=use_cache,
                                           is_called_by_user=True)
 
     if not endpoint:
