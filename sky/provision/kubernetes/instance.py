@@ -86,7 +86,7 @@ def is_high_availability_cluster_by_kubectl(
     """
     try:
         kubernetes.apps_api(context).list_namespaced_deployment(
-            namespace, label_selector=ray_tag_filter(cluster_name))
+            namespace, label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
     except kubernetes.api_exception():
         return False
     return True
@@ -604,6 +604,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         cluster_name_on_cloud, context, namespace)
     if is_provisioned_cluster_ha != to_create_deployment:
         ha_str = lambda x: 'high availability' if x else 'non-high availability'
+
         message = (
             f'The cluster "{cluster_name_on_cloud}" is configured to be '
             f'{ha_str(to_create_deployment)} but the cluster has already been '
