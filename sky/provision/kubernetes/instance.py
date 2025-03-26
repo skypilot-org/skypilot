@@ -86,7 +86,8 @@ def is_high_availability_cluster_by_kubectl(
     """
     try:
         kubernetes.apps_api(context).list_namespaced_deployment(
-            namespace, label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
+            namespace,
+            label_selector=f'{TAG_SKYPILOT_CLUSTER_NAME}={cluster_name}')
     except kubernetes.api_exception():
         return False
     return True
