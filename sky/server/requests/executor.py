@@ -338,8 +338,6 @@ class RequestWorker:
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
         signal.signal(signal.SIGTERM, _sigterm_handler)
-        proc_group = f'{self.schedule_type.value}'
-        setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
         queue = _get_queue(self.schedule_type)
 
         # Use concurrent.futures.ProcessPoolExecutor instead of
@@ -349,11 +347,7 @@ class RequestWorker:
         # the overhead of forking a new process for each request, which can be
         # about 1s delay.
         try:
-            executor = BurstableProcessPoolExecutor(
-                garanteed_workers=self.garanteed_parallelism,
-                burst_workers=self.burstable_parallelism,
-                initializer=executor_initializer,
-                initargs=(proc_group,))
+            executor = self.executor()
             while True:
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
@@ -368,6 +362,23 @@ class RequestWorker:
             # to avoid broken state in such cases.
             logger.info(f'[{self}] Worker process interrupted')
             executor.shutdown()
+    
+    def executor(self) -> ProcessPoolExecutor:
+        proc_group = f'{self.schedule_type.value}'
+        setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
+        if self.garanteed_parallelism > 0:
+            return BurstableProcessPoolExecutor(
+                garanteed_workers=self.garanteed_parallelism,
+                burst_workers=self.burstable_parallelism,
+                initializer=executor_initializer,
+                initargs=(proc_group,))
+        else:
+            # For low resource mode, use a disposable pool.
+            return ProcessPoolExecutor(
+                max_workers=self.burstable_parallelism,
+                reuse_worker=False,
+                initializer=executor_initializer,
+                initargs=(proc_group,))
 
 
 @annotations.lru_cache(scope='global', maxsize=None)
@@ -556,20 +567,52 @@ def schedule_request(
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
-    """Start the request workers."""
+    """Start the request workers.
+
+    Args:
+        deploy: If True, indicates the API server is deployed and have dedicated 
+                resources.
+    """
     # Determine the job capacity of the workers based on the system resources.
     cpu_count = common_utils.get_cpu_count()
     mem_size_gb = common_utils.get_mem_size_gb()
     mem_size_gb = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
+    # Runs in low resource mode if the available memory is less than
+    # server_constants.MIN_AVAIL_MEM_GB.
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
-    logger.info(
-        f'SkyPilot API server will start {max_parallel_for_long} workers for '
-        f'long requests and will allow at max '
-        f'{max_parallel_for_short} short requests in parallel.')
+    if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
+        if deploy:
+            # For deployment, we require at the min available memory to be
+            # met for stable operation.
+            raise RuntimeError(
+                f'Not enough memory to deploy the API server. '
+                f'{mem_size_gb}GB available, '
+                f'but {server_constants.MIN_AVAIL_MEM_GB}GB required.'
+            )
+        else:
+            # Permanent worker process may have significant memory consumption
+            # after running commands like `sky check`, so we don't start any
+            # permanent workers in low resource local mode. This mimics the
+            # behavior of local sky CLI before API server was introduced, where
+            # the CLI will start new process everytime and never reject to start
+            # due to resource constraints.
+            # Note that the refresh daemon will still occupy one worker
+            # permanently because it never exits.
+            max_parallel_for_long = 0
+            max_parallel_for_short = 0
+            logger.warning(
+                'SkyPilot API server will run in low resource mode because '
+                'the available memory is less than '
+                f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
+    else:
+        logger.info(
+            f'SkyPilot API server will start {max_parallel_for_long} workers for '
+            f'long requests and will allow at max '
+            f'{max_parallel_for_short} short requests in parallel.')
 
     sub_procs = []
     # Setup the queues.
