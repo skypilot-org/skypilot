@@ -193,7 +193,8 @@ def _get_cluster_config_template(cloud):
         clouds.Vsphere: 'vsphere-ray.yml.j2',
         clouds.Vast: 'vast-ray.yml.j2',
         clouds.Fluidstack: 'fluidstack-ray.yml.j2',
-        clouds.Nebius: 'nebius-ray.yml.j2'
+        clouds.Nebius: 'nebius-ray.yml.j2',
+        clouds.Simplepod: 'simplepod-ray.yml.j2'
     }
     return cloud_to_template[type(cloud)]
 
