@@ -17,13 +17,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
-import psutil
 from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
@@ -40,8 +40,12 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import psutil
+
     import sky
     from sky import dag as dag_lib
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -125,6 +129,11 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        # This can happen if the cluster was preempted and background status
+        # refresh already noticed and cleaned it up.
+        logger.info(f'Cluster {cluster_name} not found.')
+        return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:

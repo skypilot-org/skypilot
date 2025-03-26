@@ -192,6 +192,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     task = task_lib.Task.from_yaml(tmp_task_yaml)
     # Already checked before submit to controller.
     assert task.service is not None, task
+    service_spec = task.service
 
     def is_recovery_mode(service_name: str) -> bool:
         """Check if service exists in database to determine recovery mode.
@@ -202,14 +203,12 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     is_recovery = is_recovery_mode(service_name)
     logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
-    if not is_recovery:
-        if len(serve_state.get_services()) >= serve_utils.NUM_SERVICE_THRESHOLD:
+    if is_recovery:
+        if (len(serve_state.get_services()) >=
+                serve_utils.get_num_service_threshold()):
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
                 raise RuntimeError('Max number of services reached.')
-
-        service_spec = task.service
-        assert service_spec is not None, task
         success = serve_state.add_service(
             service_name,
             controller_job_id=job_id,
@@ -225,6 +224,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Service {service_name} already exists.')
 
+    if not is_recovery:
         # Add initial version information to the service state.
         serve_state.add_or_update_version(service_name,
                                           constants.INITIAL_VERSION,

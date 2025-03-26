@@ -810,6 +810,7 @@ def test_skyserve_update_autoscale(generic_cloud: str):
         )
         smoke_tests_utils.run_one_test(test)
 
+
 @pytest.mark.no_fluidstack  # Spot instances are note supported by Fluidstack
 @pytest.mark.serve
 @pytest.mark.no_kubernetes  # Spot instances are not supported in Kubernetes

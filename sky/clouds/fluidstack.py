@@ -3,9 +3,8 @@ import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
-import requests
-
 from sky import clouds
+from sky.adaptors import common as adaptors_common
 from sky.clouds import service_catalog
 from sky.provision.fluidstack import fluidstack_utils
 from sky.utils import registry
@@ -18,8 +17,12 @@ _CREDENTIAL_FILES = [
     fluidstack_utils.FLUIDSTACK_API_KEY_PATH
 ]
 if typing.TYPE_CHECKING:
+    import requests
+
     # Renaming to avoid shadowing variables.
     from sky import resources as resources_lib
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 
 @registry.CLOUD_REGISTRY.register
@@ -258,8 +261,9 @@ class Fluidstack(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        FluidStack's compute service."""
         try:
             assert os.path.exists(
                 os.path.expanduser(fluidstack_utils.FLUIDSTACK_API_KEY_PATH))

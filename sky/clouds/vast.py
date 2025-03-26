@@ -236,8 +236,9 @@ class Vast(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for Vast. """
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has valid credentials for
+        Vast's compute service. """
         try:
             import vastai_sdk as _vast  # pylint: disable=import-outside-toplevel
             vast = _vast.VastAI()

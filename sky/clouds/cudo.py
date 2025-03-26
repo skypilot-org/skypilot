@@ -269,8 +269,9 @@ class Cudo(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Cudo's compute service."""
         try:
             # pylint: disable=import-outside-toplevel,unused-import
             from cudo_compute import cudo_api

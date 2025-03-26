@@ -19,12 +19,7 @@ import uuid
 import colorama
 import filelock
 from packaging import version
-import requests
-from requests import adapters
-from requests.packages.urllib3.util import retry as retry_lib
-import rich.progress as rich_progress
 from typing_extensions import Literal
-import yaml
 
 import sky
 from sky import authentication as auth
@@ -36,6 +31,7 @@ from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -56,10 +52,23 @@ from sky.utils import timeline
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import requests
+    from requests import adapters
+    from requests.packages.urllib3.util import retry as retry_lib
+    import rich.progress as rich_progress
+    import yaml
+
     from sky import resources as resources_lib
     from sky import task as task_lib
     from sky.backends import cloud_vm_ray_backend
     from sky.backends import local_docker_backend
+else:
+    yaml = adaptors_common.LazyImport('yaml')
+    requests = adaptors_common.LazyImport('requests')
+    rich_progress = adaptors_common.LazyImport('rich.progress')
+    adapters = adaptors_common.LazyImport('requests.adapters')
+    retry_lib = adaptors_common.LazyImport(
+        'requests.packages.urllib3.util.retry')
 
 logger = sky_logging.init_logger(__name__)
 

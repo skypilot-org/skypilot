@@ -14,10 +14,8 @@ from typing import Dict, Generator, Iterable
 import uuid
 import zipfile
 
-import httpx
-import requests
-
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.data import storage_utils
 from sky.server import common as server_common
@@ -29,8 +27,14 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import httpx
+    import requests
+
     import sky
     import sky.dag as dag_lib
+else:
+    httpx = adaptors_common.LazyImport('httpx')
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -143,7 +147,7 @@ class FileChunkIterator:
 
 @dataclasses.dataclass
 class UploadChunkParams:
-    client: httpx.Client
+    client: 'httpx.Client'
     upload_id: str
     chunk_index: int
     total_chunks: int

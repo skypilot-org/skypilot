@@ -565,10 +565,22 @@ class AWS(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this AWS's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to this AWS's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to S3.
+        return cls._check_credentials()
+
+    @classmethod
     @annotations.lru_cache(scope='global',
                            maxsize=1)  # Cache since getting identity is slow.
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """Checks if the user has access credentials to this cloud."""
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to AWS."""
 
         dependency_installation_hints = (
             'AWS dependencies are not installed. '

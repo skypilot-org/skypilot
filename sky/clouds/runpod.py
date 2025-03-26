@@ -250,7 +250,13 @@ class RunPod(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        RunPod's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """ Verify that the user has valid credentials for RunPod. """
         try:
             import runpod  # pylint: disable=import-outside-toplevel
