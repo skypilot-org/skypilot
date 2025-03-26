@@ -215,7 +215,8 @@ def terminate_replica(service_name: str, replica_id: int,
 @server_common.check_server_healthy_or_start
 def status(
         service_names: Optional[Union[str,
-                                      List[str]]]) -> server_common.RequestId:
+                                      List[str]]],
+        use_endpoint_cache: bool) -> server_common.RequestId:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -261,6 +262,9 @@ def status(
     Args:
         service_names: a single or a list of service names to query. If None,
             query all services.
+        use_endpoint_cache: flag whether to use endpoint caching. It is
+            important to note that other values in the cache apart from the
+            endpoint may be (more) stale.
 
     Returns:
         The request ID of the status request.
@@ -274,7 +278,8 @@ def status(
         RuntimeError: if failed to get the service status.
         exceptions.ClusterNotUpError: if the sky serve controller is not up.
     """
-    body = payloads.ServeStatusBody(service_names=service_names,)
+    body = payloads.ServeStatusBody(service_names=service_names,
+                                    use_endpoint_cache=use_endpoint_cache)
     response = requests.post(
         f'{server_common.get_server_url()}/serve/status',
         json=json.loads(body.model_dump_json()),

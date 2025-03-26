@@ -4633,7 +4633,9 @@ def serve_status(verbose: bool, endpoint: bool, force_refresh: bool,
         service_names_to_query = None
     # This won't pollute the output of --endpoint.
     with rich_utils.client_status('[cyan]Checking services[/]'):
-        service_status_request_id = serve_lib.status(service_names_to_query)
+        use_endpoint_cache = endpoint and not force_refresh
+        service_status_request_id = serve_lib.status(service_names_to_query,
+                                                     use_endpoint_cache)
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
                                           show_all=verbose,

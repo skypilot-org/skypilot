@@ -639,7 +639,8 @@ def terminate_replica(service_name: str, replica_id: int, purge: bool) -> None:
 @usage_lib.entrypoint
 def status(
     service_names: Optional[Union[str,
-                                  List[str]]] = None) -> List[Dict[str, Any]]:
+                                  List[str]]] = None,
+    use_endpoint_cache: bool = False) -> List[Dict[str, Any]]:
     """Gets service statuses.
 
     If service_names is given, return those services. Otherwise, return all
@@ -686,10 +687,14 @@ def status(
     Args:
         service_names: a single or a list of service names to query. If None,
             query all services.
+        use_endpoint_cache: whether endpoint caching is used (for --endpoint).
 
     Returns:
         A list of dicts, with each dict containing the information of a service.
         If a service is not found, it will be omitted from the returned list.
+        When use_endpoint_cache is True, the endpoint for the service will be
+        retrieved from the cache (if exists). Returned dictionary will leave
+        some fields blank (ie: uptime, active_versions, etc).
 
     Raises:
         RuntimeError: if failed to get the service status.
@@ -698,6 +703,8 @@ def status(
     if service_names is not None:
         if isinstance(service_names, str):
             service_names = [service_names]
+
+    # TODO(kyuds): implement caching logic here. 
 
     try:
         backend_utils.check_network_connection()
