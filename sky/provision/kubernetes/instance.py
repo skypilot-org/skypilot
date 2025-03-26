@@ -87,7 +87,7 @@ def is_high_availability_cluster_by_kubectl(
     try:
         kubernetes.core_api(context).list_namespaced_deployment(
             namespace, label_selector=ray_tag_filter(cluster_name))
-    except Exception:
+    except kubernetes.api_exception():
         return False
     return True
 
