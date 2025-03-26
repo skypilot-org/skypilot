@@ -16,7 +16,7 @@ from typing import Optional
 import requests
 
 ENDPOINT = 'https://api.simplemining.net/instances/market/list?rentalStatus=active'
-DEFAULT_SIMPLEPOD_KEYS_PATH = os.path.expanduser('~/.simplepod_cloud/simplepod_keys')
+DEFAULT_SIMPLEPOD_KEYS_PATH = os.path.expanduser('~/.simplepod/simplepod_keys')
 
 def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
     headers = {'X-AUTH-TOKEN': DEFAULT_SIMPLEPOD_KEYS_PATH}
