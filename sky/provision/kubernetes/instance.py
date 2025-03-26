@@ -62,16 +62,34 @@ def infer_deployment_name_from_pods(pod_name: str) -> str:
     return pod_name[:pod_name.rfind('-')]
 
 
-def is_high_availability_controller(cluster_name: str) -> bool:
+def is_high_availability_controller_by_name(cluster_name: str) -> bool:
     """Check if a cluster is a high availability controller based on naming
     pattern.
     """
     # TODO(andyl): We should let config['cluster_name'] be the deployment name.
     # Or even k8s identifier like 'deployment/sky-serve-controller-deployment'.
-    # So that we can further avoid checking the naming pattern here.
+    # Otherwise, we have no place to store the custom info that the cluster is
+    # high availability.
     # But this means we need to change the update_cluster_info logic and
     # what stored in handle.cluster_name_on_cloud as well.
-    return 'deployment' in cluster_name
+    # Is it worth to call `kubectl get deployment` to check if the cluster is
+    # high availability? Like `is_high_availability_cluster_by_kubectl`?
+    return '-deployment-' in cluster_name
+
+
+def is_high_availability_cluster_by_kubectl(
+        cluster_name: str,
+        context: Optional[str] = None,
+        namespace: Optional[str] = None) -> bool:
+    """Check if a cluster is a high availability controller by calling
+    `kubectl get deployment`.
+    """
+    try:
+        kubernetes.core_api(context).list_namespaced_deployment(
+            namespace, label_selector=ray_tag_filter(cluster_name))
+    except Exception:
+        return False
+    return True
 
 
 def _formatted_resource_requirements(pod_or_spec: Union[Any, dict]) -> str:
@@ -582,6 +600,18 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
     logger.debug(f'Found {len(running_pods)} existing pods: '
                  f'{list(running_pods.keys())}')
 
+    is_provisioned_cluster_ha = is_high_availability_cluster_by_kubectl(
+        cluster_name_on_cloud, context, namespace)
+    if is_provisioned_cluster_ha != to_create_deployment:
+        ha_str = lambda x: 'high availability' if x else 'non-high availability'
+        raise RuntimeError(
+            f'The cluster "{cluster_name_on_cloud}" is configured to be '
+            f'{ha_str(to_create_deployment)} but the cluster has already been '
+            f'provisioned as {ha_str(is_provisioned_cluster_ha)}. '
+            'If you want to make the provisioned cluster '
+            f'{ha_str(to_create_deployment)}, please first down the cluster '
+            'and then up the cluster again.')
+
     to_start_count = config.count - len(running_pods)
     if to_start_count < 0:
         raise RuntimeError(
@@ -915,7 +945,7 @@ def terminate_instances(
             logger.warning('terminate_instances: Error occurred when analyzing '
                            f'SSH Jump pod: {e}')
 
-    if is_high_availability_controller(cluster_name_on_cloud):
+    if is_high_availability_controller_by_name(cluster_name_on_cloud):
         # For high availability controllers, terminate the deployment
         _terminate_deployment(cluster_name_on_cloud, namespace, context)
         return
@@ -1073,7 +1103,8 @@ def get_command_runners(
     if cluster_info.head_instance_id is not None:
         pod_name = cluster_info.head_instance_id
         deployment = (infer_deployment_name_from_pods(pod_name)
-                      if is_high_availability_controller(pod_name) else None)
+                      if is_high_availability_controller_by_name(pod_name) else
+                      None)
         node_list = [((namespace, context), pod_name)]
         head_runner = command_runner.KubernetesCommandRunner(
             node_list[0], deployment=deployment, **credentials)

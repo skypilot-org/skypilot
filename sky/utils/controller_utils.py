@@ -192,7 +192,7 @@ class Controllers(enum.Enum):
 
 def high_availability_specified(cluster_name: Optional[str],
                                 skip_warning: bool = True) -> bool:
-    """Check if the controller high availability is supported.
+    """Check if the controller high availability is specified in user config.
     """
     controller = Controllers.from_name(cluster_name)
     if controller is None:

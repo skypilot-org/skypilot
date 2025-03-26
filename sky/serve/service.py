@@ -224,7 +224,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Service {service_name} already exists.')
 
-    if not is_recovery:
         # Add initial version information to the service state.
         serve_state.add_or_update_version(service_name,
                                           constants.INITIAL_VERSION,
