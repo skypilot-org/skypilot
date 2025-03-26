@@ -18,7 +18,6 @@ The number of the workers is determined by the system resources.
 
 See the [README.md](../README.md) for detailed architecture of the executor.
 """
-import concurrent.futures
 import contextlib
 import enum
 import multiprocessing
@@ -40,13 +39,12 @@ from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
 from sky.server.requests import preconditions
+from sky.server.requests import process
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
-from sky.utils import atomic
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
@@ -156,126 +154,6 @@ class RequestQueue:
 queue_backend = QueueBackend.MULTIPROCESSING
 
 
-class ProcessPoolExecutor(concurrent.futures.ProcessPoolExecutor):
-    """A custom ProcessPoolExecutor with additional supports for skypilot.
-
-    The additional supports include:
-    1. Disposable workers: support control whether the worker process should
-       exit after complete a task.
-    2. Idle check: support check if there are any idle workers.
-    3. Proactive shutdown: SIGTERM worker processes when the executor is
-       shutting down instead of indefinitely waiting.
-    """
-
-    # Control whether to reuse the worker process, workers processes are
-    # disposable if `reuse_worker` is False.
-    # This is a workaround for Python 3.10 since `max_tasks_per_child` was
-    # introduced in 3.11.
-    # Ref: https://docs.python.org/3/library/concurrent.futures.html#concurrent.futures.ProcessPoolExecutor # pylint: disable=line-too-long
-    # TODO(aylei): use the official `max_tasks_per_child` when upgrade to 3.11
-    _reuse_worker: bool
-
-    # The number of workers that are handling tasks, atomicity across
-    # multiple threads is sufficient since the idleness check is best-effort
-    # and does not affect the correctness.
-    # E.g. the following case is totally fine:
-    # 1. Thread 1 checks running == max_workers
-    # 2. Thread 2 decrements running
-    # 3. Thread 1 schedules the task to other pool even if the pool is
-    #    currently idle.
-    running: atomic.Int = atomic.Int(0)
-
-    def __init__(self, max_workers: int, reuse_worker: bool = True, **kwargs):
-        logger.info(f'Initializing ProcessPoolExecutor with {max_workers} '
-                    f'workers and reuse_worker={reuse_worker}')
-        super().__init__(max_workers=max_workers, **kwargs)
-        self._reuse_worker = reuse_worker
-        self.max_workers = max_workers
-
-    def submit(self, fn, *args, **kwargs) -> concurrent.futures.Future:
-        """Submit a task for execution.
-
-        If reuse_worker is False, wraps the function to exit after completion.
-        """
-        self.running.increment()
-        if not self._reuse_worker:
-            # Wrap the function to exit the process after completion
-            def wrapped_fn(*fn_args, **fn_kwargs):
-                try:
-                    fn(*fn_args, **fn_kwargs)
-                    sys.exit(0)
-                except Exception as e:  # pylint: disable=broad-except
-                    # We expect the caller to handle the all exceptions in fn,
-                    # but just in case.
-                    logger.error(f'Error in disposable: {e}')
-                    sys.exit(1)
-
-            fn = wrapped_fn
-        logger.info(f'Submitting task to ProcessPoolExecutor with {fn}')
-        future = super().submit(fn, *args, **kwargs)
-        future.add_done_callback(lambda _: self.running.decrement())
-        return future
-
-    def has_idle_workers(self) -> bool:
-        """Check if there are any idle workers."""
-        return self.running.get() < self.max_workers
-
-    def shutdown(self, wait: bool = True) -> None:
-        """Shutdown the executor."""
-        # Here wait means wait for the proactive cancellation complete.
-        # TODO(aylei): we may support wait=True in the future if needed.
-        assert wait is True, 'wait=False is not supported'
-        executor_processes = list(self._processes.values())
-        # Shutdown the executor so that executor process can exit once the
-        # running task is finished or interrupted.
-        super().shutdown(wait=False)
-        # Proactively interrupt the running task to avoid indefinite waiting.
-        subprocess_utils.run_in_parallel(
-            subprocess_utils.kill_process_with_grace_period,
-            executor_processes,
-            num_threads=len(executor_processes))
-
-
-class BurstableProcessPoolExecutor(ProcessPoolExecutor):
-    """A ProcessPoolExecutor that supports bursting disposable workers."""
-
-    # _burst_pool is a ProcessPoolExecutor that is used to run burst requests.
-    _burst_pool: Optional[ProcessPoolExecutor] = None
-
-    def __init__(self,
-                 garanteed_workers: int,
-                 burst_workers: int = 0,
-                 **kwargs):
-        super().__init__(max_workers=garanteed_workers, **kwargs)
-        if burst_workers > 0:
-            self._burst_pool = ProcessPoolExecutor(max_workers=burst_workers,
-                                                   reuse_worker=False)
-
-    def submit(self, fn, *args, **kwargs) -> concurrent.futures.Future:
-        """Submit a task for execution.
-
-        If the current pool has no idle workers AND there are idle workers
-        in the burst pool, use the idle workers in the burst pool to run the
-        task. Queue the task to the current pool otherwise.
-        """
-
-        no_idle_garanteed = not self.has_idle_workers()
-        has_idle_burst = (self._burst_pool is not None and
-                          self._burst_pool.has_idle_workers())
-        if no_idle_garanteed and has_idle_burst:
-            # Make linter happy.
-            assert self._burst_pool is not None
-            return self._burst_pool.submit(fn, *args, **kwargs)
-        return super().submit(fn, *args, **kwargs)
-
-    def shutdown(self, wait: bool = True) -> None:
-        """Shutdown the executor."""
-
-        if self._burst_pool is not None:
-            self._burst_pool.shutdown(wait=wait)
-        super().shutdown(wait=wait)
-
-
 def executor_initializer(proc_group: str):
     setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
                               f'{multiprocessing.current_process().pid}')
@@ -308,7 +186,7 @@ class RequestWorker:
     def __str__(self) -> str:
         return f'Worker(schedule_type={self.schedule_type.value})'
 
-    def process_request(self, executor: ProcessPoolExecutor,
+    def process_request(self, executor: process.BurstableExecutor,
                         queue: RequestQueue) -> None:
         try:
             request_element = queue.get()
@@ -327,8 +205,8 @@ class RequestWorker:
             # multiple requests can share the same process pid, which may cause
             # issues with SkyPilot core functions if they rely on the exit of
             # the process, such as subprocess_daemon.py.
-            executor.submit(_request_execution_wrapper, request_id,
-                            ignore_return_value)
+            executor.submit_until_success(_request_execution_wrapper,
+                                          request_id, ignore_return_value)
 
             logger.info(f'[{self}] Submitted request: {request_id}')
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -366,21 +244,14 @@ class RequestWorker:
             logger.info(f'[{self}] Worker process interrupted')
             executor.shutdown()
 
-    def executor(self) -> ProcessPoolExecutor:
+    def executor(self) -> process.BurstableExecutor:
         proc_group = f'{self.schedule_type.value}'
         setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
-        if self.garanteed_parallelism > 0:
-            return BurstableProcessPoolExecutor(
-                garanteed_workers=self.garanteed_parallelism,
-                burst_workers=self.burstable_parallelism,
-                initializer=executor_initializer,
-                initargs=(proc_group,))
-        else:
-            # For low resource mode, use a disposable pool.
-            return ProcessPoolExecutor(max_workers=self.burstable_parallelism,
-                                       reuse_worker=False,
-                                       initializer=executor_initializer,
-                                       initargs=(proc_group,))
+        return process.BurstableExecutor(
+            garanteed_workers=self.garanteed_parallelism,
+            burst_workers=self.burstable_parallelism,
+            initializer=executor_initializer,
+            initargs=(proc_group,))
 
 
 @annotations.lru_cache(scope='global', maxsize=None)
