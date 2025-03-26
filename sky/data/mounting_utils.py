@@ -55,7 +55,6 @@ def get_s3_mount_cmd(bucket_name: str,
 
 
 def get_nebius_mount_cmd(nebius_profile_name: str,
-                         endpoint_url: str,
                          bucket_name: str,
                          mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
@@ -67,7 +66,6 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
     mount_cmd = (f'AWS_PROFILE={nebius_profile_name} goofys -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--endpoint {endpoint_url} '
                  f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 

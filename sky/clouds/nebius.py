@@ -24,18 +24,28 @@ _CREDENTIAL_FILES = [
 _INDENT_PREFIX = '    '
 
 
-def nebius_profile_in_aws_cred() -> bool:
-    """Checks if Nebius Object Storage profile is set in aws credentials."""
+def nebius_profile_in_aws_cred_and_config() -> bool:
+    """Checks if Nebius Object Storage profile is set in aws credentials
+    and profile."""
 
-    profile_path = os.path.expanduser('~/.aws/credentials')
-    nebius_profile_exists = False
-    if os.path.isfile(profile_path):
-        with open(profile_path, 'r', encoding='utf-8') as file:
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    nebius_profile_exists_in_credentials = False
+    if os.path.isfile(credentials_path):
+        with open(credentials_path, 'r', encoding='utf-8') as file:
             for line in file:
                 if f'[{nebius.NEBIUS_PROFILE_NAME}]' in line:
-                    nebius_profile_exists = True
+                    nebius_profile_exists_in_credentials = True
 
-    return nebius_profile_exists
+    config_path = os.path.expanduser('~/.aws/config')
+    nebius_profile_exists_in_config = False
+    if os.path.isfile(config_path):
+        with open(config_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if f'[profile {nebius.NEBIUS_PROFILE_NAME}]' in line:
+                    nebius_profile_exists_in_config = True
+
+    return (nebius_profile_exists_in_credentials and
+            nebius_profile_exists_in_config)
 
 
 @registry.CLOUD_REGISTRY.register
@@ -308,12 +318,12 @@ class Nebius(clouds.Cloud):
             with a string on unset credential.
         """
         hints = None
-        if not nebius_profile_in_aws_cred():
+        if not nebius_profile_in_aws_cred_and_config():
             hints = (f'[{nebius.NEBIUS_PROFILE_NAME}] profile '
                      'is not set in ~/.aws/credentials.')
         if hints:
             hints += ' Run the following commands:'
-            if not nebius_profile_in_aws_cred():
+            if not nebius_profile_in_aws_cred_and_config():
                 hints += (
                     f'\n{_INDENT_PREFIX}  $ pip install boto3'
                     f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius')
@@ -329,7 +339,7 @@ class Nebius(clouds.Cloud):
             for filename in _CREDENTIAL_FILES
         }
         credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
-
+        credential_file_mounts['~/.aws/config'] = '~/.aws/config'
         return credential_file_mounts
 
     @classmethod
