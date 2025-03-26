@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Optional, Set
 from sky import check as sky_check
 from sky import clouds as sky_clouds
 from sky import sky_logging
+from sky.clouds import cloud as sky_cloud
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import ux_utils
@@ -124,6 +125,7 @@ def _get_possible_location_from_task(task: 'task_lib.Task') -> List[Location]:
         # related requirements. Then we start with all enabled clouds and
         # all possible regions and zones.
         clouds_list = sky_check.get_cached_enabled_clouds_or_refresh(
+            capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=False)
         for cloud in clouds_list:
             # Create empty entry for each cloud.
