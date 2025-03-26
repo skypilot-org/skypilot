@@ -6,7 +6,7 @@ import pathlib
 import pickle
 import sqlite3
 import typing
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import colorama
 
@@ -59,6 +59,10 @@ def create_table(cursor: 'sqlite3.Cursor', conn: 'sqlite3.Connection') -> None:
         service_name TEXT,
         spec BLOB,
         PRIMARY KEY (service_name, version))""")
+    cursor.execute("""\
+        CREATE TABLE IF NOT EXISTS endpoint_cache (
+        service_name TEXT PRIMARY KEY,
+        endpoint TEXT)""")
     conn.commit()
 
     # Backward compatibility.
@@ -555,3 +559,37 @@ def delete_all_versions(service_name: str) -> None:
             """\
             DELETE FROM version_specs
             WHERE service_name=(?)""", (service_name,))
+
+# == Endpoint Cache functions ==
+def get_endpoint_cache(
+        service_names: Optional[Union[str, List[str]]] = None) -> Dict[str, str]:
+    """Gets endpoint cache values for services."""
+    if service_names is not None:
+        if isinstance(service_names, str):
+            service_names = [service_names]
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = None
+        if len(service_names) == 0:
+            rows = cursor.execute(
+                """SELECT * FROM endpoint_cache""")
+        else:
+            placeholder = ", ".join(["?"] * len(service_names))
+            rows = cursor.execute(
+                f"""\
+                SELECT * FROM endpoint_cache
+                WHERE service_name IN ({placeholder})""",
+                service_names)
+    endpoints = {}
+    for row in rows:
+        (name, endpoint) = row[:2]
+        endpoints[name] = endpoint
+    return endpoints
+
+def set_endpoint_cache(service_name: str, endpoint: str) -> None:
+    """Sets endpoint cache value for a specific service."""
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        cursor.execute(
+            """\
+            INSERT or REPLACE INTO endpoint_cache
+            (service_name, endpoint)
+            VALUES (?, ?)""", (service_name, endpoint))
