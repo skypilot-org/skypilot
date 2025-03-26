@@ -39,6 +39,7 @@ from sky.server import constants as server_constants
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
 from sky.server.requests import requests as requests_lib
 from sky.skylet import constants
 from sky.usage import usage_lib
@@ -498,13 +499,18 @@ async def launch(launch_body: payloads.LaunchBody,
 # pylint: disable=redefined-builtin
 async def exec(request: fastapi.Request, exec_body: payloads.ExecBody) -> None:
     """Executes a task on an existing cluster."""
+    cluster_name = exec_body.cluster_name
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='exec',
         request_body=exec_body,
         func=execution.exec,
+        precondition=preconditions.ClusterStartCompletePrecondition(
+            request_id=request.state.request_id,
+            cluster_name=cluster_name,
+        ),
         schedule_type=requests_lib.ScheduleType.LONG,
-        request_cluster_name=exec_body.cluster_name,
+        request_cluster_name=cluster_name,
     )
 
 
@@ -1134,6 +1140,9 @@ if __name__ == '__main__':
                 # The process may not be started yet, close it anyway.
                 proc.close()
 
+        # Terminate processes in reverse order in case dependency, especially
+        # queue server. Terminate queue server first does not affect the
+        # correctness of cleanup but introduce redundant error messages.
         subprocess_utils.run_in_parallel(cleanup,
-                                         sub_procs,
+                                         list(reversed(sub_procs)),
                                          num_threads=len(sub_procs))

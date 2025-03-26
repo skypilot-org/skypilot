@@ -5,6 +5,7 @@ name: a
 
 resources:
   cpus: 2+
+  memory: 4+
   use_spot: true
   any_of:
     - cloud: aws
@@ -24,6 +25,7 @@ name: b
 
 resources:
   cpus: 2+
+  memory: 4+
   any_of:
     - cloud: aws
     - cloud: gcp
@@ -43,7 +45,7 @@ name: eval1
 
 resources:
   cpus: 2+
-
+  memory: 4+
 setup: |
   echo setup for eval
   sleep 20
@@ -59,7 +61,7 @@ name: eval2
 
 resources:
   cpus: 2+
-
+  memory: 4+
 setup: |
   echo setup for eval
   sleep 20

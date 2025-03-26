@@ -32,6 +32,7 @@ from smoke_tests import smoke_tests_utils
 import sky
 from sky.skylet import constants
 from sky.skylet import events
+import sky.skypilot_config
 from sky.utils import common_utils
 
 
@@ -52,12 +53,12 @@ def test_minimal(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --cpus 2+ tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -100,7 +101,7 @@ def test_launch_fast(generic_cloud: str):
         'test_launch_fast',
         [
             # First launch to create the cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Second launch to test fast launch - should not reprovision
@@ -136,7 +137,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -170,7 +171,7 @@ def test_stale_job(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'stale_job',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} "echo hi"',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             f'sky stop {name} -y',
             smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
@@ -197,7 +198,7 @@ def test_aws_stale_job_manual_restart():
         'aws_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('aws', name),
-            f'sky launch -y -c {name} --cloud aws --region {region} "echo hi"',
+            f'sky launch -y -c {name} --cloud aws --region {region} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(
@@ -244,7 +245,7 @@ def test_gcp_stale_job_manual_restart():
         'gcp_stale_job_manual_restart',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} --cloud gcp --zone {zone} "echo hi"',
+            f'sky launch -y -c {name} --cloud gcp --zone {zone} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo hi"',
             f'sky exec {name} -d "echo start; sleep 10000"',
             # Stop the cluster manually.
             smoke_tests_utils.run_cloud_cmd_on_cluster(name, cmd=stop_cmd),
@@ -274,7 +275,7 @@ def test_env_check(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'env_check',
         [
-            f'sky launch -y -c {name} --cloud {generic_cloud} examples/env_check.yaml',
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/env_check.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             # Test with only setup.
             f'sky launch -y -c {name} tests/test_yamls/test_only_setup.yaml',
@@ -298,7 +299,7 @@ def test_cli_logs(generic_cloud: str):
         num_nodes = 1
     timestamp = time.time()
     test = smoke_tests_utils.Test('cli_logs', [
-        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} "echo {timestamp} 1"',
+        f'sky launch -y -c {name} --cloud {generic_cloud} --num-nodes {num_nodes} {smoke_tests_utils.LOW_RESOURCE_ARG} "echo {timestamp} 1"',
         f'sky exec {name} "echo {timestamp} 2"',
         f'sky exec {name} "echo {timestamp} 3"',
         f'sky exec {name} "echo {timestamp} 4"',
@@ -340,7 +341,8 @@ def test_core_api_sky_launch_exec(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     task = sky.Task(run="whoami")
-    task.set_resources(sky.Resources(cloud=cloud))
+    task.set_resources(
+        sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
     try:
         job_id, handle = sky.get(sky.launch(task, cluster_name=name))
         assert job_id == 1
@@ -368,7 +370,8 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
     try:
-        task = sky.Task(run="whoami").set_resources(sky.Resources(cloud=cloud))
+        task = sky.Task(run="whoami").set_resources(
+            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
         sky.launch(task,
                    cluster_name=name,
                    idle_minutes_to_autostop=1,
@@ -388,21 +391,25 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 
 def test_jobs_launch_and_logs(generic_cloud: str):
-    name = smoke_tests_utils.get_cluster_name()
-    task = sky.Task(run="echo start job; sleep 30; echo end job")
-    cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
-    task.set_resources(sky.Resources(cloud=cloud))
-    job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
-    assert handle is not None
-    try:
-        with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
-            sky.jobs.tail_logs(job_id=job_id, output_stream=f)
-            f.seek(0)
-            content = f.read()
-            assert content.count('start job') == 1
-            assert content.count('end job') == 1
-    finally:
-        sky.jobs.cancel(job_ids=[job_id])
+    # Use the context manager
+    with sky.skypilot_config.override_skypilot_config(
+            smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
+        name = smoke_tests_utils.get_cluster_name()
+        task = sky.Task(run="echo start job; sleep 30; echo end job")
+        cloud = sky.CLOUD_REGISTRY.from_str(generic_cloud)
+        task.set_resources(
+            sky.Resources(cloud=cloud, **smoke_tests_utils.LOW_RESOURCE_PARAM))
+        job_id, handle = sky.stream_and_get(sky.jobs.launch(task, name=name))
+        assert handle is not None
+        try:
+            with tempfile.TemporaryFile(mode='w+', encoding='utf-8') as f:
+                sky.jobs.tail_logs(job_id=job_id, output_stream=f)
+                f.seek(0)
+                content = f.read()
+                assert content.count('start job') == 1
+                assert content.count('end job') == 1
+        finally:
+            sky.jobs.cancel(job_ids=[job_id])
 
 
 # ---------- Testing YAML Specs ----------
@@ -715,6 +722,68 @@ def test_kubernetes_context_failover(unreachable_context):
             },
         )
         smoke_tests_utils.run_one_test(test)
+
+
+def test_launch_and_exec_async(generic_cloud: str):
+    """Test if the launch and exec commands work correctly with --async."""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test(
+        'launch_and_exec_async',
+        [
+            f'sky launch -c {name} -y --async',
+            # Async exec.
+            f'sky exec {name} echo --async',
+            # Async exec and cancel immediately.
+            (f's=$(sky exec {name} echo --async) && '
+             'echo "$s" && '
+             'cancel_cmd=$(echo "$s" | grep "To cancel the request" | '
+             'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
+             'echo "Extracted cancel command: $cancel_cmd" && '
+             '$cancel_cmd'),
+            # Sync exec must succeed after command end.
+            (
+                f's=$(sky exec {name} echo) && echo "$s" && '
+                'echo "===check exec output===" && '
+                'job_id=$(echo "$s" | grep "Job submitted, ID:" | '
+                'sed -E "s/.*Job submitted, ID: ([0-9]+).*/\\1/") && '
+                f'sky logs {name} $job_id --status | grep "SUCCEEDED" && '
+                # If job_id is 1, async_job_id will be 2, and vice versa.
+                'async_job_id=$((3-job_id)) && '
+                f'echo "===check async job===" && echo "Job ID: $async_job_id" && '
+                # Wait async job to succeed.
+                f'{smoke_tests_utils.get_cmd_wait_until_job_status_succeeded(name, "$async_job_id")}'
+            ),
+            # Cluster must be UP since the sync exec has been completed.
+            f'sky status {name} | grep "UP"',
+            # The cancelled job should not be scheduled, the job ID 3 is just
+            # not exist.
+            f'! sky logs {name} 3 --status | grep "SUCCEEDED"',
+        ],
+        teardown=f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud))
+    smoke_tests_utils.run_one_test(test)
+
+
+def test_cancel_launch_and_exec_async(generic_cloud: str):
+    """Test if async launch and exec commands work correctly when cluster is shutdown"""
+    name = smoke_tests_utils.get_cluster_name()
+    test = smoke_tests_utils.Test('cancel_launch_and_exec_async', [
+        f'sky launch -c {name} -y --cloud {generic_cloud} --async',
+        (f's=$(sky exec {name} echo --async) && '
+         'echo "$s" && '
+         'logs_cmd=$(echo "$s" | grep "Check logs with" | '
+         'sed -E "s/.*with: (sky api logs .*).*/\\1/") && '
+         'echo "Extracted logs command: $logs_cmd" && '
+         f'{smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(name, [sky.ClusterStatus.INIT, sky.ClusterStatus.UP], 30)} && '
+         f'sky down -y {name} && '
+         'log_output=$(eval $logs_cmd || true) && '
+         'echo "===logs===" && echo "$log_output" && '
+         'echo "$log_output" | grep "cancelled"'),
+    ],
+                                  teardown=f'sky down -y {name}',
+                                  timeout=smoke_tests_utils.get_timeout(
+                                      generic_cloud))
+    smoke_tests_utils.run_one_test(test)
 
 
 # ---------- Testing Exit Codes for CLI commands ----------

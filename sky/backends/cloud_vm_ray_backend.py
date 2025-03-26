@@ -38,6 +38,7 @@ from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
@@ -773,32 +774,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
-                        launchable_resources: 'resources_lib.Resources',
-                        region: 'clouds.Region',
-                        zones: Optional[List['clouds.Zone']], stdout: str,
-                        stderr: str):
-        del region, zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
-        messages = '\n  '.join(errors)
-        style = colorama.Style
-        logger.warning(f'  {style.DIM}{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, LambdaCloudError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('lambda'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -845,32 +820,6 @@ class FailoverCloudErrorHandlerV1:
         for zone in zones:  # type: ignore[union-attr]
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
-
-    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-    @staticmethod
-    def _oci_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        known_service_errors = [
-            'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
-            'LimitExceeded', 'NotAuthenticated'
-        ]
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
-            ('oci.exceptions.ServiceError' in x.strip() and any(
-                known_err in x.strip() for known_err in known_service_errors)))
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-
-        if zones is not None:
-            for zone in zones:
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -1122,6 +1071,23 @@ class FailoverCloudErrorHandlerV2:
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
+
+    @staticmethod
+    def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
+                        launchable_resources: 'resources_lib.Resources',
+                        region: 'clouds.Region',
+                        zones: Optional[List['clouds.Zone']], error: Exception):
+        output = str(error)
+        # Sometimes, lambda cloud error will list available regions.
+        if output.find('Regions with capacity available:') != -1:
+            for r in service_catalog.regions('lambda'):
+                if output.find(r.name) == -1:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(region=r.name, zone=None))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -2016,7 +1982,8 @@ class RetryingVmProvisioner(object):
         # is running. Here we check the enabled clouds and expiring credentials
         # and raise a warning to the user.
         if task.is_controller_task():
-            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                sky_cloud.CloudCapability.COMPUTE)
             expirable_clouds = backend_utils.get_expirable_clouds(
                 enabled_clouds)
 
@@ -3665,8 +3632,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # should be higher priority than the cluster requests, and we should
             # release the lock from other requests.
             exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
-            requests_lib.kill_cluster_requests(handle.cluster_name,
-                                               exclude_request_to_kill)
+            try:
+                # TODO(zhwu): we should get rid of this when it is being called
+                # internally without involving an API server, e.g., when a
+                # controller is trying to terminate a cluster.
+                requests_lib.kill_cluster_requests(handle.cluster_name,
+                                                   exclude_request_to_kill)
+            except Exception as e:  # pylint: disable=broad-except
+                # We allow the failure to kill other launch requests, because
+                # it is not critical to the cluster teardown.
+                logger.warning(
+                    'Failed to kill other launch requests for the '
+                    f'cluster {handle.cluster_name}: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
             try:
                 with filelock.FileLock(
                         lock_path,
@@ -4063,8 +4041,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # the cluster is terminated/stopped. Otherwise, it will be quite
         # confusing to see the cluster restarted immediately after it is
         # terminated/stopped, when there is a pending launch request.
-        requests_lib.kill_cluster_requests(handle.cluster_name,
-                                           exclude_request_to_kill)
+        try:
+            # TODO(zhwu): we should get rid of this when it is being called
+            # internally without involving an API server, e.g., when a
+            # controller is trying to terminate a cluster.
+            requests_lib.kill_cluster_requests(handle.cluster_name,
+                                               exclude_request_to_kill)
+        except Exception as e:  # pylint: disable=broad-except
+            # We allow the failure to kill other launch requests, because
+            # it is not critical to the cluster teardown.
+            logger.warning(
+                'Failed to kill other launch requests for the '
+                f'cluster {handle.cluster_name}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
@@ -4391,7 +4380,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.
         if handle.cluster_yaml is not None:
-            _detect_abnormal_non_terminated_nodes(handle)
+            try:
+                _detect_abnormal_non_terminated_nodes(handle)
+            except exceptions.ClusterStatusFetchingError as e:
+                if purge:
+                    msg = common_utils.format_exception(e, use_bracket=True)
+                    logger.warning(
+                        'Failed abnormal non-terminated nodes cleanup. '
+                        'Skipping and cleaning up as purge is set. '
+                        f'Details: {msg}')
+                    logger.debug(f'Full exception details: {msg}',
+                                 exc_info=True)
+                else:
+                    raise
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,

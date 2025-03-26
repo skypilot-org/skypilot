@@ -395,7 +395,21 @@ class IBM(clouds.Cloud):
         return image_size
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        IBM's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        IBM's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to IBM COS.
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         required_fields = ['iam_api_key', 'resource_group_id']

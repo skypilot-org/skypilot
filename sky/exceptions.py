@@ -24,16 +24,25 @@ MOUNT_PATH_NON_EMPTY_CODE = 42
 INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
+# Return code from bash when a command is not found
+COMMAND_NOT_FOUND_EXIT_CODE = 127
 # Architecture, such as arm64, not supported by the dependency
 ARCH_NOT_SUPPORTED_EXIT_CODE = 133
 
 
-def is_safe_exception(exc: Exception) -> bool:
+def is_safe_exception(exc: BaseException) -> bool:
     """Returns True if the exception is safe to send to clients.
 
     Safe exceptions are:
     1. Built-in exceptions
     2. SkyPilot's own exceptions
+
+    Args:
+        exc: The exception to check, accept BaseException to handle SystemExit
+            and KeyboardInterrupt.
+
+    Returns:
+        True if the exception is safe to send to clients, False otherwise.
     """
     module = type(exc).__module__
 
@@ -48,7 +57,7 @@ def is_safe_exception(exc: Exception) -> bool:
     return False
 
 
-def wrap_exception(exc: Exception) -> Exception:
+def wrap_exception(exc: BaseException) -> BaseException:
     """Wraps non-safe exceptions into SkyPilot exceptions
 
     This is used to wrap exceptions that are not safe to deserialize at clients.
@@ -64,7 +73,8 @@ def wrap_exception(exc: Exception) -> Exception:
                       error_type=type(exc).__name__)
 
 
-def serialize_exception(e: Exception) -> Dict[str, Any]:
+# Accept BaseException to handle SystemExit and KeyboardInterrupt
+def serialize_exception(e: BaseException) -> Dict[str, Any]:
     """Serialize the exception.
 
     This function also wraps any unsafe exceptions (e.g., cloud exceptions)
