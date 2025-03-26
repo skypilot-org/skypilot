@@ -31,8 +31,8 @@ from sky import global_user_state
 from sky import provision as provision_lib
 from sky import sky_logging
 from sky import skypilot_config
-from sky.provision import common
 from sky.adaptors import common as adaptors_common
+from sky.provision import common as provision_common
 from sky.provision import instance_setup
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
@@ -2936,16 +2936,17 @@ def get_endpoints(cluster: str,
                                              provider_config=config['provider'])
 
     def filter_endpoints_by_protocol(
-            port_details: Dict[int, List['common.Endpoint']]) -> Dict[int, str]:
+        port_details: Dict[int, List['provision_common.Endpoint']]
+    ) -> Dict[int, str]:
         if protocol == 'https':
             port_details = {
                 port: [
                     endpoint for endpoint in endpoints
-                    if isinstance(endpoint, common.HTTPSEndpoint)
+                    if isinstance(endpoint, provision_common.HTTPSEndpoint)
                 ] for port, endpoints in port_details.items()
             }
 
-        def add_prefix(endpoint: 'common.Endpoint') -> str:
+        def add_prefix(endpoint: 'provision_common.Endpoint') -> str:
             url = endpoint.url()
             if url.startswith(protocol):
                 return url

@@ -737,14 +737,13 @@ def status(
     for service_record in service_records:
         service_record['endpoint'] = None
         if service_record['load_balancer_port'] is not None:
-            protocol = ('https'
-                        if service_record['tls_encrypted'] else 'http')
+            protocol = ('https' if service_record['tls_encrypted'] else 'http')
             try:
                 endpoint = backend_utils.get_endpoints(
                     cluster=common.SKY_SERVE_CONTROLLER_NAME,
                     port=service_record['load_balancer_port'],
-                    protocol=protocol).get(
-                        service_record['load_balancer_port'], None)
+                    protocol=protocol).get(service_record['load_balancer_port'],
+                                           None)
             except exceptions.ClusterNotUpError:
                 pass
             else:
