@@ -569,7 +569,7 @@ def get_endpoint_cache(
             service_names = [service_names]
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = None
-        if len(service_names) == 0:
+        if service_names is None or len(service_names) == 0:
             rows = cursor.execute(
                 """SELECT * FROM endpoint_cache""")
         else:
@@ -578,11 +578,11 @@ def get_endpoint_cache(
                 f"""\
                 SELECT * FROM endpoint_cache
                 WHERE service_name IN ({placeholder})""",
-                service_names)
-    endpoints = {}
+                tuple(service_names))
+    endpoints = []
     for row in rows:
         (name, endpoint) = row[:2]
-        endpoints[name] = endpoint
+        endpoints.append({ name: endpoint })
     return endpoints
 
 def set_endpoint_cache(service_name: str, endpoint: str) -> None:
@@ -594,10 +594,20 @@ def set_endpoint_cache(service_name: str, endpoint: str) -> None:
             (service_name, endpoint)
             VALUES (?, ?)""", (service_name, endpoint))
 
-def delete_endpoint_cache(service_name: str) -> None:
-    """Removes endpoint cache (ignores missing case)."""
+def delete_endpoint_cache(
+        service_names: Optional[Union[str, List[str]]] = None) -> None:
+    """Removes endpoint cache."""
+    if service_names is None:
+        service_names = []
+    elif isinstance(service_names, str):
+        service_names = [service_names]
+
     with db_utils.safe_cursor(_DB_PATH) as cursor:
-        cursor.execute(
-            """\
-            DELETE FROM endpoint_cache
-            WHERE service_name=(?)""", (service_name,))
+        if not service_names:
+            cursor.execute("DELETE FROM endpoint_cache")
+        else:
+            placeholder = ", ".join(["?"] * len(service_names))
+            cursor.execute(
+                f"""\
+                DELETE FROM endpoint_cache
+                WHERE service_name IN ({placeholder})""", tuple(service_names))
