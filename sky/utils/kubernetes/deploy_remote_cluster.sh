@@ -42,6 +42,18 @@ USER=$2
 SSH_KEY=$3
 CONTEXT_NAME=${4:-default}
 K3S_TOKEN=mytoken  # Any string can be used as the token
+# Create temporary askpass script for sudo
+ASKPASS_BLOCK="# Create temporary askpass script
+ASKPASS_SCRIPT=\$(mktemp)
+trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
+cat > \$ASKPASS_SCRIPT << EOF
+#!/bin/bash
+echo $PASSWORD
+EOF
+chmod 700 \$ASKPASS_SCRIPT
+# Use askpass
+export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+"
 
 # Basic argument checks
 if [ -z "$IPS_FILE" ] || [ -z "$USER" ] || [ -z "$SSH_KEY" ]; then
@@ -95,16 +107,7 @@ cleanup_server_node() {
     local NODE_IP=$1
     echo -e "${YELLOW}Cleaning up head node $NODE_IP...${NC}"
     run_remote "$NODE_IP" "
-        # Create temporary askpass script
-        ASKPASS_SCRIPT=\$(mktemp)
-        trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > \$ASKPASS_SCRIPT << EOF
-#!/bin/bash
-echo "$PASSWORD"
-EOF
-        chmod 700 \$ASKPASS_SCRIPT
-        # Use askpass
-        export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+        $ASKPASS_BLOCK
         echo 'Uninstalling k3s...' &&
         sudo -A /usr/local/bin/k3s-uninstall.sh || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
@@ -117,16 +120,7 @@ cleanup_agent_node() {
     local NODE_IP=$1
     echo -e "${YELLOW}Cleaning up node $NODE_IP...${NC}"
     run_remote "$NODE_IP" "
-        # Create temporary askpass script
-        ASKPASS_SCRIPT=\$(mktemp)
-        trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > \$ASKPASS_SCRIPT << EOF
-#!/bin/bash
-echo "$PASSWORD"
-EOF
-        chmod 700 \$ASKPASS_SCRIPT
-        # Use askpass
-        export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+        $ASKPASS_BLOCK
         echo 'Uninstalling k3s...' &&
         sudo -A /usr/local/bin/k3s-agent-uninstall.sh || true &&
         sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
@@ -177,16 +171,7 @@ fi
 # Step 1: Install k3s on the head node
 progress_message "Deploying Kubernetes on head node ($HEAD_NODE)..."
 run_remote "$HEAD_NODE" "
-    # Create temporary askpass script
-    ASKPASS_SCRIPT=\$(mktemp)
-    trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > \$ASKPASS_SCRIPT << EOF
-#!/bin/bash
-echo "$PASSWORD"
-EOF
-    chmod 700 \$ASKPASS_SCRIPT
-    # Use askpass
-    export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+    $ASKPASS_BLOCK
     curl -sfL https://get.k3s.io | K3S_TOKEN=$K3S_TOKEN sudo -E -A sh - &&
     mkdir -p ~/.kube &&
     sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
@@ -220,16 +205,7 @@ echo -e "${GREEN}Master node internal IP: $MASTER_ADDR${NC}"
 for NODE in $WORKER_NODES; do
     progress_message "Deploying Kubernetes on worker node ($NODE)..."
     run_remote "$NODE" "
-        # Create temporary askpass script
-        ASKPASS_SCRIPT=\$(mktemp)
-        trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > \$ASKPASS_SCRIPT << EOF
-#!/bin/bash
-echo "$PASSWORD"
-EOF
-        chmod 700 \$ASKPASS_SCRIPT
-        # Use askpass
-        export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+        $ASKPASS_BLOCK
         curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_ADDR:6443 K3S_TOKEN=$K3S_TOKEN sudo -E -A sh -"
     success_message "Kubernetes deployed on worker node ($NODE)."
 
@@ -293,16 +269,7 @@ echo "Cluster deployment completed. You can now run 'kubectl get nodes' to verif
 if [ "$INSTALL_GPU" == "true" ]; then
     echo -e "${YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...${NC}"
     run_remote "$HEAD_NODE" "
-        # Create temporary askpass script
-        ASKPASS_SCRIPT=\$(mktemp)
-        trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
-cat > \$ASKPASS_SCRIPT << EOF
-#!/bin/bash
-echo "$PASSWORD"
-EOF
-        chmod 700 \$ASKPASS_SCRIPT
-        # Use askpass
-        export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+        $ASKPASS_BLOCK
         curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
         chmod 700 get_helm.sh &&
         ./get_helm.sh &&

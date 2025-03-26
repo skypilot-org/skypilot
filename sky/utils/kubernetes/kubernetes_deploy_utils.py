@@ -23,9 +23,9 @@ logger = sky_logging.init_logger(__name__)
 def deploy_remote_cluster(ip_list: List[str],
                           ssh_user: str,
                           ssh_key: str,
-                          password: Optional[str],
                           cleanup: bool,
-                          context_name: Optional[str] = None):
+                          context_name: Optional[str] = None,
+                          password: Optional[str] = None):
     success = False
     path_to_package = os.path.dirname(__file__)
     up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.sh')

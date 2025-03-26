@@ -5458,7 +5458,8 @@ def local():
 @click.option('--password',
               type=str,
               required=False,
-              help='Password for the ssh-user to execute sudo commands.')
+              help='Password for the ssh-user to execute sudo commands. '
+              'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint

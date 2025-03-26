@@ -71,8 +71,6 @@ Deploying SkyPilot
 
 2. Run ``sky local up`` and pass the ``ips.txt`` file, SSH username, and SSH key as arguments:
 
-   If passwordless sudo is available:
-
    .. code-block:: bash
 
       IP_FILE=ips.txt
@@ -81,16 +79,13 @@ Deploying SkyPilot
       CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
       sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME
 
-   If passwordless sudo is not available:
+   .. tip::
+      If your cluster does not have passwordless sudo, specify the sudo password with the ``--password`` option:
 
-   .. code-block:: bash
+      .. code-block:: bash
 
-      IP_FILE=ips.txt
-      SSH_USER=username
-      SSH_KEY=path/to/ssh/key
-      PASSWORD=password
-      CONTEXT_NAME=mycluster  # Optional, sets the context name in the kubeconfig. Defaults to "default".
-      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME --password $PASSWORD
+         PASSWORD=password
+         sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --context-name $CONTEXT_NAME --password $PASSWORD
 
    SkyPilot will deploy a Kubernetes cluster on the remote machines, set up GPU support, configure Kubernetes credentials on your local machine, and set up SkyPilot to operate with the new cluster.
 
@@ -157,24 +152,20 @@ Cleanup
 
 To clean up all state created by SkyPilot on your machines, use the ``--cleanup`` flag:
 
-If passwordless sudo is available:
-
 .. code-block:: bash
 
     IP_FILE=ips.txt
     SSH_USER=username
     SSH_KEY=path/to/ssh/key
-    sky local up --ip $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --cleanup
+    sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --cleanup
 
-If passwordless sudo is not available:
+.. tip::
+   If your cluster does not have passwordless sudo, specify the sudo password with the ``--password`` option:
 
-.. code-block:: bash
+   .. code-block:: bash
 
-    IP_FILE=ips.txt
-    SSH_USER=username
-    SSH_KEY=path/to/ssh/key
-    PASSWORD=password
-    sky local up --ip $IP_FILE --ssh-user SSH_USER --ssh-key-path $SSH_KEY --password $PASSWORD --cleanup
+      PASSWORD=password
+      sky local up --ips $IP_FILE --ssh-user $SSH_USER --ssh-key-path $SSH_KEY --password $PASSWORD --cleanup
 
 This will stop all Kubernetes services on the remote machines.
 
