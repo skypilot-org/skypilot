@@ -298,7 +298,10 @@ class SkyServeLoadBalancer:
                     # assigned a LB.
                     logger.info(f'All ready replica URLs: {ready_replica_urls}')
                     logger.info(f'All ready LB URLs: {ready_lb_urls}')
-                    ready_urls = ready_replica_urls.get(self._region, [])
+                    if self._region is not None and self._region != 'global':
+                        ready_urls = ready_replica_urls.get(self._region, [])
+                    else:
+                        ready_urls = sum(ready_replica_urls.values(), [])
                     logger.info(f'Available Replica URLs: {ready_replica_urls},'
                                 f' Ready URLs in local region {self._region}: '
                                 f'{ready_urls}')
@@ -784,9 +787,11 @@ class SkyServeLoadBalancer:
             self._tasks.append(
                 self._loop.create_task(self._cleanup_completed_tasks()))
 
-            # Start the request stealing loop
-            self._tasks.append(
-                self._loop.create_task(self._request_stealing_loop()))
+            # Start the request stealing loop. Only enable if the region is set,
+            # i.e. not global LB.
+            if self._region is not None:
+                self._tasks.append(
+                    self._loop.create_task(self._request_stealing_loop()))
 
             if _USE_IE_QUEUE_INDICATOR:
                 self._tasks.append(
@@ -890,7 +895,7 @@ if __name__ == '__main__':
         help=f'The meta load balancing policy to use. Available policies: '
         f'{", ".join(available_policies)}.')
     parser.add_argument('--region',
-                        required=True,
+                        default=None,
                         help='The region of the load balancer.')
     parser.add_argument('--max-concurrent-requests',
                         type=int,

@@ -19,13 +19,16 @@ import sky
 
 external_lb_info = [
     {
-        'endpoint': 'http://18.217.237.196:8000'
+        'endpoint': 'http://3.15.188.113:8000'
     },
     {
-        'endpoint': 'http://54.249.171.175:8000'
+        'endpoint': 'http://13.115.68.125:8000'
     },
+    # {
+    #     'endpoint': 'http://3.84.5.14:9002'
+    # }
 ]
-with open('@temp/result/queue_size_q72_sky.txt', 'w') as f:
+with open('@temp/result_queue_size_q72_sky_sgl.txt', 'w') as f:
     while True:
         lb2confs = {'time': time.time()}
         for lb in external_lb_info:

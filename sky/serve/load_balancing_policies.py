@@ -71,7 +71,7 @@ class LoadBalancingPolicy:
             raise ValueError(f'Unknown load balancing policy: {policy_name}')
         return LB_POLICIES[policy_name]()
 
-    async def background_task(self):
+    async def background_task(self) -> None:
         pass
 
     async def set_ready_replicas(self, ready_replicas: List[str]) -> None:
@@ -381,6 +381,8 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
     """Proximate tree load balancing policy."""
 
     async def _background_eviction_thread(self) -> None:
+        print('Starting background eviction thread')
+        logger.info('Starting background eviction thread')
         while True:
             await asyncio.sleep(self.config.eviction_interval_secs)
             await self.tree.evict_replica_by_size(self.config.max_tree_size)
@@ -390,7 +392,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         self.tree = prefix_tree.PrefixTree()
         self.config = ProximateTreeConfig()
 
-    async def background_task(self):
+    async def background_task(self) -> None:
         await self._background_eviction_thread()
 
     async def set_ready_replicas(self, ready_replicas: List[str]) -> None:

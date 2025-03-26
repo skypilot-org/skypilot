@@ -3,7 +3,7 @@ from rich import print
 
 import sky
 
-st = sky.serve.status('llm8b2')
+st = sky.serve.status('skysgl')
 st = sky.client.sdk.get(st)[0]
 # print('Replicas:')
 # for r in st['replica_info']:
