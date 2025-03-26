@@ -4919,8 +4919,10 @@ class NebiusStore(AbstractStore):
         """
         install_cmd = mounting_utils.get_s3_mount_install_cmd()
         nebius_profile_name = nebius.NEBIUS_PROFILE_NAME
+        endpoint_url = self.client.meta.endpoint_url
         mount_cmd = mounting_utils.get_nebius_mount_cmd(nebius_profile_name,
                                                         self.bucket.name,
+                                                        endpoint_url,
                                                         mount_path,
                                                         self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
