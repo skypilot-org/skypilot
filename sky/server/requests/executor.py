@@ -186,6 +186,8 @@ class ProcessPoolExecutor(concurrent.futures.ProcessPoolExecutor):
     running: atomic.Int = atomic.Int(0)
 
     def __init__(self, max_workers: int, reuse_worker: bool = True, **kwargs):
+        logger.info(f'Initializing ProcessPoolExecutor with {max_workers} '
+                    f'workers and reuse_worker={reuse_worker}')
         super().__init__(max_workers=max_workers, **kwargs)
         self._reuse_worker = reuse_worker
         self.max_workers = max_workers
@@ -209,6 +211,7 @@ class ProcessPoolExecutor(concurrent.futures.ProcessPoolExecutor):
                     sys.exit(1)
 
             fn = wrapped_fn
+        logger.info(f'Submitting task to ProcessPoolExecutor with {fn}')
         future = super().submit(fn, *args, **kwargs)
         future.add_done_callback(lambda _: self.running.decrement())
         return future
