@@ -336,17 +336,11 @@ class TestBackwardCompatibility:
         commands = [
             # Check API version compatibility
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            'result="$(curl -s ' + ENDPOINT + ')" && '
-            'echo "$result" && '
-            'base_version=$(echo "$result" | grep -o \'"api_version":"[^"]*"\' | cut -d":" -f2 | tr -d \'"\') && '
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
-            'result="$(curl -s ' + ENDPOINT + ')" && '
-            'echo "$result" && '
-            'current_version=$(echo "$result" | grep -o \'"api_version":"[^"]*"\' | cut -d":" -f2 | tr -d \'"\') && '
-            'if [ "$base_version" != "$current_version" ]; then '
-            '  echo "API version mismatch: base=$base_version, current=$current_version" && '
-            '  exit 1; '
+            f'{self.ACTIVATE_CURRENT} && result="$(sky status 2>&1)" || true; '
+            'if echo "$result" | grep -q "SkyPilot API server is too old"; then '
+            '  echo "$result" && exit 1; '
             'fi',
+            # managed job test
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
             f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
@@ -357,6 +351,7 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
             f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # cluster launch/exec test
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} &&'
             f'sky launch --cloud {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
             # No restart on switch to current, cli in current, server in base
@@ -365,8 +360,17 @@ class TestBackwardCompatibility:
             f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
             f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && sky exec {cluster_name} "echo from base"',
             # No restart on switch to current, cli in current, server in base
-            f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"'
+            f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            # serve test
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'sky serve up --cloud {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
+            # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_CURRENT} && sky serve status {cluster_name}-0',
+            f'{self.ACTIVATE_CURRENT} && sky serve logs {cluster_name}-0 2 --no-follow',
+            f'{self.ACTIVATE_CURRENT} && sky serve logs --controller {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_CURRENT} && sky serve logs --load-balancer {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_CURRENT} && sky serve down {cluster_name}-0 -y',
         ]
 
-        teardown = f'sky down {cluster_name} -y'
+        teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
         self.run_compatibility_test(cluster_name, commands, teardown)
