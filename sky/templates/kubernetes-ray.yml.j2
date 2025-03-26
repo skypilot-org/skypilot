@@ -326,8 +326,8 @@ available_node_types:
             - name: {{ key }}
               value: {{ value }}
             {% endfor %}
-          # Do not change this command - it keeps the pod alive until it is
-          # explicitly killed.
+          {% if not preserve_entrypoint|default(false) %}
+          # Only include command/args if not preserving the entrypoint
           command: ["/bin/bash", "-c", "--"]
           args: 
             - |
