@@ -36,7 +36,7 @@ class TestBackwardCompatibility:
     # Fix the flakyness of the test, server may not ready when we run the command after restart.
     WAIT_FOR_API = (
         'for i in $(seq 1 30); do '
-        'if curl -s {ENDPOINT} > /dev/null; then '
+        f'if curl -s {ENDPOINT} > /dev/null; then '
         'echo "API is up and running"; break; fi; '
         'echo "Waiting for API to be ready... ($i/30)"; '
         '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
