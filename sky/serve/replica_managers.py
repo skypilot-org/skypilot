@@ -643,30 +643,38 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert (not self._launch_process_pool and not self._down_process_pool
                ), 'We should not have any running processes in a recovery run'
 
-        # execution.launch should be robust enough to handle the case where the
-        # provisioning is partially done.
+        # It should be robust enough for `execution.launch` to handle cases
+        # where the provisioning is partially done.
         for replica_info in serve_state.get_replicas_at_statuses(
                 self._service_name, serve_state.ReplicaStatus.PROVISIONING):
             replica_id = replica_info.replica_id
-            self._launch_replica(replica_id, resources_override=None)
+            # Currently resources_override only has one key `use_spot`.
+            # So we mock the original request based on all call sites,
+            # including SkyServeController._run_autoscaler.
+            # Since `replica_info.is_spot` is derived from `_should_use_spot`,
+            # it's safe to directly use it for the override.
+            resources_override = {'use_spot': replica_info.is_spot}
+            self._launch_replica(replica_id, resources_override=resources_override)
 
-        # _launch_replica has a FIFO queue with capacity _MAX_NUM_LAUNCH.
-        # We need to first ensure all PROVISIONING replicas are launched,
-        # since they have already been launched but may have been interrupted,
-        # and we need to restart them.
-        # That's why we process PENDING replicas after PROVISIONING replicas.
+        # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for _launch_replica.
+        # We prioritize PROVISIONING replicas since they were previously launched
+        # but may have been interrupted and need to be restarted.
+        # This is why we process PENDING replicas only after PROVISIONING replicas.
         for replica_info in serve_state.get_replicas_at_statuses(
                 self._service_name, serve_state.ReplicaStatus.PENDING):
             replica_id = replica_info.replica_id
-            self._launch_replica(replica_id, resources_override=None)
+            resources_override = {'use_spot': replica_info.is_spot}
+            self._launch_replica(replica_id,
+                                 resources_override=resources_override)
 
         for replica_info in serve_state.get_replicas_at_statuses(
                 self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
             replica_id = replica_info.replica_id
             self._terminate_replica(replica_id,
                                     sync_down_logs=False,
-                                    purge=True,
-                                    replica_drain_delay_seconds=0)
+                                    replica_drain_delay_seconds=0,
+                                    purge=replica_info.status_property.purged,
+                                    is_scale_down=replica_info.status_property.is_scale_down)
 
     ################################
     # Replica management functions #

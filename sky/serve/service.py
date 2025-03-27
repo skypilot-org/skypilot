@@ -203,7 +203,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     is_recovery = is_recovery_mode(service_name)
     logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
-
     if is_recovery:
         version = serve_state.get_latest_version(service_name)
         if version is None:
@@ -211,12 +210,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     else:
         version = constants.INITIAL_VERSION
         # Add initial version information to the service state.
-        serve_state.add_or_update_version(service_name,
-                                        version,
-                                        service_spec)
+        serve_state.add_or_update_version(service_name, version, service_spec)
 
-    task_yaml = serve_utils.generate_task_yaml_file_name(
-        service_name, version)
+    task_yaml = serve_utils.generate_task_yaml_file_name(service_name, version)
 
     if not is_recovery:
         if (len(serve_state.get_services()) >=
