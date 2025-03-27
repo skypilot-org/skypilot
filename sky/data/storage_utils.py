@@ -18,12 +18,6 @@ from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
-    f'{colorama.Fore.YELLOW}Warning: Files/dirs '
-    'specified in .gitignore will be uploaded '
-    'to the cloud storage for {path!r}'
-    'due to the following error: {error_msg!r}')
-
 _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
 
