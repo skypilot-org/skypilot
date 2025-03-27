@@ -1,14 +1,31 @@
 import tempfile
 import textwrap
+from unittest import mock
 
 from click import testing as cli_testing
+import requests
 
 from sky import cli
 from sky import exceptions
+from sky import server
 
 CLOUDS_TO_TEST = [
     'aws', 'gcp', 'ibm', 'azure', 'lambda', 'scp', 'oci', 'vsphere', 'nebius'
 ]
+
+
+def mock_server_api_version(monkeypatch, version):
+    original_get = requests.get
+
+    def mock_get(url, *args, **kwargs):
+        if '/api/health' in url:
+            mock_response = mock.MagicMock()
+            mock_response.status_code = 200
+            mock_response.json.return_value = {'api_version': version}
+            return mock_response
+        return original_get(url, *args, **kwargs)
+
+    monkeypatch.setattr(requests, 'get', mock_get)
 
 
 class TestWithNoCloudEnabled:
@@ -145,3 +162,30 @@ class TestAllCloudsEnabled:
 
         result = cli_runner.invoke(cli.show_gpus, ['--cloud', 'notarealcloud'])
         assert isinstance(result.exception, ValueError)
+
+
+class TestServerVersion:
+
+    def test_cli_low_version_server_high_version(self, monkeypatch,
+                                                 mock_client_requests):
+        mock_server_api_version(monkeypatch, '2')
+        monkeypatch.setattr(server.constants, 'API_VERSION', 3)
+        cli_runner = cli_testing.CliRunner()
+
+        result = cli_runner.invoke(cli.status, [])
+        assert "SkyPilot API server is too old: v2 (client version is v3)." in str(
+            result.exception)
+        assert result.exit_code == 1
+
+    def test_cli_high_version_server_low_version(self, monkeypatch,
+                                                 mock_client_requests):
+        mock_server_api_version(monkeypatch, '3')
+        monkeypatch.setattr(server.constants, 'API_VERSION', 2)
+        cli_runner = cli_testing.CliRunner()
+
+        result = cli_runner.invoke(cli.status, [])
+
+        # Verify the error message contains correct versions
+        assert "SkyPilot API server is too old: v3 (client version is v2)." in str(
+            result.exception)
+        assert result.exit_code == 1

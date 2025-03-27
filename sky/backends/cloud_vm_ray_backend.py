@@ -1090,6 +1090,21 @@ class FailoverCloudErrorHandlerV2:
                 blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
+    def _aws_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'AWS handler error: {error}')
+        # Block AWS if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
                          launchable_resources: 'resources_lib.Resources',
                          region: 'clouds.Region',
@@ -1419,6 +1434,17 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
+            except exceptions.InvalidCloudCredentials as e:
+                # Failed due to invalid cloud credentials.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud for invalid cloud credentials
+                _add_to_blocked_resources(
+                    self._blocked_resources,
+                    to_provision.copy(region=None, zone=None))
+                raise exceptions.ResourcesUnavailableError(
+                    f'Failed to provision on cloud {to_provision.cloud} due to '
+                    f'invalid cloud credentials: '
+                    f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
                 # Failed due to invalid user configs in ~/.sky/config.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
@@ -3632,8 +3658,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # should be higher priority than the cluster requests, and we should
             # release the lock from other requests.
             exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
-            requests_lib.kill_cluster_requests(handle.cluster_name,
-                                               exclude_request_to_kill)
+            try:
+                # TODO(zhwu): we should get rid of this when it is being called
+                # internally without involving an API server, e.g., when a
+                # controller is trying to terminate a cluster.
+                requests_lib.kill_cluster_requests(handle.cluster_name,
+                                                   exclude_request_to_kill)
+            except Exception as e:  # pylint: disable=broad-except
+                # We allow the failure to kill other launch requests, because
+                # it is not critical to the cluster teardown.
+                logger.warning(
+                    'Failed to kill other launch requests for the '
+                    f'cluster {handle.cluster_name}: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
             try:
                 with filelock.FileLock(
                         lock_path,
@@ -4030,8 +4067,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # the cluster is terminated/stopped. Otherwise, it will be quite
         # confusing to see the cluster restarted immediately after it is
         # terminated/stopped, when there is a pending launch request.
-        requests_lib.kill_cluster_requests(handle.cluster_name,
-                                           exclude_request_to_kill)
+        try:
+            # TODO(zhwu): we should get rid of this when it is being called
+            # internally without involving an API server, e.g., when a
+            # controller is trying to terminate a cluster.
+            requests_lib.kill_cluster_requests(handle.cluster_name,
+                                               exclude_request_to_kill)
+        except Exception as e:  # pylint: disable=broad-except
+            # We allow the failure to kill other launch requests, because
+            # it is not critical to the cluster teardown.
+            logger.warning(
+                'Failed to kill other launch requests for the '
+                f'cluster {handle.cluster_name}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
@@ -4358,7 +4406,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.
         if handle.cluster_yaml is not None:
-            _detect_abnormal_non_terminated_nodes(handle)
+            try:
+                _detect_abnormal_non_terminated_nodes(handle)
+            except exceptions.ClusterStatusFetchingError as e:
+                if purge:
+                    msg = common_utils.format_exception(e, use_bracket=True)
+                    logger.warning(
+                        'Failed abnormal non-terminated nodes cleanup. '
+                        'Skipping and cleaning up as purge is set. '
+                        f'Details: {msg}')
+                    logger.debug(f'Full exception details: {msg}',
+                                 exc_info=True)
+                else:
+                    raise
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,

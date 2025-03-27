@@ -120,7 +120,7 @@ def bootstrap_instances(
             except azure.exceptions().ClientAuthenticationError as e:
                 message = (
                     'Failed to authenticate with Azure. Please check your '
-                    'Azure credentials. Error: '
+                    'Azure credentials. ClientAuthenticationError: '
                     f'{common_utils.format_exception(e)}').replace('\n', ' ')
                 logger.error(message)
                 raise exceptions.NoClusterLaunchedError(message) from e

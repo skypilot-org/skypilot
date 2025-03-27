@@ -12,12 +12,18 @@ NC='\033[0m' # No color
 CLEANUP=false
 INSTALL_GPU=false
 POSITIONAL_ARGS=()
+PASSWORD=""
 
 # Process all arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --cleanup)
             CLEANUP=true
+            shift
+            ;;
+        --password)
+            PASSWORD=$2
+            shift
             shift
             ;;
         *)
@@ -36,11 +42,23 @@ USER=$2
 SSH_KEY=$3
 CONTEXT_NAME=${4:-default}
 K3S_TOKEN=mytoken  # Any string can be used as the token
+# Create temporary askpass script for sudo
+ASKPASS_BLOCK="# Create temporary askpass script
+ASKPASS_SCRIPT=\$(mktemp)
+trap 'rm -f \$ASKPASS_SCRIPT' EXIT INT TERM ERR QUIT
+cat > \$ASKPASS_SCRIPT << EOF
+#!/bin/bash
+echo $PASSWORD
+EOF
+chmod 700 \$ASKPASS_SCRIPT
+# Use askpass
+export SUDO_ASKPASS=\$ASKPASS_SCRIPT
+"
 
 # Basic argument checks
 if [ -z "$IPS_FILE" ] || [ -z "$USER" ] || [ -z "$SSH_KEY" ]; then
     >&2 echo -e "${RED}Error: Missing required arguments.${NC}"
-    >&2 echo "Usage: ./deploy_remote_cluster.sh ips.txt username path/to/ssh/key [context-name] [--cleanup]"
+    >&2 echo "Usage: ./deploy_remote_cluster.sh ips.txt username path/to/ssh/key [context-name] [--cleanup] [--password password]"
     exit 1
 fi
 
@@ -89,9 +107,10 @@ cleanup_server_node() {
     local NODE_IP=$1
     echo -e "${YELLOW}Cleaning up head node $NODE_IP...${NC}"
     run_remote "$NODE_IP" "
+        $ASKPASS_BLOCK
         echo 'Uninstalling k3s...' &&
-        /usr/local/bin/k3s-uninstall.sh || true &&
-        sudo rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
+        sudo -A /usr/local/bin/k3s-uninstall.sh || true &&
+        sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     "
     echo -e "${GREEN}Node $NODE_IP cleaned up successfully.${NC}"
 }
@@ -101,9 +120,10 @@ cleanup_agent_node() {
     local NODE_IP=$1
     echo -e "${YELLOW}Cleaning up node $NODE_IP...${NC}"
     run_remote "$NODE_IP" "
+        $ASKPASS_BLOCK
         echo 'Uninstalling k3s...' &&
-        /usr/local/bin/k3s-agent-uninstall.sh || true &&
-        sudo rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
+        sudo -A /usr/local/bin/k3s-agent-uninstall.sh || true &&
+        sudo -A rm -rf /etc/rancher /var/lib/rancher /var/lib/kubelet /etc/kubernetes ~/.kube
     "
     echo -e "${GREEN}Node $NODE_IP cleaned up successfully.${NC}"
 }
@@ -151,10 +171,11 @@ fi
 # Step 1: Install k3s on the head node
 progress_message "Deploying Kubernetes on head node ($HEAD_NODE)..."
 run_remote "$HEAD_NODE" "
-    curl -sfL https://get.k3s.io | K3S_TOKEN=$K3S_TOKEN sh - &&
+    $ASKPASS_BLOCK
+    curl -sfL https://get.k3s.io | K3S_TOKEN=$K3S_TOKEN sudo -E -A sh - &&
     mkdir -p ~/.kube &&
-    sudo cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
-    sudo chown \$(id -u):\$(id -g) ~/.kube/config &&
+    sudo -A cp /etc/rancher/k3s/k3s.yaml ~/.kube/config &&
+    sudo -A chown \$(id -u):\$(id -g) ~/.kube/config &&
     for i in {1..3}; do
         if kubectl wait --for=condition=ready node --all --timeout=2m --kubeconfig ~/.kube/config; then
             break
@@ -163,7 +184,7 @@ run_remote "$HEAD_NODE" "
             sleep 5
         fi
     done
-    if [ $i -eq 3 ]; then
+    if [ \$i -eq 3 ]; then
         echo 'Failed to wait for nodes to be ready after 3 attempts'
         exit 1
     fi"
@@ -184,7 +205,8 @@ echo -e "${GREEN}Master node internal IP: $MASTER_ADDR${NC}"
 for NODE in $WORKER_NODES; do
     progress_message "Deploying Kubernetes on worker node ($NODE)..."
     run_remote "$NODE" "
-        curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_ADDR:6443 K3S_TOKEN=$K3S_TOKEN sh -"
+        $ASKPASS_BLOCK
+        curl -sfL https://get.k3s.io | K3S_URL=https://$MASTER_ADDR:6443 K3S_TOKEN=$K3S_TOKEN sudo -E -A sh -"
     success_message "Kubernetes deployed on worker node ($NODE)."
 
     # Check if worker node has a GPU
@@ -247,12 +269,13 @@ echo "Cluster deployment completed. You can now run 'kubectl get nodes' to verif
 if [ "$INSTALL_GPU" == "true" ]; then
     echo -e "${YELLOW}GPU detected in the cluster. Installing Nvidia GPU Operator...${NC}"
     run_remote "$HEAD_NODE" "
+        $ASKPASS_BLOCK
         curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/master/scripts/get-helm-3 &&
         chmod 700 get_helm.sh &&
         ./get_helm.sh &&
         helm repo add nvidia https://helm.ngc.nvidia.com/nvidia && helm repo update &&
         kubectl create namespace gpu-operator --kubeconfig ~/.kube/config || true &&
-        sudo ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
+        sudo -A ln -s /sbin/ldconfig /sbin/ldconfig.real || true &&
         helm install gpu-operator -n gpu-operator --create-namespace nvidia/gpu-operator \
         --set 'toolkit.env[0].name=CONTAINERD_CONFIG' \
         --set 'toolkit.env[0].value=/var/lib/rancher/k3s/agent/etc/containerd/config.toml' \

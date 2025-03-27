@@ -82,6 +82,8 @@ def _parse_args(args: Optional[str] = None):
     # -k argument for a test selection pattern
     parser.add_argument("-k")
 
+    parser.add_argument("--remote-server", action="store_true")
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -105,7 +107,11 @@ def _parse_args(args: Optional[str] = None):
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
 
-    return default_clouds_to_run, parsed_args.k
+    extra_args = []
+    if parsed_args.remote_server:
+        extra_args.append('--remote-server')
+
+    return default_clouds_to_run, parsed_args.k, extra_args
 
 
 def _extract_marked_tests(
@@ -129,7 +135,7 @@ def _extract_marked_tests(
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
     print(f'args: {args}')
-    default_clouds_to_run, k_value = _parse_args(args)
+    default_clouds_to_run, k_value, extra_args = _parse_args(args)
 
     print(f'default_clouds_to_run: {default_clouds_to_run}, k_value: {k_value}')
     function_name_marks_map = collections.defaultdict(set)
@@ -209,7 +215,9 @@ def _extract_marked_tests(
             QUEUE_KUBE_BACKEND
             if run_on_cloud_kube_backend else CLOUD_QUEUE_MAP[cloud]
             for cloud in final_clouds_to_include
-        ], param_list)
+        ], param_list, [
+            extra_args for _ in range(len(final_clouds_to_include))
+        ])
 
     return function_cloud_map
 
@@ -222,12 +230,14 @@ def _generate_pipeline(test_file: str,
     generated_steps_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param in zip(*clouds_queues_param):
+        for cloud, queue, param, extra_args in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
+            if extra_args:
+                command += f' {" ".join(extra_args)}'
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue

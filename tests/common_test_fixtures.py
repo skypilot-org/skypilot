@@ -11,7 +11,6 @@ import pytest
 import requests
 
 import sky
-from sky import cli
 from sky import global_user_state
 from sky import sky_logging
 from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend

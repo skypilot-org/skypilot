@@ -1,4 +1,19 @@
+import fcntl
+import json
+import os
+import subprocess
+import tempfile
+import time
 from typing import List
+
+import pytest
+import requests
+from smoke_tests.docker import docker_utils
+
+from sky import sky_logging
+
+# Initialize logger at the top level
+logger = sky_logging.init_logger(__name__)
 
 # We need to import all the mock functions here, so that the smoke
 # tests can access them.
@@ -14,7 +29,6 @@ from common_test_fixtures import mock_services_no_service
 from common_test_fixtures import mock_services_one_service
 from common_test_fixtures import mock_stream_utils
 from common_test_fixtures import skyignore_dir
-import pytest
 
 from sky.server import common as server_common
 
@@ -107,6 +121,11 @@ def pytest_addoption(parser):
                      dest='terminate_on_failure',
                      action='store_false',
                      help='Do not terminate test VMs on failure.')
+    parser.addoption(
+        '--remote-server',
+        action='store_true',
+        default=False,
+        help='Run tests against a remote server in Docker container.')
     # Custom options for backward compatibility tests
     parser.addoption(
         '--need-launch',
@@ -247,3 +266,170 @@ def _generic_cloud(config) -> str:
 @pytest.fixture
 def generic_cloud(request) -> str:
     return _generic_cloud(request.config)
+
+
+@pytest.fixture(scope='session', autouse=True)
+def setup_docker_container(request):
+    """Setup Docker container for remote server testing if --remote-server is specified."""
+    if not request.config.getoption('--remote-server'):
+        yield
+        return
+
+    # Set environment variable to indicate we're using remote server
+    os.environ['PYTEST_SKYPILOT_REMOTE_SERVER_TEST'] = '1'
+
+    # Docker image and container names
+    dockerfile_path = 'tests/smoke_tests/docker/Dockerfile_test'
+    default_user = os.environ.get('USER', 'buildkite')
+
+    # Create a lockfile and counter file in a temporary directory that all processes can access
+    lock_file = os.path.join(tempfile.gettempdir(), 'sky_docker_setup.lock')
+    counter_file = os.path.join(tempfile.gettempdir(), 'sky_docker_workers.txt')
+
+    lock_fd = open(lock_file, 'w')
+    fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+    try:
+        try:
+            with open(counter_file, 'r') as f:
+                worker_count = int(f.read().strip())
+        except (FileNotFoundError, ValueError):
+            worker_count = 0
+
+        worker_count += 1
+        with open(counter_file, 'w') as f:
+            f.write(str(worker_count))
+
+        # Check if container is already running (another worker might have started it)
+        try:
+            # Use docker ps with filter to check for running container
+            result = subprocess.run([
+                'docker', 'ps', '--filter',
+                f'name={docker_utils.get_container_name()}', '--format',
+                '{{.Names}}'
+            ],
+                                    check=True,
+                                    capture_output=True,
+                                    text=True)
+            if docker_utils.get_container_name() in result.stdout:
+                fcntl.flock(lock_fd, fcntl.LOCK_UN)
+                yield docker_utils.get_container_name()
+                return
+        except subprocess.CalledProcessError:
+            pass
+
+        # Use docker images with filter to check for existing image
+        result = subprocess.run([
+            'docker', 'images', '--filter',
+            f'reference={docker_utils.IMAGE_NAME}', '--format',
+            '{{.Repository}}'
+        ],
+                                check=True,
+                                capture_output=True,
+                                text=True)
+        if docker_utils.IMAGE_NAME in result.stdout:
+            logger.info(
+                f'Docker image {docker_utils.IMAGE_NAME} already exists')
+        else:
+            in_container = docker_utils.is_inside_docker()
+
+            if in_container:
+                # We're inside a container, so we can't build the Docker image
+                raise Exception(
+                    f"Docker image {docker_utils.IMAGE_NAME} must be built on "
+                    f"the host first when running inside a container. Please "
+                    f"run 'docker build -t {docker_utils.IMAGE_NAME} "
+                    f"--build-arg USERNAME={default_user} -f "
+                    f"tests/smoke_tests/docker/Dockerfile_test .' on the host "
+                    f"machine.")
+            else:
+                logger.info(
+                    f'Docker image {docker_utils.IMAGE_NAME} not found, building...'
+                )
+                subprocess.run([
+                    'docker', 'build', '-t', docker_utils.IMAGE_NAME,
+                    '--build-arg', f'USERNAME={default_user}', '-f',
+                    dockerfile_path, '.'
+                ],
+                               check=True)
+                logger.info(
+                    f'Successfully built Docker image {docker_utils.IMAGE_NAME}'
+                )
+
+        # Start new container
+        logger.info(
+            f'Starting Docker container {docker_utils.get_container_name()}...')
+
+        # Use create_and_setup_new_container to create and start the container
+        docker_utils.create_and_setup_new_container(
+            target_container_name=docker_utils.get_container_name(),
+            host_port=46581,
+            container_port=46580,
+            username=default_user)
+
+        logger.info(f'Container {docker_utils.get_container_name()} started')
+
+        # Wait for container to be ready
+        logger.info('Waiting for container to be ready...')
+        url = docker_utils.get_api_server_endpoint_inside_docker()
+        health_endpoint = f'{url}/api/health'
+        max_retries = 20
+        retry_count = 0
+
+        while retry_count < max_retries:
+            try:
+                response = requests.get(health_endpoint)
+                response.raise_for_status()
+
+                # Parse JSON response
+                if response.json().get('status') == 'healthy':
+                    logger.info('Container is ready!')
+                    break
+
+                retry_count += 1
+                time.sleep(1)
+            except Exception as e:
+                logger.error(f'Error connecting to container: {e}, retrying...')
+                retry_count += 1
+                time.sleep(10)
+        else:
+            raise Exception(
+                'Container failed to start properly - health check did not pass'
+            )
+
+        # Release the lock before yielding
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        yield docker_utils.get_container_name()
+
+    except Exception as e:
+        logger.exception(f'Error in Docker setup: {e}')
+        raise
+    finally:
+        # Reacquire lock for file operations
+        fcntl.flock(lock_fd, fcntl.LOCK_EX)
+
+        # Decrement worker counter and cleanup if this is the last worker
+        with open(counter_file, 'r') as f:
+            worker_count = int(f.read().strip())
+        worker_count -= 1
+        with open(counter_file, 'w') as f:
+            f.write(str(worker_count))
+
+        if worker_count == 0:
+            logger.info('Last worker finished, cleaning up container...')
+            subprocess.run([
+                'docker', 'stop', '-t', '600',
+                docker_utils.get_container_name()
+            ],
+                           check=False)
+            subprocess.run(['docker', 'rm',
+                            docker_utils.get_container_name()],
+                           check=False)
+            try:
+                os.remove(counter_file)
+            except OSError:
+                pass
+
+        # Release the lock and close the file
+        fcntl.flock(lock_fd, fcntl.LOCK_UN)
+        lock_fd.close()
