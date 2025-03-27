@@ -203,8 +203,20 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     is_recovery = is_recovery_mode(service_name)
     logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
+
+    if is_recovery:
+        version = serve_state.get_latest_version(service_name)
+        if version is None:
+            raise ValueError(f'No version found for service {service_name}')
+    else:
+        version = constants.INITIAL_VERSION
+        # Add initial version information to the service state.
+        serve_state.add_or_update_version(service_name,
+                                        version,
+                                        service_spec)
+
     task_yaml = serve_utils.generate_task_yaml_file_name(
-        service_name, constants.INITIAL_VERSION)
+        service_name, version)
 
     if is_recovery:
         if (len(serve_state.get_services()) >=
@@ -226,11 +238,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             cleanup_storage(tmp_task_yaml)
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Service {service_name} already exists.')
-
-        # Add initial version information to the service state.
-        serve_state.add_or_update_version(service_name,
-                                          constants.INITIAL_VERSION,
-                                          service_spec)
 
         # Create the service working directory.
         service_dir = os.path.expanduser(
