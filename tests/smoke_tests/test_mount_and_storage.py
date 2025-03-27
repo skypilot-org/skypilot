@@ -162,7 +162,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         storage_name=storage_name,
         cloud=cloud,
         only_mount=only_mount,
-        include_s3_mount=False,
+        include_s3_mount=include_s3_mount,
         include_gcs_mount=include_gcs_mount,
         include_azure_mount=include_azure_mount,
     )
