@@ -1,8 +1,8 @@
 """Unit tests for sky/server/requests/process.py."""
+import pytest
+
 from concurrent.futures import Future
 import time
-
-import pytest
 
 from sky.server.requests.process import BurstableExecutor
 from sky.server.requests.process import DisposableExecutor
