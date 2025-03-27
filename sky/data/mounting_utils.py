@@ -243,7 +243,14 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo "{rclone_config}" >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
-    log_file_path = os.path.join(constants.RCLONE_LOG_DIR, f'{bucket_name}.log')
+    # Assume mount path is unique. We use a hash of mount path as
+    # various filenames related to the mount.
+    # This is because the full path may be longer than
+    # the filename length limit.
+    # The hash is a non-negative integer in string form.
+    hashed_mount_path = str(abs(hash(mount_path)))
+    log_file_path = os.path.join(constants.RCLONE_LOG_DIR,
+                                 f'{hashed_mount_path}.log')
     create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
                       f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
@@ -274,6 +281,8 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # using up all the disk space. Note that files that opened
         # by a process is not evicted from the cache.
         '--vfs-cache-max-size 10G '
+        # give each mount its own cache directory
+        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path}'
         '> /dev/null 2>&1 &')
     return mount_cmd
 
