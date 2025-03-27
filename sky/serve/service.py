@@ -218,7 +218,7 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     task_yaml = serve_utils.generate_task_yaml_file_name(
         service_name, version)
 
-    if is_recovery:
+    if not is_recovery:
         if (len(serve_state.get_services()) >=
                 serve_utils.get_num_service_threshold()):
             cleanup_storage(tmp_task_yaml)
