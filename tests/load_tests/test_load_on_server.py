@@ -226,8 +226,16 @@ def test_tail_logs_api(num_requests, cloud):
 def test_jobs_launch_api(num_requests, cloud, is_async=True):
     print(f"Testing {num_requests} jobs launch API requests, is_async={is_async}")
     def jobs_launch(idx: int):
-        req_id = jobs_sdk.launch(task=sky.Task(run='echo hello && sleep 60').set_resources(
-                sky.Resources(cpus='1+', cloud=cloud)), name=f'test-job-{idx}')
+        task = sky.Task(run='echo hello && sleep 60')
+        task = task.set_resources(sky.Resources(cpus='1+', cloud=cloud))
+        task = task.set_file_mounts({
+            '/dummy': '/tmp/dummy',
+        })
+        task = task.set_storage_mounts({
+            '/mount_public_s3': sky.Storage(source='s3://digitalcorpora',
+                                            mode=sky.StorageMode.MOUNT),
+        })
+        req_id = jobs_sdk.launch(task=task, name=f'test-job-{idx}')
         if not is_async:
             print(f"Waiting for job {idx} to finish")
             sdk.stream_and_get(req_id)
