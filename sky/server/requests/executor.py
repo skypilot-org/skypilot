@@ -224,8 +224,10 @@ class RequestWorker:
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
+        proc_group = f'{self.schedule_type.value}'
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, _sigterm_handler)
+            setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
         queue = _get_queue(self.schedule_type)
 
         # Use concurrent.futures.ProcessPoolExecutor instead of
@@ -235,7 +237,11 @@ class RequestWorker:
         # the overhead of forking a new process for each request, which can be
         # about 1s delay.
         try:
-            executor = self.executor()
+            executor = process.BurstableExecutor(
+                garanteed_workers=self.garanteed_parallelism,
+                burst_workers=self.burstable_parallelism,
+                initializer=executor_initializer,
+                initargs=(proc_group,))
             while True:
                 self.process_request(executor, queue)
         # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
@@ -250,15 +256,6 @@ class RequestWorker:
             # to avoid broken state in such cases.
             logger.info(f'[{self}] Worker process interrupted')
             executor.shutdown()
-
-    def executor(self) -> process.BurstableExecutor:
-        proc_group = f'{self.schedule_type.value}'
-        setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
-        return process.BurstableExecutor(
-            garanteed_workers=self.garanteed_parallelism,
-            burst_workers=self.burstable_parallelism,
-            initializer=executor_initializer,
-            initargs=(proc_group,))
 
 
 @annotations.lru_cache(scope='global', maxsize=None)
