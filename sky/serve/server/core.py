@@ -750,7 +750,7 @@ def status(service_names: Optional[Union[str, List[str]]] = None,
                                            stream_logs=True)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
-    
+
     # now that we've got some data back, we are going to clear cache for
     # the services we queried. We do this because external causes might
     # bring serve down (ie: user just terminates everything on AWS console)
@@ -774,7 +774,7 @@ def status(service_names: Optional[Union[str, List[str]]] = None,
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
                 # we only cache is service is Ready. This is mostly to prevent
                 # status calls called after "down" to cache terminating
-                # endpoints. 
+                # endpoints.
                 if service_record['status'] == serve_state.ServiceStatus.READY:
                     serve_state.set_endpoint_cache(
                         service_name=service_record['name'],
