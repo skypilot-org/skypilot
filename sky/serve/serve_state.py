@@ -566,12 +566,14 @@ def get_endpoint_cache(
     service_names: Optional[Union[str,
                                   List[str]]] = None) -> List[Dict[str, str]]:
     """Gets endpoint cache values for services."""
-    if service_names is not None:
-        if isinstance(service_names, str):
-            service_names = [service_names]
+    if service_names is None:
+        service_names = []
+    elif isinstance(service_names, str):
+        service_names = [service_names]
+
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = None
-        if service_names is None or len(service_names) == 0:
+        if not service_names:
             rows = cursor.execute("""SELECT * FROM endpoint_cache""")
         else:
             placeholder = ', '.join(['?'] * len(service_names))

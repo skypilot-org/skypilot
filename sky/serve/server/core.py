@@ -563,7 +563,8 @@ def down(
         raise ValueError('Can only specify one of service_names or all. '
                          f'Provided {argument_str!r}.')
 
-    # Clear cache if we have a valid set of inputs. We can always recache.
+    # Clear cache if we have a valid set of inputs. We can always recache
+    # incase of termination failure and the service is still up.
     serve_state.delete_endpoint_cache(None if all else service_names)
 
     backend = backend_utils.get_backend_from_handle(handle)
@@ -749,6 +750,11 @@ def status(service_names: Optional[Union[str, List[str]]] = None,
                                            stream_logs=True)
     except exceptions.CommandError as e:
         raise RuntimeError(e.error_msg) from e
+    
+    # now that we've got some data back, we are going to clear cache for
+    # the services we queried. We do this because external causes might
+    # bring serve down (ie: user just terminates everything on AWS console)
+    serve_state.delete_endpoint_cache(service_names)
 
     service_records = serve_utils.load_service_status(serve_status_payload)
     # Get the endpoint for each service
@@ -766,9 +772,13 @@ def status(service_names: Optional[Union[str, List[str]]] = None,
                 protocol = ('https'
                             if service_record['tls_encrypted'] else 'http')
                 service_record['endpoint'] = f'{protocol}://{endpoint}'
-                serve_state.set_endpoint_cache(
-                    service_name=service_record['name'],
-                    endpoint=service_record['endpoint'])
+                # we only cache is service is Ready. This is mostly to prevent
+                # status calls called after "down" to cache terminating
+                # endpoints. 
+                if service_record['status'] == serve_state.ServiceStatus.READY:
+                    serve_state.set_endpoint_cache(
+                        service_name=service_record['name'],
+                        endpoint=service_record['endpoint'])
 
     return service_records
 
