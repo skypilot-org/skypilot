@@ -39,27 +39,53 @@ def wait_for_workers_cleanup(executor, timeout=5):
     return False
 
 
+def wait_for_futures(futures, timeout=5):
+    """Wait for futures to complete.
+    
+    Args:
+        futures: List of futures to wait for
+        timeout: Maximum time to wait in seconds
+    
+    Returns:
+        bool: True if all futures completed, False if timeout
+    """
+    start_time = time.time()
+    try:
+        for future in futures:
+            remaining = max(0, timeout - (time.time() - start_time))
+            future.result(timeout=remaining)
+        return True
+    except TimeoutError:
+        return False
+
+
 def test_pool_executor():
     """Test PoolExecutor functionality."""
     executor = PoolExecutor(max_workers=2)
+    futures = []
     try:
         # Test submit and has_idle_workers
         assert executor.has_idle_workers()
-        future = executor.submit(dummy_task)
+        future = executor.submit(dummy_task, sleep_time=0.1)
+        futures.append(future)
         assert isinstance(future, Future)
-        assert future.result()
 
         # Test multiple tasks
-        futures = [
-            executor.submit(dummy_task, sleep_time=0.1) for _ in range(2)
-        ]
+        for _ in range(2):
+            futures.append(executor.submit(dummy_task, sleep_time=0.1))
         # Should have no idle workers when both are running
         assert not executor.has_idle_workers()
-        # Wait for completion
-        assert all(f.result() for f in futures)
+
+        # Wait for all futures to complete before shutdown
+        assert wait_for_futures(futures), "Tasks did not complete in time"
+        assert all(f.done() for f in futures), "Not all tasks completed"
+        assert all(f.result() for f in futures), "Some tasks failed"
+
         # Should have idle workers after completion
         assert executor.has_idle_workers()
     finally:
+        # Wait a bit to ensure all tasks are truly done
+        time.sleep(0.1)
         executor.shutdown()
 
 
