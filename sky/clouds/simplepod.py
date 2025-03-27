@@ -204,3 +204,112 @@ class Simplepod(clouds.Cloud):
                                     region: Optional[str] = None,
                                     zone: Optional[str] = None) -> bool:
         return True  # Since SimplePod has dynamic availability
+
+    @classmethod
+    def get_vcpus_mem_from_instance_type(
+        cls,
+        instance_type: str,
+    ) -> Tuple[Optional[float], Optional[float]]:
+        return service_catalog.get_vcpus_mem_from_instance_type(instance_type,
+                                                                clouds='simplepod')
+
+    @classmethod
+    def get_zone_shell_cmd(cls) -> Optional[str]:
+        return None
+
+    def make_deploy_resources_variables(
+            self,
+            resources: 'resources_lib.Resources',
+            cluster_name: 'resources_utils.ClusterName',
+            region: 'clouds.Region',
+            zones: Optional[List['clouds.Zone']],
+            num_nodes: int,
+            dryrun: bool = False) -> Dict[str, Optional[str]]:
+        del cluster_name, dryrun  # Unused.
+        assert zones is None, 'SimplePod does not support zones.'
+
+        r = resources
+        acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
+        custom_resources = resources_utils.make_ray_custom_resources_str(
+            acc_dict)
+
+        resources_vars = {
+            'instance_type': resources.instance_type,
+            'custom_resources': custom_resources,
+            'region': region.name,
+        }
+
+        if acc_dict is not None:
+            # SimplePod's docker runtime information does not contain
+            # 'nvidia-container-runtime', causing no GPU option is added to
+            # the docker run command. We patch this by adding it here.
+            resources_vars['docker_run_options'] = ['--gpus all']
+
+        return resources_vars
+
+    def _get_feasible_launchable_resources(
+        self, resources: 'resources_lib.Resources'
+    ) -> 'resources_utils.FeasibleResources':
+        if resources.instance_type is not None:
+            assert resources.is_launchable(), resources
+            # Accelerators are part of the instance type in SimplePod
+            resources = resources.copy(accelerators=None)
+            # TODO: Add hints to all return values in this method to help
+            #  users understand why the resources are not launchable.
+            return resources_utils.FeasibleResources([resources], [], None)
+
+        def _make(instance_list):
+            resource_list = []
+            for instance_type in instance_list:
+                r = resources.copy(
+                    cloud=Simplepod(),
+                    instance_type=instance_type,
+                    # Setting this to None as SimplePod doesn't separately bill /
+                    # attach the accelerators. Billed as part of the VM type.
+                    accelerators=None,
+                    cpus=None,
+                    memory=None,
+                )
+                resource_list.append(r)
+            return resource_list
+
+        # Currently, handle a filter on accelerators only.
+        accelerators = resources.accelerators
+        if accelerators is None:
+            # Return a default instance type with the given number of vCPUs.
+            default_instance_type = Simplepod.get_default_instance_type(
+                cpus=resources.cpus,
+                memory=resources.memory,
+                disk_tier=resources.disk_tier)
+            if default_instance_type is None:
+                return resources_utils.FeasibleResources([], [], None)
+            else:
+                return resources_utils.FeasibleResources(
+                    _make([default_instance_type]), [], None)
+
+        assert len(accelerators) == 1, resources
+        acc, acc_count = list(accelerators.items())[0]
+        (instance_list, fuzzy_candidate_list
+        ) = service_catalog.get_instance_type_for_accelerator(
+            acc,
+            acc_count,
+            use_spot=resources.use_spot,
+            cpus=resources.cpus,
+            memory=resources.memory,
+            region=resources.region,
+            zone=resources.zone,
+            clouds='simplepod')
+        if instance_list is None:
+            return resources_utils.FeasibleResources([], fuzzy_candidate_list,
+                                                     None)
+        return resources_utils.FeasibleResources(_make(instance_list),
+                                                 fuzzy_candidate_list, None)
+
+    @classmethod
+    def get_user_identities(cls) -> Optional[List[List[str]]]:
+        # TODO: Implement get_user_identities for SimplePod
+        return None
+
+    @classmethod
+    def regions(cls) -> List['clouds.Region']:
+        return service_catalog.regions(clouds='simplepod')
