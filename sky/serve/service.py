@@ -203,6 +203,9 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
     is_recovery = is_recovery_mode(service_name)
     logger.info(f'It is a {"first" if not is_recovery else "recovery"} run')
 
+    task_yaml = serve_utils.generate_task_yaml_file_name(
+        service_name, constants.INITIAL_VERSION)
+
     if is_recovery:
         if (len(serve_state.get_services()) >=
                 serve_utils.get_num_service_threshold()):
@@ -240,8 +243,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # don't want the new file mounts to overwrite the old one, so we
         # sync to a tmp file first and then copy it to the final name
         # if there is no name conflict.
-        task_yaml = serve_utils.generate_task_yaml_file_name(
-            service_name, constants.INITIAL_VERSION)
         shutil.copy(tmp_task_yaml, task_yaml)
 
     controller_process = None
