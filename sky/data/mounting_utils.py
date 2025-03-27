@@ -243,9 +243,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
                                 f'echo "{rclone_config}" >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
-    log_dir_path = '~/.sky/rclone_log'
-    log_file_path = os.path.join(log_dir_path, f'{bucket_name}.log')
-    create_log_cmd = f'mkdir -p {log_dir_path} && touch {log_file_path}'
+    log_file_path = os.path.join(constants.RCLONE_LOG_DIR, f'{bucket_name}.log')
+    create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
+                      f'touch {log_file_path}')
     # when mounting multiple directories with vfs cache mode, it's handled by
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.

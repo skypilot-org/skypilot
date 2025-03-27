@@ -333,6 +333,8 @@ SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
 
 RCLONE_CONFIG_DIR = '~/.config/rclone'
 RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
+RCLONE_LOG_DIR = '~/.sky/rclone_log'
+RCLONE_CACHE_REFRESH_INTERVAL = 10
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.

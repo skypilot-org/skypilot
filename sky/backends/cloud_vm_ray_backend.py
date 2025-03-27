@@ -623,33 +623,38 @@ class RayCodeGen:
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
-        rclone_script = textwrap.dedent("""\
-        RCLONE_LOG_DIR=~/.sky/rclone_log
-        flushed=0
-        # extra second on top of --vfs-cache-poll-interval to
-        # avoid race condition between rclone log line creation and this check.
-        sleep 1
-        while [ $flushed -eq 0 ]; do
-            sleep 10 # sleep for the same interval as --vfs-cache-poll-interval
-            flushed=1
-            for file in "$RCLONE_LOG_DIR"/*; do
-                tac $file | grep "cache" -m 1 | grep "in use 0, to upload 0, uploading 0" -q
-                if [ $? -ne 0 ]; then
-                    echo "vfs cache is still flushing to remote" # optional log line
-                    flushed=0
-                    break
-                fi
+        # Script to block completion of a job until all storage mounted with
+        # CACHED_MOUNT mode is uploaded to remote.
+        rclone_flush_script = textwrap.dedent(f"""\
+
+        if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ]; then
+            flushed=0
+            # extra second on top of --vfs-cache-poll-interval to
+            # avoid race condition between rclone log line creation and this check.
+            sleep 1
+            while [ $flushed -eq 0 ]; do
+                # sleep for the same interval as --vfs-cache-poll-interval
+                sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
+                flushed=1
+                for file in {constants.RCLONE_LOG_DIR}/*; do
+                    tac $file | grep "cache" -m 1 | grep "in use 0, to upload 0, uploading 0" -q
+                    if [ $? -ne 0 ]; then
+                        echo "skypilot: cached mount is still uploading to remote"
+                        flushed=0
+                        break
+                    fi
+                done
             done
-        done
-        echo "cache flushed" """)
+            echo "skypilot: cached mount uploaded complete"
+        fi""")
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
         script = {bash_script!r}
-        rclone_script = {rclone_script!r}
+        rclone_flush_script = {rclone_flush_script!r}
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
-
+        script += rclone_flush_script
 
         if script is not None:
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
@@ -685,15 +690,6 @@ class RayCodeGen:
                     .options(name=name_str, {options_str}) \\
                     .remote(
                         script,
-                        log_path,
-                        env_vars=sky_env_vars_dict,
-                        stream_logs=True,
-                        with_ray=True,
-                    ))
-            futures.append(run_bash_command_with_log \\
-                    .options(name=name_str, {options_str}) \\
-                    .remote(
-                        rclone_script,
                         log_path,
                         env_vars=sky_env_vars_dict,
                         stream_logs=True,
