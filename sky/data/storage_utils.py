@@ -172,7 +172,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     submodules = submodules_output.stdout.split('\0')[:-1]
 
     # The empty string is the relative reference to the src_dir_path.
-    all_git_repos = ['.'] + [
+    all_git_repos = [''] + [
         # We only care about submodules that are a subdirectory of src_dir_path.
         submodule for submodule in submodules if not submodule.startswith('../')
     ]
