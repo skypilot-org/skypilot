@@ -33,6 +33,7 @@ import colorama
 import filelock
 
 from sky import clouds
+from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
@@ -214,6 +215,9 @@ def setup_gcp_authentication(config: Dict[str, Any]) -> Dict[str, Any]:
             sys.exit(1)
         else:
             raise
+    except gcp.auth_error_exception() as e:
+        raise exceptions.InvalidCloudCredentials(
+            f'{common_utils.format_exception(e)}')
     except socket.timeout:
         logger.error('Socket timed out when trying to get the GCP project. '
                      'Please check your network connection.')
