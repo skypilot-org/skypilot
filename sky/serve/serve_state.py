@@ -565,6 +565,17 @@ def delete_all_versions(service_name: str) -> None:
             WHERE service_name=(?)""", (service_name,))
 
 
+def get_latest_version(service_name: str) -> Optional[int]:
+    with db_utils.safe_cursor(_DB_PATH) as cursor:
+        rows = cursor.execute(
+            """\
+            SELECT MAX(version) FROM version_specs
+            WHERE service_name=(?)""", (service_name,)).fetchall()
+    if not rows or rows[0][0] is None:
+        return None
+    return rows[0][0]
+
+
 def get_service_controller_port(service_name: str) -> int:
     """Gets the controller port of a service."""
     with db_utils.safe_cursor(_DB_PATH) as cursor:
