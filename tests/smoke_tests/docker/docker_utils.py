@@ -68,6 +68,7 @@ def create_and_setup_new_container(target_container_name: str, host_port: int,
         run_cmd = (f'docker run -d '
                    f'--name {target_container_name} '
                    f'-p {host_port}:{container_port} '
+                   f'--add-host=host.docker.internal:host-gateway '
                    f'-e USERNAME={username} '
                    f'-e LAUNCHED_BY_DOCKER_CONTAINER=1 '
                    f'-e SKYPILOT_DISABLE_USAGE_COLLECTION=1 '
