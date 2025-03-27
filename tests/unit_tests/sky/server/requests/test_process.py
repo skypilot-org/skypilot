@@ -1,10 +1,12 @@
 """Unit tests for sky/server/requests/process.py."""
-import time
 from concurrent.futures import Future
+import time
+
 import pytest
 
-from sky.server.requests.process import (PoolExecutor, DisposableExecutor,
-                                       BurstableExecutor)
+from sky.server.requests.process import BurstableExecutor
+from sky.server.requests.process import DisposableExecutor
+from sky.server.requests.process import PoolExecutor
 
 
 def dummy_task(sleep_time=0.1):
@@ -79,7 +81,8 @@ def test_disposable_executor():
 
         # Test with failing task
         assert executor.submit(failing_task)
-        assert wait_for_workers_cleanup(executor), "Failed task worker not cleaned up"
+        assert wait_for_workers_cleanup(
+            executor), "Failed task worker not cleaned up"
         assert executor.has_idle_workers()  # Worker should be cleaned up
     finally:
         executor.shutdown()

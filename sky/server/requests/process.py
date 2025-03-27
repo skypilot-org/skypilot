@@ -171,7 +171,7 @@ class BurstableExecutor:
                                           **kwargs)
         if burst_workers > 0:
             self._burst_executor = DisposableExecutor(max_workers=burst_workers,
-                                                     **kwargs)
+                                                      **kwargs)
 
     def submit_until_success(self, fn, *args, **kwargs):
         """Submit a task for execution until success.

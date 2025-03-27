@@ -25,6 +25,7 @@ import os
 import queue as queue_lib
 import signal
 import sys
+import threading
 import time
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
@@ -41,6 +42,7 @@ from sky.server.requests import payloads
 from sky.server.requests import preconditions
 from sky.server.requests import process
 from sky.server.requests import requests as api_requests
+from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
@@ -106,6 +108,7 @@ _BURSTABLE_WORKERS_FOR_LOCAL = 1024
 
 
 class QueueBackend(enum.Enum):
+    LOCAL = 'local'
     MULTIPROCESSING = 'multiprocessing'
     # TODO(zhwu): we can add redis backend in the future.
 
@@ -121,9 +124,12 @@ class RequestQueue:
                  backend: Optional[QueueBackend] = None) -> None:
         self.name = schedule_type.value
         self.backend = backend
-        assert (backend is None or
-                backend == QueueBackend.MULTIPROCESSING), backend
-        self.queue = mp_queue.get_queue(self.name)
+        if backend == QueueBackend.MULTIPROCESSING:
+            self.queue = mp_queue.get_queue(self.name)
+        elif backend == QueueBackend.LOCAL:
+            self.queue = local_queue.get_queue(self.name)
+        else:
+            raise RuntimeError(f'Invalid queue backend: {backend}')
 
     def put(self, request: Tuple[str, bool]) -> None:
         """Put and request to the queue.
@@ -218,7 +224,8 @@ class RequestWorker:
 
     def run(self) -> None:
         # Handle the SIGTERM signal to abort the executor process gracefully.
-        signal.signal(signal.SIGTERM, _sigterm_handler)
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, _sigterm_handler)
         queue = _get_queue(self.schedule_type)
 
         # Use concurrent.futures.ProcessPoolExecutor instead of
@@ -442,9 +449,37 @@ def schedule_request(
 def start(deploy: bool) -> List[multiprocessing.Process]:
     """Start the request workers.
 
-    Args:
-        deploy: If True, indicates the API server is deployed and have dedicated
-                resources.
+    Request workers run in background, schedule the requests and delegate the
+    request execution to executor processes. We have different assumptions for
+    the resources in different deployment modes, which leads to different
+    worker setups:
+
+    - Deployment mode (deploy=True), we assume the resources are dedicated to
+      the API server and the resources will be tuned for serious use cases, so:
+      - Use multiprocessing queue backend and dedicated workers processes to
+        avoid GIL contention.
+      - Parallelism (number of executor processes) is fixed and executor
+        processes have same lifecycle with the server, which ensures
+        best-effort cache reusing and stable resources consumption.
+      - Reject to start in low resource environments, to avoid flaky
+        deployments.
+    - Local mode (deploy=False), we assume the server is running in a shared
+      environment (e.g. laptop) and users typically do not pay attention to
+      the resource setup of the server. Moreover, existing users may expect
+      some consistent behaviors with old versions, i.e. before API server was
+      introduced, so:
+      - The max number of long-running executor processes are limited, to avoid
+        high memory consumption when the server is idle.
+      - Allow burstable workers to handle requests when all long-running
+        workers are busy, which mimics the behavior of local sky CLI before
+        API server was introduced.
+      - Works in low resources environments, and further reduce the memory
+        consumption in low resource environments.
+
+    Note that there is still significant overhead for SDK users when migrate to
+    local API server. Since the users are free to run sky operations in Threads
+    when using SDK but all client operations will occupy at least one worker
+    process after API server was introduced.
     """
     # Determine the job capacity of the workers based on the system resources.
     cpu_count = common_utils.get_cpu_count()
@@ -457,6 +492,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
+    local_worker = False
     if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
         if deploy:
             # For deployment, we require at the min available memory to be
@@ -467,15 +503,20 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
                 f'but {server_constants.MIN_AVAIL_MEM_GB}GB required.')
         else:
             # Permanent worker process may have significant memory consumption
-            # after running commands like `sky check`, so we don't start any
-            # permanent workers in low resource local mode. This mimics the
-            # behavior of local sky CLI before API server was introduced, where
-            # the CLI will start new process everytime and never reject to start
-            # due to resource constraints.
+            # (~350MB per worker) after running commands like `sky check`, so we
+            # don't start any permanent workers in low resource local mode. This
+            # mimics the behavior of local sky CLI before API server was
+            # introduced, where the CLI will start new process everytime and
+            # never reject to start due to resource constraints.
             # Note that the refresh daemon will still occupy one worker
             # permanently because it never exits.
             max_parallel_for_long = 0
             max_parallel_for_short = 0
+            # For local resource mode, use local queue backend and local workers
+            # to avoid the memory overhead (about ~350MB).
+            global queue_backend
+            queue_backend = QueueBackend.LOCAL
+            local_worker = True
             logger.warning(
                 'SkyPilot API server will run in low resource mode because '
                 'the available memory is less than '
@@ -488,6 +529,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
 
     sub_procs = []
     # Setup the queues.
+
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
         queue_names = [
@@ -505,25 +547,39 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
         queue_server.start()
         sub_procs.append(queue_server)
         mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
+    elif queue_backend == QueueBackend.LOCAL:
+        # No setup is needed for local queue backend.
+        pass
+    else:
+        # Should be checked earlier, but just in case.
+        raise RuntimeError(f'Invalid queue backend: {queue_backend}')
 
     logger.info('Request queues created')
+
+    def run_worker_in_background(worker: RequestWorker):
+        if local_worker:
+            # Use daemon thread for automatic cleanup.
+            thread = threading.Thread(target=worker.run, daemon=True)
+            thread.start()
+        else:
+            # Cannot use daemon process since daemon process cannot create
+            # sub-processes, so we manually manage the cleanup.
+            worker_proc = multiprocessing.Process(target=worker.run)
+            worker_proc.start()
+            sub_procs.append(worker_proc)
 
     burstable_parallelism = _BURSTABLE_WORKERS_FOR_LOCAL if not deploy else 0
     # Start a worker for long requests.
     long_worker = RequestWorker(schedule_type=api_requests.ScheduleType.LONG,
                                 garanteed_parallelism=max_parallel_for_long,
                                 burstable_parallelism=burstable_parallelism)
-    long_worker_proc = multiprocessing.Process(target=long_worker.run)
-    long_worker_proc.start()
-    sub_procs.append(long_worker_proc)
+    run_worker_in_background(long_worker)
 
     # Start a worker for short requests.
     short_worker = RequestWorker(schedule_type=api_requests.ScheduleType.SHORT,
                                  garanteed_parallelism=max_parallel_for_short,
                                  burstable_parallelism=burstable_parallelism)
-    short_worker_proc = multiprocessing.Process(target=short_worker.run)
-    short_worker_proc.start()
-    sub_procs.append(short_worker_proc)
+    run_worker_in_background(short_worker)
     return sub_procs
 
 
