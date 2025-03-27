@@ -256,7 +256,7 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
         '--daemon --daemon-wait 0 '
-        f'--log-file {log_file_path} --log-level DEBUG '
+        f'--log-file {log_file_path} --log-level INFO '
         # '--dir-cache-time' sets how long directory listings are cached before
         # rclone checks the remote storage for changes again. A shorter
         # interval allows for faster detection of new or updated files on the
