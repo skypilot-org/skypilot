@@ -1095,8 +1095,7 @@ class FailoverCloudErrorHandlerV2:
                      region: 'clouds.Region',
                      zones: Optional[List['clouds.Zone']],
                      error: Exception) -> None:
-        output = str(error)
-        logger.info(f'AWS handler error: {output}')
+        logger.info(f'AWS handler error: {error}')
         # Block AWS if the credential has expired.
         if isinstance(error, exceptions.InvalidCloudCredentials):
             _add_to_blocked_resources(
