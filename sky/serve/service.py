@@ -285,8 +285,10 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             controller_addr = f'http://{controller_host}:{controller_port}'
 
             # Start the load balancer.
-            load_balancer_port = common_utils.find_free_port(
+            load_balancer_port = (common_utils.find_free_port(
                 constants.LOAD_BALANCER_PORT_START)
+                if not is_recovery else
+                serve_state.get_service_load_balancer_port(service_name))
             load_balancer_log_file = os.path.expanduser(
                 serve_utils.generate_remote_load_balancer_log_file_name(
                     service_name))
