@@ -377,9 +377,6 @@ def _request_execution_wrapper(request_id: str,
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} finished')
 
-    # Exit
-    sys.exit(1)
-
 
 def schedule_request(
         request_id: str,

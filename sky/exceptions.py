@@ -24,6 +24,8 @@ MOUNT_PATH_NON_EMPTY_CODE = 42
 INSUFFICIENT_PRIVILEGES_CODE = 52
 # Return code when git command is ran in a dir that is not git repo
 GIT_FATAL_EXIT_CODE = 128
+# Return code from bash when a command is not found
+COMMAND_NOT_FOUND_EXIT_CODE = 127
 # Architecture, such as arm64, not supported by the dependency
 ARCH_NOT_SUPPORTED_EXIT_CODE = 133
 
@@ -175,6 +177,11 @@ class KubeAPIUnreachableError(ResourcesUnavailableError):
 
 class InvalidCloudConfigs(Exception):
     """Raised when invalid configurations are provided for a given cloud."""
+    pass
+
+
+class InvalidCloudCredentials(Exception):
+    """Raised when the cloud credentials are invalid."""
     pass
 
 

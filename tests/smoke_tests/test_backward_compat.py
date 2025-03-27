@@ -1,5 +1,6 @@
 import pathlib
 import subprocess
+from typing import Sequence
 
 import pytest
 from smoke_tests import smoke_tests_utils
@@ -9,6 +10,7 @@ from sky.backends import backend_utils
 
 # Add a pytest mark to limit concurrency to 1
 pytestmark = pytest.mark.xdist_group(name="backward_compat")
+ENDPOINT = 'http://127.0.0.1:46580/api/health'
 
 
 class TestBackwardCompatibility:
@@ -30,10 +32,35 @@ class TestBackwardCompatibility:
     # Command templates
     ACTIVATE_BASE = f'rm -r {SKY_WHEEL_DIR} || true && source {BASE_ENV_DIR}/bin/activate && cd {BASE_SKY_DIR}'
     ACTIVATE_CURRENT = f'rm -r {SKY_WHEEL_DIR} || true && source {CURRENT_ENV_DIR}/bin/activate && cd {CURRENT_SKY_DIR}'
-    SKY_API_RESTART = 'sky api stop || true && sky api start'
+
+    # Fix the flakyness of the test, server may not ready when we run the command after restart.
+    WAIT_FOR_API = (
+        'for i in $(seq 1 30); do '
+        f'if curl -s {ENDPOINT} > /dev/null; then '
+        'echo "API is up and running"; break; fi; '
+        'echo "Waiting for API to be ready... ($i/30)"; '
+        '[ $i -eq 30 ] && echo "Timed out waiting for API to be ready" && exit 1; '
+        'sleep 1; done')
+
+    SKY_API_RESTART = f'sky api stop || true && sky api start && {WAIT_FOR_API}'
+
+    # Shorthand of switching to base environment and running a list of commands in environment.
+    def _switch_to_base(self, *cmds: str) -> list[str]:
+        cmds = [self.SKY_API_RESTART] + list(cmds)
+        return [f'{self.ACTIVATE_BASE} && {c}' for c in cmds]
+
+    # Shorthand of switching to current environment and running a list of commands in environment.
+    def _switch_to_current(self, *cmds: str) -> list[str]:
+        cmds = [self.SKY_API_RESTART] + list(cmds)
+        return [f'{self.ACTIVATE_CURRENT} && {c}' for c in cmds]
 
     def _run_cmd(self, cmd: str):
         subprocess.run(cmd, shell=True, check=True, executable='/bin/bash')
+
+    def _wait_for_managed_job_status(self, job_name: str,
+                                     status: Sequence[sky.ManagedJobStatus]):
+        return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+            job_name=job_name, job_status=status, timeout=300)
 
     @pytest.fixture(scope="session", autouse=True)
     def session_setup(self, request):
@@ -219,42 +246,63 @@ class TestBackwardCompatibility:
     def test_managed_jobs(self, generic_cloud: str):
         """Test managed jobs functionality across versions"""
         managed_job_name = smoke_tests_utils.get_cluster_name()
+
+        def launch_job(job_name: str, command: str):
+            return (
+                f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} '
+                f'--num-nodes 2 -n {job_name} "{command}"')
+
+        def wait_for_status(job_name: str,
+                            status: Sequence[sky.ManagedJobStatus]):
+            return smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=job_name, job_status=status, timeout=300)
+
         commands = [
-            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
-            f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -n {managed_job_name}-0 \'echo hi; sleep 1000\'',
-            f'{self.ACTIVATE_BASE} && sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --num-nodes 2 -n {managed_job_name}-1 \'echo hi; sleep 400\'',
-            f"""
-            {self.ACTIVATE_BASE} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-0",
-                    job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-1",
-                    job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=300)}
-            """,
-            f'{self.ACTIVATE_CURRENT} && {self.SKY_API_RESTART} && '
-            f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
-            f'{self.ACTIVATE_CURRENT} && sky jobs launch -d --cloud {generic_cloud} --num-nodes 2 -y -n {managed_job_name}-2 \'echo hi; sleep 40\'',
-            f"""
-            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-2",
-                    job_status=[sky.ManagedJobStatus.RUNNING],
-                    timeout=300)}
-            """,
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
-            f'{self.ACTIVATE_CURRENT} && sky jobs cancel -y -n {managed_job_name}-0',
-            f"""
-            {self.ACTIVATE_CURRENT} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-1",
-                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=300)} && {smoke_tests_utils.get_cmd_wait_until_managed_job_status_contains_matching_job_name(
-                    job_name=f"{managed_job_name}-2",
-                    job_status=[sky.ManagedJobStatus.SUCCEEDED],
-                    timeout=300)}
-            """,
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 2',
-            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 1',
+            *self._switch_to_base(
+                # Cover jobs launched in the old version and ran to terminal states
+                launch_job(f'{managed_job_name}-old-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-old-1', 'echo hi'),
+                wait_for_status(f'{managed_job_name}-old-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-old-0',
+                                [sky.ManagedJobStatus.RUNNING]),
+                f'sky jobs cancel -n {managed_job_name}-old-0 -y',
+                wait_for_status(f'{managed_job_name}-old-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                # Cover jobs launched in the new version and still running after upgrade
+                launch_job(f'{managed_job_name}-0', 'echo hi; sleep 1000'),
+                launch_job(f'{managed_job_name}-1', 'echo hi; sleep 400'),
+                wait_for_status(f'{managed_job_name}-0',
+                                [sky.ManagedJobStatus.RUNNING]),
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.RUNNING]),
+            ),
+            *self._switch_to_current(
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep RUNNING | wc -l | grep 2',
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-1)"; echo "$result"; echo "$result" | grep hi',
+                launch_job(f'{managed_job_name}-2', 'echo hi; sleep 400'),
+                # Cover cancelling jobs launched in the new version
+                launch_job(f'{managed_job_name}-3', 'echo hi; sleep 1000'),
+                f'result="$(sky jobs logs --no-follow -n {managed_job_name}-2)"; echo "$result"; echo "$result" | grep hi',
+                f'sky jobs cancel -y -n {managed_job_name}-0',
+                f'sky jobs cancel -y -n {managed_job_name}-3',
+                wait_for_status(f'{managed_job_name}-1',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-2',
+                                [sky.ManagedJobStatus.SUCCEEDED]),
+                wait_for_status(f'{managed_job_name}-0', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                wait_for_status(f'{managed_job_name}-3', [
+                    sky.ManagedJobStatus.CANCELLED,
+                    sky.ManagedJobStatus.CANCELLING
+                ]),
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep SUCCEEDED | wc -l | grep 3',
+                f'result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {managed_job_name} | grep \'CANCELLING\\|CANCELLED\' | wc -l | grep 3',
+            ),
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky jobs cancel -n {managed_job_name}* -y'
         self.run_compatibility_test(managed_job_name, commands, teardown)
@@ -280,3 +328,49 @@ class TestBackwardCompatibility:
         ]
         teardown = f'{self.ACTIVATE_CURRENT} && sky serve down {serve_name}* -y'
         self.run_compatibility_test(serve_name, commands, teardown)
+
+    def test_client_server_compatibility(self, generic_cloud: str):
+        """Test client server compatibility across versions"""
+        cluster_name = smoke_tests_utils.get_cluster_name()
+        job_name = f"{cluster_name}-job"
+        commands = [
+            # Check API version compatibility
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'{self.ACTIVATE_CURRENT} && result="$(sky status 2>&1)" || true; '
+            'if echo "$result" | grep -q "SkyPilot API server is too old"; then '
+            '  echo "$result" && exit 1; '
+            'fi',
+            # managed job test
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'sky jobs launch -d --cloud {generic_cloud} -y {smoke_tests_utils.LOW_RESOURCE_ARG} -n {job_name} "echo hello world; sleep 60"',
+            # No restart on switch to current, cli in current, server in base, verify cli works with different version of sky server
+            f'{self.ACTIVATE_CURRENT} && sky api status',
+            f'{self.ACTIVATE_CURRENT} && sky api info',
+            f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.RUNNING])}',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep RUNNING',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs logs --no-follow -n {job_name})"; echo "$result"; echo "$result" | grep "hello world"',
+            f'{self.ACTIVATE_CURRENT} && {self._wait_for_managed_job_status(job_name, [sky.ManagedJobStatus.SUCCEEDED])}',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky jobs queue)"; echo "$result"; echo "$result" | grep {job_name} | grep SUCCEEDED',
+            # cluster launch/exec test
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} &&'
+            f'sky launch --cloud {generic_cloud} -y -c {cluster_name} "echo hello world; sleep 60"',
+            # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_CURRENT} && result="$(sky queue {cluster_name})"; echo "$result"',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1 --status)"; echo "$result"',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 1)"; echo "$result"; echo "$result" | grep "hello world"',
+            f'{self.ACTIVATE_BASE} && sky exec {cluster_name} "echo from base"',
+            f'{self.ACTIVATE_CURRENT} && result="$(sky logs {cluster_name} 2)"; echo "$result"; echo "$result" | grep "from base"',
+            f'{self.ACTIVATE_BASE} && sky autostop -i 1 -y {cluster_name}',
+            # serve test
+            f'{self.ACTIVATE_BASE} && {self.SKY_API_RESTART} && '
+            f'sky serve up --cloud {generic_cloud} -y -n {cluster_name}-0 examples/serve/http_server/task.yaml',
+            # No restart on switch to current, cli in current, server in base
+            f'{self.ACTIVATE_CURRENT} && sky serve status {cluster_name}-0',
+            f'{self.ACTIVATE_CURRENT} && sky serve logs {cluster_name}-0 2 --no-follow',
+            f'{self.ACTIVATE_CURRENT} && sky serve logs --controller {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_CURRENT} && sky serve logs --load-balancer {cluster_name}-0 --no-follow',
+            f'{self.ACTIVATE_CURRENT} && sky serve down {cluster_name}-0 -y',
+        ]
+
+        teardown = f'{self.ACTIVATE_BASE} && sky down {cluster_name} -y && sky serve down {cluster_name}* -y'
+        self.run_compatibility_test(cluster_name, commands, teardown)

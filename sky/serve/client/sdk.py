@@ -4,8 +4,8 @@ import typing
 from typing import List, Optional, Union
 
 import click
-import requests
 
+from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.server import common as server_common
 from sky.server.requests import payloads
@@ -15,8 +15,12 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
+    import requests
+
     import sky
     from sky.serve import serve_utils
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 
 @usage_lib.entrypoint

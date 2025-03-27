@@ -6,7 +6,9 @@ import os
 import threading
 from typing import Dict, Optional, Tuple
 
+from sky import exceptions
 from sky.adaptors import common
+from sky.clouds import cloud
 from sky.utils import annotations
 from sky.utils import ux_utils
 
@@ -23,7 +25,6 @@ R2_CREDENTIALS_PATH = '~/.cloudflare/r2.credentials'
 R2_PROFILE_NAME = 'r2'
 _INDENT_PREFIX = '    '
 NAME = 'Cloudflare'
-SKY_CHECK_NAME = 'Cloudflare (for R2 object store)'
 
 
 @contextlib.contextmanager
@@ -130,8 +131,8 @@ def client(service_name: str, region):
 @common.load_lazy_modules(_LAZY_MODULES)
 def botocore_exceptions():
     """AWS botocore exception."""
-    from botocore import exceptions
-    return exceptions
+    from botocore import exceptions as boto_exceptions
+    return boto_exceptions
 
 
 def create_endpoint():
@@ -148,8 +149,18 @@ def create_endpoint():
     return endpoint
 
 
-def check_credentials() -> Tuple[bool, Optional[str]]:
-    return check_storage_credentials()
+def check_credentials(
+        cloud_capability: cloud.CloudCapability) -> Tuple[bool, Optional[str]]:
+    if cloud_capability == cloud.CloudCapability.COMPUTE:
+        # for backward compatibility,
+        # we check storage credentials for compute.
+        # TODO(seungjin): properly return not supported error for compute.
+        return check_storage_credentials()
+    elif cloud_capability == cloud.CloudCapability.STORAGE:
+        return check_storage_credentials()
+    else:
+        raise exceptions.NotSupportedError(
+            f'{NAME} does not support {cloud_capability}.')
 
 
 def check_storage_credentials() -> Tuple[bool, Optional[str]]:

@@ -692,34 +692,40 @@ def test_skyserve_rolling_update(generic_cloud: str):
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
                (1, False, 'SHUTTING_DOWN')])
-    test = smoke_tests_utils.Test(
-        f'test-skyserve-rolling-update',
-        [
-            f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/old.yaml',
-            _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
-            f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/new.yaml',
-            # Make sure the traffic is mixed across two versions, the replicas
-            # with even id will sleep 120 seconds before being ready, so we
-            # should be able to get observe the period that the traffic is mixed
-            # across two versions.
-            f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
-            'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
-            # The latest version should have one READY and the one of the older versions should be shutting down
-            f'{single_new_replica} {_check_service_version(name, "1,2")} '
-            # Check the output from the old version, immediately after the
-            # output from the new version appears. This is guaranteed by the
-            # round robin load balancing policy.
-            # TODO(zhwu): we should have a more generalized way for checking the
-            # mixed version of replicas to avoid depending on the specific
-            # round robin load balancing policy.
-            'curl $endpoint | grep "Hi, SkyPilot here"',
-        ],
-        _TEARDOWN_SERVICE.format(name=name),
-        timeout=20 * 60,
-        env=env,
-    )
-    smoke_tests_utils.run_one_test(test)
+    with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
+            generic_cloud) as increase_initial_delay_seconds:
+        test = smoke_tests_utils.Test(
+            f'test-skyserve-rolling-update',
+            [
+                increase_initial_delay_seconds(
+                    f'sky serve up -n {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/old.yaml'
+                ),
+                _SERVE_WAIT_UNTIL_READY.format(name=name, replica_num=2),
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; curl $endpoint | grep "Hi, SkyPilot here"',
+                increase_initial_delay_seconds(
+                    f'sky serve update {name} --cloud {generic_cloud} {resource_arg} -y tests/skyserve/update/new.yaml'
+                ),
+                # Make sure the traffic is mixed across two versions, the replicas
+                # with even id will sleep 120 seconds before being ready, so we
+                # should be able to get observe the period that the traffic is mixed
+                # across two versions.
+                f'{_SERVE_ENDPOINT_WAIT.format(name=name)}; '
+                'until curl $endpoint | grep "Hi, new SkyPilot here!"; do sleep 2; done; sleep 2; '
+                # The latest version should have one READY and the one of the older versions should be shutting down
+                f'{single_new_replica} {_check_service_version(name, "1,2")} '
+                # Check the output from the old version, immediately after the
+                # output from the new version appears. This is guaranteed by the
+                # round robin load balancing policy.
+                # TODO(zhwu): we should have a more generalized way for checking the
+                # mixed version of replicas to avoid depending on the specific
+                # round robin load balancing policy.
+                'curl $endpoint | grep "Hi, SkyPilot here"',
+            ],
+            _TEARDOWN_SERVICE.format(name=name),
+            timeout=20 * 60,
+            env=env,
+        )
+        smoke_tests_utils.run_one_test(test)
 
 
 @pytest.mark.no_fluidstack

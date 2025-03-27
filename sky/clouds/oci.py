@@ -396,7 +396,21 @@ class OCI(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to OCI Object Storage.
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         short_credential_help_str = (
@@ -455,11 +469,6 @@ class OCI(clouds.Cloud):
                 f'{cls._INDENT_PREFIX}{credential_help_str}\n'
                 f'{cls._INDENT_PREFIX}Error details: '
                 f'{common_utils.format_exception(e, use_bracket=True)}')
-
-    @classmethod
-    def check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
-        # TODO(seungjin): Check if the user has access to OCI Object Storage.
-        return cls.check_credentials()
 
     @classmethod
     def check_disk_tier(
