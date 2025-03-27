@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 import click
 import colorama
 import dotenv
+import nebius
 import requests as requests_lib
 from rich import progress as rich_progress
 import yaml
@@ -3286,6 +3287,7 @@ def show_gpus(
       in the Kubernetes cluster. This is fetched in real-time and may change
       when other users are using the cluster.
     """
+    logger.info(f'nebius: {nebius}')
     # validation for the --region flag
     if region is not None and cloud is None:
         raise click.UsageError(
