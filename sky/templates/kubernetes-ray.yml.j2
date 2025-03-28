@@ -384,21 +384,10 @@ available_node_types:
                   echo "Installing missing packages: $MISSING_PACKAGES";
                   DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $MISSING_PACKAGES;
                 fi;
-              
-                $(prefix_cmd) mkdir -p /var/run/sshd;
-                $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
-                $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;
-                cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
-                $(prefix_cmd) mkdir -p ~/.ssh;
-                $(prefix_cmd) chown -R $(whoami) ~/.ssh;
-                $(prefix_cmd) chmod 700 ~/.ssh;
-                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
-                $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
-                $(prefix_cmd) service ssh restart;
-                $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+
                 {% if k8s_fuse_device_required %}
                 set -e
-                # Find fusermount binary location
+                # Mask fusermount binary before enabling SSH access
                 FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
                 if [ -z "$FUSERMOUNT_PATH" ]; then
                     echo "Error: fusermount binary not found"
@@ -436,7 +425,20 @@ available_node_types:
                     $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
                     $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
                 fi
-                {% endif %}
+                {% endif %}            
+
+                $(prefix_cmd) mkdir -p /var/run/sshd;
+                $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
+                $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;
+                cd /etc/ssh/ && $(prefix_cmd) ssh-keygen -A;
+                $(prefix_cmd) mkdir -p ~/.ssh;
+                $(prefix_cmd) chown -R $(whoami) ~/.ssh;
+                $(prefix_cmd) chmod 700 ~/.ssh;
+                $(prefix_cmd) cat /etc/secret-volume/ssh-publickey* > ~/.ssh/authorized_keys;
+                $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
+                $(prefix_cmd) service ssh restart;
+                $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+
                 ) > /tmp/${STEPS[0]}.log 2>&1 || {
                   echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
                   cat /tmp/${STEPS[0]}.log
