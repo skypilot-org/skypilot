@@ -12,10 +12,12 @@ from sky.provision import common
 from sky.provision.kubernetes import network_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
+
 if typing.TYPE_CHECKING:
     import yaml
 else:
     yaml = adaptors_common.LazyImport('yaml')
+
 logger = logging.getLogger(__name__)
 # Timeout for deleting a Kubernetes resource (in seconds).
 DELETION_TIMEOUT = 90
@@ -28,11 +30,14 @@ def bootstrap_instances(
     namespace = kubernetes_utils.get_namespace_from_config(
         config.provider_config)
     context = kubernetes_utils.get_context_from_config(config.provider_config)
+
     _configure_services(namespace, context, config.provider_config)
+
     networking_mode = network_utils.get_networking_mode(
         config.provider_config.get('networking_mode'))
     if networking_mode == kubernetes_enums.KubernetesNetworkingMode.NODEPORT:
         config = _configure_ssh_jump(namespace, context, config)
+
     requested_service_account = config.node_config['spec']['serviceAccountName']
     if (requested_service_account ==
             kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
@@ -92,6 +97,7 @@ def bootstrap_instances(
                         ' Skipping ingress role and role binding setup.')
                 else:
                     raise e
+
     elif requested_service_account != 'default':
         logger.info(f'Using service account {requested_service_account!r}, '
                     'skipping role and role binding setup.')
@@ -135,6 +141,7 @@ def not_provided_msg(resource_type: str) -> str:
 
 def fillout_resources_kubernetes(config: Dict[str, Any]) -> Dict[str, Any]:
     """Fills CPU and GPU resources in the ray cluster config.
+
     For each node type and each of CPU/GPU, looks at container's resources
     and limits, takes min of the two.
     """
@@ -210,12 +217,15 @@ def get_resource(container_resources: Dict[str, Any],
 def _get_resource(container_resources: Dict[str, Any], resource_name: str,
                   field_name: str) -> Union[int, float]:
     """Returns the resource quantity.
+
     The amount of resource is rounded up to nearest integer.
     Returns float("inf") if the resource is not present.
+
     Args:
         container_resources: Container's resource field.
         resource_name: One of 'cpu', 'gpu' or 'memory'.
         field_name: One of 'requests' or 'limits'.
+
     Returns:
         Union[int, float]: Detected resource quantity.
     """
@@ -254,6 +264,7 @@ def _configure_autoscaler_service_account(
         account['metadata']['namespace'] = namespace
     elif account['metadata']['namespace'] != namespace:
         raise InvalidNamespaceError(account_field, namespace)
+
     name = account['metadata']['name']
     field_selector = f'metadata.name={name}'
     accounts = (kubernetes.core_api(context).list_namespaced_service_account(
@@ -279,6 +290,7 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
                                provider_config: Dict[str, Any],
                                role_field: str) -> None:
     """ Reads the role from the provider config, creates if it does not exist.
+
     Args:
         namespace: The namespace to create the role in.
         provider_config: The provider config.
@@ -295,6 +307,7 @@ def _configure_autoscaler_role(namespace: str, context: Optional[str],
         role['metadata']['namespace'] = namespace
     else:
         namespace = role['metadata']['namespace']
+
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
     roles = (kubernetes.auth_api(context).list_namespaced_role(
@@ -328,6 +341,7 @@ def _configure_autoscaler_role_binding(
         override_name: Optional[str] = None,
         override_subject_namespace: Optional[str] = None) -> None:
     """ Reads the role binding from the config, creates if it does not exist.
+
     Args:
         namespace: The namespace to create the role binding in.
         provider_config: The provider config.
@@ -345,6 +359,7 @@ def _configure_autoscaler_role_binding(
         rb_namespace = namespace
     else:
         rb_namespace = binding['metadata']['namespace']
+
     # If override_subject_namespace is provided, we will use that
     # namespace for the subject. Otherwise, we will raise an error.
     subject_namespace = override_subject_namespace or namespace
@@ -355,8 +370,10 @@ def _configure_autoscaler_role_binding(
             subject_name = subject['name']
             raise InvalidNamespaceError(
                 binding_field + f' subject {subject_name}', namespace)
+
     # Override name if provided
     binding['metadata']['name'] = override_name or binding['metadata']['name']
+
     name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
     role_bindings = (kubernetes.auth_api(context).list_namespaced_role_binding(
@@ -397,6 +414,7 @@ def _configure_autoscaler_cluster_role(namespace, context,
         role['metadata']['namespace'] = namespace
     elif role['metadata']['namespace'] != namespace:
         raise InvalidNamespaceError(role_field, namespace)
+
     name = role['metadata']['name']
     field_selector = f'metadata.name={name}'
     cluster_roles = (kubernetes.auth_api(context).list_cluster_role(
@@ -442,6 +460,7 @@ def _configure_autoscaler_cluster_role_binding(
             raise InvalidNamespaceError(
                 binding_field + f' subject {subject_name}', namespace)
     name = binding['metadata']['name']
+
     field_selector = f'metadata.name={name}'
     cr_bindings = (kubernetes.auth_api(context).list_cluster_role_binding(
         field_selector=field_selector).items)
@@ -469,18 +488,22 @@ def _configure_autoscaler_cluster_role_binding(
 
 def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):
     """Creates a SSH jump pod to connect to the cluster.
+
     Also updates config['auth']['ssh_proxy_command'] to use the newly created
     jump pod.
     """
     provider_config = config.provider_config
     pod_cfg = config.node_config
+
     ssh_jump_name = pod_cfg['metadata']['labels']['skypilot-ssh-jump']
     ssh_jump_image = provider_config['ssh_jump_image']
+
     volumes = pod_cfg['spec']['volumes']
     # find 'secret-volume' and get the secret name
     secret_volume = next(filter(lambda x: x['name'] == 'secret-volume',
                                 volumes))
     ssh_key_secret_name = secret_volume['secret']['secretName']
+
     # TODO(romilb): We currently split SSH jump pod and svc creation. Service
     #  is first created in authentication.py::setup_kubernetes_authentication
     #  and then SSH jump pod creation happens here. This is because we need to
@@ -488,9 +511,11 @@ def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):
     #  autoscaler. If in the future if we can write the ssh_proxy_command to the
     #  cluster yaml through this method, then we should move the service
     #  creation here.
+
     # TODO(romilb): We should add a check here to make sure the service is up
     #  and available before we create the SSH jump pod. If for any reason the
     #  service is missing, we should raise an error.
+
     kubernetes_utils.setup_ssh_jump_pod(ssh_jump_name, ssh_jump_image,
                                         ssh_key_secret_name, namespace, context)
     return config
@@ -499,6 +524,7 @@ def _configure_ssh_jump(namespace, context, config: common.ProvisionConfig):
 def _configure_skypilot_system_namespace(
         provider_config: Dict[str, Any]) -> None:
     """Creates the namespace for skypilot-system mounting if it does not exist.
+
     Also patches the SkyPilot service account to have the necessary permissions
     to manage resources in the namespace.
     """
@@ -506,6 +532,7 @@ def _configure_skypilot_system_namespace(
     skypilot_system_namespace = provider_config['skypilot_system_namespace']
     context = kubernetes_utils.get_context_from_config(provider_config)
     kubernetes_utils.create_namespace(skypilot_system_namespace, context)
+
     # Note - this must be run only after the service account has been
     # created in the cluster (in bootstrap_instances).
     # Create the role in the skypilot-system namespace if it does not exist.
@@ -519,6 +546,7 @@ def _configure_skypilot_system_namespace(
     # different SkyPilot instances may be running in different namespaces.
     override_name = provider_config['autoscaler_skypilot_system_role_binding'][
         'metadata']['name'] + '-' + svc_account_namespace
+
     # Create the role binding in the skypilot-system namespace, and have
     # the subject namespace be the namespace that the SkyPilot service
     # account is created in.
@@ -533,20 +561,26 @@ def _configure_skypilot_system_namespace(
 
 def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     """Creates sidecars required for FUSE mounting.
+
     FUSE mounting in Kubernetes without privileged containers requires us to
     run a sidecar container with the necessary capabilities. We run a daemonset
     which exposes the host /dev/fuse device as a Kubernetes resource. The
     SkyPilot pod requests this resource to mount the FUSE filesystem.
+
     We create this daemonset in the skypilot_system_namespace, which is
     configurable in the provider config. This allows the FUSE mounting sidecar
     to be shared across multiple tenants. The default namespace is
     'skypilot-system' (populated in clouds.Kubernetes).
     """
+
     logger.info('_configure_fuse_mounting: Setting up FUSE device manager.')
+
     fuse_device_manager_namespace = provider_config['skypilot_system_namespace']
     context = kubernetes_utils.get_context_from_config(provider_config)
+
     # Read the device manager YAMLs from the manifests directory
     root_dir = os.path.dirname(os.path.dirname(__file__))
+
     # Load and create the ConfigMap
     logger.info('_configure_fuse_mounting: Creating configmap.')
     config_map_path = os.path.join(
@@ -566,6 +600,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     else:
         logger.info('_configure_fuse_mounting: ConfigMap created '
                     f'in namespace {fuse_device_manager_namespace!r}')
+
     # Load and create the DaemonSet
     logger.info('_configure_fuse_mounting: Creating daemonset.')
     daemonset_path = os.path.join(
@@ -585,6 +620,7 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
     else:
         logger.info('_configure_fuse_mounting: DaemonSet created '
                     f'in namespace {fuse_device_manager_namespace!r}')
+
     logger.info('FUSE device manager setup complete '
                 f'in namespace {fuse_device_manager_namespace!r}')
 
@@ -602,6 +638,7 @@ def _configure_services(namespace: str, context: Optional[str],
             service['metadata']['namespace'] = namespace
         elif service['metadata']['namespace'] != namespace:
             raise InvalidNamespaceError(service_field, namespace)
+
         name = service['metadata']['name']
         field_selector = f'metadata.name={name}'
         services = (kubernetes.core_api(context).list_namespaced_service(
