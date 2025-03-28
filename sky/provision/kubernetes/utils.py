@@ -2458,10 +2458,16 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
 
 
 def get_unlabeled_accelerator_nodes(context: str) -> List[Any]:
-    """Detects unlabeled GPU nodes in the cluster.
+    """Gets a list of unlabeled GPU nodes in the cluster.
+
+    This function returns a list of nodes that have GPU resources but no label
+    that indicates the accelerator type.
 
     Args:
         context: The context to check.
+
+    Returns:
+        List[Any]: List of unlabeled nodes with accelerators.
     """
     nodes = get_kubernetes_nodes(context=context)
     nodes_with_accelerator = []
