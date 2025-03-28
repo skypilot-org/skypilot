@@ -51,6 +51,11 @@ API_SERVER_CMD = '-m sky.server.server'
 API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 
+# The maximum time to wait for the API server to start, set to a conservative
+# value that unlikely to reach since the server might be just starting slowly
+# (e.g. in high contention env) and we will exit eagerly if server exit.
+WAIT_APISERVER_START_TIMEOUT_SEC = 60
+
 SKY_API_VERSION_WARNING = (
     f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
     f'v{{server_version}} (client version is v{{client_version}}). '
@@ -179,7 +184,8 @@ def _start_api_server(deploy: bool = False,
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
-    with rich_utils.client_status('Starting SkyPilot API server'):
+    with rich_utils.client_status('Starting SkyPilot API server, '
+                                  f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
@@ -218,11 +224,6 @@ def _start_api_server(deploy: bool = False,
         # the API server.
         proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
 
-        # Wait for the server to start until timeout or server exit.
-        # Server might be just starting slowly (e.g. in high contetion env)
-        # if it did not exit, so we set a conservative wait timeout that
-        # unlikely to reach and exit eagerly if server exit.
-        timeout_sec = 60
         start_time = time.time()
         while True:
             # Check if process has exited
@@ -231,7 +232,6 @@ def _start_api_server(deploy: bool = False,
                     raise RuntimeError(
                         'SkyPilot API server process exited unexpectedly.\n'
                         f'View logs at: {constants.API_SERVER_LOGS}')
-
             api_server_info = get_api_server_status()
             assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
                 f'API server version mismatch when starting the server. '
@@ -239,7 +239,7 @@ def _start_api_server(deploy: bool = False,
                 f'Client version: {server_constants.API_VERSION}')
             if api_server_info.status == ApiServerStatus.HEALTHY:
                 break
-            elif time.time() - start_time >= timeout_sec:
+            elif time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'Failed to start SkyPilot API server at '
