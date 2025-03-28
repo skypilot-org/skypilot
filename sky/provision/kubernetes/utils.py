@@ -2457,6 +2457,33 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
 
 
+def get_unlabeled_accelerator_nodes(context: str) -> List[Any]:
+    """Detects unlabeled GPU nodes in the cluster.
+
+    Args:
+        context: The context to check.
+    """
+    nodes = get_kubernetes_nodes(context=context)
+    nodes_with_accelerator = []
+    for node in nodes:
+        if get_gpu_resource_key() in node.status.capacity:
+            nodes_with_accelerator.append(node)
+
+    lf, _ = detect_gpu_label_formatter(context)
+    if not lf:
+        return nodes_with_accelerator
+    else:
+        label_keys = lf.get_label_keys()
+
+    unlabeled_nodes = []
+    for node in nodes_with_accelerator:
+        for label_key in label_keys:
+            if label_key not in node.metadata.labels:
+                unlabeled_nodes.append(node)
+
+    return unlabeled_nodes
+
+
 def get_kubernetes_node_info(
         context: Optional[str] = None) -> Dict[str, models.KubernetesNodeInfo]:
     """Gets the resource information for all the nodes in the cluster.
