@@ -352,7 +352,7 @@ available_node_types:
                 (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
-                PACKAGES="rsync curl netcat gcc patch pciutils openssh-server";
+                PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl and rsync are available sooner to unblock the following
@@ -396,6 +396,47 @@ available_node_types:
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+                {% if k8s_fuse_device_required %}
+                set -e
+                # Find fusermount binary location
+                FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
+                if [ -z "$FUSERMOUNT_PATH" ]; then
+                    echo "Error: fusermount binary not found"
+                    exit 1
+                fi
+                $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                FUSERMOUNT3_PATH=$(whereis fusermount3 | awk '{print $2}')
+                if [ -z "$FUSERMOUNT3_PATH" ]; then
+                    FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
+                fi
+                # Also mask fusermount3 for rclone mount utility on ubuntu < 22.04
+                $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
+                echo "FUSERMOUNT_PATH: $FUSERMOUNT_PATH"
+                # Wait for the server to setup the fusermount shim binary in case:
+                # 1. The server daemonset was just deployed and is still starting up.
+                # 2. The node was just started and the server Pod is still starting up.
+                wait_for_fusermount() {
+                    local timeout=60
+                    local start_time=$(date +%s)
+                    while ! command -v fusermount >/dev/null 2>&1; do
+                        current_time=$(date +%s)
+                        elapsed=$((current_time - start_time))
+                        if [ $elapsed -ge $timeout ]; then
+                            echo "Error: fusermount not ready after $timeout seconds"
+                            exit 1
+                        fi
+                        sleep 1
+                    done
+                }
+                wait_for_fusermount
+                # Some distributions may mount hostPath with noexec, copy the binary in this case.
+                if ! fusermount -V; then
+                    echo "fusermount -V failed, copying fusermount-shim directly"
+                    $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
+                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                fi
+                {% endif %}
                 ) > /tmp/${STEPS[0]}.log 2>&1 || {
                   echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
                   cat /tmp/${STEPS[0]}.log
@@ -473,58 +514,6 @@ available_node_types:
                   exit 1
                 }
               ) &
-
-              # STEP 4: Mask fusermount with fusermount-shim to forward mount/unmount requests
-              {% if k8s_fuse_device_required %}
-              (
-                (
-                set -e
-
-                if ! dpkg -l | grep -q "^ii fuse "; then
-                  # install fuse eagerly for masking
-                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" fuse;
-                fi
-                # Find fusermount binary location
-                FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
-                if [ -z "$FUSERMOUNT_PATH" ]; then
-                    echo "Error: fusermount binary not found"
-                    exit 1
-                fi
-                $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
-                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                FUSERMOUNT3_PATH=$(whereis fusermount3 | awk '{print $2}')
-                if [ -z "$FUSERMOUNT3_PATH" ]; then
-                    FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
-                fi
-                # Also mask fusermount3 for rclone mount utility on ubuntu < 22.04
-                $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
-                echo "FUSERMOUNT_PATH: $FUSERMOUNT_PATH"
-                # Wait for the server to setup the fusermount shim binary in case:
-                # 1. The server daemonset was just deployed and is still starting up.
-                # 2. The node was just started and the server Pod is still starting up.
-                wait_for_fusermount() {
-                    local timeout=60
-                    local start_time=$(date +%s)
-                    while ! command -v fusermount >/dev/null 2>&1; do
-                        current_time=$(date +%s)
-                        elapsed=$((current_time - start_time))
-                        if [ $elapsed -ge $timeout ]; then
-                            echo "Error: fusermount not ready after $timeout seconds"
-                            exit 1
-                        fi
-                        sleep 1
-                    done
-                }
-                wait_for_fusermount
-                # Some distributions may might hostPath with noexec, copy the binary in this case.
-                if ! fusermount -V; then
-                    echo "fusermount -V failed, copying fusermount-shim directly"
-                    $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
-                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                fi
-                )
-              ) &
-              {% endif %}
 
               function mylsof { p=$(for pid in /proc/{0..9}*; do i=$(basename "$pid"); for file in "$pid"/fd/*; do link=$(readlink -e "$file"); if [ "$link" = "$1" ]; then echo "$i"; fi; done; done); echo "$p"; };
 
