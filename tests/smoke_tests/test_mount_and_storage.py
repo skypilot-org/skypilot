@@ -397,8 +397,8 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Commands to verify bucket upload. We need to check all three
     # storage types because the optimizer may pick any of them.
     s3_command = f'aws s3 ls {storage_name}/hello.txt'
-    gsutil_command = (f'{{ {ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
-                      f'ls gs://{storage_name}/hello.txt; }}')
+    # gsutil_command = (f'{{ {ACTIVATE_SERVICE_ACCOUNT_AND_GSUTIL} '
+    #                  f'ls gs://{storage_name}/hello.txt; }}')
     azure_blob_command = TestStorageWithCredentials.cli_ls_cmd(
         storage_lib.StoreType.AZURE, storage_name, suffix='hello.txt')
     # TODO(zpoint): this is a temporary fix. We should make it more robust.
@@ -423,7 +423,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
             controller_utils.Controllers.JOBS_CONTROLLER))
     quoted_check = shlex.quote(
         f'{constants.ACTIVATE_SKY_REMOTE_PYTHON_ENV} && '
-        f'{cloud_dependencies_setup_cmd}; {s3_command} || {gsutil_command} || '
+        f'{cloud_dependencies_setup_cmd}; {s3_command} || '
         f'{azure_blob_command}')
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
