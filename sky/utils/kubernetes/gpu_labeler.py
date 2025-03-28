@@ -86,7 +86,6 @@ def label():
     with rich_utils.client_status('Creating GPU labeler jobs'):
         config.load_kube_config()
 
-        v1 = client.CoreV1Api()
         batch_v1 = client.BatchV1Api()
         # Load the job manifest
         job_manifest_path = os.path.join(manifest_dir,
@@ -95,16 +94,11 @@ def label():
         with open(job_manifest_path, 'r', encoding='utf-8') as file:
             job_manifest = yaml.safe_load(file)
 
-        # Iterate over nodes
-        nodes = v1.list_node().items
+        unlabeled_gpu_nodes = (
+            kubernetes_utils.get_unlabeled_accelerator_nodes())
 
-        # Get the list of nodes with GPUs
-        gpu_nodes = []
-        for node in nodes:
-            if kubernetes_utils.get_gpu_resource_key() in node.status.capacity:
-                gpu_nodes.append(node)
-
-        print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
+        print(f'Found {len(unlabeled_gpu_nodes)} '
+              'unlabeled GPU nodes in the cluster')
 
         # Check if the 'nvidia' RuntimeClass exists
         try:
@@ -125,7 +119,7 @@ def label():
         else:
             print('Using default RuntimeClass for GPU labeling.')
 
-        for node in gpu_nodes:
+        for node in unlabeled_gpu_nodes:
             node_name = node.metadata.name
 
             # Modify the job manifest for the current node
@@ -139,10 +133,11 @@ def label():
             # Create the job for this node`
             batch_v1.create_namespaced_job(namespace, job_manifest)
             print(f'Created GPU labeler job for node {node_name}')
-    if not gpu_nodes:
-        print('No GPU nodes found in the cluster. If you have GPU nodes, '
-              'please ensure that they have the label '
-              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>`')
+    if not unlabeled_gpu_nodes:
+        print('No unlabeled GPU nodes found in the cluster. If you have '
+              'unlabeled GPU nodes, please ensure that they have the resource '
+              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>` '
+              'in their capacity.')
     else:
         print('GPU labeling started - this may take 10 min or more to complete.'
               '\nTo check the status of GPU labeling jobs, run '
