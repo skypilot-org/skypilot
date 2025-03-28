@@ -2483,9 +2483,13 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
 
     unlabeled_nodes = []
     for node in nodes_with_accelerator:
+        labeled = False
         for label_key in label_keys:
-            if label_key not in node.metadata.labels:
-                unlabeled_nodes.append(node)
+            if label_key in node.metadata.labels:
+                labeled = True
+                break
+        if not labeled:
+            unlabeled_nodes.append(node)
 
     return unlabeled_nodes
 
