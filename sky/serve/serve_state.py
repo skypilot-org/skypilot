@@ -574,18 +574,15 @@ def get_endpoint_cache(
     with db_utils.safe_cursor(_DB_PATH) as cursor:
         rows = None
         if not service_names:
-            rows = cursor.execute("""SELECT * FROM endpoint_cache""")
+            rows = cursor.execute("""SELECT * FROM endpoint_cache""").fetchall()
         else:
             placeholder = ', '.join(['?'] * len(service_names))
             rows = cursor.execute(
                 f"""\
                 SELECT * FROM endpoint_cache
-                WHERE service_name IN ({placeholder})""", tuple(service_names))
-    endpoints = []
-    for row in rows:
-        (name, endpoint) = row[:2]
-        endpoints.append({name: endpoint})
-    return endpoints
+                WHERE service_name IN ({placeholder})""",
+                tuple(service_names)).fetchall()
+    return [{'name': row[0], 'endpoint': row[1]} for row in rows]
 
 
 def set_endpoint_cache(service_name: str, endpoint: str) -> None:
