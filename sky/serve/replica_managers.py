@@ -657,10 +657,12 @@ class SkyPilotReplicaManager(ReplicaManager):
             self._launch_replica(replica_id,
                                  resources_override=resources_override)
 
-        # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for _launch_replica.
-        # We prioritize PROVISIONING replicas since they were previously launched
-        # but may have been interrupted and need to be restarted.
-        # This is why we process PENDING replicas only after PROVISIONING replicas.
+        # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
+        # _launch_replica.
+        # We prioritize PROVISIONING replicas since they were previously
+        # launched but may have been interrupted and need to be restarted.
+        # This is why we process PENDING replicas only after PROVISIONING
+        # replicas.
         for replica_info in serve_state.get_replicas_at_statuses(
                 self._service_name, serve_state.ReplicaStatus.PENDING):
             replica_id = replica_info.replica_id
