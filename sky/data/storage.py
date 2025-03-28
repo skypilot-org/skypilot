@@ -107,8 +107,10 @@ def _is_storage_cloud_enabled(cloud_name: str,
         return True
     if try_fix_with_sky_check:
         # TODO(zhwu): Only check the specified cloud to speed up.
-        sky_check.check(quiet=True,
-                        capability=sky_cloud.CloudCapability.STORAGE)
+        sky_check.check_capability(
+            sky_cloud.CloudCapability.STORAGE,
+            quiet=True,
+        )
         return _is_storage_cloud_enabled(cloud_name,
                                          try_fix_with_sky_check=False)
     return False
@@ -201,7 +203,7 @@ class StoreType(enum.Enum):
             return 'oci://'
         # Nebius storages use 's3://' as a prefix for various aws cli commands
         elif self == StoreType.NEBIUS:
-            return 's3://'
+            return 'nebius://'
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
@@ -4886,8 +4888,8 @@ class NebiusStore(AbstractStore):
                 raise exceptions.StorageBucketGetError(
                     'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using `aws s3 ls '
-                    f'{self.source} --endpoint={endpoint_url}`'
-                    f'--profile={nebius.NEBIUS_PROFILE_NAME} to debug.')
+                    f's3://{self.name} --endpoint={endpoint_url}'
+                    f'--profile={nebius.NEBIUS_PROFILE_NAME}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if

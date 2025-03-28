@@ -6,7 +6,6 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
-import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -29,10 +28,12 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
+    import numpy as np
 
     from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
+    np = adaptors_common.LazyImport('numpy')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -712,7 +713,7 @@ class Optimizer:
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
             table = _create_table(['SOURCE', 'TARGET', 'SIZE (GB)', metric])
-            table.add_rows(reversed(message_data))
+            table.add_rows(list(reversed(message_data)))
             logger.info(f'Egress plan:\n{table}\n')
 
     @staticmethod
@@ -1226,10 +1227,10 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             all_clouds_specified.add(cloud_str)
 
         # Explicitly check again to update the enabled cloud list.
-        sky_check.check(quiet=True,
-                        clouds=list(clouds_need_recheck -
-                                    global_disabled_clouds),
-                        capability=sky_cloud.CloudCapability.COMPUTE)
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=list(clouds_need_recheck -
+                                               global_disabled_clouds))
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
             capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)

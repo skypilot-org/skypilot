@@ -50,7 +50,8 @@ class CloudImplementationFeatures(enum.Enum):
     AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
 
 
-class CloudCapability(enum.Enum):
+# Use str, enum.Enum to allow CloudCapability to be used as a string.
+class CloudCapability(str, enum.Enum):
     # Compute capability.
     COMPUTE = 'compute'
     # Storage capability.
