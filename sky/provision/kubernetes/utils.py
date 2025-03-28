@@ -2457,7 +2457,7 @@ def dict_to_k8s_object(object_dict: Dict[str, Any], object_type: 'str') -> Any:
     return kubernetes.api_client().deserialize(fake_kube_response, object_type)
 
 
-def get_unlabeled_accelerator_nodes(context: str) -> List[Any]:
+def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
     """Gets a list of unlabeled GPU nodes in the cluster.
 
     This function returns a list of nodes that have GPU resources but no label
