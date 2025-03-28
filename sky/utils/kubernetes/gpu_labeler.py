@@ -148,6 +148,9 @@ def main():
                         action='store_true',
                         help='delete all GPU labeler resources in the '
                         'Kubernetes cluster.')
+    parser.add_argument('--context',
+                        type=str,
+                        help='the context to use for the Kubernetes cluster.')
     args = parser.parse_args()
     context = None
     if args.context:
