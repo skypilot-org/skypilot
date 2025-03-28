@@ -713,7 +713,7 @@ class Optimizer:
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
             table = _create_table(['SOURCE', 'TARGET', 'SIZE (GB)', metric])
-            table.add_rows(reversed(message_data))
+            table.add_rows(list(reversed(message_data)))
             logger.info(f'Egress plan:\n{table}\n')
 
     @staticmethod

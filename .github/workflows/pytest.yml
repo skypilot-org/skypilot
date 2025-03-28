@@ -53,3 +53,34 @@ jobs:
         run: |
           source ~/test-env/bin/activate
           SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
+
+  limited-deps-test:
+    # Test with limited dependencies to ensure cloud module imports don't break
+    # basic functionality (e.g., importing IBM shouldn't break AWS support)
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.8"]
+        test-path:
+          - tests/test_cli.py
+          - tests/test_jobs_and_serve.py
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install the latest version of uv
+        uses: astral-sh/setup-uv@v4
+        with:
+          version: "latest"
+          python-version: ${{ matrix.python-version }}
+      - name: Install limited dependencies
+        run: |
+          uv venv --seed ~/test-env
+          source ~/test-env/bin/activate
+          uv pip install --prerelease=allow "azure-cli>=2.65.0"
+          # Install limited dependencies only
+          uv pip install -e ".[kubernetes,aws,gcp,azure]"
+          uv pip install pytest pytest-xdist pytest-env>=0.6 memory-profiler==0.61.0
+      - name: Run tests with pytest
+        run: |
+          source ~/test-env/bin/activate
+          SKYPILOT_DISABLE_USAGE_COLLECTION=1 SKYPILOT_SKIP_CLOUD_IDENTITY_CHECK=1 pytest -n 0 --dist no ${{ matrix.test-path }}
