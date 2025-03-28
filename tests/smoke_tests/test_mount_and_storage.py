@@ -440,7 +440,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
         test = smoke_tests_utils.Test(
             'docker_storage_mounts',
             test_commands,
-            f'sky down -y {name}; sky storage delete -y {storage_name}',
+            # f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)
@@ -469,7 +469,7 @@ def test_cloudflare_storage_mounts(generic_cloud: str):
         test = smoke_tests_utils.Test(
             'cloudflare_storage_mounts',
             test_commands,
-            # f'sky down -y {name}; sky storage delete -y {storage_name}',
+            f'sky down -y {name}; sky storage delete -y {storage_name}',
             timeout=20 * 60,  # 20 mins
         )
         smoke_tests_utils.run_one_test(test)
