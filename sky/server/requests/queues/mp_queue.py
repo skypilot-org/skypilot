@@ -64,7 +64,7 @@ def wait_for_queues_to_be_ready(queue_names: List[str],
     initial_time = time.time()
     # Wait for queue manager to be ready. Exit eagerly if the manager process
     # exits, just wait for a long timeout that is unlikely to reach otherwise.
-    timeout = 60
+    max_wait_time = 60
     while queue_names:
         try:
             get_queue(queue_names[0], port)
@@ -77,7 +77,7 @@ def wait_for_queues_to_be_ready(queue_names: List[str],
             if not queue_server.is_alive():
                 raise RuntimeError(
                     'Queue manager process exited unexpectedly.') from e
-            if time.time() - initial_time > timeout:
+            if time.time() - initial_time > max_wait_time:
                 raise RuntimeError(
                     f'Request queue, named {queue_names[0]!r}, '
-                    f'is not ready after {timeout} seconds.') from e
+                    f'is not ready after {max_wait_time} seconds.') from e

@@ -222,7 +222,7 @@ def _start_api_server(deploy: bool = False,
         # Server might be just starting slowly (e.g. in high contetion env)
         # if it did not exit, so we set a conservative wait timeout that
         # unlikely to reach and exit eagerly if server exit.
-        timeout_secs = 60
+        timeout_sec = 60
         start_time = time.time()
         while True:
             # Check if process has exited
@@ -239,7 +239,7 @@ def _start_api_server(deploy: bool = False,
                 f'Client version: {server_constants.API_VERSION}')
             if api_server_info.status == ApiServerStatus.HEALTHY:
                 break
-            elif time.time() - start_time >= timeout_secs:
+            elif time.time() - start_time >= timeout_sec:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'Failed to start SkyPilot API server at '
