@@ -3,35 +3,17 @@ import argparse
 import hashlib
 import os
 import subprocess
-from typing import Tuple
+from typing import Optional, Tuple
 
-from kubernetes import client
-from kubernetes import config
 import yaml
 
 import sky
+from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import rich_utils
 
 
-def prerequisite_check() -> Tuple[bool, str]:
-    """Checks if kubectl is installed and kubeconfig is set up"""
-    reason = ''
-    prereq_ok = False
-    try:
-        subprocess.run(['kubectl', 'get', 'pods'],
-                       check=True,
-                       capture_output=True)
-        prereq_ok = True
-    except FileNotFoundError:
-        reason = 'kubectl not found. Please install kubectl and try again.'
-    except subprocess.CalledProcessError as e:
-        output = e.output.decode('utf-8')
-        reason = 'Error running kubectl: ' + output
-    return prereq_ok, reason
-
-
-def cleanup() -> Tuple[bool, str]:
+def cleanup(context: Optional[str] = None) -> Tuple[bool, str]:
     """Deletes all Kubernetes resources created by this script
 
     Used to provide idempotency when the script is run multiple times. Also
@@ -42,7 +24,8 @@ def cleanup() -> Tuple[bool, str]:
                    'replicasets,configmaps,secrets,pv,pvc,clusterrole,'
                    'serviceaccount,clusterrolebinding -n kube-system '
                    '-l job=sky-gpu-labeler')
-
+    if context:
+        del_command += f' --context {context}'
     success = False
     reason = ''
     with rich_utils.client_status('Cleaning up existing GPU labeling '
@@ -62,7 +45,7 @@ def get_node_hash(node_name: str):
     return md5_hash[:32]
 
 
-def label():
+def label(context: Optional[str] = None):
     deletion_success, reason = cleanup()
     if not deletion_success:
         print(reason)
@@ -76,18 +59,17 @@ def label():
         rbac_manifest_path = os.path.join(manifest_dir,
                                           'k8s_gpu_labeler_setup.yaml')
         try:
-            subprocess.check_output(
-                ['kubectl', 'apply', '-f', rbac_manifest_path])
+            apply_command = ['kubectl', 'apply', '-f', rbac_manifest_path]
+            if context:
+                apply_command += ['--context', context]
+            subprocess.check_output(apply_command)
         except subprocess.CalledProcessError as e:
             output = e.output.decode('utf-8')
             print('Error setting up GPU labeling: ' + output)
             return
 
     with rich_utils.client_status('Creating GPU labeler jobs'):
-        config.load_kube_config()
-
-        v1 = client.CoreV1Api()
-        batch_v1 = client.BatchV1Api()
+        batch_v1 = kubernetes.batch_api(context=context)
         # Load the job manifest
         job_manifest_path = os.path.join(manifest_dir,
                                          'k8s_gpu_labeler_job.yaml')
@@ -96,7 +78,7 @@ def label():
             job_manifest = yaml.safe_load(file)
 
         # Iterate over nodes
-        nodes = v1.list_node().items
+        nodes = kubernetes_utils.get_kubernetes_nodes(context=context)
 
         # Get the list of nodes with GPUs
         gpu_nodes = []
@@ -108,7 +90,8 @@ def label():
 
         # Check if the 'nvidia' RuntimeClass exists
         try:
-            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class()
+            nvidia_exists = kubernetes_utils.check_nvidia_runtime_class(
+                context=context)
         except Exception as e:  # pylint: disable=broad-except
             print('Error occurred while checking for nvidia RuntimeClass: '
                   f'{str(e)}')
@@ -166,17 +149,20 @@ def main():
                         help='delete all GPU labeler resources in the '
                         'Kubernetes cluster.')
     args = parser.parse_args()
+    context = None
+    if args.context:
+        context = args.context
 
     # Check if kubectl is installed and kubeconfig is set up
-    prereq_ok, reason = prerequisite_check()
+    prereq_ok, reason = kubernetes_utils.check_credentials(context=context)
     if not prereq_ok:
         print(reason)
         return
 
     if args.cleanup:
-        cleanup()
+        cleanup(context=context)
     else:
-        label()
+        label(context=context)
 
 
 if __name__ == '__main__':
