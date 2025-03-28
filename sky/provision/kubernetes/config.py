@@ -19,6 +19,7 @@ else:
     yaml = adaptors_common.LazyImport('yaml')
 
 logger = logging.getLogger(__name__)
+
 # Timeout for deleting a Kubernetes resource (in seconds).
 DELETION_TIMEOUT = 90
 
@@ -373,8 +374,8 @@ def _configure_autoscaler_role_binding(
 
     # Override name if provided
     binding['metadata']['name'] = override_name or binding['metadata']['name']
-
     name = binding['metadata']['name']
+
     field_selector = f'metadata.name={name}'
     role_bindings = (kubernetes.auth_api(context).list_namespaced_role_binding(
         rb_namespace, field_selector=field_selector).items)
@@ -459,8 +460,8 @@ def _configure_autoscaler_cluster_role_binding(
             subject_name = subject['name']
             raise InvalidNamespaceError(
                 binding_field + f' subject {subject_name}', namespace)
-    name = binding['metadata']['name']
 
+    name = binding['metadata']['name']
     field_selector = f'metadata.name={name}'
     cr_bindings = (kubernetes.auth_api(context).list_cluster_role_binding(
         field_selector=field_selector).items)
