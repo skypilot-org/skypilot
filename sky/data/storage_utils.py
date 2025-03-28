@@ -273,11 +273,15 @@ def zip_files_and_folders(items: List[str],
                 item = os.path.expanduser(item)
                 if not os.path.isfile(item) and not os.path.isdir(item):
                     raise ValueError(f'{item} does not exist.')
-                excluded_files = set(
-                    [os.path.join(item, f) for f in get_excluded_files(item)])
-                if os.path.isfile(item) and item not in excluded_files:
+                if os.path.isfile(item):
+                    # Add the file to the zip archive even if it matches
+                    # patterns in dot ignore files, as it was explicitly
+                    # specified by user.
                     zipf.write(item)
                 elif os.path.isdir(item):
+                    excluded_files = set([
+                        os.path.join(item, f) for f in get_excluded_files(item)
+                    ])
                     for root, dirs, files in os.walk(item, followlinks=False):
                         # Store directory entries (important for empty
                         # directories)
