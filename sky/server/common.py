@@ -51,12 +51,29 @@ API_SERVER_CMD = '-m sky.server.server'
 API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
 
-SKY_API_VERSION_WARNING = (
-    f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
-    f'v{{server_version}} (client version is v{{client_version}}). '
-    'Please restart the SkyPilot API server with: '
-    'sky api stop; sky api start'
+SKY_CLIENT_TOO_OLD_WARNING = (
+    f'{colorama.Fore.YELLOW}Your SkyPilot client is too old: '
+    f'v{{client_version}} (server version is v{{server_version}}). '
+    'Please refer to the following link to upgrade your client:\n'
+    f'{colorama.Style.RESET_ALL}'
+    f'{colorama.Style.DIM}'
+    'https://docs.skypilot.co/en/latest/getting-started/installation.html'
     f'{colorama.Style.RESET_ALL}')
+SKY_SERVER_TOO_OLD_WARNING = (
+    f'{colorama.Fore.YELLOW}SkyPilot API server is too old: '
+    f'v{{server_version}} (client version is v{{client_version}}). {{hint}}'
+    f'{colorama.Style.RESET_ALL}')
+RESTART_LOCAL_API_SERVER_HINT = ('Restart the SkyPilot API server with: '
+                                 'sky api stop; sky api start')
+UPGRADE_REMOTE_SERVER_HINT = (
+    'Please refer to the following link to upgrade your server:\n'
+    f'{colorama.Style.RESET_ALL}'
+    f'{colorama.Style.DIM}'
+    'https://docs.skypilot.co/en/latest/reference/api-server/api-server-admin-deploy.html'  # pylint: disable=line-too-long
+    f'{colorama.Style.RESET_ALL}')
+# Local API version number.
+_LOCAL_API_VERSION: int = int(server_constants.API_VERSION)
+
 RequestId = str
 ApiVersion = Optional[str]
 
@@ -256,11 +273,30 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
     api_server_info = get_api_server_status(endpoint)
     api_server_status = api_server_info.status
     if api_server_status == ApiServerStatus.VERSION_MISMATCH:
+        sv, cv = api_server_info.api_version, _LOCAL_API_VERSION
+        assert sv is not None, 'API server version is None'
+        try:
+            server_is_older = int(sv) < _LOCAL_API_VERSION
+        except ValueError:
+            # Raised when the server version using an unknown scheme.
+            # Version compatibility checking is expected to handle all legacy
+            # cases so we assume the server is newer when the version scheme
+            # is unknown.
+            logger.debug('API server version using unknown scheme: %s', sv)
+            server_is_older = False
+        if server_is_older:
+            if is_api_server_local():
+                hint = RESTART_LOCAL_API_SERVER_HINT
+            else:
+                hint = UPGRADE_REMOTE_SERVER_HINT
+            msg = SKY_SERVER_TOO_OLD_WARNING.format(client_version=cv,
+                                                    server_version=sv,
+                                                    hint=hint)
+        else:
+            msg = SKY_CLIENT_TOO_OLD_WARNING.format(client_version=cv,
+                                                    server_version=sv)
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(
-                SKY_API_VERSION_WARNING.format(
-                    server_version=api_server_info.api_version,
-                    client_version=server_constants.API_VERSION))
+            raise RuntimeError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ApiServerConnectionError(endpoint)
