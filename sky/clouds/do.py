@@ -280,10 +280,14 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        if not os.path.exists(os.path.expanduser(do_utils.CREDENTIALS_PATH)):
+        if do_utils.get_credentials_path() is None:
+            return {}
+        if not os.path.exists(
+                os.path.expanduser(do_utils.get_credentials_path())):
             return {}
         return {
-            f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
+            f'~/.config/doctl/{_CREDENTIAL_FILE}':
+                do_utils.get_credentials_path()
         }
 
     @classmethod
