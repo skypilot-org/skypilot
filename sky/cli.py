@@ -253,7 +253,8 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                     fg='green')
         click.echo(
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
-            f'sky api logs {short_request_id}{colorama.Style.RESET_ALL}\n'
+            f'{ux_utils.BOLD}sky api logs {short_request_id}'
+            f'{colorama.Style.RESET_ALL}\n'
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
             f'{server_common.get_server_url()}/api/stream?'
             f'request_id={short_request_id}'

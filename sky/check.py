@@ -62,7 +62,7 @@ def check_capabilities(
                     activated_account = cloud.get_active_user_identity_str()
                     if activated_account is not None:
                         echo(f'    Activated account: {activated_account}')
-                if reason is not None:
+                if reason is not None and reason:  # Don't print empty strings.
                     echo(f'    Hint: {reason}')
             else:
                 disabled_clouds.setdefault(cloud_repr, []).append(capability)
@@ -290,9 +290,9 @@ def _format_enabled_cloud(cloud_name: str) -> str:
                           if i == len(existing_contexts) -
                           1 else ux_utils.INDENT_SYMBOL)
                 contexts_formatted.append(f'\n    {symbol}{context}')
-            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+            context_info = f'  Allowed contexts:{"".join(contexts_formatted)}'
         else:
-            context_info = f'Active context: {existing_contexts[0]}'
+            context_info = f'  Active context: {existing_contexts[0]}'
 
         return (f'{_green_color(cloud_name)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
