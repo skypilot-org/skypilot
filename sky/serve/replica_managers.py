@@ -388,7 +388,8 @@ class ReplicaInfo:
     _VERSION = 0
 
     def __init__(self, replica_id: int, cluster_name: str, replica_port: str,
-                 is_spot: bool, version: int) -> None:
+                 is_spot: bool, version: int,
+                 resources_override: Optional[Dict[str, Any]]) -> None:
         self._version = self._VERSION
         self.replica_id: int = replica_id
         self.cluster_name: str = cluster_name
@@ -398,6 +399,7 @@ class ReplicaInfo:
         self.consecutive_failure_times: List[float] = []
         self.status_property: ReplicaStatusProperty = ReplicaStatusProperty()
         self.is_spot: bool = is_spot
+        self.resources_override: Optional[Dict[str, Any]] = resources_override
 
     def handle(
         self,
@@ -556,6 +558,7 @@ class ReplicaInfo:
             # It will be handled with RequestRateAutoscaler.
             # Treated similar to on-demand instances.
             self.is_spot = False
+            self.resources_override = None
 
         self.__dict__.update(state)
 
@@ -643,38 +646,31 @@ class SkyPilotReplicaManager(ReplicaManager):
         assert (not self._launch_process_pool and not self._down_process_pool
                ), 'We should not have any running processes in a recovery run'
 
-        # It should be robust enough for `execution.launch` to handle cases
-        # where the provisioning is partially done.
-        for replica_info in serve_state.get_replicas_at_statuses(
-                self._service_name, serve_state.ReplicaStatus.PROVISIONING):
-            replica_id = replica_info.replica_id
-            # Currently resources_override only has one key `use_spot`.
-            # So we mock the original request based on all call sites,
-            # including SkyServeController._run_autoscaler.
-            # Since `replica_info.is_spot` is derived from `_should_use_spot`,
-            # it's safe to directly use it for the override.
-            resources_override = {'use_spot': replica_info.is_spot}
-            self._launch_replica(replica_id,
-                                 resources_override=resources_override)
-
         # There is a FIFO queue with capacity _MAX_NUM_LAUNCH for
         # _launch_replica.
         # We prioritize PROVISIONING replicas since they were previously
         # launched but may have been interrupted and need to be restarted.
         # This is why we process PENDING replicas only after PROVISIONING
         # replicas.
-        for replica_info in serve_state.get_replicas_at_statuses(
-                self._service_name, serve_state.ReplicaStatus.PENDING):
-            replica_id = replica_info.replica_id
-            resources_override = {'use_spot': replica_info.is_spot}
-            self._launch_replica(replica_id,
-                                 resources_override=resources_override)
+        to_up_replicas = serve_state.get_replicas_at_status(
+            self._service_name, serve_state.ReplicaStatus.PROVISIONING)
+        to_up_replicas.extend(
+            serve_state.get_replicas_at_status(
+                self._service_name, serve_state.ReplicaStatus.PENDING))
 
-        for replica_info in serve_state.get_replicas_at_statuses(
+        for replica_info in to_up_replicas:
+            # It should be robust enough for `execution.launch` to handle cases
+            # where the provisioning is partially done.
+            # So we mock the original request based on all call sites,
+            # including SkyServeController._run_autoscaler.
+            self._launch_replica(
+                replica_info.replica_id,
+                resources_override=replica_info.resources_override)
+
+        for replica_info in serve_state.get_replicas_at_status(
                 self._service_name, serve_state.ReplicaStatus.SHUTTING_DOWN):
-            replica_id = replica_info.replica_id
             self._terminate_replica(
-                replica_id,
+                replica_info.replica_id,
                 sync_down_logs=False,
                 replica_drain_delay_seconds=0,
                 purge=replica_info.status_property.purged,
@@ -710,7 +706,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         use_spot = _should_use_spot(self._task_yaml_path, resources_override)
 
         info = ReplicaInfo(replica_id, cluster_name, replica_port, use_spot,
-                           self.latest_version)
+                           self.latest_version, resources_override)
         serve_state.add_or_update_replica(self._service_name, replica_id, info)
         # Don't start right now; we will start it later in _refresh_process_pool
         # to avoid too many sky.launch running at the same time.

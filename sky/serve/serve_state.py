@@ -485,12 +485,12 @@ def total_number_provisioning_replicas() -> int:
     return provisioning_count
 
 
-def get_replicas_at_statuses(
-    service_name: str, statuses: Union[ReplicaStatus, Sequence[ReplicaStatus]]
+def get_replicas_at_status(
+    service_name: str,
+    status: ReplicaStatus,
 ) -> List['replica_managers.ReplicaInfo']:
     replicas = get_replica_infos(service_name)
-    statuses = [statuses] if isinstance(statuses, ReplicaStatus) else statuses
-    return [replica for replica in replicas if replica.status in statuses]
+    return [replica for replica in replicas if replica.status == status]
 
 
 # === Version functions ===
