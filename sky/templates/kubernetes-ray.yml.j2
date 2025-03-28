@@ -352,7 +352,7 @@ available_node_types:
                 (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
-                PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
+                PACKAGES="rsync curl netcat gcc patch pciutils openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl and rsync are available sooner to unblock the following
@@ -479,6 +479,11 @@ available_node_types:
               (
                 (
                 set -e
+
+                if ! dpkg -l | grep -q "^ii fuse "; then
+                  # install fuse eagerly for masking
+                  DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" fuse;
+                fi
                 # Find fusermount binary location
                 FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
                 if [ -z "$FUSERMOUNT_PATH" ]; then
