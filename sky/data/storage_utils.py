@@ -195,19 +195,25 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                                 text=True)
         # Don't catch any errors. We would only expect to see errors during the
         # first git invocation - so if we see any here, crash.
-
         output_list = output.stdout.split('\0')
         # trim the empty string at the end
         output_list = output_list[:-1]
-
         for item in output_list:
-
-            if repo == '.' and item == './':
-                logger.warning(f'{src_dir_path} is within a git repo, but the '
-                               'entire directory is ignored by git. We will '
-                               'ignore all git exclusions. '
-                               f'{_USE_SKYIGNORE_HINT}')
-                return []
+            if repo == '':
+                check_dir_cmd = (f'git -C {shlex.quote(repo_path)} '
+                                 'check-ignore -q .')
+                dir_ignored = subprocess.run(check_dir_cmd,
+                                             shell=True,
+                                             stderr=subprocess.PIPE,
+                                             check=False)
+                # Exit code 0 means the path is ignored
+                if dir_ignored.returncode == 0:
+                    logger.warning(
+                        f'{src_dir_path} is within a git repo, but the '
+                        'entire directory is ignored by git. We will '
+                        'ignore all git exclusions. '
+                        f'{_USE_SKYIGNORE_HINT}')
+                    return []
 
             to_be_excluded = os.path.join(repo, item)
             if item.endswith('/'):

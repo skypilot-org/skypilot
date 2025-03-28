@@ -1692,19 +1692,29 @@ class TestStorageWithCredentials:
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.no_fluidstack
-    @pytest.mark.parametrize(
-        'gitignore_structure, store_type',
-        [(GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3),
-         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS),
-         (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.AZURE),
-         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
-                      storage_lib.StoreType.R2,
-                      marks=pytest.mark.cloudflare),
-         pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
-                      storage_lib.StoreType.NEBIUS,
-                      marks=pytest.mark.nebius)])
+    @pytest.mark.parametrize('gitignore_structure, store_type, test_case', [
+        (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3, 'normal'),
+        (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS,
+         'normal'),
+        (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.AZURE,
+         'normal'),
+        pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                     storage_lib.StoreType.R2,
+                     'normal',
+                     marks=pytest.mark.cloudflare),
+        pytest.param(GITIGNORE_SYNC_TEST_DIR_STRUCTURE,
+                     storage_lib.StoreType.NEBIUS,
+                     'normal',
+                     marks=pytest.mark.nebius),
+        (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.S3,
+         'asterisk'),
+        (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.GCS,
+         'asterisk'),
+        (GITIGNORE_SYNC_TEST_DIR_STRUCTURE, storage_lib.StoreType.AZURE,
+         'asterisk')
+    ])
     def test_excluded_file_cloud_storage_upload_copy(self, gitignore_structure,
-                                                     store_type,
+                                                     store_type, test_case,
                                                      tmp_gitignore_storage_obj):
         # tests if files included in .gitignore and .git/info/exclude are
         # excluded from being transferred to Storage
@@ -1713,6 +1723,13 @@ class TestStorageWithCredentials:
             # We have to specify the region for Azure storage, as the default
             # Azure storage account is in centralus region.
             region_kwargs['region'] = 'centralus'
+
+        # For the asterisk test case, modify the .gitignore file to just contain "*"
+        if test_case == 'asterisk':
+            gitignore_path = os.path.join(tmp_gitignore_storage_obj.source,
+                                          constants.GIT_IGNORE_FILE)
+            with open(gitignore_path, 'w', encoding='utf-8') as f:
+                f.write('*\n')
 
         tmp_gitignore_storage_obj.add_store(store_type, **region_kwargs)
         upload_file_name = 'included'
@@ -1728,14 +1745,22 @@ class TestStorageWithCredentials:
                                                      shell=True)
         cnt_output = subprocess.check_output(cnt_num_file_cmd, shell=True)
 
-        assert '3' in up_output.decode('utf-8'), \
-                'Files to be included are not completely uploaded.'
-        # 1 is read as .gitignore is uploaded
-        assert '1' in git_exclude_output.decode('utf-8'), \
-               '.git directory should not be uploaded.'
-        # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
-        assert '4' in cnt_output.decode('utf-8'), \
-               'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        if test_case == 'normal':
+            assert '3' in up_output.decode('utf-8'), \
+                    'Files to be included are not completely uploaded.'
+            # 1 is read as .gitignore is uploaded
+            assert '1' in git_exclude_output.decode('utf-8'), \
+                   '.git directory should not be uploaded.'
+            # 4 files include .gitignore, included.log, included.txt, include_dir/included.log
+            assert '4' in cnt_output.decode('utf-8'), \
+                   'Some items listed in .gitignore and .git/info/exclude are not excluded.'
+        else:  # test_case == 'asterisk'
+            # Check that all files are uploaded (ignoring .git directory)
+            cnt_output_str = cnt_output.decode('utf-8').strip()
+            # All 29 files should be uploaded, ignoring .git directory
+            assert int(cnt_output_str) == 29, \
+                   f'Expected 29 files, but got {cnt_output_str}. ' \
+                   'The .gitignore with "*" should not exclude any files.'
 
     @pytest.mark.no_vast  # Requires AWS or S3
     @pytest.mark.parametrize('ext_bucket_fixture, store_type',
