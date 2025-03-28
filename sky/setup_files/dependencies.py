@@ -118,7 +118,9 @@ extras_require: Dict[str, List[str]] = {
     # We need google-api-python-client>=2.69.0 to enable 'discardLocalSsd'
     # parameter for stopping instances. Reference:
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
-    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
+    # pyOpenSSL>=24.3.0 has issues with gsutil bucket uploads when using service account:
+    # https://github.com/googleapis/google-api-python-client/issues/2554
+    'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage', 'pyOpenSSL<24.3.0'],
     'ibm': [
         'ibm-cloud-sdk-core',
         'ibm-vpc',
