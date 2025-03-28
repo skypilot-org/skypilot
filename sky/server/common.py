@@ -216,14 +216,22 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        subprocess.Popen(cmd, shell=True, start_new_session=True)
+        proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
 
-        # Wait for the server to start until timeout.
-        # Conservative upper time bound for starting the server based on
-        # profiling.
-        timeout_sec = 12
+        # Wait for the server to start until timeout or server exit.
+        # Server might be just starting slowly (e.g. in high contetion env)
+        # if it did not exit, so we set a conservative wait timeout that
+        # unlikely to reach and exit eagerly if server exit.
+        timeout_secs = 60
         start_time = time.time()
         while True:
+            # Check if process has exited
+            if proc.poll() is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'SkyPilot API server process exited unexpectedly.\n'
+                        f'View logs at: {constants.API_SERVER_LOGS}')
+
             api_server_info = get_api_server_status()
             assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
                 f'API server version mismatch when starting the server. '
@@ -231,7 +239,7 @@ def _start_api_server(deploy: bool = False,
                 f'Client version: {server_constants.API_VERSION}')
             if api_server_info.status == ApiServerStatus.HEALTHY:
                 break
-            elif time.time() - start_time >= timeout_sec:
+            elif time.time() - start_time >= timeout_secs:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'Failed to start SkyPilot API server at '
