@@ -12,6 +12,8 @@ import uuid
 
 import colorama
 import pytest
+from smoke_tests.docker import docker_utils
+import yaml
 
 import sky
 from sky import serve
@@ -359,6 +361,29 @@ def run_one_test(test: Test) -> None:
     env_dict = os.environ.copy()
     if test.env:
         env_dict.update(test.env)
+
+    # Create a temporary config file with API server config only if running with remote server
+    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+        temp_config = tempfile.NamedTemporaryFile(mode='w',
+                                                  suffix='.yaml',
+                                                  delete=False)
+        if 'SKYPILOT_CONFIG' in env_dict:
+            # Read the original config
+            with open(env_dict['SKYPILOT_CONFIG'], 'r') as f:
+                config = yaml.safe_load(f)
+        else:
+            config = {}
+        config['api_server'] = {
+            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
+        }
+        test.echo(
+            f'Overriding API server endpoint: {config["api_server"]["endpoint"]}'
+        )
+        yaml.dump(config, temp_config)
+        temp_config.close()
+        # Update the environment variable to use the temporary file
+        env_dict['SKYPILOT_CONFIG'] = temp_config.name
+
     for command in test.commands:
         write(f'+ {command}\n')
         flush()
@@ -408,6 +433,7 @@ def run_one_test(test: Test) -> None:
             stderr=subprocess.STDOUT,
             timeout=10 * 60,  # 10 mins
             shell=True,
+            env=env_dict,
         )
 
     if proc.returncode:
