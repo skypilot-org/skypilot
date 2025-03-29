@@ -51,6 +51,18 @@ def label(context: Optional[str] = None):
         print(reason)
         return
 
+    unlabeled_gpu_nodes = kubernetes_utils.get_unlabeled_accelerator_nodes()
+
+    if not unlabeled_gpu_nodes:
+        print('No unlabeled GPU nodes found in the cluster. If you have '
+              'unlabeled GPU nodes, please ensure that they have the resource '
+              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>` '
+              'in their capacity.')
+        return
+
+    print(f'Found {len(unlabeled_gpu_nodes)} '
+          'unlabeled GPU nodes in the cluster')
+
     sky_dir = os.path.dirname(sky.__file__)
     manifest_dir = os.path.join(sky_dir, 'utils/kubernetes')
 
@@ -76,12 +88,6 @@ def label(context: Optional[str] = None):
 
         with open(job_manifest_path, 'r', encoding='utf-8') as file:
             job_manifest = yaml.safe_load(file)
-
-        unlabeled_gpu_nodes = (
-            kubernetes_utils.get_unlabeled_accelerator_nodes())
-
-        print(f'Found {len(unlabeled_gpu_nodes)} '
-              'unlabeled GPU nodes in the cluster')
 
         # Check if the 'nvidia' RuntimeClass exists
         try:
@@ -117,22 +123,13 @@ def label(context: Optional[str] = None):
             # Create the job for this node`
             batch_v1.create_namespaced_job(namespace, job_manifest)
             print(f'Created GPU labeler job for node {node_name}')
-    if not unlabeled_gpu_nodes:
-        print('No unlabeled GPU nodes found in the cluster. If you have '
-              'unlabeled GPU nodes, please ensure that they have the resource '
-              f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>` '
-              'in their capacity.')
-    else:
-        context_str = f' --context {context}' if context else ''
-        print(
-            f'GPU labeling started - this may take 10 min or more to complete.'
-            '\nTo check the status of GPU labeling jobs, run '
-            f'`kubectl get jobs -n kube-system '
-            f'-l job=sky-gpu-labeler{context_str}`'
-            '\nYou can check if nodes have been labeled by running '
-            f'`kubectl describe nodes{context_str}` '
-            'and looking for labels of the format '
-            '`skypilot.co/accelerator: <gpu_name>`. ')
+
+        print('GPU labeling started - this may take 10 min or more to complete.'
+              '\nTo check the status of GPU labeling jobs, run '
+              '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
+              '\nYou can check if nodes have been labeled by running '
+              '`kubectl describe nodes` and looking for labels of the format '
+              '`skypilot.co/accelerator: <gpu_name>`. ')
 
 
 def main():
