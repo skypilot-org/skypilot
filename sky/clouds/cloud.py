@@ -37,7 +37,7 @@ class CloudImplementationFeatures(enum.Enum):
     _cloud_unsupported_features in all clouds to make sure the
     check_features_are_supported() works as expected.
     """
-    STOP = 'stop'  # Includes both stop and autostop.
+    STOP = 'stop'
     MULTI_NODE = 'multi-node'
     CLONE_DISK_FROM_CLUSTER = 'clone_disk_from_cluster'
     IMAGE_ID = 'image_id'
@@ -47,7 +47,8 @@ class CloudImplementationFeatures(enum.Enum):
     OPEN_PORTS = 'open_ports'
     STORAGE_MOUNTING = 'storage_mounting'
     HOST_CONTROLLERS = 'host_controllers'  # Can run jobs/serve controllers
-    AUTO_TERMINATE = 'auto_terminate'  # Pod/VM can stop or down itself
+    AUTOSTOP = 'autostop'  # Pod/VM can stop itself
+    AUTODOWN = 'autodown'  # Pod/VM can down itself
 
 
 # Use str, enum.Enum to allow CloudCapability to be used as a string.
