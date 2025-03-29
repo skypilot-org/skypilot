@@ -205,15 +205,12 @@ gcpCredentials:
   # TODO(romilb): This can be made optional by using the project in the key json by default.
   projectId: null
 
+
 # Set securityContext for the api pod
-securityContext:
-  capabilities:
-    drop:
-    - ALL  
-  allowPrivilegeEscalation: false
+podSecurityContext: {}
 
 # Set securityContext for the api container inside the api pod
-podSecurityContext: 
+securityContext:
   capabilities:
     drop:
     - ALL  

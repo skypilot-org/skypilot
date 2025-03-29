@@ -540,7 +540,9 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
         sub_procs.append(queue_server)
-        mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
+        mp_queue.wait_for_queues_to_be_ready(queue_names,
+                                             queue_server,
+                                             port=port)
     elif queue_backend == QueueBackend.LOCAL:
         # No setup is needed for local queue backend.
         pass
