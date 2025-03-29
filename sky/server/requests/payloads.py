@@ -421,6 +421,8 @@ class ServeLogsBody(RequestBody):
 class ServeStatusBody(RequestBody):
     """The request body for the serve status endpoint."""
     service_names: Optional[Union[str, List[str]]]
+    # only True when --endpoint and not --force-refresh
+    use_endpoint_cache: bool = False
 
 
 class RealtimeGpuAvailabilityRequestBody(RequestBody):
