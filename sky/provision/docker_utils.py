@@ -86,14 +86,26 @@ def docker_start_cmds(
     container_name,
     user_options,
     docker_cmd,
+    preserve_entrypoint=False,
 ):
     """Generating docker start command.
 
     The code is borrowed from `ray.autoscaler._private.command_runner`.
-    We made the following two changes:
+    We made the following changes:
       1. Remove `--rm` to keep the container after `ray stop` is executed.
       2. Remove mount options, as all the file mounts will be handled after
         the container is started, through `rsync` command.
+      3. Add option to preserve the original container entrypoint.
+
+    Args:
+        image: Docker image name.
+        container_name: Name to assign to the container.
+        user_options: Additional options for docker run command.
+        docker_cmd: Docker command (docker or podman).
+        preserve_entrypoint: If True, will not override the container's entrypoint.
+    
+    Returns:
+        The docker run command as a string.
     """
 
     # for click, used in ray cli
@@ -117,9 +129,14 @@ def docker_start_cmds(
         '--cap-add=SYS_ADMIN',
         '--device=/dev/fuse',
         '--security-opt=apparmor:unconfined',
-        '--entrypoint=/bin/bash',
-        image,
     ]
+    
+    # Only override entrypoint if preserve_entrypoint is False
+    if not preserve_entrypoint:
+        docker_run.append('--entrypoint=/bin/bash')
+    
+    docker_run.append(image)
+    
     return ' '.join(docker_run)
 
 
@@ -272,6 +289,7 @@ class DockerInitializer:
                 self._configure_runtime(
                     self._auto_configure_shm(user_docker_run_options)),
                 self.docker_cmd,
+                preserve_entrypoint=self.docker_config.get('preserve_entrypoint', False),
             )
             self._run(start_command)
 
