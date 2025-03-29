@@ -125,3 +125,5 @@ JOBS_RECOVERY_STRATEGY_REGISTRY: _Registry = (
         registry_name='jobs recovery strategy',
         exclude=None,
         type_register=True))
+
+# TODO(tian): Add a registry for spot placer.

@@ -25,80 +25,11 @@ from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
-from sky.utils import resources_utils
 from sky.utils import rich_utils
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 logger = sky_logging.init_logger(__name__)
-
-
-def _validate_service_task(task: 'sky.Task') -> None:
-    """Validate the task for Sky Serve.
-
-    Args:
-        task: sky.Task to validate
-
-    Raises:
-        ValueError: if the arguments are invalid.
-        RuntimeError: if the task.serve is not found.
-    """
-    spot_resources: List['sky.Resources'] = [
-        resource for resource in task.resources if resource.use_spot
-    ]
-    # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
-    # On-demand fallback should go to the resources specified as on-demand.
-    if len(spot_resources) not in [0, len(task.resources)]:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(
-                'Resources must either all use spot or none use spot. '
-                'To use on-demand and spot instances together, '
-                'use `dynamic_ondemand_fallback` or set '
-                'base_ondemand_fallback_replicas.')
-
-    if task.service is None:
-        with ux_utils.print_exception_no_traceback():
-            raise RuntimeError('Service section not found.')
-
-    policy_description = ('on-demand'
-                          if task.service.dynamic_ondemand_fallback else 'spot')
-    for resource in list(task.resources):
-        if resource.job_recovery is not None:
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError('job_recovery is disabled for SkyServe. '
-                                 'SkyServe will replenish preempted spot '
-                                 f'with {policy_description} instances.')
-
-    replica_ingress_port: Optional[int] = int(
-        task.service.ports) if (task.service.ports is not None) else None
-    for requested_resources in task.resources:
-        if (task.service.use_ondemand_fallback and
-                not requested_resources.use_spot):
-            with ux_utils.print_exception_no_traceback():
-                raise ValueError(
-                    '`use_ondemand_fallback` is only supported '
-                    'for spot resources. Please explicitly specify '
-                    '`use_spot: true` in resources for on-demand fallback.')
-        if task.service.ports is None:
-            requested_ports = list(
-                resources_utils.port_ranges_to_set(requested_resources.ports))
-            if len(requested_ports) != 1:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        'To open multiple ports on the replica, please set the '
-                        '`service.ports` field to specify a main service port. '
-                        'Must only specify one port in resources otherwise. '
-                        'Each replica will use the port specified as '
-                        'application ingress port.')
-            service_port = requested_ports[0]
-            if replica_ingress_port is None:
-                replica_ingress_port = service_port
-            elif service_port != replica_ingress_port:
-                with ux_utils.print_exception_no_traceback():
-                    raise ValueError(
-                        f'Got multiple ports: {service_port} and '
-                        f'{replica_ingress_port} in different resources. '
-                        'Please specify the same port instead.')
 
 
 def _rewrite_tls_credential_paths_and_get_tls_env_vars(
@@ -113,7 +44,7 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
         The generated template variables for TLS.
     """
     service_spec = task.service
-    # Already checked by _validate_service_task
+    # Already checked by validate_service_task
     assert service_spec is not None
     if service_spec.tls_credential is None:
         return {'use_tls': False}
@@ -166,7 +97,7 @@ def up(
                              'only contains lower letters, numbers and dash): '
                              f'{constants.CLUSTER_NAME_VALID_REGEX}')
 
-    _validate_service_task(task)
+    serve_utils.validate_service_task(task)
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG
     # and get the mutated config.
@@ -322,7 +253,7 @@ def up(
                 skip_status_check=True).get(lb_port)
             assert socket_endpoint is not None, (
                 'Did not get endpoint for controller.')
-            # Already checked by _validate_service_task
+            # Already checked by validate_service_task
             assert task.service is not None
             protocol = ('http'
                         if task.service.tls_credential is None else 'https')
@@ -376,7 +307,7 @@ def update(
         mode: Update mode.
     """
     task.validate()
-    _validate_service_task(task)
+    serve_utils.validate_service_task(task)
 
     # Always apply the policy again here, even though it might have been applied
     # in the CLI. This is to ensure that we apply the policy to the final DAG

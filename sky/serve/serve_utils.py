@@ -25,6 +25,7 @@ from sky import global_user_state
 from sky.adaptors import common as adaptors_common
 from sky.serve import constants
 from sky.serve import serve_state
+from sky.serve import spot_placer
 from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
@@ -40,6 +41,7 @@ if typing.TYPE_CHECKING:
     import psutil
     import requests
 
+    import sky
     from sky.serve import replica_managers
 else:
     psutil = adaptors_common.LazyImport('psutil')
@@ -208,6 +210,84 @@ class RequestTimestamp(RequestsAggregator):
 
     def __repr__(self) -> str:
         return f'RequestTimestamp(timestamps={self.timestamps})'
+
+
+def validate_service_task(task: 'sky.Task') -> None:
+    """Validate the task for Sky Serve.
+
+    Args:
+        task: sky.Task to validate
+
+    Raises:
+        ValueError: if the arguments are invalid.
+        RuntimeError: if the task.serve is not found.
+    """
+    spot_resources: List['sky.Resources'] = [
+        resource for resource in task.resources if resource.use_spot
+    ]
+    # TODO(MaoZiming): Allow mixed on-demand and spot specification in resources
+    # On-demand fallback should go to the resources specified as on-demand.
+    if len(spot_resources) not in [0, len(task.resources)]:
+        with ux_utils.print_exception_no_traceback():
+            raise ValueError(
+                'Resources must either all use spot or none use spot. '
+                'To use on-demand and spot instances together, '
+                'use `dynamic_ondemand_fallback` or set '
+                'base_ondemand_fallback_replicas.')
+
+    if task.service is None:
+        with ux_utils.print_exception_no_traceback():
+            raise RuntimeError('Service section not found.')
+
+    policy_description = ('on-demand'
+                          if task.service.dynamic_ondemand_fallback else 'spot')
+    for resource in list(task.resources):
+        if resource.job_recovery is not None:
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError('job_recovery is disabled for SkyServe. '
+                                 'SkyServe will replenish preempted spot '
+                                 f'with {policy_description} instances.')
+
+    # Try to create a spot placer from the task yaml. Check if the task yaml
+    # is valid for spot placer.
+    spot_placer.SpotPlacer.from_task(task.service, task)
+
+    replica_ingress_port: Optional[int] = int(
+        task.service.ports) if (task.service.ports is not None) else None
+    for requested_resources in task.resources:
+        if (task.service.use_ondemand_fallback and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`use_ondemand_fallback` is only supported '
+                    'for spot resources. Please explicitly specify '
+                    '`use_spot: true` in resources for on-demand fallback.')
+        if (task.service.spot_placer is not None and
+                not requested_resources.use_spot):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    '`spot_placer` is only supported for spot resources. '
+                    'Please explicitly specify `use_spot: true` in resources.')
+        if task.service.ports is None:
+            requested_ports = list(
+                resources_utils.port_ranges_to_set(requested_resources.ports))
+            if len(requested_ports) != 1:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        'To open multiple ports on the replica, please set the '
+                        '`service.ports` field to specify a main service port. '
+                        'Must only specify one port in resources otherwise. '
+                        'Each replica will use the port specified as '
+                        'application ingress port.')
+            service_port = requested_ports[0]
+            if replica_ingress_port is None:
+                replica_ingress_port = service_port
+            elif service_port != replica_ingress_port:
+                with ux_utils.print_exception_no_traceback():
+                    raise ValueError(
+                        f'Got multiple ports: {service_port} and '
+                        f'{replica_ingress_port} in different resources. '
+                        'Please specify the same port instead.')
 
 
 def generate_service_name():
