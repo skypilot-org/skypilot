@@ -1,7 +1,6 @@
 """Nebius cloud adaptor."""
 import os
 import threading
-from typing import Optional
 
 from sky.adaptors import common
 from sky.utils import annotations
@@ -168,7 +167,7 @@ def session():
 
 
 @annotations.lru_cache(scope='global')
-def resource(resource_name: str, region: str = DEFAULT_REGION, **kwargs):
+def resource(resource_name: str, **kwargs):
     """Create a Nebius resource.
 
     Args:
@@ -181,21 +180,13 @@ def resource(resource_name: str, region: str = DEFAULT_REGION, **kwargs):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    nebius_credentials = get_nebius_credentials(session_)
-    endpoint = create_endpoint(region)
 
-    return session_.resource(
-        resource_name,
-        endpoint_url=endpoint,
-        aws_access_key_id=nebius_credentials.access_key,
-        aws_secret_access_key=nebius_credentials.secret_key,
-        region_name=region,
-        **kwargs)
+    return session_.resource(resource_name, **kwargs)
 
 
 @annotations.lru_cache(scope='global')
-def client(service_name: str, region):
-    """Create an Nebius client of a certain service.
+def client(service_name: str):
+    """Create Nebius client of a certain service.
 
     Args:
         service_name: Nebius service name (e.g., 's3').
@@ -207,14 +198,8 @@ def client(service_name: str, region):
     # Reference: https://stackoverflow.com/a/59635814
 
     session_ = session()
-    nebius_credentials = get_nebius_credentials(session_)
-    endpoint = create_endpoint(region)
 
-    return session_.client(service_name,
-                           endpoint_url=endpoint,
-                           aws_access_key_id=nebius_credentials.access_key,
-                           aws_secret_access_key=nebius_credentials.secret_key,
-                           region_name=region)
+    return session_.client(service_name)
 
 
 @common.load_lazy_modules(_LAZY_MODULES)
@@ -223,10 +208,3 @@ def botocore_exceptions():
     # pylint: disable=import-outside-toplevel
     from botocore import exceptions
     return exceptions
-
-
-def create_endpoint(region: Optional[str] = DEFAULT_REGION) -> str:
-    """Reads accountid necessary to interact with Nebius Object Storage"""
-    if region is None:
-        region = DEFAULT_REGION
-    return f'https://storage.{region}.nebius.cloud:443'
