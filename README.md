@@ -59,7 +59,7 @@ SkyPilot **is easy to use for AI users**:
 - Easy job management: queue, run, and auto-recover many jobs
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
-- One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
+- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
 - [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with auto-retry
 - [Team deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server.html) and resource sharing
 
