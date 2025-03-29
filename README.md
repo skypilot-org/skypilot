@@ -94,7 +94,7 @@ VMware vSphere, Nebius.
     <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=85%>
   </picture>
 </p>
-<!-- source xcf file: https://drive.google.com/file/d/19_w-v5vGAS8rcdicFk3iNJPsiqtF3u5D/view?usp=drive_link -->
+<!-- source xcf file: https://drive.google.com/drive/folders/1S_acjRsAD3T14qMeEnf6FFrIwHu_Gs_f?usp=drive_link -->
 
 
 ## Getting started
