@@ -31,40 +31,43 @@ MAX_BACKOFF_FACTOR = 10
 MAX_ATTEMPTS = 6
 SSH_KEY_NAME_ON_DO = f'sky-key-{common_utils.get_user_hash()}'
 
-CREDENTIALS_PATH = '~/.config/doctl/config.yaml'
 _client = None
 _ssh_key_id = None
+_credentials_path = None
 
 
 class DigitalOceanError(Exception):
     pass
 
 
-def _init_client():
-    global _client, CREDENTIALS_PATH
-    assert _client is None
-    CREDENTIALS_PATH = None
-    credentials_found = 0
-    for path in POSSIBLE_CREDENTIALS_PATHS:
-        if os.path.exists(path):
-            CREDENTIALS_PATH = path
-            credentials_found += 1
-            logger.debug(f'Digital Ocean credential path found at {path}')
-    if not credentials_found > 1:
-        logger.debug('more than 1 credential file found')
-    if CREDENTIALS_PATH is None:
-        raise DigitalOceanError(
-            'no credentials file found from '
-            f'the following paths {POSSIBLE_CREDENTIALS_PATHS}')
+def get_credentials_path():
+    global _credentials_path
+    if _credentials_path is None:
+        credentials_found = 0
+        for path in POSSIBLE_CREDENTIALS_PATHS:
+            if os.path.exists(path):
+                logger.debug(f'Digital Ocean credential path found at {path}')
+                _credentials_path = path
+                credentials_found += 1
+        if credentials_found > 1:
+            logger.debug('More than 1 credential file found')
+    return _credentials_path
 
+
+def _init_client():
+    global _client
+    assert _client is None
     # attempt default context
-    credentials = common_utils.read_yaml(CREDENTIALS_PATH)
+    if get_credentials_path() is None:
+        raise DigitalOceanError(
+            'No credentials found, please run `doctl auth init`')
+    credentials = common_utils.read_yaml(get_credentials_path())
     default_token = credentials.get('access-token', None)
     if default_token is not None:
         try:
             test_client = do.pydo.Client(token=default_token)
             test_client.droplets.list()
-            logger.debug('trying `default` context')
+            logger.debug('Trying `default` context')
             _client = test_client
             return _client
         except do.exceptions().HttpResponseError:
@@ -76,7 +79,7 @@ def _init_client():
             try:
                 test_client = do.pydo.Client(token=api_token)
                 test_client.droplets.list()
-                logger.debug(f'using {context} context')
+                logger.debug(f'Using "{context}" context')
                 _client = test_client
                 break
             except do.exceptions().HttpResponseError:
