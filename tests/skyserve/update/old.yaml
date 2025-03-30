@@ -1,16 +1,14 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 60
+    initial_delay_seconds: 100
   replicas: 2
   load_balancing_policy: round_robin
 
 resources:
   ports: 8080
   cloud: gcp
-  cpus: 2+
 
 workdir: tests/skyserve/update
 
 run: python3 old_server.py --port 8080
-

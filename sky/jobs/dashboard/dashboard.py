@@ -16,6 +16,7 @@ import flask
 import yaml
 
 from sky import jobs as managed_jobs
+from sky.client import sdk
 from sky.jobs import constants as managed_job_constants
 from sky.utils import common_utils
 from sky.utils import controller_utils
@@ -33,15 +34,11 @@ def _is_running_on_jobs_controller() -> bool:
             pathlib.Path('~/.sky/sky_ray.yml').expanduser().read_text(
                 encoding='utf-8'))
         cluster_name = config.get('cluster_name', '')
-        candidate_controller_names = (
-            controller_utils.Controllers.JOBS_CONTROLLER.value.
-            candidate_cluster_names)
         # We use startswith instead of exact match because the cluster name in
         # the yaml file is cluster_name_on_cloud which may have additional
         # suffices.
-        return any(
-            cluster_name.startswith(name)
-            for name in candidate_controller_names)
+        return cluster_name.startswith(
+            controller_utils.Controllers.JOBS_CONTROLLER.value.cluster_name)
     return False
 
 
@@ -65,6 +62,7 @@ class JobTableColumns(enum.IntEnum):
     - FAILOVER (13): Job failover history
     - DETAILS (14): Job details
     - ACTIONS (15): Available actions column
+    - LOG_CONTENT (16): Log content column
     """
     DROPDOWN = 0
     ID = 1
@@ -82,13 +80,14 @@ class JobTableColumns(enum.IntEnum):
     DETAILS = 13
     FAILOVER = 14
     ACTIONS = 15
+    LOG_CONTENT = 16
 
 
 # Column headers matching the indices above
 JOB_TABLE_COLUMNS = [
     '', 'ID', 'Task', 'Name', 'Resources', 'Submitted', 'Total Duration',
     'Job Duration', 'Status', 'Started', 'Cluster', 'Region', 'Failover',
-    'Recoveries', 'Details', 'Actions'
+    'Recoveries', 'Details', 'Actions', 'Log Content'
 ]
 
 # This column is given by format_job_table but should be ignored.
@@ -138,7 +137,8 @@ def _extract_launch_history(log_content: str) -> str:
 def home():
     if not _is_running_on_jobs_controller():
         # Experimental: run on laptop (refresh is very slow).
-        all_managed_jobs = managed_jobs.queue(refresh=True, skip_finished=False)
+        request_id = managed_jobs.queue(refresh=True, skip_finished=False)
+        all_managed_jobs = sdk.get(request_id)
     else:
         job_table = managed_jobs.dump_managed_job_queue()
         all_managed_jobs = managed_jobs.load_managed_job_queue(job_table)
@@ -146,6 +146,7 @@ def home():
     timestamp = datetime.datetime.now(datetime.timezone.utc)
     rows = managed_jobs.format_job_table(all_managed_jobs,
                                          show_all=True,
+                                         show_user=False,
                                          return_rows=True)
 
     status_counts = collections.defaultdict(int)
@@ -154,14 +155,14 @@ def home():
             status_counts[task['status'].value] += 1
 
     # Add an empty column for the dropdown button and actions column
-    # Exclude SCHED. STATE column
+    # Exclude SCHED. STATE and LOG_CONTENT columns
     rows = [
         [''] + row[:SCHED_STATE_COLUMN] + row[SCHED_STATE_COLUMN + 1:] +
         # Add empty cell for failover and actions column
-        [''] + [''] for row in rows
+        [''] + [''] + [''] for row in rows
     ]
 
-    # Add log content as failover history for each job
+    # Add log content as a regular column for each job
     for row in rows:
         job_id = str(row[JobTableColumns.ID]).strip().replace(' ⤳', '')
         if job_id and job_id != '-':
@@ -175,17 +176,21 @@ def home():
                         log_content = f.read()
                         row[JobTableColumns.FAILOVER] = _extract_launch_history(
                             log_content)
+                        row[JobTableColumns.LOG_CONTENT] = log_content
                 else:
                     row[JobTableColumns.FAILOVER] = 'Log file not found'
+                    row[JobTableColumns.LOG_CONTENT] = 'Log file not found'
             except (IOError, OSError) as e:
-                row[JobTableColumns.FAILOVER] = f'Error reading log: {str(e)}'
-    app.logger.error('All managed jobs:')
+                error_msg = f'Error reading log: {str(e)}'
+                row[JobTableColumns.FAILOVER] = error_msg
+                row[JobTableColumns.LOG_CONTENT] = error_msg
+        else:
+            row[JobTableColumns.LOG_CONTENT] = ''
 
-    # Validate column count
     if rows and len(rows[0]) != len(JOB_TABLE_COLUMNS):
         raise RuntimeError(
             f'Dashboard code and managed job queue code are out of sync. '
-            f'Expected {(JOB_TABLE_COLUMNS)} columns, got {(rows[0])}')
+            f'Expected {JOB_TABLE_COLUMNS} columns, got {rows[0]}')
 
     # Fix STATUS color codes: '\x1b[33mCANCELLED\x1b[0m' -> 'CANCELLED'
     for row in rows:
@@ -209,25 +214,9 @@ def home():
         last_updated_timestamp=timestamp,
         status_values=status_values,
         status_counts=status_counts,
+        request=flask.request,
     )
     return rendered_html
-
-
-@app.route('/download_log/<job_id>')
-def download_log(job_id):
-    try:
-        log_path = os.path.join(
-            os.path.expanduser(managed_job_constants.JOBS_CONTROLLER_LOGS_DIR),
-            f'{job_id}.log')
-        if not os.path.exists(log_path):
-            flask.abort(404)
-        return flask.send_file(log_path,
-                               mimetype='text/plain',
-                               as_attachment=True,
-                               download_name=f'job_{job_id}.log')
-    except (IOError, OSError) as e:
-        app.logger.error(f'Error downloading log for job {job_id}: {str(e)}')
-        flask.abort(500)
 
 
 if __name__ == '__main__':

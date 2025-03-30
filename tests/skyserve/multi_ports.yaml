@@ -1,7 +1,7 @@
 service:
   readiness_probe:
     path: /health
-    initial_delay_seconds: 20
+    initial_delay_seconds: 180  # Use a large delay for EKS LB to be ready
   replicas: 1
   ports: 8080
 
@@ -9,7 +9,6 @@ resources:
   ports:
     - 8080
     - 8081
-  cpus: 2+
 
 setup: |
   wget https://raw.githubusercontent.com/skypilot-org/skypilot/refs/heads/master/examples/serve/http_server/server.py

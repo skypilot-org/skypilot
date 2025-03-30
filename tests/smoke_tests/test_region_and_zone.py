@@ -26,6 +26,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.skylet import constants
 
 
@@ -36,10 +37,10 @@ def test_aws_region():
     test = smoke_tests_utils.Test(
         'aws_region',
         [
-            f'sky launch -y -c {name} --region us-east-2 examples/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-2 examples/minimal.yaml',
             f'sky exec {name} examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-east-2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-east-2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-east-2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
@@ -54,26 +55,30 @@ def test_aws_region():
 @pytest.mark.aws
 def test_aws_with_ssh_proxy_command():
     name = smoke_tests_utils.get_cluster_name()
-
     with tempfile.NamedTemporaryFile(mode='w') as f:
         f.write(
             textwrap.dedent(f"""\
         aws:
             ssh_proxy_command: ssh -W %h:%p -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null jump-{name}
         """))
+        f.write(
+            textwrap.dedent(f"""\
+            api_server:
+                endpoint: {sky.server.common.get_server_url()}
+            """))
         f.flush()
         test = smoke_tests_utils.Test(
             'aws_with_ssh_proxy_command',
             [
-                f'sky launch -y -c jump-{name} --cloud aws --cpus 2 --region us-east-1',
+                f'sky launch -y -c jump-{name} --cloud aws {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-1',
                 # Use jump config
                 f'export SKYPILOT_CONFIG={f.name}; '
-                f'sky launch -y -c {name} --cloud aws --cpus 2 --region us-east-1 echo hi',
+                f'sky launch -y -c {name} --cloud aws {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-1 echo hi',
                 f'sky logs {name} 1 --status',
                 f'export SKYPILOT_CONFIG={f.name}; sky exec {name} echo hi',
                 f'sky logs {name} 2 --status',
                 # Start a small job to make sure the controller is created.
-                f'sky jobs launch -n {name}-0 --cloud aws --cpus 2 --use-spot -y echo hi',
+                f'sky jobs launch -n {name}-0 --cloud aws {smoke_tests_utils.LOW_RESOURCE_ARG} --use-spot -y echo hi',
                 # Wait other tests to create the job controller first, so that
                 # the job controller is not launched with proxy command.
                 smoke_tests_utils.
@@ -81,7 +86,7 @@ def test_aws_with_ssh_proxy_command():
                     cluster_name_wildcard='sky-jobs-controller-*',
                     cluster_status=[sky.ClusterStatus.UP],
                     timeout=300),
-                f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cpus 2 --cloud aws --region us-east-1 -yd echo hi',
+                f'export SKYPILOT_CONFIG={f.name}; sky jobs launch -n {name} --cloud aws {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-1 -yd echo hi',
                 smoke_tests_utils.
                 get_cmd_wait_until_managed_job_status_contains_matching_job_name(
                     job_name=name,
@@ -93,6 +98,7 @@ def test_aws_with_ssh_proxy_command():
                     timeout=300),
             ],
             f'sky down -y {name} jump-{name}; sky jobs cancel -y -n {name}',
+            env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
         )
         smoke_tests_utils.run_one_test(test)
 
@@ -103,12 +109,12 @@ def test_gcp_region_and_service_account():
     test = smoke_tests_utils.Test(
         'gcp_region',
         [
-            f'sky launch -y -c {name} --region us-central1 --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} --region us-central1 {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'curl -H "Metadata-Flavor: Google" "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/identity?format=standard&audience=gcp"\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep us-central1',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep us-central1\'',
             f'sky logs {name} 3 --status',  # Ensure the job succeeded.
             # A user program should not access SkyPilot runtime env python by default.
@@ -130,7 +136,7 @@ def test_ibm_region():
             f'sky launch -y -c {name} --cloud ibm --region {region} examples/minimal.yaml',
             f'sky exec {name} --cloud ibm examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep {region}',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep {region}',  # Ensure the region is correct.
         ],
         f'sky down -y {name}',
     )
@@ -143,10 +149,10 @@ def test_azure_region():
     test = smoke_tests_utils.Test(
         'azure_region',
         [
-            f'sky launch -y -c {name} --region eastus2 --cloud azure tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --region eastus2 --cloud azure tests/test_yamls/minimal.yaml',
             f'sky exec {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep eastus2',  # Ensure the region is correct.
+            f'sky status -v | grep {name} | grep eastus2',  # Ensure the region is correct.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .region | grep eastus2\'',
             f'sky logs {name} 2 --status',  # Ensure the job succeeded.
             f'sky exec {name} \'echo $SKYPILOT_CLUSTER_INFO | jq .zone | grep null\'',
@@ -167,10 +173,10 @@ def test_aws_zone():
     test = smoke_tests_utils.Test(
         'aws_zone',
         [
-            f'sky launch -y -c {name} examples/minimal.yaml --zone us-east-2b',
+            f'sky launch -y -c {name} examples/minimal.yaml {smoke_tests_utils.LOW_RESOURCE_ARG} --zone us-east-2b',
             f'sky exec {name} examples/minimal.yaml --zone us-east-2b',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-east-2b',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )
@@ -184,10 +190,10 @@ def test_ibm_zone():
     test = smoke_tests_utils.Test(
         'zone',
         [
-            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml --zone {zone}',
+            f'sky launch -y -c {name} --cloud ibm examples/minimal.yaml {smoke_tests_utils.LOW_RESOURCE_ARG} --zone {zone}',
             f'sky exec {name} --cloud ibm examples/minimal.yaml --zone {zone}',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep {zone}',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep {zone}',  # Ensure the zone is correct.
         ],
         f'sky down -y {name} {name}-2 {name}-3',
     )
@@ -200,10 +206,10 @@ def test_gcp_zone():
     test = smoke_tests_utils.Test(
         'gcp_zone',
         [
-            f'sky launch -y -c {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} --zone us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky exec {name} --zone us-central1-a --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky status --all | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
+            f'sky status -v | grep {name} | grep us-central1-a',  # Ensure the zone is correct.
         ],
         f'sky down -y {name}',
     )

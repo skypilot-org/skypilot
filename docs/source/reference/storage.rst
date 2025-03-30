@@ -1,7 +1,7 @@
 .. _sky-storage:
 
-Cloud Object Storage
-====================
+Cloud Buckets
+==============
 
 SkyPilot tasks can access data from buckets in cloud object storages such as AWS S3, Google Cloud Storage (GCS), Cloudflare R2, OCI Object Storage or IBM COS.
 
@@ -238,8 +238,8 @@ workers running on different nodes.
 
 
 
-Using SkyPilot Storage CLI
---------------------------------
+Using SkyPilot storage CLI
+--------------------------
 
 To manage buckets created by SkyPilot, the sky CLI provides two commands:
 :code:`sky storage ls` and :code:`sky storage delete`.

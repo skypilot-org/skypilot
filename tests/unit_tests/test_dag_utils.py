@@ -6,8 +6,8 @@ import yaml
 
 import sky
 from sky import jobs
-from sky.utils import common_utils
 from sky.utils import dag_utils
+from sky.utils import registry
 
 
 def test_jobs_recovery_fill_default_values():
@@ -23,8 +23,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery[
-        'strategy'] == jobs.DEFAULT_RECOVERY_STRATEGY
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
 
     task_str = textwrap.dedent("""\
         resources:
@@ -40,8 +40,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery[
-        'strategy'] == jobs.DEFAULT_RECOVERY_STRATEGY
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
     assert resources[0].job_recovery['max_restarts_on_errors'] == 3
 
     task_str = textwrap.dedent(f"""\
@@ -75,8 +75,8 @@ def test_jobs_recovery_fill_default_values():
 
     resources = list(dag.tasks[0].resources)
     assert len(resources) == 1
-    assert resources[0].job_recovery[
-        'strategy'] == jobs.DEFAULT_RECOVERY_STRATEGY
+    assert resources[0].job_recovery['strategy'].lower(
+    ) == registry.JOBS_RECOVERY_STRATEGY_REGISTRY.default
 
     task_str = textwrap.dedent("""\
         resources:

@@ -48,14 +48,19 @@ To prepare a Kubernetes cluster to run SkyPilot, the cluster administrator must:
 
 1. :ref:`Deploy a cluster <kubernetes-setup-deploy>` running Kubernetes v1.20 or later.
 2. Set up :ref:`GPU support <kubernetes-setup-gpusupport>`.
-3. [Optional] :ref:`Set up ports <kubernetes-setup-ports>` for exposing services.
-4. [Optional] :ref:`Set up permissions <kubernetes-setup-serviceaccount>`: create a namespace for your users and/or create a service account with minimal permissions for SkyPilot.
 
-After these steps, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
+After these required steps, perform optional setup steps as needed:
+
+* :ref:`kubernetes-setup-volumes`
+* :ref:`kubernetes-setup-priority`
+* :ref:`kubernetes-setup-serviceaccount`
+* :ref:`kubernetes-setup-ports`
+
+Once completed, the administrator can share the kubeconfig file with users, who can then submit tasks to the cluster using SkyPilot.
 
 .. _kubernetes-setup-deploy:
 
-Step 1 - Deploy a Kubernetes Cluster
+Step 1 - Deploy a Kubernetes cluster
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 .. tip::
@@ -158,7 +163,7 @@ Any one of these labels is sufficient for SkyPilot to detect GPUs on the cluster
           echo "$output"
         fi
 
-Automatically Labelling Nodes
+Automatically labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 If none of the above labels are present on your cluster, we provide a convenience script that automatically detects GPU types and labels each node with the ``skypilot.co/accelerator`` label. You can run it with:
@@ -177,7 +182,7 @@ If none of the above labels are present on your cluster, we provide a convenienc
 
     If the GPU labelling process fails, you can run ``python -m sky.utils.kubernetes.gpu_labeler --cleanup`` to clean up the failed jobs.
 
-Manually Labelling Nodes
+Manually labelling nodes
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 You can also manually label nodes, if required. Labels must be of the format ``skypilot.co/accelerator: <gpu_name>`` where ``<gpu_name>`` is the lowercase name of the GPU.
@@ -195,57 +200,9 @@ Use the following command to label a node:
 
     GPU labels are case-sensitive. Ensure that the GPU name is lowercase if you are using the ``skypilot.co/accelerator`` label.
 
-
-.. _kubernetes-setup-ports:
-
-[Optional] Step 3 - Set up for Exposing Services
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. tip::
-
-    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
-
-Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
-SkyPilot supports either of two modes to expose ports:
-
-* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
-* :ref:`Nginx Ingress <kubernetes-ingress>`
-
-Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
-
-.. _kubernetes-setup-serviceaccount:
-
-[Optional] Step 4 - Namespace and Service Account Setup
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-
-.. tip::
-
-    This step is optional and required only in specific environments. By default, SkyPilot runs in the namespace configured in current `kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_ and creates a service account named ``skypilot-service-account`` to run tasks.
-    **This step is not required if you use these defaults.**
-
-If your cluster requires isolating SkyPilot tasks to a specific namespace and restricting the permissions granted to users,
-you can create a new namespace and service account for SkyPilot to use.
-
-The minimal permissions required for the service account can be found on the :ref:`Minimal Kubernetes Permissions <cloud-permissions-kubernetes>` page.
-
-To simplify the setup, we provide a `script <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/kubernetes/generate_kubeconfig.sh>`_ that creates a namespace and service account with the necessary permissions for a given service account name and namespace.
-
-.. code-block:: bash
-
-    # Download the script
-    wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
-    chmod +x generate_kubeconfig.sh
-
-    # Execute the script to generate a kubeconfig file with the service account and namespace
-    # Replace my-sa and my-namespace with your desired service account name and namespace
-    # The script will create the namespace if it does not exist and create a service account with the necessary permissions.
-    SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
-
-You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
-
 .. _kubernetes-setup-verify:
 
-Verifying Setup
+Verifying setup
 ---------------
 
 Once the cluster is deployed and you have placed your kubeconfig at ``~/.kube/config``, verify your setup by running :code:`sky check`:
@@ -275,10 +232,241 @@ You can also check the GPUs available on your nodes by running:
     my-cluster-4               H100      8           8
     my-cluster-5               H100      8           8
 
+.. _kubernetes-optional-steps:
+
+Optional setup
+--------------
+
+The following setup steps are optional and can be performed based on your specific requirements:
+
+* :ref:`kubernetes-setup-volumes`
+* :ref:`kubernetes-setup-priority`
+* :ref:`kubernetes-setup-serviceaccount`
+* :ref:`kubernetes-setup-ports`
+
+
+.. _kubernetes-setup-volumes:
+
+Set up NFS and other volumes
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
+
+Examples:
+
+.. tab-set::
+
+    .. tab-item:: NFS using hostPath
+      :name: kubernetes-volumes-hostpath-nfs
+
+      Mount a NFS share that's `already mounted on the Kubernetes nodes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: my-host-nfs
+                   volumes:
+                     - name: my-host-nfs
+                       hostPath:
+                         path: /path/on/host/nfs
+                         type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nfs
+                         name: my-host-nfs
+                 volumes:
+                   - name: my-host-nfs
+                     hostPath:
+                       path: /path/on/host/nfs
+                       type: Directory
+
+    .. tab-item:: NFS using native volume
+      :name: kubernetes-volumes-native-nfs
+
+      Mount a NFS share using Kubernetes' `native NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_ support.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nfs/hello.txt
+             ls -la /mnt/nfs
+
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nfs
+                           name: nfs-volume
+                   volumes:
+                     - name: nfs-volume
+                       nfs:
+                         server: nfs.example.com
+                         path: /shared
+                         readOnly: false
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nfs
+                         name: nfs-volume
+                 volumes:
+                   - name: nfs-volume
+                     nfs:
+                       server: nfs.example.com
+                       path: /shared
+                       readOnly: false
+
+    .. tab-item:: NVMe using hostPath
+      :name: kubernetes-volumes-hostpath-nvme
+
+      Mount local NVMe storage that's already mounted on the Kubernetes nodes.
+
+      **Per-task configuration:**
+
+      .. code-block:: yaml
+
+           # task.yaml
+           run: |
+             echo "Hello, world!" > /mnt/nvme/hello.txt
+             ls -la /mnt/nvme
+
+           experimental:
+             config_overrides:
+               pod_config:
+                 spec:
+                   containers:
+                     - volumeMounts:
+                         - mountPath: /mnt/nvme
+                           name: nvme
+                   volumes:
+                     - name: nvme
+                       hostPath:
+                         path: /path/on/host/nvme
+                         type: Directory
+
+      **Global configuration:**
+
+      .. code-block:: yaml
+
+           # ~/.sky/config.yaml
+           kubernetes:
+             pod_config:
+               spec:
+                 containers:
+                   - volumeMounts:
+                       - mountPath: /mnt/nvme
+                         name: nvme
+                 volumes:
+                   - name: nvme
+                     hostPath:
+                       path: /path/on/host/nvme
+                       type: Directory
+
+.. note::
+
+  When using `hostPath volumes <https://kubernetes.io/docs/concepts/storage/volumes/#hostpath>`_, the specified paths must already exist on the Kubernetes node where the pod is scheduled.
+
+  For NFS mounts using hostPath, ensure the NFS mount is already configured on all Kubernetes nodes.
+
+
+.. _kubernetes-setup-priority:
+
+Set up priority and preemption
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default, all SkyPilot pods use the default Kubernetes priority class configured in your cluster. Pods will queue if there are no resources available.
+
+To assign priorities to SkyPilot pods and enable preemption to prioritize critical jobs, refer to :ref:`kubernetes-priorities`.
+
+
+.. _kubernetes-setup-serviceaccount:
+
+Set up namespaces and service accounts
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. tip::
+
+    By default, SkyPilot runs in the namespace configured in current `kube-context <https://kubernetes.io/docs/tasks/access-application-cluster/configure-access-multiple-clusters/#define-clusters-users-and-contexts>`_ and creates a service account named ``skypilot-service-account`` to run tasks.
+    **This step is not required if you use these defaults.**
+
+If your cluster requires isolating SkyPilot tasks to a specific namespace and restricting the permissions granted to users,
+you can create a new namespace and service account for SkyPilot to use.
+
+The minimal permissions required for the service account can be found on the :ref:`Minimal Kubernetes Permissions <cloud-permissions-kubernetes>` page.
+
+To simplify the setup, we provide a `script <https://github.com/skypilot-org/skypilot/blob/master/sky/utils/kubernetes/generate_kubeconfig.sh>`_ that creates a namespace and service account with the necessary permissions for a given service account name and namespace.
+
+.. code-block:: bash
+
+    # Download the script
+    wget https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/utils/kubernetes/generate_kubeconfig.sh
+    chmod +x generate_kubeconfig.sh
+
+    # Execute the script to generate a kubeconfig file with the service account and namespace
+    # Replace my-sa and my-namespace with your desired service account name and namespace
+    # The script will create the namespace if it does not exist and create a service account with the necessary permissions.
+    SKYPILOT_SA_NAME=my-sa SKYPILOT_NAMESPACE=my-namespace ./generate_kubeconfig.sh
+
+You may distribute the generated kubeconfig file to users who can then use it to submit tasks to the cluster.
+
+
+.. _kubernetes-setup-ports:
+
+Set up for exposing services
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. tip::
+
+    If you are using GKE or EKS or do not plan expose ports publicly on Kubernetes (such as ``sky launch --ports``, SkyServe), no additional setup is required. On GKE and EKS, SkyPilot will create a LoadBalancer service automatically.
+
+Running SkyServe or tasks exposing ports requires additional setup to expose ports running services.
+SkyPilot supports either of two modes to expose ports:
+
+* :ref:`LoadBalancer Service <kubernetes-loadbalancer>` (default)
+* :ref:`Nginx Ingress <kubernetes-ingress>`
+
+Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
+
 
 .. _kubernetes-observability:
 
-Observability for Administrators
+Observability for administrators
 --------------------------------
 All SkyPilot tasks are run in pods inside a Kubernetes cluster. As a cluster administrator,
 you can inspect running pods (e.g., with :code:`kubectl get pods -n namespace`) to check which
@@ -321,7 +509,7 @@ Unlike :code:`sky status` which lists only the SkyPilot resources launched by th
 
 .. _kubernetes-observability-dashboard:
 
-Kubernetes Dashboard
+Kubernetes dashboard
 ^^^^^^^^^^^^^^^^^^^^
 You can deploy tools such as the `Kubernetes dashboard <https://kubernetes.io/docs/tasks/access-application-cluster/web-ui-dashboard/>`_ to easily view and manage
 SkyPilot resources on your cluster.
@@ -329,7 +517,7 @@ SkyPilot resources on your cluster.
 .. image:: ../../images/screenshots/kubernetes/kubernetes-dashboard.png
     :width: 80%
     :align: center
-    :alt: Kubernetes Dashboard
+    :alt: Kubernetes dashboard
 
 
 As a demo, we provide a sample Kubernetes dashboard deployment manifest that you can deploy with:
@@ -357,7 +545,7 @@ Note that this dashboard can only be accessed from the machine where the ``kubec
     for more information on how to set up access control for the dashboard.
 
 
-Troubleshooting Kubernetes Setup
+Troubleshooting Kubernetes setup
 --------------------------------
 
 If you encounter issues while setting up your Kubernetes cluster, please refer to the :ref:`troubleshooting guide <kubernetes-troubleshooting>` to diagnose and fix issues.

@@ -3,6 +3,25 @@
 Getting Started on Kubernetes
 =============================
 
+Quickstart
+----------
+Have a kubeconfig? Get started with SkyPilot in 3 commands:
+
+.. code-block:: bash
+
+   # Install dependencies
+   $ brew install kubectl socat netcat
+   # Linux: sudo apt-get install kubectl socat netcat
+
+   # With a valid kubeconfig at ~/.kube/config, run:
+   $ sky check
+   # Shows "Kubernetes: enabled"
+
+   # Launch your SkyPilot cluster
+   $ sky launch --cpus 2+ -- echo hi
+
+For detailed instructions, prerequisites, and advanced features, read on.
+
 Prerequisites
 -------------
 
@@ -170,9 +189,7 @@ You can also inspect the real-time GPU usage on the cluster with :code:`sky show
     my-cluster-5               H100      8           8
 
 
-.. _kubernetes-custom-images:
-
-Using Custom Images
+Using custom images
 -------------------
 By default, we maintain and use two SkyPilot container images for use on Kubernetes clusters:
 
@@ -200,7 +217,7 @@ Your image must satisfy the following requirements:
 
 .. _kubernetes-custom-images-private-repos:
 
-Using Images from Private Repositories
+Using images from private repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
 
@@ -217,7 +234,7 @@ To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Go
     If you use Amazon ECR, your secret credentials may expire every 12 hours. Consider using `k8s-ecr-login-renew <https://github.com/nabsul/k8s-ecr-login-renew>`_ to automatically refresh your secrets.
 
 
-Opening Ports
+Opening ports
 -------------
 
 Opening ports on SkyPilot clusters running on Kubernetes is supported through two modes:
@@ -258,17 +275,19 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 
     To learn more about opening ports in SkyPilot tasks, see :ref:`Opening Ports <ports>`.
 
-Customizing SkyPilot pods
+.. _kubernetes-custom-pod-config:
+
+Customizing SkyPilot Pods
 -------------------------
 
 You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
-The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_. This will apply to all pods created by SkyPilot. 
+The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_. This will apply to all pods created by SkyPilot.
 
 For example, to set custom environment variables and use GPUDirect RDMA, you can add the following to your :code:`~/.sky/config.yaml` file:
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml 
+    # ~/.sky/config.yaml
     kubernetes:
       pod_config:
         spec:
@@ -281,25 +300,6 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
                   rdma/rdma_shared_device_a: 1
                 limits:
                   rdma/rdma_shared_device_a: 1
-
-
-Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ (e.g., an `NFS volume <https://kubernetes.io/docs/concepts/storage/volumes/#nfs>`_) directly to your SkyPilot pods:
-
-.. code-block:: yaml
-
-    # ~/.sky/config.yaml
-    kubernetes:
-      pod_config:
-        spec:
-          containers:
-            - volumeMounts:       # Custom volume mounts for the pod
-                - mountPath: /data
-                  name: nfs-volume
-          volumes:
-            - name: nfs-volume
-              nfs:                # Alternatively, use hostPath if your NFS is directly attached to the nodes
-                server: nfs.example.com
-                path: /nfs
 
 
 .. tip::
@@ -318,20 +318,28 @@ Similarly, you can attach `Kubernetes volumes <https://kubernetes.io/docs/concep
            pod_config:
              ...
 
+.. _kubernetes-using-volumes:
+
+Mounting NFS and other volumes
+------------------------------
+
+`Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
+
+Refer to :ref:`kubernetes-setup-volumes` for details and examples.
 
 FAQs
 ----
 
 * **Can I use multiple Kubernetes clusters with SkyPilot?**
 
-  SkyPilot can work with multiple Kubernetes contexts set in your kubeconfig file. By default, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
+  SkyPilot can work with multiple Kubernetes contexts in your kubeconfig file by setting the ``allowed_contexts`` key in :code:`~/.sky/config.yaml`. See :ref:`multi-kubernetes`.
 
-  If you would like to use multiple contexts seamlessly during failover, check out the :code:`allowed_contexts` feature in :ref:`config-yaml`.
+  If ``allowed_contexts`` is not set, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
 
 * **Are autoscaling Kubernetes clusters supported?**
 
   To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
-  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud). 
+  This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud).
 
   If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
 
@@ -390,4 +398,3 @@ FAQs
         curl -LO "https://dl.k8s.io/release/v1.28.11/bin/linux/amd64/kubectl" && \
         sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl && \
         echo 'export PATH="$PATH:$HOME/.local/bin"' >> ~/.bashrc
-

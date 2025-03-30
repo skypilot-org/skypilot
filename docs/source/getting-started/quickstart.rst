@@ -12,6 +12,8 @@ This guide will walk you through:
 
 Be sure to complete the :ref:`installation instructions <installation>` first before continuing with this guide.
 
+.. _hello-skypilot:
+
 Hello, SkyPilot!
 ------------------
 
@@ -216,6 +218,25 @@ When you are ready to scale out (e.g., run 10s, 100s, or 1000s of jobs), **use**
 
 SkyPilot can support :ref:`thousands of managed jobs <many-jobs>` running at once.
 
+Asynchronous execution
+======================
+
+All SkyPilot CLIs and APIs are asynchronous requests, i.e. you can interrupt them at
+any time and let them run in the background. For example, if you KeyInterrupt the ``sky launch`` command,
+the cluster will keep provisioning in the background:
+
+.. code-block:: console
+
+  $ sky launch -c mycluster hello_sky.yaml
+  ^C
+  ⚙︎ Request will continue running asynchronously.
+  ├── View logs: sky api logs 73d316ac
+  ├── Or, visit: http://127.0.0.1:46580/api/stream?request_id=73d316ac
+  └── To cancel the request, run: sky api cancel 73d316ac
+
+See more details in :ref:`async`.
+
+
 Next steps
 -----------
 
@@ -224,7 +245,7 @@ Congratulations!  In this quickstart, you have launched a cluster, run a task, a
 Next steps:
 
 - Adapt :ref:`Tutorial: AI Training <ai-training>` to start running your own project on SkyPilot!
-- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_
-- To learn more, try out `SkyPilot Tutorials <https://github.com/skypilot-org/skypilot-tutorial>`_ in Jupyter notebooks
+- See the :ref:`Task YAML reference <yaml-spec>`, :ref:`CLI reference <cli>`, and `more examples <https://github.com/skypilot-org/skypilot/tree/master/examples>`_.
+- Set up SkyPilot for a multi-user team: :ref:`Team Deployment <sky-api-server>`.
 
 We invite you to explore SkyPilot's unique features in the rest of the documentation.

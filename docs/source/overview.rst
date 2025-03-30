@@ -121,7 +121,7 @@ A *job* is a program you want to run. Two types of jobs are supported:
 
 
 
-A job can contain one or :ref:`more <pipeline>` tasks. In most cases, a job has just one task; we'll refer to them interchangeably.
+A job can contain one or :ref:`more <pipeline>` *tasks*. In most cases, a job has just one task; we'll refer to them interchangeably.
 
 
 
@@ -162,12 +162,12 @@ See :ref:`job-queue` to get started.
             train = sky.Task(run='python train.py').set_resources(
                 sky.Resources(accelerators='L4:1'))
             train = sky.Task.from_yaml('train.yaml')  # Or load from a YAML.
-            sky.exec(train, cluster_name='my-cluster', detach_run=True)
+            sky.exec(train, cluster_name='my-cluster')
 
             # Queue a job requesting 0.5 GPU.
             eval = sky.Task(run='python eval.py').set_resources(
                 sky.Resources(accelerators='L4:0.5'))
-            sky.exec(eval, cluster_name='my-cluster', detach_run=True)
+            sky.exec(eval, cluster_name='my-cluster')
 
 
 .. _concept-managed-jobs:
@@ -205,6 +205,8 @@ Bringing your infra
 SkyPilot easily connects to your existing infra---clouds, Kubernetes
 clusters, or on-prem machines---using each infra's native authentication
 (cloud credentials, kubeconfig, SSH).
+
+.. _concept-cloud-vms:
 
 Cloud VMs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -267,6 +269,8 @@ If you have existing machines, i.e., a list of IP addresses you can SSH into, yo
 
 See :ref:`Using Existing Machines <existing-machines>`.
 
+
+
 SkyPilot's cost and capacity optimization
 -------------------------------------------------------------------
 
@@ -296,3 +300,17 @@ Users can specify each workload's search space. It can be as flexible or as spec
 
 Optimization is performed within the search space.
 See :ref:`auto-failover` for details.
+
+Use SkyPilot locally or deploy for a team
+----------------------------------------------------------
+
+SkyPilot can be used locally or deployed as a centralized API server for your team.
+
+Team deployment enables you to share and manage compute resources across many users:
+
+- **Deploy once and use anywhere**: Deploy a SkyPilot API server in Kubernetes or on a cloud VM and access it anywhere.
+- **Resource sharing in a team**: Team members can share resources with each other.
+- **Easy onboarding for new members**: Users can run SkyPilot commands without setting up local cloud credentials.
+- **Global view and control**: Admins obtain a single pane of glass for the entire team's compute resources---across clusters and regions.
+
+See :ref:`sky-api-server` for details.

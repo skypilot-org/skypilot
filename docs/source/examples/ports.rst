@@ -9,7 +9,7 @@ At times, it might be crucial to expose specific ports on your cluster to the pu
 - **Creating Web Services**: Whether you're setting up a web server, database, or another service, they all communicate via specific ports that need to be accessible.
 - **Collaborative Tools**: Some tools and platforms may require port openings to enable collaboration with teammates or to integrate with other services.
 
-Opening Ports on a Cluster
+Opening ports on a cluster
 ----------------------------------
 
 To open a port on a SkyPilot cluster, specify :code:`ports` in the :code:`resources` section of your task. For example, here is a YAML configuration to expose a Jupyter Lab server:
@@ -63,7 +63,7 @@ SkyPilot also support opening ports through the CLI:
 
     $ sky launch -c jupyter --ports 8888 jupyter_lab.yaml
 
-Security and Lifecycle Considerations
+Security and lifecycle considerations
 -------------------------------------
 
 Before you start opening ports, there are a few things you need to bear in mind:

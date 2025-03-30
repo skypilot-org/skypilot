@@ -8,7 +8,6 @@ from sky.clouds.cloud import ProvisionerVersion
 from sky.clouds.cloud import Region
 from sky.clouds.cloud import StatusVersion
 from sky.clouds.cloud import Zone
-from sky.clouds.cloud_registry import CLOUD_REGISTRY
 
 # NOTE: import the above first to avoid circular imports.
 # isort: split
@@ -21,6 +20,7 @@ from sky.clouds.gcp import GCP
 from sky.clouds.ibm import IBM
 from sky.clouds.kubernetes import Kubernetes
 from sky.clouds.lambda_cloud import Lambda
+from sky.clouds.nebius import Nebius
 from sky.clouds.oci import OCI
 from sky.clouds.paperspace import Paperspace
 from sky.clouds.runpod import RunPod
@@ -47,10 +47,10 @@ __all__ = [
     'CloudImplementationFeatures',
     'Region',
     'Zone',
-    'CLOUD_REGISTRY',
     'ProvisionerVersion',
     'StatusVersion',
     'Fluidstack',
+    'Nebius',
     # Utility functions
     'cloud_in_iterable',
 ]

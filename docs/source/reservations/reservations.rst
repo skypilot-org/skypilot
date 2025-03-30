@@ -1,7 +1,7 @@
 
 .. _reservation:
 
-Reserved, Capacity Blocks, DWS
+Using Reservations
 ===================================
 
 
@@ -15,7 +15,7 @@ utilize the capacity in your cloud accounts.
   :align: center
 
 
-AWS Capacity Reservations & Capacity Blocks
+AWS capacity reservations & capacity blocks
 --------------------------------------------
 
 AWS **capacity reservations** and **capacity blocks** are ways to reserve a certain amount of compute capacity for a period of time. The latter is for high-end GPUs, such as A100s (P4d instances) and H100s (P5d instances), while the former is for all other instance types.
@@ -60,7 +60,7 @@ For more details of the fields, see :ref:`config-yaml`.
 
 .. _utilizing-reservations:
 
-Utilizing Reservations
+Utilizing reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
 By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
@@ -79,7 +79,7 @@ For example, if you are launching a cluster with the following SkyPilot YAML:
     resources:
       cloud: aws
       accelerators: A100:8
-    
+
     num_nodes: 2
 
 
@@ -166,9 +166,11 @@ In case you want to specify the DWS configuration for each job/cluster, you can 
     resources:
       cloud: gcp
       accelerators: A100:8
-    
+
     num_nodes: 4
-    
+
+.. _dws-on-gke:
+
 Using DWS on GKE with Kueue
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -205,4 +207,3 @@ Unlike short-term reservations above, long-term reservations are typically more 
 SkyPilot supports long-term reservations and on-premise clusters through Kubernetes, i.e., you can set up a Kubernetes cluster on top of your reserved resources and interact with them through SkyPilot.
 
 See the simple steps to set up a Kubernetes cluster on existing machines in :ref:`Using Existing Machines <existing-machines>` or :ref:`bring your existing Kubernetes cluster <kubernetes-overview>`.
-
