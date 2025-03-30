@@ -1106,6 +1106,9 @@ class TestStorageWithCredentials:
         # with .gitignore and .git/info/exclude files to test exclude filter.
         # Stores must be added in the test.
         with tempfile.TemporaryDirectory() as tmpdir:
+            # Initialize git repository
+            subprocess.check_call(['git', 'init'], cwd=tmpdir)
+
             # Creates file structure to be uploaded in the Storage
             self.create_dir_structure(tmpdir, gitignore_structure)
 
@@ -1117,7 +1120,6 @@ class TestStorageWithCredentials:
 
             # Create .git/info/exclude and list files/dirs to be excluded in it
             temp_path = f'{tmpdir}/.git/info/'
-            os.makedirs(temp_path)
             temp_exclude_path = os.path.join(temp_path, 'exclude')
             file_path = os.path.join(skypilot_path,
                                      'tests/git_info_exclude_test')
