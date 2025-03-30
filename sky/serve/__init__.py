@@ -21,6 +21,7 @@ from sky.serve.serve_utils import generate_service_name
 from sky.serve.serve_utils import ServeCodeGen
 from sky.serve.serve_utils import ServiceComponent
 from sky.serve.serve_utils import UpdateMode
+from sky.serve.serve_utils import validate_service_task
 from sky.serve.service_spec import SkyServiceSpec
 
 os.makedirs(os.path.expanduser(SKYSERVE_METADATA_DIR), exist_ok=True)
