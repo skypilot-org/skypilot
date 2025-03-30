@@ -202,7 +202,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 
         for item in output_list:
 
-            if repo == '.' and item == './':
+            if repo == '' and item == './':
                 logger.warning(f'{src_dir_path} is within a git repo, but the '
                                'entire directory is ignored by git. We will '
                                'ignore all git exclusions. '
