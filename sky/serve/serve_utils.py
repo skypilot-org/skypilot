@@ -3,7 +3,6 @@ import base64
 import collections
 import dataclasses
 import enum
-import json
 import os
 import pathlib
 import pickle
@@ -31,7 +30,6 @@ from sky.skylet import constants as skylet_constants
 from sky.skylet import job_lib
 from sky.utils import annotations
 from sky.utils import common_utils
-from sky.utils import controller_utils
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils

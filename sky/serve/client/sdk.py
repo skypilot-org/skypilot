@@ -383,7 +383,8 @@ def sync_down_logs(service_name: str,
 
     This function:
       1) Directly streams controller and load balancer logs to the local machine
-      2) Uses direct 2-layer rsync for replica logs without unifying logs on the controller
+      2) Uses direct 2-layer rsync for replica logs without unifying logs on the
+        controller
 
     Args:
         service_name: The name of the service to download logs from.

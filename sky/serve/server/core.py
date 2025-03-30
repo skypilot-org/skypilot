@@ -1,5 +1,4 @@
 """SkyServe core APIs."""
-import json
 import pathlib
 import re
 import signal
@@ -832,8 +831,8 @@ def sync_down_logs(service_name: str,
             controller=controller_type,
             stopped_message=controller_type.value.default_hint_if_non_existent)
 
-        backend: backends.CloudVmRayBackend = backend_utils.get_backend_from_handle(
-            handle)
+        backend: backends.CloudVmRayBackend = (
+            backend_utils.get_backend_from_handle(handle))
 
     if not normalized_targets:
         # Get all replica infos
