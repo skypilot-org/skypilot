@@ -906,41 +906,44 @@ def sync_down_logs(service_name: str,
 
     if not normalized_targets:
         # Get all replica infos
-        code = serve_utils.ServeCodeGen.get_service_status([service_name])
-        returncode, serve_status_payload, stderr = backend.run_on_head(
-            handle,
-            code,
-            require_outputs=True,
-            stream_logs=False,
-            separate_stderr=True)
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Getting live replicas...')):
+            code = serve_utils.ServeCodeGen.get_service_status([service_name])
+            returncode, serve_status_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
 
-        try:
-            subprocess_utils.handle_returncode(returncode,
-                                               code,
-                                               'Failed to fetch services',
-                                               stderr,
-                                               stream_logs=True)
-        except exceptions.CommandError as e:
-            raise RuntimeError(e.error_msg) from e
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   'Failed to fetch services',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
 
-        service_records = serve_utils.load_service_status(serve_status_payload)
-        assert len(service_records) == 1
-        service_record = service_records[0]
+            service_records = serve_utils.load_service_status(
+                serve_status_payload)
+            assert len(service_records) == 1
+            service_record = service_records[0]
 
-        normalized_targets = {
-            serve_utils.ServiceComponentTarget(
-                serve_utils.ServiceComponent.CONTROLLER),
-            serve_utils.ServiceComponentTarget(
-                serve_utils.ServiceComponent.LOAD_BALANCER),
-            *(serve_utils.ServiceComponentTarget(
-                serve_utils.ServiceComponent.REPLICA,
-                replica_info['replica_id'])
-              for replica_info in service_record['replica_info'])
-        }
+            normalized_targets = {
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.CONTROLLER),
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.LOAD_BALANCER),
+                *(serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.REPLICA,
+                    replica_info['replica_id'])
+                  for replica_info in service_record['replica_info'])
+            }
 
-    local_base = pathlib.Path(
-        serve_utils.generate_remote_service_dir_name(
-            service_name)).expanduser()
+    local_service_dir = serve_utils.generate_remote_service_dir_name(
+        service_name)
+    local_base = pathlib.Path(local_service_dir).expanduser()
     local_base.mkdir(exist_ok=True)
 
     def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
@@ -969,7 +972,9 @@ def sync_down_logs(service_name: str,
                             ssh_mode=command_runner.SshMode.INTERACTIVE,
                             log_path=str(local_base / f'{target}.log'))
 
-    subprocess_utils.run_in_parallel(sync_down_logs_by_target,
-                                     list(normalized_targets))
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Syncing down logs...')):
+        subprocess_utils.run_in_parallel(sync_down_logs_by_target,
+                                         list(normalized_targets))
 
-    return str(local_base)
+    return local_service_dir

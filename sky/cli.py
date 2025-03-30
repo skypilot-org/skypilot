@@ -4819,10 +4819,11 @@ def serve_logs(
         chosen_components.add(serve_lib.ServiceComponent.REPLICA)
 
     if sync_down:
-        serve_lib.sync_down_logs(service_name,
-                                    targets=chosen_components,
-                                    replica_id=replica_id)
-
+        request_id = serve_lib.sync_down_logs(service_name,
+                                              targets=chosen_components,
+                                              replica_id=replica_id)
+        local_path = sdk.stream_and_get(request_id)
+        click.echo(f'Logs downloaded to {local_path}')
         return
 
     if num_flags > 1:
