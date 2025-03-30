@@ -35,7 +35,7 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union, S
 
 import click
 import colorama
