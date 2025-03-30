@@ -8,14 +8,14 @@ payloads is that a user can find the default values in the Restful API docs.
 import getpass
 import json
 import os
+import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
-
-import pydantic
 
 from sky import admin_policy
 from sky import serve
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.server import common
 from sky.skylet import constants
 from sky.usage import constants as usage_constants
@@ -24,6 +24,11 @@ from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
 from sky.utils import registry
+
+if typing.TYPE_CHECKING:
+    import pydantic
+else:
+    pydantic = adaptors_common.LazyImport('pydantic')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -467,6 +472,7 @@ class LocalUpBody(RequestBody):
     ssh_key: Optional[str] = None
     cleanup: bool = False
     context_name: Optional[str] = None
+    password: Optional[str] = None
 
 
 class ServeTerminateReplicaBody(RequestBody):

@@ -19,6 +19,7 @@ from sky import optimizer
 from sky import sky_logging
 from sky import task as task_lib
 from sky.backends import backend_utils
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.jobs.server import core as managed_jobs_core
 from sky.provision.kubernetes import constants as kubernetes_constants
@@ -1001,7 +1002,8 @@ def storage_delete(name: str) -> None:
 # ===================
 @usage_lib.entrypoint
 def enabled_clouds() -> List[clouds.Cloud]:
-    return global_user_state.get_cached_enabled_clouds()
+    return global_user_state.get_cached_enabled_clouds(
+        sky_cloud.CloudCapability.COMPUTE)
 
 
 @usage_lib.entrypoint
@@ -1061,7 +1063,8 @@ def local_up(gpus: bool,
              ssh_user: Optional[str],
              ssh_key: Optional[str],
              cleanup: bool,
-             context_name: Optional[str] = None) -> None:
+             context_name: Optional[str] = None,
+             password: Optional[str] = None) -> None:
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key, cleanup):
@@ -1087,7 +1090,8 @@ def local_up(gpus: bool,
     if ips:
         assert ssh_user is not None and ssh_key is not None
         kubernetes_deploy_utils.deploy_remote_cluster(ips, ssh_user, ssh_key,
-                                                      cleanup, context_name)
+                                                      cleanup, context_name,
+                                                      password)
     else:
         # Run local deployment (kind) if no remote args are specified
         kubernetes_deploy_utils.deploy_local_cluster(gpus)
@@ -1134,7 +1138,9 @@ def local_down() -> None:
         # Run sky check
         with rich_utils.safe_status(
                 ux_utils.spinner_message('Running sky check...')):
-            sky_check.check(clouds=['kubernetes'], quiet=True)
+            sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                       clouds=['kubernetes'],
+                                       quiet=True)
         logger.info(
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,

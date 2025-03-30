@@ -1116,7 +1116,7 @@ if __name__ == '__main__':
 
     sub_procs = []
     try:
-        sub_procs = executor.start(cmd_args.deploy)
+        sub_procs = executor.start(deploy=cmd_args.deploy)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.
@@ -1140,6 +1140,9 @@ if __name__ == '__main__':
                 # The process may not be started yet, close it anyway.
                 proc.close()
 
+        # Terminate processes in reverse order in case dependency, especially
+        # queue server. Terminate queue server first does not affect the
+        # correctness of cleanup but introduce redundant error messages.
         subprocess_utils.run_in_parallel(cleanup,
-                                         sub_procs,
+                                         list(reversed(sub_procs)),
                                          num_threads=len(sub_procs))

@@ -3943,6 +3943,7 @@ def jobs_launch(
               required=False,
               help='Show jobs from all users.')
 @click.option('--all',
+              '-a',
               default=False,
               is_flag=True,
               required=False,
@@ -4394,6 +4395,7 @@ def serve_up(
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
+    serve_lib.validate_service_task(task)
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
@@ -4493,6 +4495,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
+    serve_lib.validate_service_task(task)
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
@@ -5485,11 +5488,17 @@ def local():
     type=str,
     required=False,
     help='Name to use for the kubeconfig context. Defaults to "default".')
+@click.option('--password',
+              type=str,
+              required=False,
+              help='Password for the ssh-user to execute sudo commands. '
+              'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str], async_call: bool):
+             cleanup: bool, context_name: Optional[str],
+             password: Optional[str], async_call: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5535,7 +5544,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
     request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name)
+                              context_name, password)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 

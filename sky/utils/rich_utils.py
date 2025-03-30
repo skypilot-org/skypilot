@@ -6,15 +6,18 @@ import threading
 import typing
 from typing import Dict, Iterator, Optional, Tuple, Union
 
-import rich.console as rich_console
-
+from sky.adaptors import common as adaptors_common
 from sky.utils import annotations
 from sky.utils import message_utils
+from sky.utils import rich_console_utils
 
 if typing.TYPE_CHECKING:
     import requests
+    import rich.console as rich_console
+else:
+    requests = adaptors_common.LazyImport('requests')
+    rich_console = adaptors_common.LazyImport('rich.console')
 
-console = rich_console.Console(soft_wrap=True)
 _statuses: Dict[str, Optional[Union['EncodedStatus',
                                     'rich_console.Status']]] = {
                                         'server': None,
@@ -141,15 +144,28 @@ class _RevertibleStatus:
         return _statuses[self.status_type]
 
     def __exit__(self, exc_type, exc_val, exc_tb):
-        global _status_nesting_level
-        _status_nesting_level -= 1
-        if _status_nesting_level <= 0:
-            _status_nesting_level = 0
-            if _statuses[self.status_type] is not None:
-                _statuses[self.status_type].__exit__(exc_type, exc_val, exc_tb)
-                _statuses[self.status_type] = None
-        else:
-            _statuses[self.status_type].update(self.previous_message)
+        # We use the same lock with the `safe_logger` to avoid the following 2
+        # raice conditions. We refer loggers in another thread as "thread
+        # logger" hereafter.
+        # 1. When a thread logger stopped the status in `safe_logger`, and
+        #    here we exit the status and set it to None. Then the thread logger
+        #    will raise an error when it tries to restart the status.
+        # 2. When a thread logger stopped the status in `safe_logger`, and
+        #    here we exit the status and entered a new one. Then the thread
+        #    logger will raise an error when it tries to restart the old status,
+        #    since only one LiveStatus can be started at the same time.
+        # Please refer to #4995 for more information.
+        with _logging_lock:
+            global _status_nesting_level
+            _status_nesting_level -= 1
+            if _status_nesting_level <= 0:
+                _status_nesting_level = 0
+                if _statuses[self.status_type] is not None:
+                    _statuses[self.status_type].__exit__(
+                        exc_type, exc_val, exc_tb)
+                    _statuses[self.status_type] = None
+            else:
+                _statuses[self.status_type].update(self.previous_message)
 
     def update(self, *args, **kwargs):
         _statuses[self.status_type].update(*args, **kwargs)
@@ -219,7 +235,7 @@ def client_status(msg: str) -> Union['rich_console.Status', _NoOpConsoleStatus]:
     if (threading.current_thread() is threading.main_thread() and
             not sky_logging.is_silent()):
         if _statuses['client'] is None:
-            _statuses['client'] = console.status(msg)
+            _statuses['client'] = rich_console_utils.get_console().status(msg)
         return _RevertibleStatus(msg, 'client')
     return _NoOpConsoleStatus()
 

@@ -5,9 +5,9 @@ from typing import Dict, List, Optional, Union
 import webbrowser
 
 import click
-import requests
 
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.client import common as client_common
 from sky.client import sdk
 from sky.server import common as server_common
@@ -20,7 +20,11 @@ from sky.utils import dag_utils
 if typing.TYPE_CHECKING:
     import io
 
+    import requests
+
     import sky
+else:
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
