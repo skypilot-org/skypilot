@@ -113,7 +113,8 @@ class Kubernetes(clouds.Cloud):
             # Pod does not have permissions to down itself with exec auth.
             unsupported_features[
                 clouds.CloudImplementationFeatures.AUTODOWN] = message
-        # Pod does not have permissions to stop itself
+        unsupported_features[clouds.CloudImplementationFeatures.STOP] = (
+            'Stopping clusters is not supported on Kubernetes.')
         unsupported_features[clouds.CloudImplementationFeatures.AUTOSTOP] = (
             'Auto-stop is not supported on Kubernetes.')
         # Allow spot instances if supported by the cluster
