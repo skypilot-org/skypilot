@@ -14,7 +14,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
@@ -70,6 +70,38 @@ class ServiceComponent(enum.Enum):
     CONTROLLER = 'controller'
     LOAD_BALANCER = 'load_balancer'
     REPLICA = 'replica'
+
+
+@dataclasses.dataclass
+class ServiceComponentTarget:
+    """Represents a target service component with an optional replica ID.
+    """
+    component: ServiceComponent
+    replica_id: Optional[int] = None
+
+    def __init__(self,
+                 component: Union[str, ServiceComponent],
+                 replica_id: Optional[int] = None):
+        if isinstance(component, str):
+            component = ServiceComponent(component)
+        self.component = component
+        self.replica_id = replica_id
+
+    def __post_init__(self):
+        """Validate that replica_id is only provided for REPLICA component."""
+        if (self.component
+                == ServiceComponent.REPLICA) != (self.replica_id is None):
+            raise ValueError(
+                'replica_id must be specified if and only if component is '
+                'REPLICA.')
+
+    def __hash__(self) -> int:
+        return hash((self.component, self.replica_id))
+
+    def __str__(self) -> str:
+        if self.component == ServiceComponent.REPLICA:
+            return f'{self.component.value}-{self.replica_id}'
+        return self.component.value
 
 
 class UserSignal(enum.Enum):
@@ -830,160 +862,6 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         ):
             print(line, end='', flush=True)
     return ''
-
-
-def sync_down_logs(service_name: str, timestamp: str,
-                   target_str_list: List[str],
-                   replica_id: Optional[int]) -> str:
-    """Gathers logs into the controller's
-      ~/.sky/serve/<service_name>/<timestamp> folder.
-    - If target == 'controller' or 'load_balancer', do local copy.
-    - If target == 'replica' and replica_id is specified, unify that
-      replica's logs only.
-    - If target is not specified, do local copy and unify all replicas' logs.
-
-    Returns a dict string in json format.
-    - Key: 'controller' or 'load_balancer' or 'replica_<replica_id>'
-    - Value: Message indicating the status of the log sync. When success, the
-      message will contains {PATH_PLACEHOLDER} to be replaced by the
-      user laptop's local path later.
-    """
-    record = serve_state.get_service_from_name(service_name)
-    if record is None:
-        with ux_utils.print_exception_no_traceback():
-            raise ValueError(f'Service {service_name} not found on controller.')
-
-    messages: Dict[str, str] = {}
-
-    all_targets = set(target_str_list)
-    wants_all = not all_targets
-
-    replicas_targets: List['replica_managers.ReplicaInfo'] = []
-    if wants_all:
-        replica_infos = serve_state.get_replica_infos(service_name)
-        for info in replica_infos:
-            # PREEMPTED or UNKNOWN replicas could be in replica_infos
-            # for a short period of time before _refresh_process_pool
-            # updates the replica infos.
-            if info.status not in [
-                    serve_state.ReplicaStatus.PREEMPTED,
-                    serve_state.ReplicaStatus.UNKNOWN,
-            ]:
-                replicas_targets.append(info)
-    elif replica_id is not None:
-        replica_info = serve_state.get_replica_info_from_id(
-            service_name, replica_id)
-        if replica_info is None:
-            messages[f'replica_{replica_id}'] = (
-                f'Replica {replica_id} for {service_name} is '
-                'not found.')
-        else:
-            replicas_targets.append(replica_info)
-
-    service_dir = generate_remote_service_dir_name(service_name)
-    local_base = (pathlib.Path(service_dir) / timestamp).expanduser()
-    local_base.mkdir(parents=True, exist_ok=True)
-
-    def _fetch_replica_logs(info: 'replica_managers.ReplicaInfo'):
-        handle = info.handle()
-        replica_id = info.replica_id
-        status = info.status
-        if status in [
-                serve_state.ReplicaStatus.PREEMPTED,
-                serve_state.ReplicaStatus.UNKNOWN,
-        ]:
-            messages[f'replica_{replica_id}'] = (
-                f'Replica {replica_id} for {service_name} has been '
-                'scaled down or preempted.')
-            return
-        if status == serve_state.ReplicaStatus.PROVISIONING:
-            messages[f'replica_{replica_id}'] = (
-                f'Replica {replica_id} for {service_name} is still '
-                'provisioning.')
-            return
-        if handle is None:
-            messages[f'replica_{replica_id}'] = (
-                f'Cannot find cluster {info.cluster_name}. '
-                'Skipping logs.')
-            return
-        assert isinstance(handle, backends.CloudVmRayResourceHandle)
-        job_file = controller_utils.download_and_stream_latest_job_log(
-            backends.CloudVmRayBackend(),
-            handle,
-            str(local_base),
-            stream_logs=False)
-        if job_file is None:
-            # TODO(andyl): We should returns the exact error message.
-            # Current blocker is error message is directly printed by
-            # controller_utils.download_and_stream_latest_job_log.
-            messages[f'replica_{replica_id}'] = (
-                f'Error pulling logs for replica {replica_id} for '
-                f'{service_name}. See the controller log for more details.')
-            return
-
-        job_file_path = pathlib.Path(job_file)
-        shutil.move(typing.cast(str, job_file_path),
-                    local_base / f'replica_{replica_id}.log')
-
-        # TODO(andyl): The whole <run-timestamp> including
-        # a run.log and 'tasks' subdir is synced down by
-        # controller_utils.download_and_stream_latest_job_log.
-        # We should not even create it.
-        shutil.rmtree(job_file_path.parent)
-
-        messages[f'replica_{replica_id}'] = (
-            f'Successfully synced replica {replica_id} logs for '
-            f'{service_name} to {{PATH_PLACEHOLDER}}/replica_{replica_id}.log')
-
-    subprocess_utils.run_in_parallel(
-        _fetch_replica_logs,
-        replicas_targets,
-    )
-
-    if (ServiceComponent.CONTROLLER.value in target_str_list or wants_all):
-        controller_file = generate_remote_controller_log_file_name(service_name)
-        shutil.copy(
-            pathlib.Path(controller_file).expanduser(),
-            local_base / 'controller.log')
-        messages['controller'] = (
-            'Successfully synced controller logs for '
-            f'{service_name} to {{PATH_PLACEHOLDER}}/controller.log')
-
-    if (ServiceComponent.LOAD_BALANCER.value in target_str_list or wants_all):
-        load_balancer_file = (
-            generate_remote_load_balancer_log_file_name(service_name))
-        shutil.copy(
-            pathlib.Path(load_balancer_file).expanduser(),
-            local_base / 'load_balancer.log')
-        messages['load_balancer'] = (
-            'Successfully synced load balancer logs for '
-            f'{service_name} to {{PATH_PLACEHOLDER}}/load_balancer.log')
-
-    return json.dumps(messages)
-
-
-def rsync_service_logs_from_controller(
-    runner: 'command_runner.CommandRunner',
-    service_name: str,
-    timestamp: str,
-) -> pathlib.Path:
-    """Rsync logs from the controller's ~/.sky/serve/<service_dir> to local.
-    Returns the parent directory of the downloaded logs.
-    """
-    service_dir = generate_remote_service_dir_name(service_name)
-    base_dir = pathlib.Path(service_dir) / timestamp
-
-    local_base = base_dir.expanduser()
-    local_base.mkdir(parents=True, exist_ok=True)
-
-    runner.rsync(
-        f'{base_dir}/',
-        str(local_base),
-        up=False,
-        stream_logs=False,
-    )
-
-    return base_dir
 
 
 # ================== Table Formatter for `sky serve status` ==================

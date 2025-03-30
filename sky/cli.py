@@ -4819,13 +4819,9 @@ def serve_logs(
         chosen_components.add(serve_lib.ServiceComponent.REPLICA)
 
     if sync_down:
-        try:
-            serve_lib.sync_down_logs(service_name,
-                                     targets=chosen_components,
-                                     replica_id=replica_id)
-        except (exceptions.ClusterNotUpError, ValueError, RuntimeError):
-            with ux_utils.print_exception_no_traceback():
-                raise
+        serve_lib.sync_down_logs(service_name,
+                                    targets=chosen_components,
+                                    replica_id=replica_id)
 
         return
 

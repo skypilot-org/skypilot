@@ -364,3 +364,50 @@ def tail_logs(service_name: str,
     )
     request_id = server_common.get_request_id(response)
     sdk.stream_response(request_id, response, output_stream)
+
+
+@usage_lib.entrypoint
+@server_common.check_server_healthy_or_start
+def sync_down_logs(service_name: str,
+                   *,
+                   targets: Optional[Union[
+                       str, 'serve_utils.ServiceComponent',
+                       List[Union[str,
+                                  'serve_utils.ServiceComponent']]]] = None,
+                   replica_id: Optional[int] = None) -> server_common.RequestId:
+    """Sync down logs from the controller for the given service.
+
+    This function:
+      1) Directly streams controller and load balancer logs to the local machine
+      2) Uses direct 2-layer rsync for replica logs without unifying logs on the controller
+
+    Args:
+        service_name: The name of the service to download logs from.
+        targets: Which component(s) to download logs for. If None or empty,
+            means download all logs (controller, load-balancer, all replicas).
+            Can be a string (e.g. "controller"), or a `ServiceComponent` object,
+            or a list of them for multiple components. Currently accepted
+            values:
+                - "controller"/ServiceComponent.CONTROLLER
+                - "load_balancer"/ServiceComponent.LOAD_BALANCER
+                - "replica"/ServiceComponent.REPLICA
+        replica_id: The replica ID to download logs from, specified when and
+            only when target is `ServiceComponent.REPLICA`.
+
+    Raises:
+        RuntimeError: If fails to gather logs or fails to rsync from the
+          controller.
+        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        ValueError: Arguments not valid.
+    """
+    body = payloads.ServeDownloadLogsBody(
+        service_name=service_name,
+        targets=targets,
+        replica_id=replica_id,
+    )
+    response = requests.post(
+        f'{server_common.get_server_url()}/serve/download-logs',
+        json=json.loads(body.model_dump_json()),
+        timeout=(5, None),
+    )
+    return server_common.get_request_id(response)

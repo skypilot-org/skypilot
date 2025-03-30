@@ -413,6 +413,14 @@ class ServeLogsBody(RequestBody):
     follow: bool = True
 
 
+class ServeDownloadLogsBody(RequestBody):
+    """The request body for the serve download logs endpoint."""
+    service_name: str
+    targets: Optional[Union[str, serve.ServiceComponent,
+                            List[Union[str, serve.ServiceComponent]]]]
+    replica_id: Optional[int] = None
+
+
 class ServeStatusBody(RequestBody):
     """The request body for the serve status endpoint."""
     service_names: Optional[Union[str, List[str]]]
