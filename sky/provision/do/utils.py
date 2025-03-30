@@ -15,6 +15,7 @@ from sky.adaptors import do
 from sky.provision import common
 from sky.provision import constants as provision_constants
 from sky.provision.do import constants
+from sky.utils import annotations
 from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
@@ -40,18 +41,18 @@ class DigitalOceanError(Exception):
     pass
 
 
+@annotations.lru_cache(scope='request')
 def get_credentials_path():
-    global _credentials_path
-    if _credentials_path is None:
-        credentials_found = 0
-        for path in POSSIBLE_CREDENTIALS_PATHS:
-            if os.path.exists(path):
-                logger.debug(f'Digital Ocean credential path found at {path}')
-                _credentials_path = path
-                credentials_found += 1
-        if credentials_found > 1:
-            logger.debug('More than 1 credential file found')
-    return _credentials_path
+    credentials_path = None
+    credentials_found = 0
+    for path in POSSIBLE_CREDENTIALS_PATHS:
+        if os.path.exists(path):
+            logger.debug(f'Digital Ocean credential path found at {path}')
+            credentials_path = path
+            credentials_found += 1
+    if credentials_found > 1:
+        logger.debug('More than 1 credential file found')
+    return credentials_path
 
 
 def _init_client():
