@@ -368,7 +368,8 @@ available_node_types:
                       INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
                     fi
                   elif ! dpkg -l | grep -q "^ii  $pkg "; then
-                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ]; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ]; then
+                      # Install fuse first to avoid confliction with fuse3
                       INSTALL_FIRST="$INSTALL_FIRST $pkg";
                     else
                       MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
