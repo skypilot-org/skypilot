@@ -2475,11 +2475,11 @@ def get_unlabeled_accelerator_nodes(context: Optional[str] = None) -> List[Any]:
         if get_gpu_resource_key() in node.status.capacity:
             nodes_with_accelerator.append(node)
 
-    lf, _ = detect_gpu_label_formatter(context)
-    if not lf:
+    label_formatter, _ = detect_gpu_label_formatter(context)
+    if not label_formatter:
         return nodes_with_accelerator
     else:
-        label_keys = lf.get_label_keys()
+        label_keys = label_formatter.get_label_keys()
 
     unlabeled_nodes = []
     for node in nodes_with_accelerator:
