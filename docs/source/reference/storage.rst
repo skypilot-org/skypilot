@@ -275,7 +275,7 @@ without blocking the training loop.
       mode: MOUNT_CACHED
 
 .. note::
-    If the data at source changes, new files will be automatically synced to the bucket.
+    When using MOUNT_CACHED for checkpoints, ensure your checkpoint frequency allows each checkpoint to be completely flushed to the remote bucket before the next one is written. Otherwise, the local cache will continue to grow and may eventually fill the disk. New files will be automatically synced to the bucket in the background.
 
 
 Using SkyPilot storage CLI
