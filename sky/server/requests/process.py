@@ -34,7 +34,7 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
         # 2. Thread 2 decrements running
         # 3. Thread 1 schedules the task to other pool even if the pool is
         #    currently idle.
-        self.running: atomic.Int = atomic.Int(0)
+        self.running: atomic.AtomicInt = atomic.AtomicInt(0)
 
     def submit(self, fn, *args, **kwargs) -> concurrent.futures.Future:
         """Submit a task for execution.
