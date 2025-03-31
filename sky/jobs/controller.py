@@ -302,14 +302,11 @@ class JobsController:
                 elif (job_status
                       in job_lib.JobStatus.user_code_failure_states() or
                       job_status == job_lib.JobStatus.FAILED_DRIVER):
-                    end_time: Optional[float] = None
-                    if job_status in job_lib.JobStatus.user_code_failure_states(
-                    ):
-                        # The user code has probably crashed, fail immediately.
-                        end_time = managed_job_utils.try_to_get_job_end_time(
-                            self._backend, cluster_name)
+                    # The user code has probably crashed, fail immediately.
+                    end_time = managed_job_utils.try_to_get_job_end_time(
+                        self._backend, cluster_name)
                     logger.info(
-                        f'The user job failed {job_status}. Please check the '
+                        f'The user job failed ({job_status}). Please check the '
                         'logs below.\n'
                         f'== Logs of the user job (ID: {self._job_id}) ==\n')
 
@@ -332,9 +329,10 @@ class JobsController:
                             managed_job_state.ManagedJobStatus.FAILED_CONTROLLER
                         )
                         failure_reason = (
-                            'The job driver failed. The job may need more '
-                            'resources - try adding more CPU, memory, or disk '
-                            f'in your job definition. {failure_reason}')
+                            'The job driver on the remote cluster failed. This '
+                            'be caused by the job taking too much memory or '
+                            'other resources. Try adding more memory, CPU, or '
+                            f'disk in your job definition. {failure_reason}')
                     should_restart_on_failure = (
                         self._strategy_executor.should_restart_on_failure())
                     if should_restart_on_failure:
