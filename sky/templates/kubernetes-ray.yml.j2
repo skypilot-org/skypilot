@@ -352,7 +352,9 @@ available_node_types:
                 (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
-                PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
+                # Install both fuse2 and fuse3 for compatibility for all possible fuse implementations in advance,
+                # so that both fusemount and fusermount3 can be masked before enabling SSH access.
+                PACKAGES="rsync curl netcat gcc patch pciutils fuse fuse3 openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
                 # so that curl and rsync are available sooner to unblock the following
@@ -399,7 +401,7 @@ available_node_types:
                 if [ -z "$FUSERMOUNT3_PATH" ]; then
                     FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
                 fi
-                # Also mask fusermount3 for rclone mount utility on ubuntu < 22.04
+                # Also mask fusermount3 for rclone and blobfuse2
                 $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
                 echo "FUSERMOUNT_PATH: $FUSERMOUNT_PATH"
                 # Wait for the server to setup the fusermount shim binary in case:
