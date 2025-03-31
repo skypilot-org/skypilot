@@ -108,7 +108,10 @@ _BURSTABLE_WORKERS_FOR_LOCAL = 1024
 
 
 class QueueBackend(enum.Enum):
+    # Local queue backend serves queues in each process locally, which has
+    # lower resource usage but the consumer must be in the same process.
     LOCAL = 'local'
+    # Multi-process queue backend starts a dedicated process for serving queues.
     MULTIPROCESSING = 'multiprocessing'
     # TODO(zhwu): we can add redis backend in the future.
 
