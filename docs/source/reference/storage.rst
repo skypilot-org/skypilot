@@ -158,10 +158,10 @@ its performance requirements and size of the data.
     
     Important considerations for :code:`MOUNT_CACHED` mode:
     
-    * If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted
-    * Files only begin uploading after they are closed by all processes
-    * By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally
-    * The write performance depends on the disk tier used for caching - faster disks provide better performance
+    * If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted.
+    * Files only begin uploading after they are closed by all processes.
+    * By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally.
+    * The write performance depends on the disk tier used for caching - faster disks provide better performance.
 
 
 .. note::
