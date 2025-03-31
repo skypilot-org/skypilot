@@ -46,7 +46,7 @@ def get_node_hash(node_name: str):
 
 
 def label(context: Optional[str] = None):
-    deletion_success, reason = cleanup()
+    deletion_success, reason = cleanup(context=context)
     if not deletion_success:
         print(reason)
         return
@@ -86,7 +86,7 @@ def label(context: Optional[str] = None):
             if kubernetes_utils.get_gpu_resource_key() in node.status.capacity:
                 gpu_nodes.append(node)
 
-        print(f'Found {len(gpu_nodes)} GPU nodes in the cluster')
+        print(f'Found {len(gpu_nodes)} GPU node(s) in the cluster')
 
         # Check if the 'nvidia' RuntimeClass exists
         try:
@@ -127,12 +127,16 @@ def label(context: Optional[str] = None):
               'please ensure that they have the label '
               f'`{kubernetes_utils.get_gpu_resource_key()}: <number of GPUs>`')
     else:
-        print('GPU labeling started - this may take 10 min or more to complete.'
-              '\nTo check the status of GPU labeling jobs, run '
-              '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
-              '\nYou can check if nodes have been labeled by running '
-              '`kubectl describe nodes` and looking for labels of the format '
-              '`skypilot.co/accelerator: <gpu_name>`. ')
+        context_str = f' --context {context}' if context else ''
+        print(
+            f'GPU labeling started - this may take 10 min or more to complete.'
+            '\nTo check the status of GPU labeling jobs, run '
+            f'`kubectl get jobs -n kube-system '
+            f'-l job=sky-gpu-labeler{context_str}`'
+            '\nYou can check if nodes have been labeled by running '
+            f'`kubectl describe nodes{context_str}` '
+            'and looking for labels of the format '
+            '`skypilot.co/accelerator: <gpu_name>`. ')
 
 
 def main():
