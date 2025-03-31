@@ -1116,7 +1116,7 @@ if __name__ == '__main__':
 
     sub_procs = []
     try:
-        sub_procs = executor.start(cmd_args.deploy)
+        sub_procs = executor.start(deploy=cmd_args.deploy)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.

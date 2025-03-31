@@ -1,4 +1,5 @@
 """Shared queues for multiprocessing."""
+import multiprocessing
 from multiprocessing import managers
 import queue
 import time
@@ -57,10 +58,13 @@ def get_queue(queue_name: str,
 
 
 def wait_for_queues_to_be_ready(queue_names: List[str],
+                                queue_server: multiprocessing.Process,
                                 port: int = DEFAULT_QUEUE_MANAGER_PORT) -> None:
     """Wait for the queues to be ready after queue manager is just started."""
     initial_time = time.time()
-    max_wait_time = 5
+    # Wait for queue manager to be ready. Exit eagerly if the manager process
+    # exits, just wait for a long timeout that is unlikely to reach otherwise.
+    max_wait_time = 60
     while queue_names:
         try:
             get_queue(queue_names[0], port)
@@ -70,6 +74,9 @@ def wait_for_queues_to_be_ready(queue_names: List[str],
             logger.info(f'Waiting for request queue, named {queue_names[0]!r}, '
                         f'to be ready...')
             time.sleep(0.2)
+            if not queue_server.is_alive():
+                raise RuntimeError(
+                    'Queue manager process exited unexpectedly.') from e
             if time.time() - initial_time > max_wait_time:
                 raise RuntimeError(
                     f'Request queue, named {queue_names[0]!r}, '
