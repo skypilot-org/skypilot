@@ -248,9 +248,11 @@ class QueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
 
+
 class UsersBody(RequestBody):
     """The request body for the users endpoint."""
     pass
+
 
 class CancelBody(RequestBody):
     """The request body for the cancel endpoint."""

@@ -185,9 +185,10 @@ def get_user(user_id: str) -> models.User:
         return models.User(id=user_id)
     return models.User(id=row[0], name=row[1])
 
+
 def get_all_users() -> List[models.User]:
-    logger.info(f'Getting all users... in global_user_state.py')
-    rows = _DB.cursor.execute('SELECT id, name FROM users ORDER BY name').fetchall()
+    rows = _DB.cursor.execute(
+        'SELECT id, name FROM users ORDER BY name').fetchall()
     return [models.User(id=row[0], name=row[1]) for row in rows]
 
 

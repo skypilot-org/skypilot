@@ -2,7 +2,7 @@
 
 import collections
 import dataclasses
-from typing import Dict, Optional, Any
+from typing import Any, Dict, Optional
 
 
 @dataclasses.dataclass
@@ -13,10 +13,7 @@ class User:
     name: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            'id': self.id,
-            'name': self.name
-        }
+        return {'id': self.id, 'name': self.name}
 
 
 RealtimeGpuAvailability = collections.namedtuple(
