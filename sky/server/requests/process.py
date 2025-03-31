@@ -41,7 +41,7 @@ class PoolExecutor(concurrent.futures.ProcessPoolExecutor):
 
         If reuse_worker is False, wraps the function to exit after completion.
         """
-        self.running.increment()
+        self.running += 1
         future = super().submit(fn, *args, **kwargs)
         future.add_done_callback(lambda _: self.running.decrement())
         return future
