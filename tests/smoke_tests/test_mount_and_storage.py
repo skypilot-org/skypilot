@@ -445,7 +445,7 @@ def test_docker_storage_mounts(generic_cloud: str, image_id: str):
                 'kubectl get po -l skypilot-head-node=1 -oname | xargs -I {} kubectl exec -it {} -- ls -l /bin/fusermount3 && '
                 'kubectl get po -l skypilot-head-node=1 -oname | xargs -I {} kubectl exec -it {} -- fusermount -V && '
                 'kubectl get po -l skypilot-head-node=1 -oname | xargs -I {} kubectl exec -it {} -- fusermount3 -V && '
-                f'&& sky down -y {name}; sky storage delete -y {storage_name}'
+                f'sky down -y {name}; sky storage delete -y {storage_name}'
             ),
             timeout=20 * 60,  # 20 mins
         )
