@@ -674,6 +674,16 @@ async def logs(
         background_tasks=background_tasks,
     )
 
+@app.post('/users')
+async def users(request: fastapi.Request,users_body: payloads.UsersBody) -> None:
+    """Gets all users."""
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='users',
+        request_body=users_body,
+        func=core.users,
+        schedule_type=requests_lib.ScheduleType.SHORT,
+    )
 
 @app.post('/download_logs')
 async def download_logs(

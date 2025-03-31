@@ -115,8 +115,8 @@ class RequestBody(pydantic.BaseModel):
 
 class CheckBody(RequestBody):
     """The request body for the check endpoint."""
-    clouds: Optional[Tuple[str, ...]]
-    verbose: bool
+    clouds: Optional[Tuple[str, ...]] = None
+    verbose: bool = False
 
 
 class DagRequestBody(RequestBody):
@@ -248,6 +248,9 @@ class QueueBody(RequestBody):
     skip_finished: bool = False
     all_users: bool = False
 
+class UsersBody(RequestBody):
+    """The request body for the users endpoint."""
+    pass
 
 class CancelBody(RequestBody):
     """The request body for the cancel endpoint."""
