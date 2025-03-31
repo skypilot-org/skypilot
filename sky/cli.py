@@ -3900,8 +3900,11 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
+    # Optimize info is only show if _need_confirmation.
+    if not yes:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='yellow')
 
     request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
