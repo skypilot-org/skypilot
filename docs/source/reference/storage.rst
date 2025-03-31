@@ -134,7 +134,7 @@ its performance requirements and size of the data.
    * - Disk Size
      - |:white_check_mark:| No disk size requirements [2]_ .
      - |:yellow_circle:| VM disk size must be greater than the size of the bucket.
-     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk.
+     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk. Writing to disk faster than disk can write to remote can cause the disk to run out of space.
 
 .. [1] ``MOUNT`` mode does not support the full POSIX interface and some file
     operations may fail. Most notably, random writes and append operations are
