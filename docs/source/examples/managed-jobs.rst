@@ -297,9 +297,10 @@ Below is an example of mounting a bucket to :code:`/checkpoint`.
   file_mounts:
     /checkpoint:
       name: # NOTE: Fill in your bucket name
-      mode: MOUNT
+      mode: MOUNT_CACHED # or MOUNT
 
-The :code:`MOUNT` mode in :ref:`SkyPilot bucket mounting <sky-storage>` ensures the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
+The :code:`MOUNT` mode and :code:`MOUNT_CACHED` mode ensure the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
+The mode difference and caveats can be found in :ref:`SkyPilot bucket mounting <sky-storage>`. 
 
 To implement checkpointing in your application code:
 
@@ -312,7 +313,24 @@ To see checkpointing in action, see the :ref:`BERT end-to-end example below <ber
 
 For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
+Using MOUNT_CACHED with multiple jobs
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+MOUNT_CACHED provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. Unlike MOUNT mode, it supports all write operations without limitations on file operations. It offers fast file access through a local VFS (Virtual File System) cache implemented by `rclone <https://rclone.org/>`__ that provides near-local disk performance. Checkpointing introduces limited slowdown to training as writes are cached locally first, then uploaded in the background. 
+
+.. note::
+   
+   In MOUNT_CACHED mode, files only begin uploading after they are closed by all processes. By default, SkyPilot uses sequential transfers to maintain file order, which can cause the cache to grow if files are written faster than they can be uploaded.
+
+   When multiple jobs share a node (e.g., using fractional GPUs), be aware of these important considerations:
+   
+   - A job is only marked complete after all files in the cache are flushed to the remote bucket, including those from other jobs.
+   - The total disk space required equals the sum of all jobs' cached data.
+   - Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
+   - Ensure the disk tier is fast enough to handle the combined write load of all jobs.
+
+   For example, if two jobs share a node with a MOUNT_CACHED bucket, the first job to finish will only be considered complete after all files from both jobs have been flushed to the remote bucket.
+   
 .. _failure-recovery:
 
 Jobs restarts on user code failure
