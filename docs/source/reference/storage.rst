@@ -29,7 +29,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>, oci://<bucket_name>
-              mode: MOUNT  # Optional: either MOUNT or COPY. Defaults to MOUNT.
+              mode: MOUNT  # How buckets are mounted to nodes. MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
 
@@ -90,10 +90,11 @@ You can find more detailed usage examples in `storage_demo.yaml <https://github.
 Storage modes
 --------------
 
-A cloud storage can be used in either :code:`MOUNT` mode or :code:`COPY` mode.
+A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`MOUNT_CACHED` mode.
 
 1. **MOUNT** mode: The bucket is directly "mounted" to the remote VM. I.e., files are streamed when accessed by the task and all writes are replicated to the remote bucket. Any writes will also appear on other VMs mounting the same bucket. This is the default mode.
 2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writes only affect the local copy and are not streamed back to the bucket.
+3. **MOUNT_CACHED** mode: The bucket is mounted to the local disk with a VFS cache. The writes are cached locally before being uploaded to the bucket.
 
 .. Source for the image: https://docs.google.com/drawings/d/1MPdVd2TFgAFOYSk6R6E903v1_C0LHmVU-ChIVwdX9A8/edit?usp=sharing
 
@@ -117,18 +118,23 @@ its performance requirements and size of the data.
    * -
      - .. centered:: :code:`mode: MOUNT`
      - .. centered:: :code:`mode: COPY`
+     - .. centered:: :code:`mode: MOUNT_CACHED`
    * - Best for
-     - Writing task outputs (e.g., checkpoints, logs); reading very large data that won't fit on disk.
+     - Writing task outputs; reading very large data that won't fit on disk.
      - High performance read-only access to datasets that fit on disk.
+     - High performance writing task outputs (e.g., model checkpoints, logs) that fit on disk with a VFS cache.
    * - Performance
      - |:yellow_circle:| Slow to read/write files. Fast to provision.
      - |:white_check_mark:| Fast file access. Slow at initial provisioning.
+     - |:white_check_mark:| Fast file access. Fast at initial provisioning.
    * - Writing to buckets
      - |:yellow_circle:| Most write operations [1]_ are supported.
      - |:x:| Not supported. Read-only.
+     - |:white_check_mark:| All write operations are supported.
    * - Disk Size
      - |:white_check_mark:| No disk size requirements [2]_ .
      - |:yellow_circle:| VM disk size must be greater than the size of the bucket.
+     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk.
 
 .. [1] ``MOUNT`` mode does not support the full POSIX interface and some file
     operations may fail. Most notably, random writes and append operations are
@@ -143,6 +149,20 @@ its performance requirements and size of the data.
     to provide a close-to-open consistency model for attached buckets. This means calling
     :code:`close()` on a file will upload the entire file to the bucket.
     Any subsequent reads will see the latest data.
+
+.. note::
+    :code:`MOUNT_CACHED` mode uses `rclone <https://rclone.org/>`_
+    to provide a close-to-open consistency model for attached buckets. This means calling
+    :code:`close()` on a file will upload the entire file to the bucket.
+    Any subsequent reads will see the latest data.
+    
+    Important considerations for :code:`MOUNT_CACHED` mode:
+    
+    * If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted
+    * Files only begin uploading after they are closed by all processes
+    * By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally
+    * The write performance depends on the disk tier used for caching - faster disks provide better performance
+
 
 .. note::
     SkyPilot does not guarantee preservation of file permissions when attaching
@@ -236,6 +256,26 @@ workers running on different nodes.
       name: my-sky-bucket
       store: s3
 
+
+Storing model checkpoints
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:code:`MOUNT_CACHED` mode can efficiently store large model checkpoints in a cloud bucket 
+without blocking the training loop.
+
+**💡 Example use case**: Saving model checkpoints to a cloud bucket.
+
+.. code-block:: yaml
+
+  # Creates a bucket and reuses it in multiple tasks and runs
+  file_mounts:
+    /my_checkpoint:
+      name: my-sky-bucket
+      store: gcs
+      mode: MOUNT_CACHED
+
+.. note::
+    If the data at source changes, new files will be automatically synced to the bucket.
 
 
 Using SkyPilot storage CLI
