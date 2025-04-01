@@ -594,6 +594,8 @@ def get_cos_regions() -> List[str]:
 class Rclone:
     """Provides methods to manage and generate Rclone configuration profile."""
 
+    # TODO(syang) Move the enum's functionality into AbstractStore subclass and
+    # deprecate this class.
     class RcloneStores(enum.Enum):
         """Rclone supporting storage types and supporting methods."""
         S3 = 'S3'

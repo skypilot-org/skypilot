@@ -241,7 +241,7 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # stores bucket profile in rclone config file at the remote nodes.
     configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
                                 f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
-                                f'echo "{rclone_config}" >> '
+                                f'echo {shlex.quote(rclone_config)} >> '
                                 f'{constants.RCLONE_CONFIG_PATH}')
     # Assume mount path is unique. We use a hash of mount path as
     # various filenames related to the mount.
@@ -257,9 +257,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # rclone to create separate cache directories at ~/.cache/rclone/vfs. It is
     # not necessary to specify separate cache directories.
     mount_cmd = (
-        f'{create_log_cmd}; '
+        f'{create_log_cmd} && '
         f'{configure_rclone_profile} && '
-        'nohup rclone mount '
+        'rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
         '--daemon --daemon-wait 0 '
@@ -282,8 +282,7 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # by a process is not evicted from the cache.
         '--vfs-cache-max-size 10G '
         # give each mount its own cache directory
-        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path}'
-        '> /dev/null 2>&1 &')
+        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path}')
     return mount_cmd
 
 

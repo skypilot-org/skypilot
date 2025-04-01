@@ -4124,6 +4124,10 @@ class IBMCosStore(AbstractStore):
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
 
+    def mount_cached_command(self, mount_path: str) -> str:
+        raise exceptions.NotSupportedError(
+            f'{StorageMode.MOUNT_CACHED.value} is not supported for IBM COS.')
+
     def _create_cos_bucket(self,
                            bucket_name: str,
                            region='us-east') -> StorageHandle:
@@ -4545,6 +4549,10 @@ class OciStore(AbstractStore):
 
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd, version_check_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        raise exceptions.NotSupportedError(
+            f'{StorageMode.MOUNT_CACHED.value} is not supported for OCI.')
 
     def _download_file(self, remote_path: str, local_path: str) -> None:
         """Downloads file from remote to local on OCI bucket
@@ -4991,6 +4999,10 @@ class NebiusStore(AbstractStore):
                                                         self._bucket_sub_path)
         return mounting_utils.get_mounting_command(mount_path, install_cmd,
                                                    mount_cmd)
+
+    def mount_cached_command(self, mount_path: str) -> str:
+        raise exceptions.NotSupportedError(
+            f'{StorageMode.MOUNT_CACHED.value} is not supported for Nebius.')
 
     def _create_nebius_bucket(self,
                               bucket_name: str,

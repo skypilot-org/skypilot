@@ -150,6 +150,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
                                        storage_name: str, ls_hello_command: str,
                                        cloud: str, only_mount: bool,
                                        include_mount_cached: bool):
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
     template_str = pathlib.Path(
         'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
     template = jinja2.Template(template_str)
@@ -192,6 +193,8 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
             rclone_stores = data_utils.Rclone.RcloneStores.GCS
         elif cloud == 'azure':
             rclone_stores = data_utils.Rclone.RcloneStores.AZURE
+        else:
+            raise ValueError(f'Invalid cloud provider: {cloud}')
         rclone_profile_name = rclone_stores.get_profile_name(storage_name)
         test_commands.append(
             f'sky exec {cluster_name} -- "set -ex; '
