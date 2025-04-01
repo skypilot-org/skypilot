@@ -359,9 +359,9 @@ def _format_enabled_cloud(cloud_name: str,
                           if i == len(existing_contexts) -
                           1 else ux_utils.INDENT_SYMBOL)
                 contexts_formatted.append(f'\n    {symbol}{context}')
-            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+            context_info = f'  Allowed contexts:{"".join(contexts_formatted)}'
         else:
-            context_info = f'Active context: {existing_contexts[0]}'
+            context_info = f'  Active context: {existing_contexts[0]}'
 
         return (f'{_green_color(cloud_and_capabilities)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
