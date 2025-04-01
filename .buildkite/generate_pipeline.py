@@ -242,7 +242,7 @@ def _generate_pipeline(test_file: str,
                 # Skip duplicate nested function tests under the same class
                 continue
             if 'PYTHON_VERSION' in os.environ:
-                command = 'PYTHONPATH=$PWD:$PYTHONPATH' + command
+                command = f'PYTHONPATH="$PWD:$PYTHONPATH" {command}'
             step = {
                 'label': label,
                 'command': command,
