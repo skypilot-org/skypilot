@@ -34,6 +34,7 @@ roleRef:
 {{- end }}
 {{- $namespaces = append $namespaces .Release.Namespace | uniq }}
 {{- range $namespaces }}
+{{/* Create namespaces in advance to enable RBAC rules, filter out the release namespace in case user accidentally added it to grantedNamespaces*/}}
 {{- if and (ne . $.Release.Namespace) (not (lookup "v1" "Namespace" "" .)) }}
 ---
 apiVersion: v1
