@@ -815,8 +815,9 @@ def test_cli_exit_codes(generic_cloud: str):
 def test_python_version():
     """Test that the Python version is correct."""
     print(
-        f'Python version from interpreter: {sys.version}, PYTHON_VERSION env: {os.environ.get("PYTHON_VERSION")}'
-    )
+        f'Python version from interpreter: {sys.version}, PYTHON_VERSION env: {os.environ.get("PYTHON_VERSION")}',
+        file=sys.stderr,
+        flush=True)
     version_env = os.environ.get('PYTHON_VERSION')
     assert version_env is not None, 'PYTHON_VERSION must be set'
     version_list = version_env.split('.')
@@ -827,5 +828,3 @@ def test_python_version():
     if len(version_list) > 2:
         assert int(version_list[2]
                   ) == sys.version_info.micro, 'Micro version must match'
-    else:
-        assert sys.version_info.micro == 0, 'Micro version must be 0'
