@@ -473,6 +473,209 @@ cost savings from spot instances without worrying about preemption or losing pro
   $ sky jobs launch -n bert-qa bert_qa.yaml
 
 
+
+Spot checkpoint and recovery example
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Here's a more advanced example showing how to implement a robust checkpoint and recovery system for spot instances. This example provides decorators that can be used to save and load checkpoints with fallback mechanisms:
+
+.. code-block:: python
+
+    import os
+    import json
+    import logging
+    import torch
+    import functools
+    from typing import Optional, Dict, Any, Callable, TypeVar, Union
+    from pathlib import Path
+    from datetime import datetime
+
+    logger = logging.getLogger(__name__)
+
+    T = TypeVar('T')
+
+    def save_checkpoint(
+        save_dir: str,
+        max_checkpoints: int = 5,
+        checkpoint_prefix: str = "checkpoint",
+    ):
+        """
+        Decorator for saving checkpoints with fallback mechanism.
+        
+        Args:
+            save_dir: Directory to save checkpoints
+            max_checkpoints: Maximum number of checkpoints to keep
+            checkpoint_prefix: Prefix for checkpoint files
+
+        Examples:
+            # Basic usage with a simple save function
+            @save_checkpoint(save_dir="checkpoints")
+            def save_model(step: int, model: torch.nn.Module):
+                torch.save(model.state_dict(), f"checkpoints/model_{step}.pt")
+
+            # With custom save function that includes optimizer
+            @save_checkpoint(save_dir="checkpoints")
+            def save_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+                torch.save({
+                    'model': model.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'step': step
+                }, f"checkpoints/training_{step}.pt")
+
+            # With additional data and custom prefix
+            @save_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
+            def save_with_metrics(step: int, model: torch.nn.Module, metrics: Dict[str, float]):
+                torch.save({
+                    'model': model.state_dict(),
+                    'metrics': metrics,
+                    'step': step
+                }, f"checkpoints/experiment1_step_{step}.pt")
+        """
+        def decorator(func: Callable[..., T]) -> Callable[..., T]:
+            # Initialize state
+            save_dir_path = Path(save_dir)
+            save_dir_path.mkdir(parents=True, exist_ok=True)
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs) -> T:
+                # Get current step from kwargs or args
+                step = kwargs.get('step', args[0] if args else None)
+                if step is None:
+                    return func(*args, **kwargs)
+
+                try:
+                    # Call the original save function
+                    result = func(*args, **kwargs)
+                    
+                    # Save metadata
+                    metadata = {
+                        'step': step,
+                        'timestamp': datetime.now().isoformat(),
+                        'model_type': kwargs.get('model', args[1] if len(args) > 1 else None).__class__.__name__,
+                    }
+                    
+                    metadata_path = save_dir_path / f"{checkpoint_prefix}_step_{step}_metadata.json"
+                    with open(metadata_path, 'w') as f:
+                        json.dump(metadata, f)
+
+                    # Cleanup old checkpoints
+                    checkpoints = sorted(
+                        [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
+                        key=lambda x: int(x.stem.split('_')[-1])
+                    )
+                    
+                    while len(checkpoints) > max_checkpoints:
+                        oldest_checkpoint = checkpoints.pop(0)
+                        oldest_checkpoint.unlink()
+                        metadata_path = oldest_checkpoint.with_suffix('_metadata.json')
+                        if metadata_path.exists():
+                            metadata_path.unlink()
+
+                    logger.info(f"Saved checkpoint at step {step}")
+                    return result
+
+                except Exception as e:
+                    logger.error(f"Failed to save checkpoint at step {step}: {str(e)}")
+                    return func(*args, **kwargs)
+
+            return wrapper
+        return decorator
+
+    def load_checkpoint(
+        save_dir: str,
+        checkpoint_prefix: str = "checkpoint",
+    ):
+        """
+        Decorator for loading checkpoints with fallback mechanism.
+        Tries to load from the latest checkpoint, if that fails tries the second latest, and so on.
+        
+        Args:
+            save_dir: Directory containing checkpoints
+            checkpoint_prefix: Prefix for checkpoint files
+
+        Examples:
+            # Basic usage with a simple load function
+            @load_checkpoint(save_dir="checkpoints")
+            def load_model(step: int, model: torch.nn.Module):
+                model.load_state_dict(torch.load(f"checkpoints/model_{step}.pt"))
+
+            # Loading with optimizer
+            @load_checkpoint(save_dir="checkpoints")
+            def load_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+                checkpoint = torch.load(f"checkpoints/training_{step}.pt")
+                model.load_state_dict(checkpoint['model'])
+                optimizer.load_state_dict(checkpoint['optimizer'])
+                return checkpoint['step']
+
+            # Loading with custom prefix and additional data
+            @load_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
+            def load_with_metrics(step: int, model: torch.nn.Module):
+                checkpoint = torch.load(f"checkpoints/experiment1_step_{step}.pt")
+                model.load_state_dict(checkpoint['model'])
+                return checkpoint['metrics']
+        """
+        def decorator(func: Callable[..., T]) -> Callable[..., T]:
+            save_dir_path = Path(save_dir)
+
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs) -> T:
+                try:
+                    # Find available checkpoints
+                    checkpoints = sorted(
+                        [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
+                        key=lambda x: int(x.stem.split('_')[-1]),
+                        reverse=True  # Sort in descending order (newest first)
+                    )
+                    
+                    if not checkpoints:
+                        logger.warning("No checkpoints found")
+                        return func(*args, **kwargs)
+
+                    # Try each checkpoint from newest to oldest
+                    for checkpoint in checkpoints:
+                        try:
+                            step = int(checkpoint.stem.split('_')[-1])
+                            
+                            # Call the original load function with the current step
+                            if 'step' in kwargs:
+                                kwargs['step'] = step
+                            elif args:
+                                args = list(args)
+                                args[0] = step
+                                args = tuple(args)
+                            
+                            result = func(*args, **kwargs)
+                            logger.info(f"Successfully loaded checkpoint from step {step}")
+                            return result
+                            
+                        except Exception as e:
+                            logger.warning(f"Failed to load checkpoint at step {step}, trying previous checkpoint: {str(e)}")
+                            continue
+
+                    # If we get here, all checkpoints failed
+                    logger.error("Failed to load any checkpoint")
+                    return func(*args, **kwargs)
+
+                except Exception as e:
+                    logger.error(f"Failed to find checkpoints: {str(e)}")
+                    return func(*args, **kwargs)
+
+            return wrapper
+        return decorator
+
+You can use these decorators in your training script to implement robust checkpointing with SkyPilot managed jobs. The decorators handle saving metadata, cleaning up old checkpoints, and providing fallback mechanisms when loading checkpoints.
+
+To use this with SkyPilot, you would:
+
+1. Include this code in your training script
+2. Set up a bucket for checkpoints in your YAML file
+3. Apply the decorators to your save and load functions
+
+This approach is particularly useful for long-running jobs on spot instances, as it provides multiple fallback options if a checkpoint becomes corrupted.
+
+
+
+
 Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
