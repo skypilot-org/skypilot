@@ -241,6 +241,8 @@ def _generate_pipeline(test_file: str,
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue
+            if 'PYTHON_VERSION' in os.environ:
+                command = f'source ~/buildkite-envs/python-{os.environ["PYTHON_VERSION"]}/bin/activate; {command}'
             step = {
                 'label': label,
                 'command': command,
