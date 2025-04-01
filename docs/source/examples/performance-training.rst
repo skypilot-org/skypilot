@@ -295,7 +295,7 @@ This example:
 - uses checkpointing to recover preempted jobs quickly.
 
 .. code-block:: yaml
-  :emphasize-lines: 8-11,41-44
+  :emphasize-lines: 9-12,43-46
 
   # bert_qa.yaml
   name: bert-qa
