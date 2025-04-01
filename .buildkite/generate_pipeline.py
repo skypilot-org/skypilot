@@ -241,11 +241,10 @@ def _generate_pipeline(test_file: str,
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue
-            if 'PYTHON_VERSION' in os.environ:
-                command = f'source {os.path.expanduser("~/buildkite-envs")}/python-{os.environ["PYTHON_VERSION"]}/bin/activate && {command}'
+            python_version_cmd = """python -c "import sys; from platform import python_version; print(f'Python version: {python_version()}') ; print(f'Path: {sys.path}')" """
             step = {
                 'label': label,
-                'command': """python -c "import sys; from platform import python_version; print(f'Python version: {python_version()}') ; print(f'Path: {sys.path}')" """,
+                'command': f"{python_version_cmd} && {command}",
                 'agents': {
                     # Separate agent pool for each cloud.
                     # Since they require different amount of resources and
