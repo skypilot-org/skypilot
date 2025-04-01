@@ -245,7 +245,7 @@ def _generate_pipeline(test_file: str,
                 command = f'source {os.path.expanduser("~/buildkite-envs")}/python-{os.environ["PYTHON_VERSION"]}/bin/activate && {command}'
             step = {
                 'label': label,
-                'command': command,
+                'command': """python -c "import sys; from platform import python_version; print(f'Python version: {python_version()}\nPath: {sys.path}')""",
                 'agents': {
                     # Separate agent pool for each cloud.
                     # Since they require different amount of resources and
