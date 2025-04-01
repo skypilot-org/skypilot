@@ -11,7 +11,8 @@ const (
 	EnvFuseCommFD = "_FUSE_COMMFD"
 	EnvSharedDir  = "FUSERMOUNT_SHARED_DIR"
 
-	ShimBinPath = "/usr/local/bin/fusermount-shim"
+	ShimBinPath    = "/usr/local/bin/fusermount-shim"
+	WrapperBinPath = "/usr/local/bin/fusermount-wrapper"
 
 	// Some fuse implementations like gcsfuse does not pass env var to fusermount binary,
 	// we use a constant path as a fallback.
@@ -40,6 +41,11 @@ func MustGetFuseCommFD() int {
 // MustGetShimInstallPath returns the path to install the fusermount shim, panic if not found
 func MustGetShimInstallPath() string {
 	return filepath.Join(getSharedDir(), "fusermount-shim")
+}
+
+// MustGetWrapperInstallPath returns the path to install the fusermount wrapper, panic if not found
+func MustGetWrapperInstallPath() string {
+	return filepath.Join(getSharedDir(), "fusermount-wrapper")
 }
 
 func getSharedDir() string {

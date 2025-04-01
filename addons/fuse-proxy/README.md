@@ -65,22 +65,24 @@ ln -sf /var/run/fusermount/fusermount-shim "$FOURSMOUNE3_PATH"
 
 ## How it Works
 
-1. When a FUSE mount is requested, SkyPilot starts a FUSE implementation process (e.g., gcsfuse) in the Sky container
-2. The FUSE implementation executes `fusermount-shim` (instead of the regular `fusermount`)
+### Proxy Mode: fusermount-shim
+
+1. When a FUSE mount is requested, SkyPilot starts a FUSE adapter process (e.g., gcsfuse) in the Sky container
+2. The FUSE adapter executes `fusermount-shim` (instead of the regular `fusermount`)
 3. `fusermount-shim` forwards the request to the privileged daemon pod
 4. The daemon pod:
    - Identifies the caller's mnt namespace
    - Performs the mount operation using `nsenter` and real `fusermount` in the caller's mnt namespace
-   - Returns the mounted file descriptor back to the FUSE implementation
+   - Returns the mounted file descriptor back to the FUSE adapter
 
 ```mermaid
 sequenceDiagram
-    SkyPilot->>+Fuse Impl: sync mount
+    SkyPilot->>+Fuse Adapter: sync mount
     box beige Sky Pod (non-Privileged)
-    participant Fuse Impl
+    participant Fuse Adapter
     participant fusermount-shim
     end
-    Fuse Impl->>+fusermount-shim: exec
+    Fuse Adapter->>+fusermount-shim: exec
     fusermount-shim->>+shim-server: RPC
     box pink Daemon Pod (Privileged)
     participant shim-server
@@ -91,6 +93,22 @@ sequenceDiagram
     fusermount->>fusermount: mount(/dev/fuse)
     fusermount->>shim-server: send fd
     shim-server->>fusermount-shim: return fd
-    fusermount-shim->>Fuse Impl: send fd
-    Fuse Impl->>Fuse Impl: start working
+    fusermount-shim->>Fuse Adapter: send fd
+    Fuse Adapter->>Fuse Adapter: start working
 ```
+
+## Wrapper Mode: fusermount-wrapper
+
+For FUSE adapter that use `libfuse` to mount FUSE device directly (e.g. [blobfuse](https://github.com/Azure/azure-storage-fuse) for Azure Blob Storage), `fusermount-shim` will fail to work because `libfuse` only fallback to `fusermount` when mount operation fails.
+However, `open /dev/fuse` syscall also requires root privilege in container so that the mount process will fail before the fallback happens.
+
+`fusermount-wrapper` is used in this case to:
+
+1. Call `fusermount-server` to mount the FUSE device before starting the FUSE adapter;
+2. Pass the mounted file descriptor to the FUSE adapter, `libfuse` will [discover the mounted fd and use it directly](https://github.com/libfuse/libfuse/blob/a25fb9bd49ef56a2223262784f18dd9bbc2601dc/lib/fuse_lowlevel.c#L3435).
+
+Refer to [fusermount-wrapper](./cmd/fusermount-wrapper/main.go) for more implementation details.
+
+## Acknowledgements
+
+This component is inspired by [k8s-fuse-csi-plugin](https://github.com/pfnet-research/k8s-fuse-csi-plugin). Kudos to the author for the great work!

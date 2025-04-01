@@ -171,14 +171,23 @@ def get_az_mount_cmd(container_name: str,
         bucket_sub_path_arg = ''
     else:
         bucket_sub_path_arg = f'--subdirectory={_bucket_sub_path}/ '
+    mount_options = '-o allow_other -o default_permissions -o umask=022'
     # TODO(zpoint): clear old cache that has been created in the previous boot.
+    blobfuse2_cmd = ('blobfuse2 --no-symlinks '
+                     f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
+                     f'{bucket_sub_path_arg}'
+                     f'--container-name {container_name}')
+    wrapped = (f'fusermount-wrapper -m {mount_path} {mount_options} -- '
+               f'{blobfuse2_cmd} {{}}')
+    original = f'{blobfuse2_cmd} {mount_options} {mount_path}'
+    # If fusermount-wrapper is available, use it to wrap the blobfuse2 command
+    # to avoid requiring root privilege.
+    # TODO(aylei): feeling hacky, refactor this.
+    get_mount_cmd = ('command -v fusermount-wrapper >/dev/null 2>&1 && '
+                     f'echo "{wrapped}" || echo "{original}"')
     mount_cmd = (f'AZURE_STORAGE_ACCOUNT={storage_account_name} '
                  f'{key_env_var} '
-                 f'blobfuse2 {mount_path} --allow-other --no-symlinks '
-                 '-o umask=022 -o default_permissions '
-                 f'--tmp-path {cache_path}_$({remote_boot_time_cmd}) '
-                 f'{bucket_sub_path_arg}'
-                 f'--container-name {container_name}')
+                 f'$({get_mount_cmd})')
     return mount_cmd
 
 

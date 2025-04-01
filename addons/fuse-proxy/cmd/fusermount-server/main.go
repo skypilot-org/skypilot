@@ -21,14 +21,18 @@ func main() {
 	log.InitFlags(nil)
 	flag.Parse()
 	shimInstallPath := common.MustGetShimInstallPath()
-
-	// Ensure the latest fusermount-shim is installed to shared path so that the
-	// caller container can access it.
+	wrapperInstallPath := common.MustGetWrapperInstallPath()
+	// Ensure the latest fusermount-shim and fusermount-wrapper are installed to
+	// shared path so that the caller container can access it.
 	// We assume the architecture of the caller container is the same as this
 	// server container since they are running on the same node.
 	cmd := exec.Command("cp", "-p", common.ShimBinPath, shimInstallPath)
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to copy shim: %v", err)
+		log.Fatalf("Failed to copy fusermount-shim: %v", err)
+	}
+	cmd = exec.Command("cp", "-p", common.WrapperBinPath, wrapperInstallPath)
+	if err := cmd.Run(); err != nil {
+		log.Fatalf("Failed to copy fusermount-wrapper: %v", err)
 	}
 
 	socketPath := common.MustGetServerSocketPath()

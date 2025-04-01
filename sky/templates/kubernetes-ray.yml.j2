@@ -352,7 +352,7 @@ available_node_types:
                 (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
-                # Install both fuse2 and fuse3 for compatibility for all possible fuse implementations in advance,
+                # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
                 PACKAGES="rsync curl netcat gcc patch pciutils fuse fuse3 openssh-server";
 
@@ -402,9 +402,10 @@ available_node_types:
                 if [ -z "$FUSERMOUNT3_PATH" ]; then
                     FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
                 fi
-                # Also mask fusermount3 for rclone and blobfuse2
+                # Also mask fusermount3 for rclone and blobfuse2 (for unmount operation)
                 $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
-                echo "FUSERMOUNT_PATH: $FUSERMOUNT_PATH"
+                # Add fusermount-wrapper to handle adapters that use libfuse directly, e.g. blobfuse2
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-wrapper bin/fusermount-wrapper
                 # Wait for the server to setup the fusermount shim binary in case:
                 # 1. The server daemonset was just deployed and is still starting up.
                 # 2. The node was just started and the server Pod is still starting up.
@@ -427,6 +428,8 @@ available_node_types:
                     echo "fusermount -V failed, copying fusermount-shim directly"
                     $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
                     $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                    $(prefix_cmd) rm -f bin/fusermount-wrapper
+                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-wrapper bin/fusermount-wrapper
                 fi
                 {% endif %}            
 
