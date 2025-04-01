@@ -242,9 +242,10 @@ def _generate_pipeline(test_file: str,
                 # Skip duplicate nested function tests under the same class
                 continue
             python_version_cmd = f"""source {os.path.expanduser("~/buildkite-envs")}/python-{os.environ["PYTHON_VERSION"]}/bin/activate && python -c "import sys; from platform import python_version; print(f'Python version: {{python_version()}}') ; print(f'Path: {{sys.path}}')" """
+            sky_version_cmd = """python -c "import sky; print(f'Sky version: {{sky.__version__}}')" """
             step = {
                 'label': label,
-                'command': f"{python_version_cmd} && {command}",
+                'command': f"{python_version_cmd} && {sky_version_cmd} && {command}",
                 'agents': {
                     # Separate agent pool for each cloud.
                     # Since they require different amount of resources and
