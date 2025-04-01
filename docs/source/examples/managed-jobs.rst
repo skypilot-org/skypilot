@@ -302,6 +302,9 @@ Below is an example of mounting a bucket to :code:`/checkpoint`.
 The :code:`MOUNT` mode and :code:`MOUNT_CACHED` mode ensure the checkpoints outputted to :code:`/checkpoint` are automatically synced to a persistent bucket.
 The mode difference and caveats can be found in :ref:`SkyPilot bucket mounting <sky-storage>`. 
 
+.. note::
+   The :code:`MOUNT_CACHED` mode is recommended for checkpointing, because it introduces less slowdown to training. All writes are cached locally first, and then uploaded in the background. 
+
 To implement checkpointing in your application code:
 
 1. Periodically save checkpoints containing the current program state during execution.
@@ -313,10 +316,10 @@ To see checkpointing in action, see the :ref:`BERT end-to-end example below <ber
 
 For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
-Using MOUNT_CACHED with multiple jobs
+Using MOUNT_CACHED with managed jobs
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-MOUNT_CACHED provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. Unlike MOUNT mode, it supports all write operations without limitations on file operations. It offers fast file access through a local VFS (Virtual File System) cache implemented by `rclone <https://rclone.org/>`__ that provides near-local disk performance. Checkpointing introduces limited slowdown to training as writes are cached locally first, then uploaded in the background. 
+MOUNT_CACHED provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. Unlike MOUNT mode, it supports all write operations without limitations on file operations. It offers fast file access through a local VFS (Virtual File System) cache implemented by `rclone <https://rclone.org/>`__ that provides near-local disk performance. 
 
 .. note::
    
