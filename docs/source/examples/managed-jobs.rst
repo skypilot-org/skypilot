@@ -474,10 +474,10 @@ cost savings from spot instances without worrying about preemption or losing pro
 
 
 
-Spot checkpoint and recovery example
+Spot checkpoint and recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Here's a more advanced example showing how to implement a robust checkpoint and recovery system for spot instances. This example provides decorators that can be used to save and load checkpoints with fallback mechanisms:
+Here's a more advanced example showing how to implement a robust checkpoint and recovery system for spot instances. In rare cases, the checkpoint file might be corrupted due to spot instance preemptions. This example provides decorators that can be used to save and load checkpoints with fallback mechanisms:
 
 .. code-block:: python
 
