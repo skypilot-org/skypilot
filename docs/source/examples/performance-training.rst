@@ -42,7 +42,7 @@ Example configuration:
     disk_tier: best # using highest performance disk tier
 
 Dataset loading
-~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~
 Copy data to local SSDs if local storage has enough capacity
 
 Example configuration:
@@ -303,11 +303,12 @@ This example:
   resources:
     accelerators: V100:1
     use_spot: true  # Use spot instances to save cost.
+    disk_tier: best # using highest performance disk tier
 
   file_mounts:
     /checkpoint:
       name: # NOTE: Fill in your bucket name
-      mode: MOUNT
+      mode: MOUNT_CACHED
 
   envs:
     # Fill in your wandb key: copy from https://wandb.ai/authorize
