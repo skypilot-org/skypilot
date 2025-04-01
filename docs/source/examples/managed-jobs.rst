@@ -312,7 +312,7 @@ To implement checkpointing in your application code:
 
 Both features are included in most model training libraries, such as `PyTorch <https://pytorch.org/docs/stable/checkpoint.html>`__, `TensorFlow <https://www.tensorflow.org/guide/checkpoint>`__, and `Hugging Face <https://huggingface.co/docs/transformers/main_classes/trainer#transformers.TrainingArguments.save_steps>`__.
 
-To see checkpointing in action, see the :ref:`BERT end-to-end example below <bert>`.
+To see checkpointing in action, see the :ref:`BERT end-to-end example below <bert>` and :ref:`spot checkpoint and recovery example <spot-checkpoint-recovery>`.
 
 For other types of workloads, you can implement a similar mechanism as long as you can store the program state to/from disk.
 
@@ -473,6 +473,7 @@ cost savings from spot instances without worrying about preemption or losing pro
   $ sky jobs launch -n bert-qa bert_qa.yaml
 
 
+.. _spot-checkpoint-recovery:
 
 Spot checkpoint and recovery
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
