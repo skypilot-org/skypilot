@@ -1344,16 +1344,14 @@ def check_credentials(context: Optional[str],
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
-    try:
-        get_accelerator_label_key_value(context,
-                                        acc_type='',
-                                        acc_count=0,
-                                        check_mode=True)
-    except exceptions.ResourcesUnavailableError as e:
-        # If GPUs are not available, we return cluster as enabled (since it can
-        # be a CPU-only cluster) but we also return the exception message which
-        # serves as a hint for how to enable GPU access.
-        gpu_msg = str(e)
+    unlabeled_nodes = get_unlabeled_accelerator_nodes(context)
+    if unlabeled_nodes:
+        gpu_msg = (f'Cluster has {len(unlabeled_nodes)} nodes with '
+                   f'accelerators that are not labeled. '
+                   f'To label the nodes, run '
+                   f'`python -m sky.utils.kubernetes.gpu_labeler '
+                   f'--context {context}` from the project root '
+                   f'directory.')
     if exec_msg and gpu_msg:
         return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
     elif gpu_msg:
