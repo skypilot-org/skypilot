@@ -84,10 +84,7 @@ To make checkpointing reading robust against preemptions, use this recipe:
 - Always try loading from the latest checkpoint first 
 - If the latest checkpoint is found to be corrupted or incomplete,  fallback to earlier checkpoints
 
-Adapting torch.save
-~~~~~~~~~~~~~~~~~~~~
-
-Here's a simplified example showing the core concepts:
+Here's a simplified example showing the core concepts for torch.save:
 
 .. code-block:: python
 
