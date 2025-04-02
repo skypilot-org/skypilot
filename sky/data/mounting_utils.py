@@ -262,7 +262,9 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         'rclone mount '
         f'{rclone_profile_name}:{bucket_name} {mount_path} '
         # '--daemon' keeps the mounting process running in the background.
-        '--daemon --daemon-wait 0 '
+        # fail in 10 seconds if mount cannot complete by then,
+        # which should be plenty of time.
+        '--daemon --daemon-wait 10 '
         f'--log-file {log_file_path} --log-level INFO '
         # '--dir-cache-time' sets how long directory listings are cached before
         # rclone checks the remote storage for changes again. A shorter
@@ -282,7 +284,10 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # by a process is not evicted from the cache.
         '--vfs-cache-max-size 10G '
         # give each mount its own cache directory
-        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path}')
+        f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
+        # This command produces children processes, which need to be
+        # detached from the current process's terminal.
+        '> /dev/null 2>&1')
     return mount_cmd
 
 
