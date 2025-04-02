@@ -82,7 +82,13 @@ To see the difference between MOUNT and MOUNT_CACHED, see :ref:`storage mounting
 Robust checkpointing for spot instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using spot instances, robust checkpointing is crucial for recovering from preemptions. Always try loading from the latest checkpoint first, but have a fallback to earlier checkpoints if the latest one is corrupted.
+When using spot instances, robust checkpointing is crucial for recovering from preemptions. 
+
+To make checkpointing reading robust against preemptions, use this recipe:
+
+- Always try loading from the latest checkpoint first 
+- If the latest checkpoint is found to be corrupted or incomplete,  fallback to earlier checkpoints
+
 Here's a simplified example showing the core concepts:
 
 .. code-block:: python
