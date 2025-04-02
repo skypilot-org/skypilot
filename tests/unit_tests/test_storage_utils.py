@@ -135,7 +135,21 @@ def test_zip_files_and_folders(skyignore_dir):
 
 
 def test_zip_files_and_folders_excluded_directories():
-    """Test that files inside excluded directories are not included in the zip file."""
+    """Test that files inside excluded directories are not included in zip file.
+    
+    File/directory structure:
+        temp_dir/ (temporary directory)
+        └── main_dir/
+            ├── main_file.txt         # contains "main file content"
+            ├── .skyignore            # contains "excluded_dir"
+            └── excluded_dir/         # this directory should be excluded
+                ├── excluded_file.txt # contains "excluded file content" 
+                └── nested_dir/
+                    └── nested_file.txt # contains "nested file content"
+
+    .skyignore content: 
+        excluded_dir
+    """
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create a directory structure with nested files
         main_dir = os.path.join(temp_dir, 'main_dir')
