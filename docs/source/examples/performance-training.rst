@@ -77,7 +77,7 @@ Example configuration:
    - Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
    - Ensure the disk tier is fast enough to handle the combined write load of all jobs.
 
-To see the difference between MOUNT and MOUNT_CACHED, see :ref:`storage mounting modes <storage-mounting-modes>`.
+For more on the differences between ``MOUNT`` and ``MOUNT_CACHED``, see :ref:`storage mounting modes <storage-mounting-modes>`.
 
 Robust checkpointing for spot instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
