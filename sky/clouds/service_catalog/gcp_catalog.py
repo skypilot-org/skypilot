@@ -108,9 +108,6 @@ _ACC_INSTANCE_TYPE_DICTS = {
     'H200': {
         8: ['a3-ultragpu-8g'],
     },
-    'B200': {
-        8: ['a4-highgpu-8g'],
-    }
 }
 
 # Number of CPU cores per GPU based on the AWS setting.
