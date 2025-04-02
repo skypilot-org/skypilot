@@ -12,7 +12,7 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -675,17 +675,11 @@ async def logs(
     )
 
 
-@app.post('/users')
-async def users(request: fastapi.Request,
-                users_body: payloads.UsersBody) -> None:
+@app.get('/users')
+async def users() -> List[Dict[str, Any]]:
     """Gets all users."""
-    executor.schedule_request(
-        request_id=request.state.request_id,
-        request_name='users',
-        request_body=users_body,
-        func=core.users,
-        schedule_type=requests_lib.ScheduleType.SHORT,
-    )
+    user_list = global_user_state.get_all_users()
+    return [user.to_dict() for user in user_list]
 
 
 @app.post('/download_logs')

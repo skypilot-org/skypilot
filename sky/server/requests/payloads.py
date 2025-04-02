@@ -249,11 +249,6 @@ class QueueBody(RequestBody):
     all_users: bool = False
 
 
-class UsersBody(RequestBody):
-    """The request body for the users endpoint."""
-    pass
-
-
 class CancelBody(RequestBody):
     """The request body for the cancel endpoint."""
     cluster_name: str

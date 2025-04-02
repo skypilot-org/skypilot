@@ -1145,10 +1145,3 @@ def local_down() -> None:
             ux_utils.finishing_message('Local cluster removed.',
                                        log_path=log_path,
                                        is_local=True))
-
-
-@usage_lib.entrypoint
-def users() -> List[Dict[str, Any]]:
-    """Gets all users."""
-    user_list = global_user_state.get_all_users()
-    return [user.to_dict() for user in user_list]
