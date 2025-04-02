@@ -98,7 +98,7 @@ A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`
 
 .. Source for the image: https://docs.google.com/drawings/d/1MPdVd2TFgAFOYSk6R6E903v1_C0LHmVU-ChIVwdX9A8/edit?usp=sharing
 
-.. image:: ../images/sky-storage-modes.png
+.. image:: ../images/sky-storage-modes.svg
     :width: 800
     :align: center
     :alt: sky-storage-modes
