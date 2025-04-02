@@ -96,7 +96,7 @@ A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`
 2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writes only affect the local copy and are not streamed back to the bucket.
 3. **MOUNT_CACHED** mode: The bucket is mounted to the local disk with a VFS cache. The writes are cached locally before being uploaded to the bucket. SkyPilot waits for the cached entries to be uploaded to remote before marking a task or a job as complete. Writes are not immediately consistent across multiple nodes.
 
-.. Source for the image: https://docs.google.com/drawings/d/1MPdVd2TFgAFOYSk6R6E903v1_C0LHmVU-ChIVwdX9A8/edit?usp=sharing
+.. Source for the image: https://docs.google.com/drawings/d/1SuAkkZya1sbFByYbeNIWRQJRhaKNRrF9PWVRKHOIx9U/edit?usp=sharing
 
 .. image:: ../images/sky-storage-modes.svg
     :width: 800
@@ -108,7 +108,7 @@ A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`
 Picking a storage mode
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-Choosing between :code:`MOUNT` and :code:`COPY` modes depends on the workload,
+Choosing among :code:`MOUNT`, :code:`COPY`, and :code:`MOUNT_CACHED` modes depends on the workload,
 its performance requirements and size of the data.
 
 .. list-table::
