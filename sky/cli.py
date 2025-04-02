@@ -3065,6 +3065,7 @@ def _down_or_stop_clusters(
             record['name']
             for record in all_clusters
             if controller_utils.Controllers.from_name(record['name']) is None
+            and record['status'] != status_lib.ClusterStatus.STOPPED
         ]
 
     clusters = names
