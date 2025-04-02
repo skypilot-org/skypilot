@@ -51,6 +51,8 @@ FILE_UPLOAD_LOGS_DIR = os.path.join(constants.SKY_LOGS_DIRECTORY,
 # Connection timeout when sending requests to the API server.
 API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS = 5
 
+get_api_cookie_jar = server_common.get_api_cookie_jar
+
 
 def download_logs_from_api_server(
         paths_on_api_server: Iterable[str]) -> Dict[str, str]:
@@ -75,7 +77,8 @@ def download_logs_from_api_server(
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
     response = requests.post(f'{server_common.get_server_url()}/download',
                              json=json.loads(body.model_dump_json()),
-                             stream=True)
+                             stream=True,
+                             cookies=get_api_cookie_jar())
     if response.status_code == 200:
         remote_home_path = response.headers.get('X-Home-Path')
         assert remote_home_path is not None, response.headers
@@ -176,7 +179,8 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                 },
                 content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
                                           params.chunk_index),
-                headers={'Content-Type': 'application/octet-stream'})
+                headers={'Content-Type': 'application/octet-stream'},
+                cookies=get_api_cookie_jar())
             if response.status_code == 200:
                 data = response.json()
                 status = data.get('status')

@@ -19,3 +19,6 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 # The interval (seconds) for the cluster status to be refreshed in the
 # background.
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
+
+# Environment variable for a file path to the API cookie file.
+ENV_VAR_API_COOKIE_FILE = 'SKYPILOT_API_COOKIE_FILE'
