@@ -51,7 +51,7 @@ Example configuration:
 
 
 Use ``MOUNT_CACHED`` for checkpointing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Cloud buckets with the ``MOUNT_CACHED`` mode provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. 
 
@@ -382,6 +382,7 @@ This example:
 - uses checkpointing to recover preempted jobs quickly.
 
 .. code-block:: yaml
+  :emphasize-lines: 9-12
 
   # bert_qa.yaml
   name: bert-qa
