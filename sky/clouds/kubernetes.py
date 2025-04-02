@@ -693,7 +693,11 @@ class Kubernetes(clouds.Cloud):
                 context)
             if len(unlabeled_nodes) > 0:
                 hints.append(f'Context {context} has {len(unlabeled_nodes)} '
-                             f'unlabeled nodes with accelerators.')
+                             f'unlabeled nodes with accelerators. '
+                             f'To label these nodes, run '
+                             f'`python -m sky.utils.kubernetes.gpu_labeler '
+                             f'--context {context}` from the project root '
+                             f'directory.')
         if success:
             return (True, cls._format_credential_check_results(hints, reasons))
         return (False, 'Failed to find available context with working '
