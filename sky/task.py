@@ -745,7 +745,7 @@ class Task:
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 for r in self.resources:
                     r.requires_fuse = True
                 break
@@ -924,7 +924,7 @@ class Task:
                         'Storage mount destination path cannot be cloud storage'
                     )
 
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:

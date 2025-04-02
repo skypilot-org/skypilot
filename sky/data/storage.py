@@ -273,6 +273,8 @@ MOUNTABLE_STORAGE_MODES = [
     StorageMode.MOUNT_CACHED,
 ]
 
+DEFAULT_STORAGE_MODE = StorageMode.MOUNT
+
 
 class AbstractStore:
     """AbstractStore abstracts away the different storage types exposed by
@@ -591,7 +593,7 @@ class Storage(object):
         source: Optional[SourceType] = None,
         stores: Optional[List[StoreType]] = None,
         persistent: Optional[bool] = True,
-        mode: StorageMode = StorageMode.MOUNT,
+        mode: StorageMode = DEFAULT_STORAGE_MODE,
         sync_on_reconstruction: bool = True,
         # pylint: disable=invalid-name
         _is_sky_managed: Optional[bool] = None,
@@ -855,7 +857,7 @@ class Storage(object):
                 is_local_source = False
                 # Storage mounting does not support mounting specific files from
                 # cloud store - ensure path points to only a directory
-                if mode == StorageMode.MOUNT:
+                if mode in MOUNTABLE_STORAGE_MODES:
                     if (split_path.scheme != 'https' and
                         ((split_path.scheme != 'cos' and
                           split_path.path.strip('/') != '') or
@@ -1284,8 +1286,7 @@ class Storage(object):
             # Make mode case insensitive, if specified
             mode = StorageMode(mode_str.upper())
         else:
-            # Make sure this keeps the same as the default mode in __init__
-            mode = StorageMode.MOUNT
+            mode = DEFAULT_STORAGE_MODE
         persistent = config.pop('persistent', None)
         if persistent is None:
             persistent = True
