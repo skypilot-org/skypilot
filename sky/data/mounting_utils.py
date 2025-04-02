@@ -286,7 +286,8 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
         # give each mount its own cache directory
         f'--cache-dir {constants.RCLONE_CACHE_DIR}/{hashed_mount_path} '
         # This command produces children processes, which need to be
-        # detached from the current process's terminal.
+        # detached from the current process's terminal. The command doesn't
+        # produce any output, so we aren't dropping any logs.
         '> /dev/null 2>&1')
     return mount_cmd
 
