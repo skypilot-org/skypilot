@@ -5010,7 +5010,10 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            if storage_obj.mode != storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode not in [
+                    storage_lib.StorageMode.MOUNT,
+                    storage_lib.StorageMode.MOUNT_CACHED
+            ]:
                 # Skip non-mount storage objects, as there is no need to
                 # reconstruct them during cluster restart.
                 continue
@@ -5056,12 +5059,14 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return None
         storage_mounts = {}
         for dst, storage_metadata in storage_mounts_metadata.items():
+            print(f'storage_metadata: {storage_metadata}')
             # Setting 'sync_on_reconstruction' to False prevents from Storage
             # object creation to sync local source syncing to the bucket. Local
             # source specified in Storage object is synced to the bucket only
             # when it is created with 'sky launch'.
             storage_mounts[dst] = storage_lib.Storage.from_metadata(
                 storage_metadata, sync_on_reconstruction=False)
+
         return storage_mounts
 
     def _skypilot_predefined_env_vars(
