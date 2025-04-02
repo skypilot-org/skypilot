@@ -3,7 +3,7 @@
 High Performance Training
 =========================
 
-This guide covers best practices and examples for achieving high performance distributed training using SkyPilot.
+This guide covers the best practices and examples for achieving high performance distributed training using SkyPilot.
 
 Distributed training basics
 ----------------------------
