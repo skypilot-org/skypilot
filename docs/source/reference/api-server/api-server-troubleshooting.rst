@@ -1,20 +1,22 @@
 .. _sky-api-server-troubleshooting:
 
 Troubleshooting SkyPilot API Server
-==================================
+===================================
 
 .. note::
    If none of the troubleshooting steps below resolve your issue, please do not hesitate to file a GitHub issue at our `issue tracker <https://github.com/skypilot-org/skypilot/issues>`_. Your feedback is valuable in helping us improve SkyPilot!
 
-Helm Deployment
----------------
+.. _sky-api-server-troubleshooting-helm:
 
-.. _sky-api-server-pod-pending:
+Helm deployment troubleshooting
+-------------------------------
 
-API server Pod is Pending
+.. _sky-api-server-troubleshooting-pod-pending:
+
+API server pod is pending
 ^^^^^^^^^^^^^^^^^^^^^^^^^
 
-If the API server Pod is pending, you can inspect the pending reason with:
+If the API server pod is pending, you can inspect the pending reason with:
 
 .. code-block:: bash
 

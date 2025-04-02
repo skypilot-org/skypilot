@@ -197,13 +197,13 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
 
-After the API server is deployed, you can inspect the API server Pod status with:
+After the API server is deployed, you can inspect the API server pod status with:
 
 .. code-block:: bash
 
     kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api --watch
 
-You should see the Pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-pod-pending` to diagnose the issue.
+You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
 
 .. _sky-get-api-server-url:
 
