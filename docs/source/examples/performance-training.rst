@@ -39,12 +39,10 @@ Example configuration:
       A100-80GB:1  
       H100:1  
 
-Use best storage tier
+Use best disk_tier
 ~~~~~~~~~~~~~~~~~~~~~~~
-Fast storage is critical for data-intensive workloads:
-
-- Specify high-performance local SSDs to reduce I/O bottlenecks
-- Use SkyPilot's disk tier options to select the fastest available storage
+Fast storage is critical for data-intensive workloads in loading and storing data and model checkpoints.
+SkyPilot's disk tier options to select the fastest available storage with high-performance local SSDs to reduce I/O bottlenecks
 
 Example configuration:
 
@@ -83,193 +81,223 @@ To see the difference between MOUNT and MOUNT_CACHED, see :ref:`storage mounting
 
 Robust checkpointing for spot instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-For spot instance recovery and robust checkpointing implementation, here's an example implementation of a robust checkpoint and recovery system:
+
+When using spot instances, robust checkpointing is crucial for recovering from preemptions. Always try loading from the latest checkpoint first, but have a fallback to earlier checkpoints if the latest one is corrupted.
+Here's a simplified example showing the core concepts:
 
 .. code-block:: python
 
+    def load_checkpoint(save_dir: str):
+        try:
+            # Find all checkpoints, sorted by step (newest first)
+            checkpoints = sorted(
+                [f for f in Path(save_dir).glob("checkpoint_*.pt")],
+                key=lambda x: int(x.stem.split('_')[-1]),
+                reverse=True
+            )
+            
+            # Try each checkpoint from newest to oldest
+            for checkpoint in checkpoints:
+                try:
+                    step = int(checkpoint.stem.split('_')[-1])
+                    result = load_checkpoint(checkpoint) # need to fill in
+                    return result
+                except Exception as e:
+                    logger.warning(f"Failed to load checkpoint {step}: {e}")
+                    continue
+        except Exception as e:
+            logger.error(f"Failed to find checkpoints: {e}")
+            return None
 
-  from datetime import datetime
-  import functools
-  import json
-  import logging
-  import os
-  from pathlib import Path
-  from typing import Any, Callable, Dict, Optional, TypeVar, Union
+For a complete implementation with additional features like custom prefixes, extended metadata, and more detailed error handling, see the code below:
 
-  import torch
+.. dropdown:: Full Implementation
+    :animate: fade-in-slide-down
 
-  logger = logging.getLogger(__name__)
+    .. code-block:: python
 
-  T = TypeVar('T')
+        from datetime import datetime
+        import functools
+        import json
+        import logging
+        import os
+        from pathlib import Path
+        from typing import Any, Callable, Dict, Optional, TypeVar, Union
 
-  def save_checkpoint(
-      save_dir: str,
-      max_checkpoints: int = 5,
-      checkpoint_prefix: str = "checkpoint",
-  ):
-      """
-      Decorator for saving checkpoints with fallback mechanism.
-      
-      Args:
-          save_dir: Directory to save checkpoints
-          max_checkpoints: Maximum number of checkpoints to keep
-          checkpoint_prefix: Prefix for checkpoint files
+        import torch
 
-      Examples:
-          # Basic usage with a simple save function
-          @save_checkpoint(save_dir="checkpoints")
-          def save_model(step: int, model: torch.nn.Module):
-              torch.save(model.state_dict(), f"checkpoints/model_{step}.pt")
+        logger = logging.getLogger(__name__)
 
-          # With custom save function that includes optimizer
-          @save_checkpoint(save_dir="checkpoints")
-          def save_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
-              torch.save({
-                  'model': model.state_dict(),
-                  'optimizer': optimizer.state_dict(),
-                  'step': step
-              }, f"checkpoints/training_{step}.pt")
+        T = TypeVar('T')
 
-          # With additional data and custom prefix
-          @save_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
-          def save_with_metrics(step: int, model: torch.nn.Module, metrics: Dict[str, float]):
-              torch.save({
-                  'model': model.state_dict(),
-                  'metrics': metrics,
-                  'step': step
-              }, f"checkpoints/experiment1_step_{step}.pt")
-      """
-      def decorator(func: Callable[..., T]) -> Callable[..., T]:
-          # Initialize state
-          save_dir_path = Path(save_dir)
-          save_dir_path.mkdir(parents=True, exist_ok=True)
+        def save_checkpoint(
+            save_dir: str,
+            max_checkpoints: int = 5,
+            checkpoint_prefix: str = "checkpoint",
+        ):
+            """
+            Decorator for saving checkpoints with fallback mechanism.
+            
+            Args:
+                save_dir: Directory to save checkpoints
+                max_checkpoints: Maximum number of checkpoints to keep
+                checkpoint_prefix: Prefix for checkpoint files
 
-          @functools.wraps(func)
-          def wrapper(*args, **kwargs) -> T:
-              # Get current step from kwargs or args
-              step = kwargs.get('step', args[0] if args else None)
-              if step is None:
-                  return func(*args, **kwargs)
+            Examples:
+                # Basic usage with a simple save function
+                @save_checkpoint(save_dir="checkpoints")
+                def save_model(step: int, model: torch.nn.Module):
+                    torch.save(model.state_dict(), f"checkpoints/model_{step}.pt")
 
-              try:
-                  # Call the original save function
-                  result = func(*args, **kwargs)
-                  
-                  # Save metadata
-                  metadata = {
-                      'step': step,
-                      'timestamp': datetime.now().isoformat(),
-                      'model_type': kwargs.get('model', args[1] if len(args) > 1 else None).__class__.__name__,
-                  }
-                  
-                  metadata_path = save_dir_path / f"{checkpoint_prefix}_step_{step}_metadata.json"
-                  with open(metadata_path, 'w') as f:
-                      json.dump(metadata, f)
+                # With custom save function that includes optimizer
+                @save_checkpoint(save_dir="checkpoints")
+                def save_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+                    torch.save({
+                        'model': model.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        'step': step
+                    }, f"checkpoints/training_{step}.pt")
 
-                  # Cleanup old checkpoints
-                  checkpoints = sorted(
-                      [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
-                      key=lambda x: int(x.stem.split('_')[-1])
-                  )
-                  
-                  while len(checkpoints) > max_checkpoints:
-                      oldest_checkpoint = checkpoints.pop(0)
-                      oldest_checkpoint.unlink()
-                      metadata_path = oldest_checkpoint.with_suffix('_metadata.json')
-                      if metadata_path.exists():
-                          metadata_path.unlink()
+                # With additional data and custom prefix
+                @save_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
+                def save_with_metrics(step: int, model: torch.nn.Module, metrics: Dict[str, float]):
+                    torch.save({
+                        'model': model.state_dict(),
+                        'metrics': metrics,
+                        'step': step
+                    }, f"checkpoints/experiment1_step_{step}.pt")
+            """
+            def decorator(func: Callable[..., T]) -> Callable[..., T]:
+                # Initialize state
+                save_dir_path = Path(save_dir)
+                save_dir_path.mkdir(parents=True, exist_ok=True)
 
-                  logger.info(f"Saved checkpoint at step {step}")
-                  return result
+                @functools.wraps(func)
+                def wrapper(*args, **kwargs) -> T:
+                    # Get current step from kwargs or args
+                    step = kwargs.get('step', args[0] if args else None)
+                    if step is None:
+                        return func(*args, **kwargs)
 
-              except Exception as e:
-                  logger.error(f"Failed to save checkpoint at step {step}: {str(e)}")
-                  return func(*args, **kwargs)
+                    try:
+                        # Call the original save function
+                        result = func(*args, **kwargs)
+                        
+                        # Save metadata
+                        metadata = {
+                            'step': step,
+                            'timestamp': datetime.now().isoformat(),
+                            'model_type': kwargs.get('model', args[1] if len(args) > 1 else None).__class__.__name__,
+                        }
+                        
+                        metadata_path = save_dir_path / f"{checkpoint_prefix}_step_{step}_metadata.json"
+                        with open(metadata_path, 'w') as f:
+                            json.dump(metadata, f)
 
-          return wrapper
-      return decorator
+                        # Cleanup old checkpoints
+                        checkpoints = sorted(
+                            [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
+                            key=lambda x: int(x.stem.split('_')[-1])
+                        )
+                        
+                        while len(checkpoints) > max_checkpoints:
+                            oldest_checkpoint = checkpoints.pop(0)
+                            oldest_checkpoint.unlink()
+                            metadata_path = oldest_checkpoint.with_suffix('_metadata.json')
+                            if metadata_path.exists():
+                                metadata_path.unlink()
 
-  def load_checkpoint(
-      save_dir: str,
-      checkpoint_prefix: str = "checkpoint",
-  ):
-      """
-      Decorator for loading checkpoints with fallback mechanism.
-      Tries to load from the latest checkpoint, if that fails tries the second latest, and so on.
-      
-      Args:
-          save_dir: Directory containing checkpoints
-          checkpoint_prefix: Prefix for checkpoint files
+                        logger.info(f"Saved checkpoint at step {step}")
+                        return result
 
-      Examples:
-          # Basic usage with a simple load function
-          @load_checkpoint(save_dir="checkpoints")
-          def load_model(step: int, model: torch.nn.Module):
-              model.load_state_dict(torch.load(f"checkpoints/model_{step}.pt"))
+                    except Exception as e:
+                        logger.error(f"Failed to save checkpoint at step {step}: {str(e)}")
+                        return func(*args, **kwargs)
 
-          # Loading with optimizer
-          @load_checkpoint(save_dir="checkpoints")
-          def load_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
-              checkpoint = torch.load(f"checkpoints/training_{step}.pt")
-              model.load_state_dict(checkpoint['model'])
-              optimizer.load_state_dict(checkpoint['optimizer'])
-              return checkpoint['step']
+                return wrapper
+            return decorator
 
-          # Loading with custom prefix and additional data
-          @load_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
-          def load_with_metrics(step: int, model: torch.nn.Module):
-              checkpoint = torch.load(f"checkpoints/experiment1_step_{step}.pt")
-              model.load_state_dict(checkpoint['model'])
-              return checkpoint['metrics']
-      """
-      def decorator(func: Callable[..., T]) -> Callable[..., T]:
-          save_dir_path = Path(save_dir)
+        def load_checkpoint(
+            save_dir: str,
+            checkpoint_prefix: str = "checkpoint",
+        ):
+            """
+            Decorator for loading checkpoints with fallback mechanism.
+            Tries to load from the latest checkpoint, if that fails tries the second latest, and so on.
+            
+            Args:
+                save_dir: Directory containing checkpoints
+                checkpoint_prefix: Prefix for checkpoint files
 
-          @functools.wraps(func)
-          def wrapper(*args, **kwargs) -> T:
-              try:
-                  # Find available checkpoints
-                  checkpoints = sorted(
-                      [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
-                      key=lambda x: int(x.stem.split('_')[-1]),
-                      reverse=True  # Sort in descending order (newest first)
-                  )
-                  
-                  if not checkpoints:
-                      logger.warning("No checkpoints found")
-                      return func(*args, **kwargs)
+            Examples:
+                # Basic usage with a simple load function
+                @load_checkpoint(save_dir="checkpoints")
+                def load_model(step: int, model: torch.nn.Module):
+                    model.load_state_dict(torch.load(f"checkpoints/model_{step}.pt"))
 
-                  # Try each checkpoint from newest to oldest
-                  for checkpoint in checkpoints:
-                      try:
-                          step = int(checkpoint.stem.split('_')[-1])
-                          
-                          # Call the original load function with the current step
-                          if 'step' in kwargs:
-                              kwargs['step'] = step
-                          elif args:
-                              args = list(args)
-                              args[0] = step
-                              args = tuple(args)
-                          
-                          result = func(*args, **kwargs)
-                          logger.info(f"Successfully loaded checkpoint from step {step}")
-                          return result
-                          
-                      except Exception as e:
-                          logger.warning(f"Failed to load checkpoint at step {step}, trying previous checkpoint: {str(e)}")
-                          continue
+                # Loading with optimizer
+                @load_checkpoint(save_dir="checkpoints")
+                def load_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+                    checkpoint = torch.load(f"checkpoints/training_{step}.pt")
+                    model.load_state_dict(checkpoint['model'])
+                    optimizer.load_state_dict(checkpoint['optimizer'])
+                    return checkpoint['step']
 
-                  # If we get here, all checkpoints failed
-                  logger.error("Failed to load any checkpoint")
-                  return func(*args, **kwargs)
+                # Loading with custom prefix and additional data
+                @load_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
+                def load_with_metrics(step: int, model: torch.nn.Module):
+                    checkpoint = torch.load(f"checkpoints/experiment1_step_{step}.pt")
+                    model.load_state_dict(checkpoint['model'])
+                    return checkpoint['metrics']
+            """
+            def decorator(func: Callable[..., T]) -> Callable[..., T]:
+                save_dir_path = Path(save_dir)
 
-              except Exception as e:
-                  logger.error(f"Failed to find checkpoints: {str(e)}")
-                  return func(*args, **kwargs)
+                @functools.wraps(func)
+                def wrapper(*args, **kwargs) -> T:
+                    try:
+                        # Find available checkpoints
+                        checkpoints = sorted(
+                            [f for f in save_dir_path.glob(f"{checkpoint_prefix}_step_*.pt")],
+                            key=lambda x: int(x.stem.split('_')[-1]),
+                            reverse=True  # Sort in descending order (newest first)
+                        )
+                        
+                        if not checkpoints:
+                            logger.warning("No checkpoints found")
+                            return func(*args, **kwargs)
 
-          return wrapper
-      return decorator 
+                        # Try each checkpoint from newest to oldest
+                        for checkpoint in checkpoints:
+                            try:
+                                step = int(checkpoint.stem.split('_')[-1])
+                                
+                                # Call the original load function with the current step
+                                if 'step' in kwargs:
+                                    kwargs['step'] = step
+                                elif args:
+                                    args = list(args)
+                                    args[0] = step
+                                    args = tuple(args)
+                                
+                                result = func(*args, **kwargs)
+                                logger.info(f"Successfully loaded checkpoint from step {step}")
+                                return result
+                                
+                            except Exception as e:
+                                logger.warning(f"Failed to load checkpoint at step {step}, trying previous checkpoint: {str(e)}")
+                                continue
+
+                        # If we get here, all checkpoints failed
+                        logger.error("Failed to load any checkpoint")
+                        return func(*args, **kwargs)
+
+                    except Exception as e:
+                        logger.error(f"Failed to find checkpoints: {str(e)}")
+                        return func(*args, **kwargs)
+
+                return wrapper
+            return decorator
 
 
 Examples
