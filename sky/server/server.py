@@ -12,7 +12,7 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -675,6 +675,13 @@ async def logs(
     )
 
 
+@app.get('/users')
+async def users() -> List[Dict[str, Any]]:
+    """Gets all users."""
+    user_list = global_user_state.get_all_users()
+    return [user.to_dict() for user in user_list]
+
+
 @app.post('/download_logs')
 async def download_logs(
         request: fastapi.Request,
@@ -1116,7 +1123,7 @@ if __name__ == '__main__':
 
     sub_procs = []
     try:
-        sub_procs = executor.start(cmd_args.deploy)
+        sub_procs = executor.start(deploy=cmd_args.deploy)
         logger.info(f'Starting SkyPilot API server, workers={num_workers}')
         # We don't support reload for now, since it may cause leakage of request
         # workers or interrupt running requests.

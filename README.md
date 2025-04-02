@@ -22,10 +22,6 @@
     <img alt="Downloads" src="https://img.shields.io/pypi/dm/skypilot">
   </a>
 
-  <a href="https://buildkite.com/skypilot-1/full-smoke-tests-run">
-    <img alt="Smoke Tests" src="https://badge.buildkite.com/d3aa9d2370e4a9ac4fb5e210381f955082a63a9a46673b197a.svg?theme=github&branch=master">
-  </a>
-
 </p>
 
 <h3 align="center">
@@ -59,7 +55,7 @@ SkyPilot **is easy to use for AI users**:
 - Easy job management: queue, run, and auto-recover many jobs
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
-- One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
+- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
 - [Flexible provisioning](https://docs.skypilot.co/en/latest/examples/auto-failover.html) of GPUs, TPUs, CPUs, with auto-retry
 - [Team deployment](https://docs.skypilot.co/en/latest/reference/api-server/api-server.html) and resource sharing
 
@@ -94,6 +90,7 @@ VMware vSphere, Nebius.
     <img alt="SkyPilot" src="https://raw.githubusercontent.com/skypilot-org/skypilot/master/docs/source/images/cloud-logos-light.png" width=85%>
   </picture>
 </p>
+<!-- source xcf file: https://drive.google.com/drive/folders/1S_acjRsAD3T14qMeEnf6FFrIwHu_Gs_f?usp=drive_link -->
 
 
 ## Getting started
