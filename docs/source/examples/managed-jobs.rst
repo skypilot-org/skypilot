@@ -299,7 +299,7 @@ Below is an example of mounting a bucket to :code:`/checkpoint`:
       name: # NOTE: Fill in your bucket name
       mode: MOUNT_CACHED # or MOUNT
 
-to learn more about the different modes, see :ref:`SkyPilot bucket mounting <sky-storage>` and :ref:`high-performance training <high-performance-training>`.
+To learn more about the different modes, see :ref:`SkyPilot bucket mounting <sky-storage>` and :ref:`high-performance training <high-performance-training>`.
 
 
 .. _failure-recovery:
