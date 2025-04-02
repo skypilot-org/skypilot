@@ -713,7 +713,7 @@ class Optimizer:
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
             table = _create_table(['SOURCE', 'TARGET', 'SIZE (GB)', metric])
-            table.add_rows(reversed(message_data))
+            table.add_rows(list(reversed(message_data)))
             logger.info(f'Egress plan:\n{table}\n')
 
     @staticmethod
@@ -1140,50 +1140,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-def _make_launchables_for_valid_region_zones(
-    launchable_resources: resources_lib.Resources
-) -> List[resources_lib.Resources]:
-    assert launchable_resources.is_launchable()
-    # In principle, all provisioning requests should be made at the granularity
-    # of a single zone. However, for on-demand instances, we batch the requests
-    # to the zones in the same region in order to leverage the region-level
-    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
-    # API calls, and thus the overall failover time. Note that this optimization
-    # does not affect the user cost since the clouds charge the same prices for
-    # on-demand instances in the same region regardless of the zones. On the
-    # other hand, for spot instances, we do not batch the requests because the
-    # "AWS" spot prices may vary across zones.
-    # For GCP, we do not batch the requests because GCP reservation system is
-    # zone based. Therefore, price estimation is potentially different across
-    # zones.
-
-    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
-    # while we return per-region resources here, the provisioner will still
-    # issue the request for one zone at a time.
-    # NOTE(woosuk): If we support Azure spot instances, we should batch the
-    # requests since Azure spot prices are region-level.
-    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
-    # in the same region and have the same price.
-    # TODO(woosuk): A better design is to implement batching at a higher level
-    # (e.g., in provisioner or optimizer), not here.
-    launchables = []
-    regions = launchable_resources.get_valid_regions_for_launchable()
-    for region in regions:
-        if (launchable_resources.use_spot and region.zones is not None or
-                launchable_resources.cloud.optimize_by_zone()):
-            # Spot instances.
-            # Do not batch the per-zone requests.
-            for zone in region.zones:
-                launchables.append(
-                    launchable_resources.copy(region=region.name,
-                                              zone=zone.name))
-        else:
-            # On-demand instances.
-            # Batch the requests at the granularity of a single region.
-            launchables.append(launchable_resources.copy(region=region.name))
-    return launchables
-
-
 def _filter_out_blocked_launchable_resources(
         launchable_resources: Iterable[resources_lib.Resources],
         blocked_resources: Iterable[resources_lib.Resources]):
@@ -1313,7 +1269,8 @@ def _fill_in_launchable_resources(
                 cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
-                    _make_launchables_for_valid_region_zones(cheapest))
+                    resources_utils.make_launchables_for_valid_region_zones(
+                        cheapest))
                 cloud_candidates[cloud] = feasible_resources.resources_list
             else:
                 all_fuzzy_candidates.update(

@@ -18,12 +18,6 @@ from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
-    f'{colorama.Fore.YELLOW}Warning: Files/dirs '
-    'specified in .gitignore will be uploaded '
-    'to the cloud storage for {path!r}'
-    'due to the following error: {error_msg!r}')
-
 _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
 
@@ -172,7 +166,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     submodules = submodules_output.stdout.split('\0')[:-1]
 
     # The empty string is the relative reference to the src_dir_path.
-    all_git_repos = ['.'] + [
+    all_git_repos = [''] + [
         # We only care about submodules that are a subdirectory of src_dir_path.
         submodule for submodule in submodules if not submodule.startswith('../')
     ]
@@ -208,7 +202,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 
         for item in output_list:
 
-            if repo == '.' and item == './':
+            if repo == '' and item == './':
                 logger.warning(f'{src_dir_path} is within a git repo, but the '
                                'entire directory is ignored by git. We will '
                                'ignore all git exclusions. '

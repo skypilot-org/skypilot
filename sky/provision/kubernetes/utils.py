@@ -159,7 +159,10 @@ def _retry_on_error(max_retries=DEFAULT_MAX_RETRIES,
                     # or 403 (Forbidden)
                     if (isinstance(e, kubernetes.api_exception()) and
                             e.status in (401, 403)):
-                        raise
+                        # Raise KubeAPIUnreachableError exception so that the
+                        # optimizer/provisioner can failover to other clouds.
+                        raise exceptions.KubeAPIUnreachableError(
+                            f'Kubernetes API error: {str(e)}') from e
                     if attempt < max_retries - 1:
                         sleep_time = backoff.current_backoff()
                         logger.debug(f'Kubernetes API call {func.__name__} '

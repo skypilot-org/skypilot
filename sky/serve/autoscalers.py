@@ -1,5 +1,6 @@
 """Autoscalers: perform autoscaling by monitoring metrics."""
 import bisect
+import copy
 import dataclasses
 import enum
 import math
@@ -56,8 +57,8 @@ class AutoscalerDecision:
 def _generate_scale_up_decisions(
         num: int, target: Optional[Dict[str, Any]]) -> List[AutoscalerDecision]:
     return [
-        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP, target)
-        for _ in range(num)
+        AutoscalerDecision(AutoscalerDecisionOperator.SCALE_UP,
+                           copy.copy(target)) for _ in range(num)
     ]
 
 
@@ -134,6 +135,7 @@ class Autoscaler:
         self.min_replicas: int = spec.min_replicas
         self.max_replicas: int = (spec.max_replicas if spec.max_replicas
                                   is not None else spec.min_replicas)
+        self.num_overprovision: Optional[int] = spec.num_overprovision
         # Target number of replicas is initialized to min replicas
         self.target_num_replicas: int = spec.min_replicas
         self.latest_version: int = constants.INITIAL_VERSION
@@ -142,6 +144,12 @@ class Autoscaler:
         # unrecoverable failure.
         self.latest_version_ever_ready: int = self.latest_version - 1
         self.update_mode = serve_utils.DEFAULT_UPDATE_MODE
+
+    def get_final_target_num_replicas(self) -> int:
+        """Get the final target number of replicas."""
+        if self.num_overprovision is None:
+            return self.target_num_replicas
+        return self.target_num_replicas + self.num_overprovision
 
     def _calculate_target_num_replicas(self) -> int:
         """Calculate target number of replicas."""
@@ -207,7 +215,7 @@ class Autoscaler:
         0, to make the service scale faster when the service is not running.
         This will happen when min_replicas = 0 and no traffic.
         """
-        if self.target_num_replicas == 0:
+        if self.get_final_target_num_replicas() == 0:
             return constants.AUTOSCALER_NO_REPLICA_DECISION_INTERVAL_SECONDS
         else:
             return constants.AUTOSCALER_DEFAULT_DECISION_INTERVAL_SECONDS
@@ -236,13 +244,14 @@ class Autoscaler:
             # old and latest versions are allowed in rolling update, this will
             # not affect the time it takes for the service to updated to the
             # latest version.
-            if num_latest_ready_replicas >= self.target_num_replicas:
+            if (num_latest_ready_replicas >=
+                    self.get_final_target_num_replicas()):
                 # Once the number of ready new replicas is greater than or equal
                 # to the target, we can scale down all old replicas.
                 return [info.replica_id for info in old_nonterminal_replicas]
             # If rolling update is in progress, we scale down old replicas
             # based on the number of ready new replicas.
-            num_old_replicas_to_keep = (self.target_num_replicas -
+            num_old_replicas_to_keep = (self.get_final_target_num_replicas() -
                                         num_latest_ready_replicas)
             # Remove old replicas (especially old launching replicas) and only
             # keep the required number of replicas, as we want to let the new
@@ -422,6 +431,7 @@ class _AutoscalerWithHysteresis(Autoscaler):
             f'Old target number of replicas: {old_target_num_replicas}. '
             f'Current target number of replicas: {target_num_replicas}. '
             f'Final target number of replicas: {self.target_num_replicas}. '
+            f'Num overprovision: {self.num_overprovision}. '
             f'Upscale counter: {self.upscale_counter}/'
             f'{self.scale_up_threshold}. '
             f'Downscale counter: {self.downscale_counter}/'
@@ -505,8 +515,9 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
 
         # Case 1. when latest_nonterminal_replicas is less
         # than num_to_provision, we always scale up new replicas.
-        if len(latest_nonterminal_replicas) < self.target_num_replicas:
-            num_replicas_to_scale_up = (self.target_num_replicas -
+        target_num_replicas = self.get_final_target_num_replicas()
+        if len(latest_nonterminal_replicas) < target_num_replicas:
+            num_replicas_to_scale_up = (target_num_replicas -
                                         len(latest_nonterminal_replicas))
             logger.info('Number of replicas to scale up: '
                         f'{num_replicas_to_scale_up}')
@@ -514,11 +525,11 @@ class RequestRateAutoscaler(_AutoscalerWithHysteresis):
                 _generate_scale_up_decisions(num_replicas_to_scale_up, None))
 
         # Case 2: when latest_nonterminal_replicas is more
-        # than self.target_num_replicas, we scale down new replicas.
+        # than target_num_replicas, we scale down new replicas.
         replicas_to_scale_down = []
-        if len(latest_nonterminal_replicas) > self.target_num_replicas:
+        if len(latest_nonterminal_replicas) > target_num_replicas:
             num_replicas_to_scale_down = (len(latest_nonterminal_replicas) -
-                                          self.target_num_replicas)
+                                          target_num_replicas)
             replicas_to_scale_down = (
                 _select_nonterminal_replicas_to_scale_down(
                     num_replicas_to_scale_down, latest_nonterminal_replicas))
@@ -633,7 +644,7 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
         all_replica_ids_to_scale_down: List[int] = []
 
         # Decide how many spot instances to launch.
-        num_spot_to_provision = (self.target_num_replicas -
+        num_spot_to_provision = (self.get_final_target_num_replicas() -
                                  self.base_ondemand_fallback_replicas)
         if num_nonterminal_spot < num_spot_to_provision:
             # Not enough spot instances, scale up.
@@ -668,6 +679,10 @@ class FallbackRequestRateAutoscaler(RequestRateAutoscaler):
             num_ondemand_to_provision += (num_spot_to_provision -
                                           num_ready_spot)
 
+        # Make sure we don't launch on-demand fallback for
+        # overprovisioned replicas.
+        num_ondemand_to_provision = min(num_ondemand_to_provision,
+                                        self.target_num_replicas)
         if num_ondemand_to_provision > num_nonterminal_ondemand:
             num_ondemand_to_scale_up = (num_ondemand_to_provision -
                                         num_nonterminal_ondemand)

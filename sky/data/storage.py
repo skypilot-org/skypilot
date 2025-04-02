@@ -202,7 +202,7 @@ class StoreType(enum.Enum):
             return 'oci://'
         # Nebius storages use 's3://' as a prefix for various aws cli commands
         elif self == StoreType.NEBIUS:
-            return 's3://'
+            return 'nebius://'
         else:
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(f'Unknown store type: {self}')
@@ -4947,8 +4947,8 @@ class NebiusStore(AbstractStore):
                 raise exceptions.StorageBucketGetError(
                     'Attempted to use a non-existent bucket as a source: '
                     f'{self.source}. Consider using `aws s3 ls '
-                    f'{self.source} --endpoint={endpoint_url}`'
-                    f'--profile={nebius.NEBIUS_PROFILE_NAME} to debug.')
+                    f's3://{self.name} --endpoint={endpoint_url}'
+                    f'--profile={nebius.NEBIUS_PROFILE_NAME}` to debug.')
 
         # If bucket cannot be found in both private and public settings,
         # the bucket is to be created by Sky. However, creation is skipped if

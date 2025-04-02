@@ -1,6 +1,7 @@
 """ Digital Ocean Cloud. """
 
 import json
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -279,13 +280,13 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        try:
-            do_utils.client()
-            return {
-                f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
-            }
-        except do_utils.DigitalOceanError:
+        if do_utils.CREDENTIALS_PATH is None:
             return {}
+        if not os.path.exists(os.path.expanduser(do_utils.CREDENTIALS_PATH)):
+            return {}
+        return {
+            f'~/.config/doctl/{_CREDENTIAL_FILE}': do_utils.CREDENTIALS_PATH
+        }
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:
