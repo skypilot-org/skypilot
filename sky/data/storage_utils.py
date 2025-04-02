@@ -279,12 +279,17 @@ def zip_files_and_folders(items: List[str],
                     zipf.write(item)
                 elif os.path.isdir(item):
                     for root, dirs, files in os.walk(item, followlinks=False):
+                        # Filter out directories in the excluded_files list
+                        # This prevents os.walk from traversing into excluded directories
+                        dirs[:] = [
+                            d for d in dirs
+                            if os.path.join(root, d) not in excluded_files
+                        ]
+
                         # Store directory entries (important for empty
                         # directories)
                         for dir_name in dirs:
                             dir_path = os.path.join(root, dir_name)
-                            if dir_path in excluded_files:
-                                continue
                             # If it's a symlink, store it as a symlink
                             if os.path.islink(dir_path):
                                 _store_symlink(zipf, dir_path, is_dir=True)

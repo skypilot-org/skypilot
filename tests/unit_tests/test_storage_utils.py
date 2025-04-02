@@ -134,6 +134,59 @@ def test_zip_files_and_folders(skyignore_dir):
         assert f'Zipped {skyignore_dir}' in log_file_content
 
 
+def test_zip_files_and_folders_excluded_directories():
+    """Test that files inside excluded directories are not included in the zip file."""
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create a directory structure with nested files
+        main_dir = os.path.join(temp_dir, 'main_dir')
+        excluded_dir = os.path.join(main_dir, 'excluded_dir')
+        nested_dir = os.path.join(excluded_dir, 'nested_dir')
+        
+        # Create directories
+        for dir_path in [main_dir, excluded_dir, nested_dir]:
+            os.makedirs(dir_path, exist_ok=True)
+            
+        # Create files in each directory
+        with open(os.path.join(main_dir, 'main_file.txt'), 'w', encoding='utf-8') as f:
+            f.write('main file content')
+            
+        with open(os.path.join(excluded_dir, 'excluded_file.txt'), 'w', encoding='utf-8') as f:
+            f.write('excluded file content')
+            
+        with open(os.path.join(nested_dir, 'nested_file.txt'), 'w', encoding='utf-8') as f:
+            f.write('nested file content')
+            
+        # Create a skyignore file that excludes the directory
+        skyignore_content = "excluded_dir\n"
+        skyignore_path = os.path.join(main_dir, constants.SKY_IGNORE_FILE)
+        with open(skyignore_path, 'w', encoding='utf-8') as f:
+            f.write(skyignore_content)
+            
+        # Create a temporary zip file
+        log_file = io.StringIO()
+        with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as zip_file:
+            # Zip the main directory
+            storage_utils.zip_files_and_folders([main_dir], zip_file, log_file)
+            
+            # Examine the zip content
+            zip_file.seek(0)
+            with zipfile.ZipFile(zip_file, 'r') as zipf:
+                zipped_files = set(zipf.namelist())
+                
+            # The main directory and its main_file.txt should be included
+            assert os.path.join(main_dir) in zipped_files
+            assert os.path.join(main_dir, 'main_file.txt') in zipped_files
+            assert os.path.join(main_dir, constants.SKY_IGNORE_FILE) in zipped_files
+            
+            # The excluded_dir and all files inside it should NOT be included
+            assert os.path.join(main_dir, 'excluded_dir') not in zipped_files
+            assert os.path.join(main_dir, 'excluded_dir', 'excluded_file.txt') not in zipped_files
+            
+            # The nested_dir and its files should also NOT be included
+            assert os.path.join(main_dir, 'excluded_dir', 'nested_dir') not in zipped_files
+            assert os.path.join(main_dir, 'excluded_dir', 'nested_dir', 'nested_file.txt') not in zipped_files
+
+
 def test_get_excluded_files_from_gitignore_with_submodules():
     """Test gitignore exclusion with submodules."""
     with tempfile.TemporaryDirectory() as temp_dir:
