@@ -10,24 +10,23 @@ Distributed training basics
 
 SkyPilot supports various distributed training frameworks and approaches:
 
-- PyTorch Distributed Data Parallel (DDP)
-- Horovod
-- DeepSpeed
-- Ray Train
-- TensorFlow Distribution Strategies
+- `PyTorch Distributed Data Parallel (DDP) <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_
+- `Horovod <https://github.com/skypilot-org/skypilot/tree/master/examples/horovod>`_
+- `DeepSpeed <https://github.com/skypilot-org/skypilot/tree/master/examples/deepspeed>`_
+- `Ray Train <https://github.com/skypilot-org/skypilot/tree/master/examples/ray_train>`_
+- `TensorFlow Distribution Strategies <https://github.com/skypilot-org/skypilot/tree/master/examples/tensorflow>`_
 
 The choice of framework depends on your specific needs, but all can be easily configured through SkyPilot's YAML specification.
 
 Best practices
 --------------
 
-High performance instances and storage
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-Choose high performance instances with fast local SSDs for optimal training performance. SkyPilot allows you to specify instance types with powerful GPUs and high-bandwidth networking:
+High performance instances
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Choose high performance instances for optimal training performance. SkyPilot allows you to specify instance types with powerful GPUs and high-bandwidth networking:
 
 - Use the latest GPU accelerators (A100, H100, etc.) for faster training
 - Select instances with NVLink for improved multi-GPU communication
-- Specify high-performance local SSDs to reduce I/O bottlenecks
 - Consider instances with higher memory bandwidth for large models
 
 Example configuration:
@@ -39,23 +38,24 @@ Example configuration:
       A100:1  
       A100-80GB:1  
       H100:1  
-    disk_tier: best # using highest performance disk tier
 
-Dataset loading
-~~~~~~~~~~~~~~~~
-Copy data to local SSDs if local storage has enough capacity
+Use best storage tier
+~~~~~~~~~~~~~~~~~~~~~~~
+Fast storage is critical for data-intensive workloads:
+
+- Specify high-performance local SSDs to reduce I/O bottlenecks
+- Use SkyPilot's disk tier options to select the fastest available storage
 
 Example configuration:
 
 .. code-block:: yaml
 
-  file_mounts:
-    /data:
-      name: my-dataset
-      mode: COPY
+  resources:
+    disk_tier: best # using highest performance disk tier
 
-Checkpointing and recovery
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+MOUNT_CACHED for checkpointing
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 MOUNT_CACHED provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. Unlike MOUNT mode, it supports all write operations without limitations on file operations. It offers fast file access through a local VFS (Virtual File System) cache implemented by `rclone <https://rclone.org/>`__ that provides near-local disk performance. 
 
@@ -79,12 +79,11 @@ Example configuration:
    - Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
    - Ensure the disk tier is fast enough to handle the combined write load of all jobs.
 
-For spot instance recovery and robust checkpointing implementation, see :ref:`Spot Checkpointing <checkpointing>`.
+To see the difference between MOUNT and MOUNT_CACHED, see :ref:`storage mounting modes <storage-mounting-modes>`.
 
 Robust checkpointing for spot instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Here's an example implementation of a robust checkpoint and recovery system:
+For spot instance recovery and robust checkpointing implementation, here's an example implementation of a robust checkpoint and recovery system:
 
 .. code-block:: python
 
@@ -295,7 +294,6 @@ This example:
 - uses checkpointing to recover preempted jobs quickly.
 
 .. code-block:: yaml
-  :emphasize-lines: 9-12,43-46
 
   # bert_qa.yaml
   name: bert-qa

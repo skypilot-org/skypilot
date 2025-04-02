@@ -94,7 +94,7 @@ A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`
 
 1. **MOUNT** mode: The bucket is directly "mounted" to the remote VM. I.e., files are streamed when accessed by the task and all writes are replicated to the remote bucket. Any writes will also appear on other VMs mounting the same bucket. This is the default mode.
 2. **COPY** mode: The files are pre-fetched and cached on the local disk. Writes only affect the local copy and are not streamed back to the bucket.
-3. **MOUNT_CACHED** mode: The bucket is mounted to the local disk with a VFS cache. The writes are cached locally before being uploaded to the bucket.
+3. **MOUNT_CACHED** mode: The bucket is mounted to the local disk with a VFS cache. The writes are cached locally before being uploaded to the bucket. SkyPilot waits for the cached entries to be uploaded to remote before marking a task or a job as complete. Writes are not immediately consistent across multiple nodes.
 
 .. Source for the image: https://docs.google.com/drawings/d/1MPdVd2TFgAFOYSk6R6E903v1_C0LHmVU-ChIVwdX9A8/edit?usp=sharing
 
@@ -122,7 +122,7 @@ its performance requirements and size of the data.
    * - Best for
      - Writing task outputs; reading very large data that won't fit on disk.
      - High performance read-only access to datasets that fit on disk.
-     - High performance writing task outputs (e.g., model checkpoints, logs) that fit on disk with a VFS cache.
+     - High performance writes (e.g., model checkpoints, logs) that fit on disk cache.
    * - Performance
      - |:yellow_circle:| Slow to read/write files. Fast to provision.
      - |:white_check_mark:| Fast file access. Slow at initial provisioning.
@@ -130,17 +130,19 @@ its performance requirements and size of the data.
    * - Writing to buckets
      - |:yellow_circle:| Most write operations [1]_ are supported.
      - |:x:| Not supported. Read-only.
-     - |:white_check_mark:| All write operations are supported.
+     - |:white_check_mark:| All write operations are supported. [2]_
    * - Disk Size
-     - |:white_check_mark:| No disk size requirements [2]_ .
+     - |:white_check_mark:| No disk size requirements [3]_ .
      - |:yellow_circle:| VM disk size must be greater than the size of the bucket.
-     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk. Writing to disk faster than disk can write to remote can cause the disk to run out of space.
+     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk. 
 
 .. [1] ``MOUNT`` mode does not support the full POSIX interface and some file
     operations may fail. Most notably, random writes and append operations are
     not supported.
 
-.. [2] Disk size smaller than the object size may cause performance degradation
+.. [2] In ``MOUNT_CACHED`` mode, writes are not immediately consistent across multiple nodes.
+
+.. [3] Disk size smaller than the object size may cause performance degradation
     in ``MOUNT`` mode.
 
 
@@ -152,9 +154,11 @@ its performance requirements and size of the data.
 
 .. note::
     :code:`MOUNT_CACHED` mode uses `rclone <https://rclone.org/>`_
-    to provide a close-to-open consistency model for attached buckets. This means calling
-    :code:`close()` on a file will upload the entire file to the bucket.
-    Any subsequent reads will see the latest data.
+    to provide a virtual filesystem that is asynchronously synced with the bucket.
+    Calling :code:`close()` does not guarantee that the file is written to the bucket.
+    rclone will sync written files back to the bucket asynchronously in the order they were written.
+    The local filesystem should be fully consistent, but a bucket using 
+    `MOUNT_CACHED` on multiple nodes may only be eventually consistent.
     
     Important considerations for :code:`MOUNT_CACHED` mode:
     
