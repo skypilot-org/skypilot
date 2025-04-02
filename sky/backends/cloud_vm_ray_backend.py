@@ -4905,8 +4905,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
-                storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHED)
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES
         }
 
         # Handle cases when there aren't any Storages with either MOUNT or
@@ -5011,10 +5010,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            if storage_obj.mode not in [
-                    storage_lib.StorageMode.MOUNT,
-                    storage_lib.StorageMode.MOUNT_CACHED
-            ]:
+            if storage_obj.mode not in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # Skip non-mount storage objects, as there is no need to
                 # reconstruct them during cluster restart.
                 continue

@@ -217,18 +217,17 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     return mount_cmd
 
 
-def get_cos_mount_cmd(rclone_config_data: str,
-                      rclone_config_path: str,
-                      bucket_rclone_profile: str,
+def get_cos_mount_cmd(rclone_config: str,
+                      rclone_profile_name: str,
                       bucket_name: str,
                       mount_path: str,
                       _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to mount an IBM COS bucket using rclone."""
     # stores bucket profile in rclone config file at the cluster's nodes.
     configure_rclone_profile = (f'{FUSERMOUNT3_SOFT_LINK_CMD}; '
-                                'mkdir -p ~/.config/rclone/ && '
-                                f'echo "{rclone_config_data}" >> '
-                                f'{rclone_config_path}')
+                                f'mkdir -p {constants.RCLONE_CONFIG_DIR} && '
+                                f'echo "{rclone_config}" >> '
+                                f'{constants.RCLONE_CONFIG_PATH}')
     if _bucket_sub_path is None:
         sub_path_arg = f'{bucket_name}/{_bucket_sub_path}'
     else:
@@ -236,7 +235,7 @@ def get_cos_mount_cmd(rclone_config_data: str,
     # --daemon will keep the mounting process running in the background.
     mount_cmd = (f'{configure_rclone_profile} && '
                  'rclone mount '
-                 f'{bucket_rclone_profile}:{sub_path_arg} {mount_path} '
+                 f'{rclone_profile_name}:{sub_path_arg} {mount_path} '
                  '--daemon')
     return mount_cmd
 

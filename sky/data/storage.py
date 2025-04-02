@@ -268,6 +268,12 @@ class StorageMode(enum.Enum):
     MOUNT_CACHED = 'MOUNT_CACHED'
 
 
+MOUNTABLE_STORAGE_MODES = [
+    StorageMode.MOUNT,
+    StorageMode.MOUNT_CACHED,
+]
+
+
 class AbstractStore:
     """AbstractStore abstracts away the different storage types exposed by
     different clouds.

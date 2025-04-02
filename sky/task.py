@@ -1268,8 +1268,7 @@ class Task:
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
-            if (storage_mount.mode == storage_lib.StorageMode.MOUNT or
-                    storage_mount.mode == storage_lib.StorageMode.MOUNT_CACHED):
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 required_features.add(
                     clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
                 break
