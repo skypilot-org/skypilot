@@ -8,7 +8,7 @@ This guide covers the best practices and examples for achieving high performance
 Distributed training basics
 ----------------------------
 
-SkyPilot supports various distributed training frameworks and approaches:
+SkyPilot supports all distributed training frameworks, including but not limited to:
 
 - `PyTorch Distributed Data Parallel (DDP) <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_
 - `Horovod <https://github.com/skypilot-org/skypilot/tree/master/examples/horovod>`_
