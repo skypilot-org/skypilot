@@ -916,7 +916,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 name=bucket_name,
                 source=local_fm_path,
                 persistent=False,
-                mode=storage_lib.StorageMode.MOUNT,
+                mode=storage_lib.DEFAULT_STORAGE_MODE,
                 stores=stores,
                 _is_sky_managed=not bucket_wth_prefix,
                 _bucket_sub_path=file_mounts_tmp_subpath)
