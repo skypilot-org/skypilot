@@ -330,9 +330,9 @@ class JobsController:
                         )
                         failure_reason = (
                             'The job driver on the remote cluster failed. This '
-                            'can be caused by the job taking too much memory or '
-                            'other resources. Try adding more memory, CPU, or '
-                            f'disk in your job definition. {failure_reason}')
+                            'can be caused by the job taking too much memory '
+                            'or other resources. Try adding more memory, CPU, '
+                            f'or disk in your job definition. {failure_reason}')
                     should_restart_on_failure = (
                         self._strategy_executor.should_restart_on_failure())
                     if should_restart_on_failure:
