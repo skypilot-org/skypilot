@@ -52,7 +52,7 @@ Example configuration:
     disk_tier: best  # Use highest performance disk tier.
 
 
-MOUNT_CACHED for checkpointing
+Use ``MOUNT_CACHED`` for checkpointing
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 MOUNT_CACHED provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. Unlike MOUNT mode, it supports all write operations without limitations on file operations. It offers fast file access through a local VFS (Virtual File System) cache implemented by `rclone <https://rclone.org/>`__ that provides near-local disk performance. 
