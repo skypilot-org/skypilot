@@ -161,7 +161,7 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[_ResourceHandleType]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool]:
         raise NotImplementedError
 
     def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:
