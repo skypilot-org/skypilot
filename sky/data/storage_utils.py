@@ -279,9 +279,13 @@ def zip_files_and_folders(items: List[str],
                     zipf.write(item)
                 elif os.path.isdir(item):
                     for root, dirs, files in os.walk(item, followlinks=False):
-                        # Filter out directories in the excluded_files list
-                        # This prevents os.walk from traversing into excluded
-                        # directories
+                        # Modify dirs in-place to control os.walk()'s traversal
+                        # behavior. This filters out excluded directories BEFORE
+                        # os.walk() visits the files and sub-directories under
+                        # them, preventing traversal into any excluded directory
+                        # and its contents.
+                        # Note: dirs[:] = ... is required for in-place
+                        # modification.
                         dirs[:] = [
                             d for d in dirs
                             if os.path.join(root, d) not in excluded_files
