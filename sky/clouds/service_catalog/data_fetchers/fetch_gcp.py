@@ -467,6 +467,8 @@ def _gpu_info_from_name(name: str) -> Optional[Dict[str, List[Dict[str, Any]]]]:
         'A100': 40 * 1024,
         'H100': 80 * 1024,
         'H100-MEGA': 80 * 1024,
+        'H200': 141 * 1024,
+        'B200':  180 * 1024,
         'P4': 8 * 1024,
         'T4': 16 * 1024,
         'V100': 16 * 1024,
