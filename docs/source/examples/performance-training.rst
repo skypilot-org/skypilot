@@ -27,7 +27,7 @@ Choose high performance instances for optimal training performance. SkyPilot all
 
 - Use the latest GPU accelerators (A100, H100, etc.) for faster training
 - Select instances with NVLink for improved multi-GPU communication
-- Consider instances with higher memory bandwidth for large models
+- Consider instances with higher memory bandwidth and higher device memory for large models
 
 Example configuration:
 
