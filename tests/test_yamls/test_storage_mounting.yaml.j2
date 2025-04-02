@@ -43,7 +43,7 @@ file_mounts:
   # Mounting private buckets in MOUNT_CACHED mode
   {% if include_mount_cached | default(False) %}
   /mount_private_mount_cached:
-    name: {{storage_name}}-mount-cached
+    name: {{storage_name}}
     source: ~/tmp-workdir
     mode: MOUNT_CACHED
   {% endif %}
