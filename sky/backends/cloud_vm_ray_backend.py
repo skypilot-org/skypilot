@@ -638,7 +638,7 @@ class RayCodeGen:
                 flushed=1
                 for file in {constants.RCLONE_LOG_DIR}/*; do
                     exitcode=0
-                    tac $file | grep "cache" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
+                    tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
                     if [ $exitcode -ne 0 ]; then
                         echo "skypilot: cached mount is still uploading to remote"
                         flushed=0
