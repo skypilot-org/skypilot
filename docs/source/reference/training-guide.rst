@@ -1,6 +1,6 @@
-.. _high-performance-training:
+.. _training-guide:
 
-High Performance Training
+Model Training Guide
 =========================
 
 This guide covers the best practices and examples for achieving high performance distributed training using SkyPilot.
@@ -51,7 +51,7 @@ Example configuration:
 
 
 Use ``MOUNT_CACHED`` for checkpointing
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Cloud buckets with the ``MOUNT_CACHED`` mode provides high performance writing, making it ideal for model checkpoints, logs, and other outputs with fast local writes. 
 
