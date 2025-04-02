@@ -1291,7 +1291,8 @@ def get_external_ip(network_mode: Optional[
 
 
 def check_credentials(context: Optional[str],
-                      timeout: int = kubernetes.API_TIMEOUT) -> \
+                      timeout: int = kubernetes.API_TIMEOUT,
+                      run_optional_checks: bool = False) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -1333,6 +1334,9 @@ def check_credentials(context: Optional[str],
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
+    if not run_optional_checks:
+        return True, None
+
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
 
@@ -1350,8 +1354,19 @@ def check_credentials(context: Optional[str],
                    f'accelerators that are not labeled. '
                    f'To label the nodes, run '
                    f'`python -m sky.utils.kubernetes.gpu_labeler '
-                   f'--context {context}` from the project root '
-                   f'directory.')
+                   f'--context {context}`')
+    else:
+        try:
+            get_accelerator_label_key_value(context,
+                                            acc_type='',
+                                            acc_count=0,
+                                            check_mode=True)
+        except exceptions.ResourcesUnavailableError as e:
+            # If GPUs are not available, we return cluster as enabled
+            # (since it can be a CPU-only cluster) but we also return the
+            # exception message which serves as a hint for how to enable
+            # GPU access.
+            gpu_msg = str(e)
     if exec_msg and gpu_msg:
         return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
     elif gpu_msg:
