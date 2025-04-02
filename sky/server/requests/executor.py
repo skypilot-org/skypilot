@@ -109,7 +109,8 @@ _BURSTABLE_WORKERS_FOR_LOCAL = 1024
 
 class QueueBackend(enum.Enum):
     # Local queue backend serves queues in each process locally, which has
-    # lower resource usage but the consumer must be in the same process.
+    # lower resource usage but the consumer must be in the same process, i.e.
+    # this only works in single-process mode.
     LOCAL = 'local'
     # Multi-process queue backend starts a dedicated process for serving queues.
     MULTIPROCESSING = 'multiprocessing'
@@ -489,7 +490,6 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
-    local_worker = False
     if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
         if deploy:
             # For deployment, we require at the min available memory to be
@@ -513,7 +513,6 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             # to avoid the memory overhead (about ~350MB).
             global queue_backend
             queue_backend = QueueBackend.LOCAL
-            local_worker = True
             logger.warning(
                 'SkyPilot API server will run in low resource mode because '
                 'the available memory is less than '
@@ -556,16 +555,11 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     logger.info('Request queues created')
 
     def run_worker_in_background(worker: RequestWorker):
-        if local_worker:
-            # Use daemon thread for automatic cleanup.
-            thread = threading.Thread(target=worker.run, daemon=True)
-            thread.start()
-        else:
-            # Cannot use daemon process since daemon process cannot create
-            # sub-processes, so we manually manage the cleanup.
-            worker_proc = multiprocessing.Process(target=worker.run)
-            worker_proc.start()
-            sub_procs.append(worker_proc)
+        # Thread dispatcher is sufficient for current scale, refer to
+        # tests/load_tests/test_queue_dispatcher.py for more details.
+        # Use daemon thread for automatic cleanup.
+        thread = threading.Thread(target=worker.run, daemon=True)
+        thread.start()
 
     burstable_parallelism = _BURSTABLE_WORKERS_FOR_LOCAL if not deploy else 0
     # Start a worker for long requests.
