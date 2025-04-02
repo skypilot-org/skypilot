@@ -42,7 +42,7 @@ Example configuration:
 Use best disk_tier
 ~~~~~~~~~~~~~~~~~~~~~~~
 Fast storage is critical for loading and storing data and model checkpoints.
-SkyPilot's disk tier options to select the fastest available storage with high-performance local SSDs to reduce I/O bottlenecks
+SkyPilot's ``disk_tier`` option supports the fastest available storage with high-performance local SSDs to reduce I/O bottlenecks.
 
 Example configuration:
 
