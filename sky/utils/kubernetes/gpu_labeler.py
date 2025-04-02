@@ -124,12 +124,15 @@ def label(context: Optional[str] = None):
             batch_v1.create_namespaced_job(namespace, job_manifest)
             print(f'Created GPU labeler job for node {node_name}')
 
-        print('GPU labeling started - this may take 10 min or more to complete.'
-              '\nTo check the status of GPU labeling jobs, run '
-              '`kubectl get jobs -n kube-system -l job=sky-gpu-labeler`'
-              '\nYou can check if nodes have been labeled by running '
-              '`kubectl describe nodes` and looking for labels of the format '
-              '`skypilot.co/accelerator: <gpu_name>`. ')
+    context_str = f' --context {context}' if context else ''
+    print(f'GPU labeling started - this may take 10 min or more to complete.'
+          '\nTo check the status of GPU labeling jobs, run '
+          f'`kubectl get jobs -n kube-system '
+          f'-l job=sky-gpu-labeler{context_str}`'
+          '\nYou can check if nodes have been labeled by running '
+          f'`kubectl describe nodes{context_str}` '
+          'and looking for labels of the format '
+          '`skypilot.co/accelerator: <gpu_name>`. ')
 
 
 def main():
