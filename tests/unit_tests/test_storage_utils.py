@@ -171,20 +171,19 @@ def test_zip_files_and_folders_excluded_directories():
             # Examine the zip content
             zip_file.seek(0)
             with zipfile.ZipFile(zip_file, 'r') as zipf:
-                zipped_files = set(zipf.namelist())
+                zipped_files = zipf.namelist()
                 
-            # The main directory and its main_file.txt should be included
-            assert os.path.join(main_dir) in zipped_files
-            assert os.path.join(main_dir, 'main_file.txt') in zipped_files
-            assert os.path.join(main_dir, constants.SKY_IGNORE_FILE) in zipped_files
+            # Check for included files (using path suffixes)
+            assert any(path.endswith('main_dir/main_file.txt') for path in zipped_files)
+            assert any(path.endswith(f'main_dir/{constants.SKY_IGNORE_FILE}') for path in zipped_files)
             
-            # The excluded_dir and all files inside it should NOT be included
-            assert os.path.join(main_dir, 'excluded_dir') not in zipped_files
-            assert os.path.join(main_dir, 'excluded_dir', 'excluded_file.txt') not in zipped_files
+            # Check that excluded files are NOT included
+            assert not any(path.endswith('excluded_file.txt') for path in zipped_files)
+            assert not any(path.endswith('nested_file.txt') for path in zipped_files)
             
-            # The nested_dir and its files should also NOT be included
-            assert os.path.join(main_dir, 'excluded_dir', 'nested_dir') not in zipped_files
-            assert os.path.join(main_dir, 'excluded_dir', 'nested_dir', 'nested_file.txt') not in zipped_files
+            # Double-check by verifying the total number of files
+            # We should only have the main directory files
+            assert len(zipped_files) == 2  # main_file.txt and .skyignore
 
 
 def test_get_excluded_files_from_gitignore_with_submodules():

@@ -229,7 +229,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 def get_excluded_files(src_dir_path: str) -> List[str]:
     # TODO: this could return a huge list of files,
     # should think of ways to optimize.
-    """ List files and directories to be excluded."""
+    """List files and directories to be excluded."""
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
@@ -280,7 +280,8 @@ def zip_files_and_folders(items: List[str],
                 elif os.path.isdir(item):
                     for root, dirs, files in os.walk(item, followlinks=False):
                         # Filter out directories in the excluded_files list
-                        # This prevents os.walk from traversing into excluded directories
+                        # This prevents os.walk from traversing into excluded
+                        # directories
                         dirs[:] = [
                             d for d in dirs
                             if os.path.join(root, d) not in excluded_files
