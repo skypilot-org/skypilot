@@ -186,7 +186,7 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
         # the mounted directory
         f'sky exec {cluster_name} -- "set -ex; ls /mount_private_mount/hello.txt"',
     ]
-    if cloud != 'kubernetes':
+    if include_mount_cached and cloud != 'kubernetes':
         if cloud == 'aws':
             rclone_stores = data_utils.Rclone.RcloneStores.S3
         elif cloud == 'gcp':
