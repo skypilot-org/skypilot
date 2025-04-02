@@ -169,6 +169,18 @@ its performance requirements and size of the data.
 
 
 .. note::
+   
+   In MOUNT_CACHED mode, files only begin uploading after they are closed by all processes. By default, SkyPilot uses sequential transfers to maintain file order, which can cause the cache to grow if files are written faster than they can be uploaded.
+
+   When multiple jobs share a node (e.g., using fractional GPUs), be aware of these important considerations:
+   
+   - A job is only marked complete after all files in the cache are flushed to the remote bucket, including those from other jobs.
+   - The total disk space required equals the sum of all jobs' cached data.
+   - Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
+   - Ensure the disk tier is fast enough to handle the combined write load of all jobs.
+
+
+.. note::
     SkyPilot does not guarantee preservation of file permissions when attaching
     buckets. You may need to set file permissions during task execution.
 

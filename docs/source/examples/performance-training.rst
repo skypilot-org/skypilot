@@ -10,11 +10,10 @@ Distributed training basics
 
 SkyPilot supports all distributed training frameworks, including but not limited to:
 
-- `PyTorch Distributed Data Parallel (DDP) <https://github.com/skypilot-org/skypilot/tree/master/examples/spot/resnet_ddp>`_
-- `Horovod <https://github.com/skypilot-org/skypilot/tree/master/examples/horovod>`_
-- `DeepSpeed <https://github.com/skypilot-org/skypilot/tree/master/examples/deepspeed>`_
-- `Ray Train <https://github.com/skypilot-org/skypilot/tree/master/examples/ray_train>`_
-- `TensorFlow Distribution Strategies <https://github.com/skypilot-org/skypilot/tree/master/examples/tensorflow>`_
+- `PyTorch Distributed Data Parallel (DDP) <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_
+- `DeepSpeed <https://docs.skypilot.co/en/latest/examples/training/deepspeed.html>`_
+- `Ray Train <https://docs.skypilot.co/en/latest/examples/training/ray.html>`_
+- `TensorFlow Distribution Strategies <https://docs.skypilot.co/en/latest/examples/tensorflow.html>`_
 
 The choice of framework depends on your specific needs, but all can be easily configured through SkyPilot's YAML specification.
 
@@ -26,7 +25,6 @@ High performance instances
 Choose high performance instances for optimal training performance. SkyPilot allows you to specify instance types with powerful GPUs and high-bandwidth networking:
 
 - Use the latest GPU accelerators (A100, H100, etc.) for faster training
-- Select instances with NVLink for improved multi-GPU communication
 - Consider instances with higher memory bandwidth and higher device memory for large models
 
 Example configuration:
@@ -39,7 +37,7 @@ Example configuration:
       A100-80GB:1  
       H100:1  
 
-Use best disk_tier
+Use ``disk_tier: best``
 ~~~~~~~~~~~~~~~~~~~~~~~
 Fast storage is critical for loading and storing data and model checkpoints.
 SkyPilot's ``disk_tier`` option supports the fastest available storage with high-performance local SSDs to reduce I/O bottlenecks.
@@ -68,28 +66,26 @@ Example configuration:
         name: my-checkpoint-bucket  
         mode: MOUNT_CACHED
 
-.. note::
-   
-   In MOUNT_CACHED mode, files only begin uploading after they are closed by all processes. By default, SkyPilot uses sequential transfers to maintain file order, which can cause the cache to grow if files are written faster than they can be uploaded.
-
-   When multiple jobs share a node (e.g., using fractional GPUs), be aware of these important considerations:
-   
-   - A job is only marked complete after all files in the cache are flushed to the remote bucket, including those from other jobs.
-   - The total disk space required equals the sum of all jobs' cached data.
-   - Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
-   - Ensure the disk tier is fast enough to handle the combined write load of all jobs.
 
 For more on the differences between ``MOUNT`` and ``MOUNT_CACHED``, see :ref:`storage mounting modes <storage-mounting-modes>`.
 
 Robust checkpointing for spot instances
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-When using spot instances, robust checkpointing is crucial for recovering from preemptions. 
+When using spot instances, robust checkpointing is crucial for recovering from preemptions. Your job should follow two key principles:
+
+1. **Write checkpoints periodically** during training to save your progress
+2. **Always attempt to load checkpoints on startup**, regardless of whether it's the first run or a restart after preemption
+
+This approach ensures your job can seamlessly resume from where it left off after preemption. On the first run, no checkpoints will exist, but on subsequent restarts, your job will automatically recover its state.
 
 To make checkpointing reading robust against preemptions, use this recipe:
 
 - Always try loading from the latest checkpoint first 
 - If the latest checkpoint is found to be corrupted or incomplete,  fallback to earlier checkpoints
+
+Adapting torch.save
+~~~~~~~~~~~~~~~~~~~~
 
 Here's a simplified example showing the core concepts:
 
@@ -307,6 +303,65 @@ For a complete implementation with additional features like custom prefixes, ext
                 return wrapper
             return decorator
 
+Here are some common ways to use the checkpointing system:
+
+Basic model saving:
+
+.. code-block:: python
+
+    @save_checkpoint(save_dir="checkpoints")
+    def save_model(step: int, model: torch.nn.Module):
+        torch.save(model.state_dict(), f"checkpoints/model_{step}.pt")
+
+Saving with optimizer state:
+
+.. code-block:: python
+
+    @save_checkpoint(save_dir="checkpoints")
+    def save_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+        torch.save({
+            'model': model.state_dict(),
+            'optimizer': optimizer.state_dict(),
+            'step': step
+        }, f"checkpoints/training_{step}.pt")
+
+Saving with metrics and custom prefix:
+
+.. code-block:: python
+
+    @save_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
+    def save_with_metrics(step: int, model: torch.nn.Module, metrics: Dict[str, float]):
+        torch.save({
+            'model': model.state_dict(),
+            'metrics': metrics,
+            'step': step
+        }, f"checkpoints/experiment1_step_{step}.pt")
+
+Loading checkpoints:
+
+.. code-block:: python
+
+    # Basic model loading
+    @load_checkpoint(save_dir="checkpoints")
+    def load_model(step: int, model: torch.nn.Module):
+        model.load_state_dict(torch.load(f"checkpoints/model_{step}.pt"))
+
+    # Loading with optimizer
+    @load_checkpoint(save_dir="checkpoints")
+    def load_training_state(step: int, model: torch.nn.Module, optimizer: torch.optim.Optimizer):
+        checkpoint = torch.load(f"checkpoints/training_{step}.pt")
+        model.load_state_dict(checkpoint['model'])
+        optimizer.load_state_dict(checkpoint['optimizer'])
+        return checkpoint['step']
+
+    # Loading with custom prefix and metrics
+    @load_checkpoint(save_dir="checkpoints", checkpoint_prefix="experiment1")
+    def load_with_metrics(step: int, model: torch.nn.Module):
+        checkpoint = torch.load(f"checkpoints/experiment1_step_{step}.pt")
+        model.load_state_dict(checkpoint['model'])
+        return checkpoint['metrics']
+
+
 
 Examples
 --------
@@ -319,7 +374,7 @@ BERT end-to-end
 We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
 
 .. note::
-  You can find all the code for this example `in the SkyPilot GitHub repository <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`_
+  You can find all the code for this example `in the documentation <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`_
 
 In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.
 
@@ -403,8 +458,8 @@ cost savings from spot instances without worrying about preemption or losing pro
 Real-world examples
 ~~~~~~~~~~~~~~~~~~~
 
-* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://github.com/skypilot-org/skypilot/tree/master/llm/vicuna>`_, `YAML <https://github.com/skypilot-org/skypilot/blob/master/llm/vicuna/train.yaml>`__
-* `Large-scale vector database ingestion <https://github.com/skypilot-org/skypilot/tree/master/examples/vector_database>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
-* BERT (shown above): `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/bert_qa.yaml>`__
-* PyTorch DDP, ResNet: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/resnet.yaml>`__
-* PyTorch Lightning DDP, CIFAR-10: `YAML <https://github.com/skypilot-org/skypilot/blob/master/examples/spot/lightning_cifar10.yaml>`__
+* `Vicuna <https://vicuna.lmsys.org/>`_ LLM chatbot: `instructions <https://docs.skypilot.co/en/latest/llm/vicuna.html>`_, `YAML <https://docs.skypilot.co/en/latest/llm/vicuna/train.html>`__
+* `Large-scale vector database ingestion <https://docs.skypilot.co/en/latest/examples/vector_database.html>`__, and the `blog post about it <https://blog.skypilot.co/large-scale-vector-database/>`__
+* BERT (shown above): `YAML <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`__
+* PyTorch DDP, ResNet: `YAML <https://docs.skypilot.co/en/latest/examples/spot/resnet.html>`__
+* PyTorch Lightning DDP, CIFAR-10: `YAML <https://docs.skypilot.co/en/latest/examples/spot/lightning_cifar10.html>`__
