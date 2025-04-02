@@ -1,4 +1,5 @@
 """Helper functions for object store mounting in Sky Storage"""
+import hashlib
 import os
 import random
 import shlex
@@ -253,7 +254,7 @@ def get_mount_cached_cmd(rclone_config: str, rclone_profile_name: str,
     # This is because the full path may be longer than
     # the filename length limit.
     # The hash is a non-negative integer in string form.
-    hashed_mount_path = str(abs(hash(mount_path)))
+    hashed_mount_path = hashlib.md5(mount_path.encode()).hexdigest()
     log_file_path = os.path.join(constants.RCLONE_LOG_DIR,
                                  f'{hashed_mount_path}.log')
     create_log_cmd = (f'mkdir -p {constants.RCLONE_LOG_DIR} && '
