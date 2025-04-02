@@ -1,0 +1,6 @@
+InstanceType,AcceleratorName,AcceleratorCount,vCPUs,MemoryGiB,Price,Region,GpuInfo,SpotPrice
+gpu_1x_rtx a2000,RTX A2000,1,12,64,0.050,Europe-NO,"{'Gpus': [{'Name': 'RTX A2000', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 6144}}], 'TotalGpuMemoryInMiB': 6144}",
+gpu_1x_rtx 3060 ti,RTX 3060 Ti,1,8,64,0.050,Europe-NO,"{'Gpus': [{'Name': 'RTX 3060 Ti', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",
+gpu_1x_rtx 3060,RTX 3060,1,6,32,0.050,North America-CA,"{'Gpus': [{'Name': 'RTX 3060', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 12288}}], 'TotalGpuMemoryInMiB': 12288}",
+gpu_1x_rtx 3060,RTX 3060,1,18,73,0.050,Europe-PL,"{'Gpus': [{'Name': 'RTX 3060', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 12288}}], 'TotalGpuMemoryInMiB': 12288}",
+gpu_1x_rtx 3060 ti,RTX 3060 Ti,1,24,128,0.050,Europe-NO,"{'Gpus': [{'Name': 'RTX 3060 Ti', 'Manufacturer': 'NVIDIA', 'Count': 1, 'MemoryInfo': {'SizeInMiB': 8192}}], 'TotalGpuMemoryInMiB': 8192}",

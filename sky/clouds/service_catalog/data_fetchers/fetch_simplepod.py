@@ -15,7 +15,7 @@ from typing import Optional
 
 import requests
 
-ENDPOINT = 'https://api.simplemining.net/instances/market/list?rentalStatus=active'
+ENDPOINT = 'https://api.simplemining.net/instances/market/list?rentalStatus=active&itemsPerPage=5'
 DEFAULT_SIMPLEPOD_KEYS_PATH = os.path.expanduser('~/.simplepod/simplepod_keys')
 
 def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
@@ -35,7 +35,7 @@ def create_catalog(DEFAULT_SIMPLEPOD_KEYS_PATH: str, output_path: str) -> None:
             gpu_count = int(instance['gpuCount'])
             vcpus = int(float(instance['cpuCoreCount']))  # Convert to int
             memory = int(float(instance['systemMemory']) / 1024)  # Convert to int GiB
-            price = float(instance['pricePerGpu']) * gpu_count
+            price = float(instance['pricePerGpu'])
 
             # Region handling
             region = f"{instance['rig']['region']}-{instance['rig']['country']}"

@@ -97,33 +97,40 @@ class SimplePodInstanceManager:
             raise exceptions.ResourcesUnavailableError(
                 'Failed to reboot instances.') from e
 
-def query_instances(
-    cluster_name_tag: str) -> List[common.InstanceInfo]:
-    """Query the instances in the cluster."""
-    client = simplepod_utils.SimplePodClient()
-    instances = client.list_instances()
-    instance_infos = []
-    for instance in instances:
-        if instance['name'] == cluster_name_tag:
-            instance_infos.append(
-                common.InstanceInfo(
-                    instance_id=instance['id'],
-                    instance_name=instance['name'],
-                    internal_ip=instance['private_ip'],
-                    external_ip=instance['public_ip'],
-                    tags={
-                        'ray-cluster-name': instance['name'],
-                    },
-                ))
-    return instance_infos
+    def stop_instances(self, instance_ids: List[str]) -> None:
+        """Stop specified instances."""
+        try:
+            for instance_id in instance_ids:
+                self.client.stop_instance(instance_id)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                raise exceptions.ResourcesUnavailableError(e.detail) from e
+            raise exceptions.ResourcesUnavailableError(
+                'Failed to stop instances.') from e
 
-def stop_instances(cluster_name_tag: str) -> None:
-    """Stop all instances in the cluster."""
-    client = simplepod_utils.SimplePodClient()
-    instances = client.list_instances()
-    for instance in instances:
-        if instance['name'] == cluster_name_tag:
-            client.stop_instance(instance['id'])
+    def start_instances(self, instance_ids: List[str]) -> None:
+        """Start specified instances."""
+        try:
+            for instance_id in instance_ids:
+                self.client.start_instance(instance_id)
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                raise exceptions.ResourcesUnavailableError(e.detail) from e
+            raise exceptions.ResourcesUnavailableError(
+                'Failed to start instances.') from e
+
+    def get_instance_status(self, instance_id: str) -> str:
+        """Get the status of a specific instance."""
+        try:
+            instance = self.client.get_instance(instance_id)
+            return instance.get('status', 'unknown')
+        except Exception as e:
+            if hasattr(e, 'detail'):
+                raise exceptions.ResourcesUnavailableError(e.detail) from e
+            raise exceptions.ResourcesUnavailableError(
+                'Failed to get instance status.') from e
+
+
 
 def terminate_instances(cluster_name_tag: str) -> None:
     """Terminate all instances in the cluster."""
@@ -132,3 +139,50 @@ def terminate_instances(cluster_name_tag: str) -> None:
     for instance in instances:
         if instance['name'] == cluster_name_tag:
             client.delete_instance(instance['id'])
+
+
+def query_instances(
+    cluster_name_on_cloud: str,
+    provider_config: Optional[Dict[str, Any]] = None,
+    non_terminated_only: bool = True,
+) -> Dict[str, Optional[status_lib.ClusterStatus]]:
+    """Query instances.
+
+    Returns a dictionary of instance IDs and status.
+
+    A None status means the instance is marked as "terminated"
+    or "terminating".
+    """
+    client = simplepod_utils.SimplePodClient()
+    instances = client.list_instances()
+
+    status_map = {
+        'running': status_lib.ClusterStatus.UP,
+        'stopped': status_lib.ClusterStatus.STOPPED,
+        'terminated': None,
+    }
+
+    statuses: Dict[str, Optional[status_lib.ClusterStatus]] = {}
+    for instance in instances:
+        if not instance['name'].startswith(f'{cluster_name_on_cloud}-'):
+            continue
+        status = status_map.get(instance['status'], None)
+        if non_terminated_only and status is None:
+            continue
+        statuses[instance['id']] = status
+
+    return statuses
+
+
+def cleanup_ports(
+    cluster_name_on_cloud: str,
+    ports: List[str],
+    provider_config: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Cleanup ports for SimplePod instances.
+
+    SimplePod does not require explicit port cleanup as all ports are open by default.
+    """
+    logger.debug(f'Skip cleaning up ports {ports} for SimplePod instances, as all '
+                 'ports are open by default.')
+    del cluster_name_on_cloud, ports, provider_config  # Unused.

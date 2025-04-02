@@ -26,6 +26,7 @@ class Simplepod(clouds.Cloud):
 
     _REPR = 'Simplepod'
     _CLOUD_UNSUPPORTED_FEATURES = {
+        clouds.CloudImplementationFeatures.SPOT_INSTANCE: 'Spot instances not supported.',
         clouds.CloudImplementationFeatures.STOP: 'Stopping not supported.',
         clouds.CloudImplementationFeatures.MULTI_NODE:
             ('Multi-node not supported yet, as the interconnection among nodes '
@@ -313,3 +314,23 @@ class Simplepod(clouds.Cloud):
     @classmethod
     def regions(cls) -> List['clouds.Region']:
         return service_catalog.regions(clouds='simplepod')
+
+    @classmethod
+    def zones_provision_loop(
+        cls,
+        *,
+        region: str,
+        num_nodes: int,
+        instance_type: str,
+        accelerators: Optional[Dict[str, int]] = None,
+        use_spot: bool = False,
+    ) -> Iterator[None]:
+        del num_nodes  # unused
+        regions = cls.regions_with_offering(instance_type,
+                                            accelerators,
+                                            use_spot,
+                                            region=region,
+                                            zone=None)
+        for r in regions:
+            assert r.zones is None, r
+            yield r.zones
