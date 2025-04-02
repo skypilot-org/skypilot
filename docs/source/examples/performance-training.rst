@@ -49,7 +49,7 @@ Example configuration:
 .. code-block:: yaml
 
   resources:
-    disk_tier: best # using highest performance disk tier
+    disk_tier: best  # Use highest performance disk tier.
 
 
 MOUNT_CACHED for checkpointing
