@@ -507,6 +507,9 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             # never reject to start due to resource constraints.
             # Note that the refresh daemon will still occupy one worker
             # permanently because it never exits.
+            # For correctness, because the available memory is already below
+            # the threshold, there will be only 1 uvicorn worker writing to the
+            # queue.
             max_parallel_for_long = 0
             max_parallel_for_short = 0
             # For local resource mode, use local queue backend and local workers
