@@ -491,44 +491,32 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
     if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
-        if deploy:
-            # For deployment, we require at the min available memory to be
-            # met for stable operation.
-            raise RuntimeError(
-                f'Not enough memory to deploy the API server. '
-                f'{mem_size_gb}GB available, '
-                f'but {server_constants.MIN_AVAIL_MEM_GB}GB required.')
-        else:
-            # Permanent worker process may have significant memory consumption
-            # (~350MB per worker) after running commands like `sky check`, so we
-            # don't start any permanent workers in low resource local mode. This
-            # mimics the behavior of local sky CLI before API server was
-            # introduced, where the CLI will start new process everytime and
-            # never reject to start due to resource constraints.
-            # Note that the refresh daemon will still occupy one worker
-            # permanently because it never exits.
-            # For correctness, because the available memory is already below
-            # the threshold, there will be only 1 uvicorn worker writing to the
-            # queue.
-            max_parallel_for_long = 0
-            max_parallel_for_short = 0
-            # For local resource mode, use local queue backend and local workers
-            # to avoid the memory overhead (about ~350MB).
-            global queue_backend
-            queue_backend = QueueBackend.LOCAL
-            logger.warning(
-                'SkyPilot API server will run in low resource mode because '
-                'the available memory is less than '
-                f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
+        # Permanent worker process may have significant memory consumption
+        # (~350MB per worker) after running commands like `sky check`, so we
+        # don't start any permanent workers in low resource local mode. This
+        # mimics the behavior of local sky CLI before API server was
+        # introduced, where the CLI will start new process everytime and
+        # never reject to start due to resource constraints.
+        # Note that the refresh daemon will still occupy one worker
+        # permanently because it never exits.
+        max_parallel_for_long = 0
+        max_parallel_for_short = 0
+        logger.warning(
+            'SkyPilot API server will run in low resource mode because '
+            'the available memory is less than '
+            f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
     else:
         logger.info(
             f'SkyPilot API server will start {max_parallel_for_long} workers '
             f'for long requests and will allow at max '
             f'{max_parallel_for_short} short requests in parallel.')
-
+    if not deploy:
+        # For local mode, use local queue backend since we only run 1 uvicorn
+        # worker in local mode.
+        global queue_backend
+        queue_backend = QueueBackend.LOCAL
     sub_procs = []
     # Setup the queues.
-
     if queue_backend == QueueBackend.MULTIPROCESSING:
         logger.info('Creating shared request queues')
         queue_names = [

@@ -19,35 +19,31 @@ class AtomicInt:
         with self._lock:
             return self._value
 
-    def __iadd__(self, delta: int) -> 'AtomicInt':
-        """Atomically increment by delta and return self.
+    def increment(self, delta: int = 1) -> int:
+        """Atomically increment by delta and return new value.
 
         Args:
-            delta: Amount to increment by
+            delta: Amount to increment by (default: 1)
 
         Returns:
-            Self reference to support the += operator
+            The new value after incrementing.
         """
         with self._lock:
             self._value += delta
-            return self
+            return self._value
 
-    def __isub__(self, delta: int) -> 'AtomicInt':
-        """Atomically decrement by delta and return self.
+    def decrement(self, delta: int = 1) -> int:
+        """Atomically decrement by delta and return new value.
 
         Args:
-            delta: Amount to decrement by
+            delta: Amount to decrement by (default: 1)
 
         Returns:
-            Self reference to support the -= operator
+            The new value after decrementing.
         """
         with self._lock:
             self._value -= delta
-            return self
-
-    def decrement(self):
-        """Atomically decrement by 1"""
-        self -= 1
+            return self._value
 
     def __str__(self) -> str:
         return str(self.get())
