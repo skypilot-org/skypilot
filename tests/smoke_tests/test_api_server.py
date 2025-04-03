@@ -147,6 +147,14 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
+# Test request scheduling in different API server deployment modes, currently
+# we rely on --remote-server flag to test the two different scenarios:
+# 1. with --remote-server: API server is deployed remotely with `--deploy` flag
+# 2. without --remote-server: API server is launched before smoke test using
+#    `sky api start`, same as the server being automatically launched for the
+#    first time user running sky command.
+# TODO(aylei): test different modes without relying on global smoke test setup
+# when we can launch isolated API server instance in each case.
 def test_requests_scheduling(generic_cloud: str):
     name = smoke_tests_utils.get_cluster_name()
     user = "abcdef21"
