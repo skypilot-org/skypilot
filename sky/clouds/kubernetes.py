@@ -679,7 +679,8 @@ class Kubernetes(clouds.Cloud):
         success = False
         for context in existing_allowed_contexts:
             try:
-                check_result = kubernetes_utils.check_credentials(context)
+                check_result = kubernetes_utils.check_credentials(
+                    context, run_optional_checks=True)
                 if check_result[0]:
                     success = True
                     if check_result[1] is not None:
@@ -689,15 +690,6 @@ class Kubernetes(clouds.Cloud):
             except Exception as e:  # pylint: disable=broad-except
                 return (False, f'Credential check failed for {context}: '
                         f'{common_utils.format_exception(e)}')
-            unlabeled_nodes = kubernetes_utils.get_unlabeled_accelerator_nodes(
-                context)
-            if len(unlabeled_nodes) > 0:
-                hints.append(f'Context {context} has {len(unlabeled_nodes)} '
-                             f'unlabeled nodes with accelerators. '
-                             f'To label these nodes, run '
-                             f'`python -m sky.utils.kubernetes.gpu_labeler '
-                             f'--context {context}` from the project root '
-                             f'directory.')
         if success:
             return (True, cls._format_credential_check_results(hints, reasons))
         return (False, 'Failed to find available context with working '

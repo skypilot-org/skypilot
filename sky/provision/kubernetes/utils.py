@@ -1097,7 +1097,9 @@ def get_accelerator_label_key_value(
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
                 (nvidia.com/gpu, google.com/tpu)
-            - The cluster does not have GPU/TPU labels setup correctly
+            - The cluster has GPU/TPU resources, but no node in the cluster has
+              an accelerator label.
+            - The cluster has a node with an invalid accelerator label value.
             - The cluster doesn't have any nodes with acc_type GPU/TPU
     """
     # Check if the cluster has GPU resources
@@ -1292,7 +1294,8 @@ def get_external_ip(network_mode: Optional[
 
 
 def check_credentials(context: Optional[str],
-                      timeout: int = kubernetes.API_TIMEOUT) -> \
+                      timeout: int = kubernetes.API_TIMEOUT,
+                      run_optional_checks: bool = False) -> \
         Tuple[bool, Optional[str]]:
     """Check if the credentials in kubeconfig file are valid
 
@@ -1334,6 +1337,9 @@ def check_credentials(context: Optional[str],
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
+    if not run_optional_checks:
+        return True, None
+
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
 
@@ -1345,16 +1351,36 @@ def check_credentials(context: Optional[str],
     # `sky launch --gpus <gpu>` and the optimizer does not list Kubernetes as a
     # provider if their cluster GPUs are not setup correctly.
     gpu_msg = ''
-    try:
-        get_accelerator_label_key_value(context,
-                                        acc_type='',
-                                        acc_count=0,
-                                        check_mode=True)
-    except exceptions.ResourcesUnavailableError as e:
-        # If GPUs are not available, we return cluster as enabled (since it can
-        # be a CPU-only cluster) but we also return the exception message which
-        # serves as a hint for how to enable GPU access.
-        gpu_msg = str(e)
+    unlabeled_nodes = get_unlabeled_accelerator_nodes(context)
+    if unlabeled_nodes:
+        gpu_msg = (f'Cluster has {len(unlabeled_nodes)} nodes with '
+                   f'accelerators that are not labeled. '
+                   f'To label the nodes, run '
+                   f'`python -m sky.utils.kubernetes.gpu_labeler '
+                   f'--context {context}`')
+    else:
+        try:
+            # This function raises a ResourcesUnavailableError in three cases:
+            # 1. If no node in cluster has GPU/TPU resource in its capacity.
+            #    (e.g. google.com/tpu, nvidia.com/gpu)
+            # 2. If at least one node in cluster has GPU/TPU resource in its
+            #    capacity, but no node in the cluster has an accelerator label.
+            # 3. If an accelerator label on a node is invalid.
+            # Exception 2 is a special case of a cluster having at least one
+            # unlabelled node, which is caught in
+            # `get_unlabeled_accelerator_nodes`.
+            # Therefore, if `get_unlabeled_accelerator_nodes` detects unlabelled
+            # nodes, we skip this check.
+            get_accelerator_label_key_value(context,
+                                            acc_type='',
+                                            acc_count=0,
+                                            check_mode=True)
+        except exceptions.ResourcesUnavailableError as e:
+            # If GPUs are not available, we return cluster as enabled
+            # (since it can be a CPU-only cluster) but we also return the
+            # exception message which serves as a hint for how to enable
+            # GPU access.
+            gpu_msg = str(e)
     if exec_msg and gpu_msg:
         return True, f'{gpu_msg}\n    Additionally, {exec_msg}'
     elif gpu_msg:
