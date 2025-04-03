@@ -148,7 +148,8 @@ def _extract_marked_tests(
         # conftest.py
         if 'skip' in marks:
             continue
-        if k_value is not None and k_value not in function_name and k_value not in file_path:
+        if k_value is not None and (k_value not in function_name or
+                                    k_value not in file_path):
             # TODO(zpoint): support and/or in k_value
             continue
 
