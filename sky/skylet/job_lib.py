@@ -41,6 +41,8 @@ _JOB_STATUS_LOCK = '~/.sky/locks/.job_{}.lock'
 # the same pid is reused by a different process.
 JOB_CMD_IDENTIFIER = 'echo "SKYPILOT_JOB_ID <{}>"'
 
+_MAX_PENDING_SUBMIT = 2
+
 
 def _get_lock_path(job_id: int) -> str:
     lock_path = os.path.expanduser(_JOB_STATUS_LOCK.format(job_id))
@@ -242,6 +244,7 @@ class JobScheduler:
         # TODO(zhwu, mraheja): One optimization can be allowing more than one
         # job staying in the pending state after ray job submit, so that to be
         # faster to schedule a large amount of jobs.
+        pending_submit_cnt = 0
         for job_id in pending_job_ids:
             with filelock.FileLock(_get_lock_path(job_id)):
                 pending_job = _get_pending_job(job_id)
@@ -264,11 +267,15 @@ class JobScheduler:
                     # before the last reboot.
                     self.remove_job_no_lock(job_id)
                     continue
+
                 if submit:
-                    # Next job waiting for resources
+                    pending_submit_cnt += 1
+                if pending_submit_cnt >= _MAX_PENDING_SUBMIT:
+                    # There are too many pending jobs, wait for a while.
                     return
-                self._run_job(job_id, run_cmd)
-                return
+                if not submit:
+                    self._run_job(job_id, run_cmd)
+                    pending_submit_cnt += 1
 
     def _get_pending_job_ids(self) -> List[int]:
         """Returns the job ids in the pending jobs table
