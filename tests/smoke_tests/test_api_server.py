@@ -145,3 +145,37 @@ def test_multi_tenant_managed_jobs(generic_cloud: str):
         env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
     )
     smoke_tests_utils.run_one_test(test)
+
+
+def test_requests_scheduling(generic_cloud: str):
+    name = smoke_tests_utils.get_cluster_name()
+    user = "abcdef21"
+    username = f"dispatch-{smoke_tests_utils.test_id}"
+    test = smoke_tests_utils.Test(
+        'test_requests_scheduling',
+        [
+            'echo "==== Test queue dispatch ===="',
+            'sky api info',
+            *set_user(
+                user,
+                username,
+                [
+                    f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} -n dispatch tests/test_yamls/minimal.yaml',
+                    f'for i in {{1..10}}; do sky exec {name} -n job-${{i}} "sleep 60" --async; done',
+                    # Wait for all reqeusts get scheduled and executed, do not check the status here to make this case focus.
+                    (f's=$(sky api status -a | grep {username});'
+                     'timeout=60; start=$SECONDS; '
+                     'until ! echo "$s" | grep "" | grep "PENDING|RUNNING"; do '
+                     '  if [ $((SECONDS - start)) -gt $timeout ]; then '
+                     '    echo "Timeout waiting for jobs to be scheduled"; exit 1; '
+                     '  fi; '
+                     f'  sleep 5; s=$(sky api status -a | grep {username});'
+                     '  echo "Waiting for request get scheduled"; echo "$s"; '
+                     'done'),
+                ],
+            ),
+        ],
+        f'sky down -y {name}',
+        env=smoke_tests_utils.LOW_CONTROLLER_RESOURCE_ENV,
+    )
+    smoke_tests_utils.run_one_test(test)

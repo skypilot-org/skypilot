@@ -10,6 +10,7 @@ from sky.server.requests import process
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
+from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
@@ -69,7 +70,7 @@ def benchmark_queue_dispatcher(queue_backend: str,
         for _ in range(num_requests):
             body = payloads.StatusBody()
             body.env_vars = dict({
-                constants.USER_ID_ENV_VAR: 'dummy',
+                constants.USER_ID_ENV_VAR: common_utils.generate_user_hash(),
             })
             executor.schedule_request(
                 request_id=str(uuid.uuid4()),
