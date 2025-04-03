@@ -84,7 +84,14 @@ To make checkpointing reading robust against preemptions, use this recipe:
 - Always try loading from the latest checkpoint first 
 - If the latest checkpoint is found to be corrupted or incomplete,  fallback to earlier checkpoints
 
-Here's a simplified example showing the core concepts for torch.save:
+Here's a simplified example showing the core concepts for :code:`torch.save`:
+
+.. code-block:: python
+
+    def save_checkpoint(step: int, model: torch.nn.Module):
+        # save checkpoint to local disk with step number
+        torch.save(model.state_dict(), f"checkpoints/model_{step}.pt")
+
 
 .. code-block:: python
 
