@@ -32,6 +32,6 @@
 {{- end -}}
 
 {{- if or (lt $cpuNum 4.0) (lt $memNum 8.0) -}}
-  {{- printf "\nWARNING: SkyPilot API server only has %.1f CPU cores and %.1f GiB memory requested. At least 4 CPU cores and 8 GiB memory is recommended to support higher load with better performance.\n" $cpuNum $memNum -}}
+  {{- printf "\nWARNING: %.1f CPU cores and %.1f GiB memory are allocated for SkyPilot API server. At least 4 CPU cores and 8 GiB memory is recommended to support higher load with better performance.\n" $cpuNum $memNum -}}
 {{- end -}}
 {{- end -}} 
