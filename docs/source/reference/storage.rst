@@ -103,7 +103,31 @@ A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`
     :align: center
     :alt: sky-storage-modes
 
+MOUNT_CACHED mode in detail
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
+:code:`MOUNT_CACHED` mode uses `rclone <https://rclone.org/>`_
+to provide a virtual filesystem that is asynchronously synced with the bucket.
+Calling :code:`close()` does not guarantee that the file is written to the bucket.
+rclone will sync written files back to the bucket asynchronously in the order they were written.
+The local filesystem should be fully consistent, but a bucket using 
+`MOUNT_CACHED` on multiple nodes may only be eventually consistent.
+
+Important considerations for :code:`MOUNT_CACHED` mode:
+
+* If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted.
+* Files only begin uploading after they are closed by all processes.
+* By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally.
+* The write performance depends on the disk tier used for caching - faster disks provide better performance.
+
+In MOUNT_CACHED mode, files only begin uploading after they are closed by all processes. By default, SkyPilot uses sequential transfers to maintain file order, which can cause the cache to grow if files are written faster than they can be uploaded.
+
+When multiple jobs share a node (e.g., using fractional GPUs), be aware of these important considerations:
+
+- A job is only marked complete after all files in the cache are flushed to the remote bucket, including those from other jobs.
+- The total disk space required equals the sum of all jobs' cached data.
+- Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
+- Ensure the disk tier is fast enough to handle the combined write load of all jobs.
 
 Picking a storage mode
 ~~~~~~~~~~~~~~~~~~~~~~~
@@ -151,34 +175,6 @@ its performance requirements and size of the data.
     to provide a close-to-open consistency model for attached buckets. This means calling
     :code:`close()` on a file will upload the entire file to the bucket.
     Any subsequent reads will see the latest data.
-
-.. note::
-    :code:`MOUNT_CACHED` mode uses `rclone <https://rclone.org/>`_
-    to provide a virtual filesystem that is asynchronously synced with the bucket.
-    Calling :code:`close()` does not guarantee that the file is written to the bucket.
-    rclone will sync written files back to the bucket asynchronously in the order they were written.
-    The local filesystem should be fully consistent, but a bucket using 
-    `MOUNT_CACHED` on multiple nodes may only be eventually consistent.
-    
-    Important considerations for :code:`MOUNT_CACHED` mode:
-    
-    * If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted.
-    * Files only begin uploading after they are closed by all processes.
-    * By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally.
-    * The write performance depends on the disk tier used for caching - faster disks provide better performance.
-
-
-.. note::
-   
-   In MOUNT_CACHED mode, files only begin uploading after they are closed by all processes. By default, SkyPilot uses sequential transfers to maintain file order, which can cause the cache to grow if files are written faster than they can be uploaded.
-
-   When multiple jobs share a node (e.g., using fractional GPUs), be aware of these important considerations:
-   
-   - A job is only marked complete after all files in the cache are flushed to the remote bucket, including those from other jobs.
-   - The total disk space required equals the sum of all jobs' cached data.
-   - Jobs that finish quickly might need to wait for other jobs' files to be uploaded.
-   - Ensure the disk tier is fast enough to handle the combined write load of all jobs.
-
 
 .. note::
     SkyPilot does not guarantee preservation of file permissions when attaching
