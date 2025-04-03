@@ -33,6 +33,8 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Skip resource check for the API server, not recommended for production deployment
+  skipResourceCheck: false
   # Set resource requests and limits for the API server
   resources:
     # Request a moderate amount of resources for an remote API server by default, which meets the

@@ -26,7 +26,7 @@ If the API server pod is pending, you can inspect the pending reason with:
 If the pending reason is ``FailedScheduling`` and the information indicates there is insufficient cpu/memory, you can either:
 
 - Adding more resources to the Kubernetes cluster, or
-- Using a smaller API server resources request:
+- Using a smaller API server resources request, for example (change the cpu and memory to your desired values):
 
 .. code-block:: bash
 
@@ -34,9 +34,9 @@ If the pending reason is ``FailedScheduling`` and the information indicates ther
     helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly \
     --namespace $NAMESPACE \
     --reuse-values \
-    --set apiService.resources.requests.cpu=2 \
-    --set apiService.resources.requests.memory=4Gi
+    --set apiService.resources.requests.cpu=4 \
+    --set apiService.resources.requests.memory=8Gi
 
 .. note::
 
-    At least 1 CPU core and 2 GiB memory request is required for the API server to function properly, otherwise the chart will fail to install.
+    API server requires at least 4 CPU cores and 8 GiB memory, setting lower values may cause degraded performance.

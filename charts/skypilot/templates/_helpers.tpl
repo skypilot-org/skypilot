@@ -26,12 +26,9 @@
   {{- $memNum = float64 (divf (trimSuffix "M" $memory | atoi) 1024) -}}
 {{- end -}}
 
-{{- if or (lt $cpuNum 1.0) (lt $memNum 2.0) -}}
+{{- if or (lt $cpuNum 4.0) (lt $memNum 8.0) -}}
 {{/* TODO(aylei): add a reference to the tuning guide once complete */}}
-  {{- fail "API server requires at least 1 CPU core and 2 GiB memory" -}}
+  {{- fail "Error\nAPI server requires at least 4 CPU cores and 8 GiB memory. You can either:\n1. increase .apiService.resources.requests.* to meet the requirements or unset them to use defaults\n2. add `--set apiService.skipResourceCheck=true` in command args to bypass this check (not recommended for production)\nto resolve this issue and then try again." -}}
 {{- end -}}
 
-{{- if or (lt $cpuNum 4.0) (lt $memNum 8.0) -}}
-  {{- printf "\nWARNING: %.1f CPU cores and %.1f GiB memory are allocated for SkyPilot API server. At least 4 CPU cores and 8 GiB memory is recommended to support higher load with better performance.\n" $cpuNum $memNum -}}
-{{- end -}}
 {{- end -}} 
