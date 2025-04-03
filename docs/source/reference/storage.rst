@@ -121,7 +121,7 @@ Important considerations for :code:`MOUNT_CACHED` mode:
 * The write performance depends on the disk tier used for caching - faster disks provide better performance.
 
 In MOUNT_CACHED mode, files only begin uploading after they are closed by all processes. By default, SkyPilot uses transfers the data sequentially to maintain file order of closing.
-When a task using MOUNT_CACHED mode completes, SkyPilot ensures all cached data is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
+When a task completes, SkyPilot ensures all cached data is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
 
 Picking a storage mode
 ~~~~~~~~~~~~~~~~~~~~~~~
