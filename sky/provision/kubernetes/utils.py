@@ -1096,7 +1096,9 @@ def get_accelerator_label_key_value(
         ResourcesUnavailableError: Can be raised from the following conditions:
             - The cluster does not have GPU/TPU resources
                 (nvidia.com/gpu, google.com/tpu)
-            - The cluster does not have GPU/TPU labels setup correctly
+            - The cluster has GPU/TPU resources, but no node in the cluster has
+              an accelerator label.
+            - The cluster has a node with an invalid accelerator label value.
             - The cluster doesn't have any nodes with acc_type GPU/TPU
     """
     # Check if the cluster has GPU resources
@@ -1357,6 +1359,17 @@ def check_credentials(context: Optional[str],
                    f'--context {context}`')
     else:
         try:
+            # This function raises a ResourcesUnavailableError in three cases:
+            # 1. If no node in cluster has GPU/TPU resource in its capacity.
+            #    (e.g. google.com/tpu, nvidia.com/gpu)
+            # 2. If at least one node in cluster has GPU/TPU resource in its
+            #    capacity, but no node in the cluster has an accelerator label.
+            # 3. If an accelerator label on a node is invalid.
+            # Exception 2 is a special case of a cluster having at least one
+            # unlabelled node, which is caught in
+            # `get_unlabeled_accelerator_nodes`.
+            # Therefore, if `get_unlabeled_accelerator_nodes` detects unlabelled
+            # nodes, we skip this check.
             get_accelerator_label_key_value(context,
                                             acc_type='',
                                             acc_count=0,
