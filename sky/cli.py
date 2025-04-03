@@ -35,7 +35,8 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
+                    Union)
 
 import click
 import colorama
@@ -3947,7 +3948,6 @@ def jobs_launch(
               required=False,
               help='Show jobs from all users.')
 @click.option('--all',
-              '-a',
               default=False,
               is_flag=True,
               required=False,
@@ -4399,7 +4399,6 @@ def serve_up(
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
-    serve_lib.validate_service_task(task)
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
@@ -4499,7 +4498,6 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
-    serve_lib.validate_service_task(task)
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')
@@ -4768,6 +4766,12 @@ def serve_down(
               default=False,
               required=False,
               help='Show the load balancer logs of this service.')
+@click.option('--sync-down',
+              '-s',
+              is_flag=True,
+              default=False,
+              help='Sync down logs to the local machine. Can be combined with '
+              '--controller, --load-balancer, or a replica ID to narrow scope.')
 @click.argument('service_name', required=True, type=str)
 @click.argument('replica_id', required=False, type=int)
 @usage_lib.entrypoint
@@ -4779,8 +4783,9 @@ def serve_logs(
     controller: bool,
     load_balancer: bool,
     replica_id: Optional[int],
+    sync_down: bool,
 ):
-    """Tail the log of a service.
+    """Tail or sync down logs of a service.
 
     Example:
 
@@ -4794,23 +4799,46 @@ def serve_logs(
         \b
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
+        \b
+        # Sync down all logs of the service
+        sky serve logs [SERVICE_NAME] --sync-down
+        \b
+        # Sync down controller logs of the service
+        sky serve logs [SERVICE_NAME] --controller --sync-down
     """
     have_replica_id = replica_id is not None
-    num_flags = (controller + load_balancer + have_replica_id)
-    if num_flags > 1:
-        raise click.UsageError('At most one of --controller, --load-balancer, '
-                               '[REPLICA_ID] can be specified.')
-    if num_flags == 0:
+    num_flags = controller + load_balancer + have_replica_id
+
+    # For sync-down, no extra flags means all logs.
+    if not sync_down and num_flags == 0:
         raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified.')
+                               '[REPLICA_ID] must be specified if not '
+                               'using --sync-down.')
+
+    chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
-        target_component = serve_lib.ServiceComponent.CONTROLLER
-    elif load_balancer:
-        target_component = serve_lib.ServiceComponent.LOAD_BALANCER
-    else:
-        # Already checked that num_flags == 1.
-        assert replica_id is not None
-        target_component = serve_lib.ServiceComponent.REPLICA
+        chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
+    if load_balancer:
+        chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
+    if replica_id is not None:
+        chosen_components.add(serve_lib.ServiceComponent.REPLICA)
+
+    if sync_down:
+        request_id = serve_lib.sync_down_logs(service_name,
+                                              targets=chosen_components,
+                                              replica_id=replica_id)
+        local_path = sdk.stream_and_get(request_id)
+        click.echo(f'Logs downloaded to {local_path}')
+        return
+
+    if num_flags > 1:
+        raise click.UsageError('Can only tail one target, i.e. '
+                               'one of --controller, --load-balancer, or '
+                               '[REPLICA_ID] at a time. '
+                               'Use --sync-down to download multiple.')
+
+    assert len(chosen_components) == 1
+    target_component = chosen_components.pop()
     try:
         serve_lib.tail_logs(service_name,
                             target=target_component,
@@ -5462,17 +5490,11 @@ def local():
     type=str,
     required=False,
     help='Name to use for the kubeconfig context. Defaults to "default".')
-@click.option('--password',
-              type=str,
-              required=False,
-              help='Password for the ssh-user to execute sudo commands. '
-              'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
-             cleanup: bool, context_name: Optional[str],
-             password: Optional[str], async_call: bool):
+             cleanup: bool, context_name: Optional[str], async_call: bool):
     """Creates a local or remote cluster."""
 
     def _validate_args(ips, ssh_user, ssh_key_path, cleanup):
@@ -5518,7 +5540,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
                 f'Failed to read SSH key file {ssh_key_path}: {str(e)}')
 
     request_id = sdk.local_up(gpus, ip_list, ssh_user, ssh_key, cleanup,
-                              context_name, password)
+                              context_name)
     _async_call_or_wait(request_id, async_call, request_name='local up')
 
 

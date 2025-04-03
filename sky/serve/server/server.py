@@ -110,3 +110,18 @@ async def tail_logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
+
+
+@router.post('/download-logs')
+async def download_logs(
+    request: fastapi.Request,
+    download_logs_body: payloads.ServeDownloadLogsBody,
+) -> None:
+    executor.schedule_request(
+        request_id=request.state.request_id,
+        request_name='serve.sync_down_logs',
+        request_body=download_logs_body,
+        func=core.sync_down_logs,
+        schedule_type=api_requests.ScheduleType.LONG,
+        request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
+    )
