@@ -9,6 +9,7 @@ from sky.server.requests import payloads
 from sky.server.requests import process
 from sky.server.requests import requests as api_requests
 from sky.server.requests.queues import mp_queue
+from sky.skylet import constants
 
 logger = sky_logging.init_logger(__name__)
 
@@ -67,10 +68,13 @@ def benchmark_queue_dispatcher(queue_backend: str,
     def enqueue_requests():
         for _ in range(num_requests):
             body = payloads.StatusBody()
+            body.env_vars = dict({
+                constants.USER_ID_ENV_VAR: 'dummy',
+            })
             executor.schedule_request(
                 request_id=str(uuid.uuid4()),
                 request_name='status',
-                is_skypilot_system=True,
+                is_skypilot_system=False,
                 request_body=body,
                 func=dummy_func,
                 schedule_type=api_requests.ScheduleType.LONG)
