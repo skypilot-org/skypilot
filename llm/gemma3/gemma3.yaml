@@ -1,7 +1,6 @@
 resources:
   accelerators:  {L4:1, L4:4, A100:1, A100-80GB:1}
-  ports:
-    - 8000
+  ports: 8000
   disk_tier: best
   use_spot: true
 
@@ -11,8 +10,7 @@ envs:
   MAX_MODEL_LEN: 4096
 
 setup: |
-  uv pip install git+https://github.com/huggingface/transformers.git@0013ba6
-  uv pip install vllm --extra-index-url https://wheels.vllm.ai/c0c25e25fa93ee7c3f279abbba5597c0fafa74ee
+  uv pip install vllm
 
 run: |
   echo 'Starting vllm openai api server...'
@@ -23,7 +21,10 @@ run: |
     --max-model-len $MAX_MODEL_LEN
 
 service:
-  replicas: 1
+  replica_policy:
+    min_replicas: 1
+    max_replicas: 2
+    target_qps_per_replica: 5
   # An actual request for readiness probe.
   readiness_probe:
     path: /v1/chat/completions
