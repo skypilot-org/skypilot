@@ -26,9 +26,9 @@
   {{- $memNum = float64 (divf (trimSuffix "M" $memory | atoi) 1024) -}}
 {{- end -}}
 
-{{- if lt $memNum 2.0 -}}
+{{- if or (lt $cpuNum 1.0) (lt $memNum 2.0) -}}
 {{/* TODO(aylei): add a reference to the tuning guide once complete */}}
-  {{- fail "API server requires at least 2 GiB of memory" -}}
+  {{- fail "API server requires at least 1 CPU core and 2 GiB memory" -}}
 {{- end -}}
 
 {{- if or (lt $cpuNum 4.0) (lt $memNum 8.0) -}}

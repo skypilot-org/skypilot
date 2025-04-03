@@ -3,8 +3,9 @@
 Troubleshooting SkyPilot API Server
 ===================================
 
-.. note::
-   If none of the troubleshooting steps below resolve your issue, please do not hesitate to file a GitHub issue at our `issue tracker <https://github.com/skypilot-org/skypilot/issues>`_. Your feedback is valuable in helping us improve SkyPilot!
+If you're unable to run SkyPilot API server, this guide will help you debug common issues.
+
+If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
 
 .. _sky-api-server-troubleshooting-helm:
 
@@ -38,4 +39,4 @@ If the pending reason is ``FailedScheduling`` and the information indicates ther
 
 .. note::
 
-    At least 2GB memory request is required for the API server to function properly, otherwise the chart will fail to install.
+    At least 1 CPU core and 2 GiB memory request is required for the API server to function properly, otherwise the chart will fail to install.
