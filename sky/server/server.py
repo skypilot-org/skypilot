@@ -12,7 +12,7 @@ import pathlib
 import re
 import shutil
 import sys
-from typing import Dict, List, Literal, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple
 import uuid
 import zipfile
 
@@ -673,6 +673,13 @@ async def logs(
         logs_path=request_task.log_path,
         background_tasks=background_tasks,
     )
+
+
+@app.get('/users')
+async def users() -> List[Dict[str, Any]]:
+    """Gets all users."""
+    user_list = global_user_state.get_all_users()
+    return [user.to_dict() for user in user_list]
 
 
 @app.post('/download_logs')

@@ -115,8 +115,8 @@ class RequestBody(pydantic.BaseModel):
 
 class CheckBody(RequestBody):
     """The request body for the check endpoint."""
-    clouds: Optional[Tuple[str, ...]]
-    verbose: bool
+    clouds: Optional[Tuple[str, ...]] = None
+    verbose: bool = False
 
 
 class DagRequestBody(RequestBody):
@@ -340,8 +340,8 @@ class JobsQueueBody(RequestBody):
 
 class JobsCancelBody(RequestBody):
     """The request body for the jobs cancel endpoint."""
-    name: Optional[str]
-    job_ids: Optional[List[int]]
+    name: Optional[str] = None
+    job_ids: Optional[List[int]] = None
     all: bool = False
     all_users: bool = False
 

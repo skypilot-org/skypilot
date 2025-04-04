@@ -745,7 +745,7 @@ class Task:
 
         # Evaluate if the task requires FUSE and set the requires_fuse flag
         for _, storage_obj in self.storage_mounts.items():
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 for r in self.resources:
                     r.requires_fuse = True
                 break
@@ -924,7 +924,7 @@ class Task:
                         'Storage mount destination path cannot be cloud storage'
                     )
 
-            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # If any storage is using MOUNT mode, we need to enable FUSE in
                 # the resources.
                 for r in self.resources:
@@ -1128,7 +1128,7 @@ class Task:
                         assert storage.name is not None, storage
                         # extract region from rclone.conf
                         cos_region = data_utils.Rclone.get_region_from_rclone(
-                            storage.name, data_utils.Rclone.RcloneClouds.IBM)
+                            storage.name, data_utils.Rclone.RcloneStores.IBM)
                         blob_path = f'cos://{cos_region}/{storage.name}'
                     blob_path = storage.get_bucket_sub_path_prefix(blob_path)
                     self.update_file_mounts({mnt_path: blob_path})
@@ -1268,7 +1268,7 @@ class Task:
 
         # Storage mounting
         for _, storage_mount in self.storage_mounts.items():
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT:
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES:
                 required_features.add(
                     clouds.CloudImplementationFeatures.STORAGE_MOUNTING)
                 break

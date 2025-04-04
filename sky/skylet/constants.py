@@ -51,7 +51,7 @@ SKY_RAY_CMD = (f'{SKY_PYTHON_CMD} $([ -s {SKY_RAY_PATH_FILE} ] && '
                f'cat {SKY_RAY_PATH_FILE} 2> /dev/null || which ray)')
 # Separate env for SkyPilot runtime dependencies.
 SKY_REMOTE_PYTHON_ENV_NAME = 'skypilot-runtime'
-SKY_REMOTE_PYTHON_ENV = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
+SKY_REMOTE_PYTHON_ENV: str = f'~/{SKY_REMOTE_PYTHON_ENV_NAME}'
 ACTIVATE_SKY_REMOTE_PYTHON_ENV = f'source {SKY_REMOTE_PYTHON_ENV}/bin/activate'
 # uv is used for venv and pip, much faster than python implementations.
 SKY_UV_INSTALL_DIR = '"$HOME/.local/bin"'
@@ -60,7 +60,7 @@ SKY_UV_CMD = f'UV_SYSTEM_PYTHON=false {SKY_UV_INSTALL_DIR}/uv'
 SKY_UV_INSTALL_CMD = (f'{SKY_UV_CMD} -V >/dev/null 2>&1 || '
                       'curl -LsSf https://astral.sh/uv/install.sh '
                       f'| UV_INSTALL_DIR={SKY_UV_INSTALL_DIR} sh')
-SKY_UV_PIP_CMD = f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip'
+SKY_UV_PIP_CMD: str = (f'VIRTUAL_ENV={SKY_REMOTE_PYTHON_ENV} {SKY_UV_CMD} pip')
 # Deleting the SKY_REMOTE_PYTHON_ENV_NAME from the PATH to deactivate the
 # environment. `deactivate` command does not work when conda is used.
 DEACTIVATE_SKY_REMOTE_PYTHON_ENV = (
@@ -330,6 +330,12 @@ SKYPILOT_NODE_RANK = f'{SKYPILOT_ENV_VAR_PREFIX}NODE_RANK'
 # Placeholder for the SSH user in proxy command, replaced when the ssh_user is
 # known after provisioning.
 SKY_SSH_USER_PLACEHOLDER = 'skypilot:ssh_user'
+
+RCLONE_CONFIG_DIR = '~/.config/rclone'
+RCLONE_CONFIG_PATH = f'{RCLONE_CONFIG_DIR}/rclone.conf'
+RCLONE_LOG_DIR = '~/.sky/rclone_log'
+RCLONE_CACHE_DIR = '~/.cache/rclone'
+RCLONE_CACHE_REFRESH_INTERVAL = 10
 
 # The keys that can be overridden in the `~/.sky/config.yaml` file. The
 # overrides are specified in task YAMLs.

@@ -253,7 +253,8 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                     fg='green')
         click.echo(
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
-            f'sky api logs {short_request_id}{colorama.Style.RESET_ALL}\n'
+            f'{ux_utils.BOLD}sky api logs {short_request_id}'
+            f'{colorama.Style.RESET_ALL}\n'
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
             f'{server_common.get_server_url()}/api/stream?'
             f'request_id={short_request_id}'
@@ -3900,8 +3901,11 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
+    # Optimize info is only show if _need_confirmation.
+    if not yes:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='yellow')
 
     request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,

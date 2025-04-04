@@ -22,10 +22,6 @@
     <img alt="Downloads" src="https://img.shields.io/pypi/dm/skypilot">
   </a>
 
-  <a href="https://buildkite.com/skypilot-1/full-smoke-tests-run">
-    <img alt="Smoke Tests" src="https://badge.buildkite.com/d3aa9d2370e4a9ac4fb5e210381f955082a63a9a46673b197a.svg?theme=github&branch=master">
-  </a>
-
 </p>
 
 <h3 align="center">

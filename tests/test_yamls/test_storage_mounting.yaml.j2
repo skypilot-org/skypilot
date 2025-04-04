@@ -40,6 +40,14 @@ file_mounts:
     mode: MOUNT
   {% endif %}
 
+  # Mounting private buckets in MOUNT_CACHED mode
+  {% if include_mount_cached | default(False) %}
+  /mount_private_mount_cached:
+    name: {{storage_name}}
+    source: ~/tmp-workdir
+    mode: MOUNT_CACHED
+  {% endif %}
+
 run: |
   set -ex
 
@@ -71,4 +79,16 @@ run: |
 
   # Write to private bucket in MOUNT mode should pass
   echo "hello" > /mount_private_mount/hello.txt
+  {% endif %}
+
+  {% if include_mount_cached | default(False) %}
+  # Check private bucket contents
+  ls -ltr /mount_private_mount_cached/foo
+  ls -ltr /mount_private_mount_cached/tmp\ file
+
+  # Symlinks are not copied to buckets
+  ! ls /mount_private_mount_cached/circle-link
+
+  # Write to private bucket in MOUNT_CACHED mode should pass
+  echo "hello" > /mount_private_mount_cached/hello.txt
   {% endif %}

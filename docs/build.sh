@@ -11,7 +11,9 @@ check_file_age() {
 # Only run sky show-gpus commands if output files don't exist or are old
 if ! check_file_age "source/compute/show-gpus-all.txt"; then
     sky show-gpus -a > source/compute/show-gpus-all.txt
-    sed -i '' '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt && echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
+    sed '/^tpu-v2-128/,$d' source/compute/show-gpus-all.txt > source/compute/show-gpus-all.txt-new
+    mv source/compute/show-gpus-all.txt-new source/compute/show-gpus-all.txt
+    echo "... [omitted long outputs] ..." >> source/compute/show-gpus-all.txt
 fi
 
 if ! check_file_age "source/compute/show-gpus-h100-8.txt"; then
