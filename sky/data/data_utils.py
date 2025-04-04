@@ -512,7 +512,7 @@ def parallel_upload(source_path_list: List[str],
         commands.append(sync_command)
 
     # Run commands in parallel
-    with pool.ThreadPool(processes=max_concurrent_uploads) as p:
+    with pool.Pool(processes=max_concurrent_uploads) as p:
         p.starmap(
             run_upload_cli,
             zip(commands, [access_denied_message] * len(commands),
