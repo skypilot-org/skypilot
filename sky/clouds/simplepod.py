@@ -7,7 +7,7 @@ import requests
 
 from sky import clouds
 from sky.clouds import service_catalog
-from sky.provision.simplepod import simplepod_utils
+from sky.provision.simplepod import utils
 from sky.utils import registry
 from sky.utils import resources_utils
 from sky.utils import status_lib
@@ -121,15 +121,15 @@ class Simplepod(clouds.Cloud):
         """
         try:
             # Import check
-            from sky.provision.simplepod import simplepod_utils
+            from sky.provision.simplepod import utils
         except ImportError:
             return False, ('Failed to import simplepod. '
                          'To install, run: pip install skypilot[simplepod]')
 
         # Check if API key file exists and can be read
         try:
-            simplepod_utils.SimplePodClient()
-        except (simplepod_utils.SimplePodError, FileNotFoundError) as e:
+            utils.SimplePodClient()
+        except (utils.SimplePodError, FileNotFoundError) as e:
             return False, (
                 'Failed to access SimplePod Cloud with credentials. '
                 'To configure credentials, go to:\n'
@@ -174,7 +174,7 @@ class Simplepod(clouds.Cloud):
             'terminated': None,
         }
         status_list = []
-        vms = simplepod_utils.SimplePodClient().list_instances()
+        vms = utils.SimplePodClient().list_instances()
         possible_names = [f'{name}-head', f'{name}-worker']
         for node in vms:
             if node.get('name') in possible_names:

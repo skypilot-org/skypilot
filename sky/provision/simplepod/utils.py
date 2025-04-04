@@ -2,6 +2,7 @@
 
 import json
 import os
+import sys
 import time
 from typing import Any, Dict, List, Optional
 import uuid
@@ -121,7 +122,7 @@ class SimplePodClient:
         """Launch a new instance.
 
         Args:
-            instance_type: Format "gpu_type:count" e.g. "A100:1" 
+            instance_type: Format like "gpu_1x_rtx a2000" or "A100:1"
             name: Instance name
             ssh_key: SSH key for access
             template_id: Optional template ID to use
@@ -133,13 +134,34 @@ class SimplePodClient:
         Raises:
             SimplePodError: If no matching instances are available or API error occurs
         """
-        gpu_type, gpu_count = instance_type.split(':')
-        gpu_count = int(gpu_count)
+        # Handle instance type formats:
+        # 1. gpu_1x_rtx a2000
+        # 2. A100:1
+        # 3. A100 1
+        parts = instance_type.split()
+        print('Nazwa instancji:', name), print('Typ instancji:', instance_type, template_id, env_variables)
+        sys.exit("DUPA")
+
+        if len(parts) == 2 and parts[0].startswith('gpu_'):
+            # Format: gpu_1x_rtx a2000
+            gpu_type = parts[0].replace('gpu_1x_', '') + ' ' + parts[1]
+            gpu_count = 1
+        else:
+            # Format: A100:1 or A100 1
+            instance_str = ' '.join(parts)
+            separator = ':' if ':' in instance_str else ' '
+            try:
+                gpu_type, count_str = instance_str.rsplit(separator, 1)
+                gpu_count = int(count_str)
+            except ValueError as e:
+                raise SimplePodError(
+                    f'Invalid instance type format. Expected "gpu_type:count", "gpu_type count", '
+                    f'or "gpu_1x_type", got: {instance_type}') from e
 
         # First find an available instance matching requirements
         available = self.list_available_instances()
         matching = [i for i in available
-                   if i['gpuModel'] == gpu_type and i['gpuCount'] >= gpu_count]
+                   if i['gpuModel'].lower() == gpu_type.lower() and i['gpuCount'] >= gpu_count]
 
         if not matching:
             raise SimplePodError(f'No available instances found matching {gpu_type} with {gpu_count} GPUs')
