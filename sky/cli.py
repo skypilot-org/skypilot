@@ -5598,9 +5598,14 @@ def api_stop():
               default=True,
               required=False,
               help='Follow the logs.')
+@click.option('--match-and-quit',
+              required=False,
+              type=str,
+              help='Match the logs and quit.')
 @usage_lib.entrypoint
 def api_logs(request_id: Optional[str], server_logs: bool,
-             log_path: Optional[str], tail: Optional[int], follow: bool):
+             log_path: Optional[str], tail: Optional[int], follow: bool,
+             match_and_quit: Optional[str]):
     """Stream the logs of a request running on SkyPilot API server."""
     if not server_logs and request_id is None and log_path is None:
         # TODO(zhwu): get the latest request ID.
@@ -5612,7 +5617,10 @@ def api_logs(request_id: Optional[str], server_logs: bool,
     if request_id is not None and log_path is not None:
         raise click.BadParameter(
             'Only one of request ID and log path can be provided.')
-    sdk.stream_and_get(request_id, log_path, tail)
+    sdk.stream_and_get(request_id,
+                       log_path,
+                       tail,
+                       stop_when_match=match_and_quit)
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)

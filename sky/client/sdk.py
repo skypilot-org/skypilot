@@ -63,7 +63,8 @@ logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
-                    output_stream: Optional['io.TextIOBase'] = None) -> Any:
+                    output_stream: Optional['io.TextIOBase'] = None,
+                    stop_when_match: Optional[str] = None) -> Any:
     """Streams the response to the console.
 
     Args:
@@ -72,12 +73,18 @@ def stream_response(request_id: Optional[str],
         output_stream: The output stream to write to. If None, print to the
             console.
     """
-
+    matched = False
     try:
         for line in rich_utils.decode_rich_status(response):
             if line is not None:
                 print(line, flush=True, end='', file=output_stream)
-        return get(request_id)
+                if stop_when_match is not None and stop_when_match in line:
+                    matched = True
+                    break
+        if not matched:
+            return get(request_id)
+        else:
+            return None
     except Exception:  # pylint: disable=broad-except
         logger.debug(f'To stream request logs: sky api logs {request_id}')
         raise
@@ -1481,13 +1488,12 @@ def get(request_id: str) -> Any:
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
 @annotations.client_api
-def stream_and_get(
-    request_id: Optional[str] = None,
-    log_path: Optional[str] = None,
-    tail: Optional[int] = None,
-    follow: bool = True,
-    output_stream: Optional['io.TextIOBase'] = None,
-) -> Any:
+def stream_and_get(request_id: Optional[str] = None,
+                   log_path: Optional[str] = None,
+                   tail: Optional[int] = None,
+                   follow: bool = True,
+                   output_stream: Optional['io.TextIOBase'] = None,
+                   stop_when_match: Optional[str] = None) -> Any:
     """Streams the logs of a request or a log file and gets the final result.
 
     This will block until the request is finished. The request id can be a
@@ -1530,7 +1536,7 @@ def stream_and_get(
             raise RuntimeError(f'Failed to stream logs: {detail}')
     elif response.status_code != 200:
         return get(request_id)
-    return stream_response(request_id, response, output_stream)
+    return stream_response(request_id, response, output_stream, stop_when_match)
 
 
 @usage_lib.entrypoint

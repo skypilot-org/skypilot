@@ -206,6 +206,73 @@ def _storage_mounts_commands_generator(f: TextIO, cluster_name: str,
     return test_commands, clean_command
 
 
+def _storage_mounts_cancel_commands_generator(f: TextIO, cluster_name: str,
+                                              storage_name: str,
+                                              ls_hello_command: str, cloud: str,
+                                              only_mount: bool,
+                                              include_mount_cached: bool):
+    assert cloud in ['aws', 'gcp', 'azure', 'kubernetes']
+    template_str = pathlib.Path(
+        'tests/test_yamls/test_storage_mounting.yaml.j2').read_text()
+    template = jinja2.Template(template_str)
+
+    # Set mount flags based on cloud provider
+    include_s3_mount = cloud in ['aws', 'kubernetes']
+    include_gcs_mount = cloud in ['gcp', 'kubernetes']
+    include_azure_mount = cloud == 'azure'
+
+    content = template.render(
+        storage_name=storage_name,
+        cloud=cloud,
+        only_mount=only_mount,
+        include_s3_mount=include_s3_mount,
+        include_gcs_mount=include_gcs_mount,
+        include_azure_mount=include_azure_mount,
+        include_mount_cached=include_mount_cached,
+    )
+    f.write(content)
+    f.flush()
+    file_path = f.name
+
+    test_commands = [
+        smoke_tests_utils.launch_cluster_for_cloud_cmd(cloud, cluster_name),
+        *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
+        (f's=$(sky launch -y -c {cluster_name} --cloud {cloud} '
+         f'{smoke_tests_utils.LOW_RESOURCE_ARG} {file_path} --async) && '
+         'echo "$s" && '
+         'logs_cmd=$(echo "$s" | grep "Check logs with" | '
+         'sed -E "s/.*: (sky api logs .*).*/\\1/") && '
+         'echo "Extracted logs command: $logs_cmd" && '
+         'cancel_cmd=$(echo "$s" | grep "To cancel the request" | '
+         'sed -E "s/.*run: (sky api cancel .*).*/\\1/") && '
+         'echo "Extracted cancel command: $cancel_cmd" && '
+         '$logs_cmd --match-and-quit Syncing && $cancel_cmd'),
+    ]
+    clean_command = (
+        f'sky down -y {cluster_name} && '
+        f'{smoke_tests_utils.down_cluster_for_cloud_cmd(cluster_name)} && '
+        f'sky storage delete -y {storage_name}')
+    return test_commands, clean_command
+
+
+@pytest.mark.aws
+def test_aws_storage_mounts_cancel_with_stop():
+    name = smoke_tests_utils.get_cluster_name()
+    cloud = 'aws'
+    storage_name = f'sky-test-{int(time.time())}'
+    ls_hello_command = f'aws s3 ls {storage_name}/hello.txt'
+    with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
+        test_commands, clean_command = _storage_mounts_cancel_commands_generator(
+            f, name, storage_name, ls_hello_command, cloud, False, True)
+        test = smoke_tests_utils.Test(
+            'aws_storage_mounts_with_cancel',
+            test_commands,
+            clean_command,
+            timeout=20 * 60,  # 20 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.aws
 def test_aws_storage_mounts_with_stop():
     name = smoke_tests_utils.get_cluster_name()
