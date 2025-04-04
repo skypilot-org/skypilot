@@ -66,7 +66,7 @@ class Backend(Generic[_ResourceHandleType]):
             cluster_name: Name of the cluster to provision. If None, a name will
                 be auto-generated. If the name refers to an existing cluster,
                 the existing cluster will be reused and re-provisioned.
-            retry_until`_up: If True, retry provisioning until resources are
+            retry_until_up: If True, retry provisioning until resources are
                 successfully launched.
             skip_unnecessary_provisioning: If True, compare the cluster config
                 to the existing cluster_name's config. Skip provisioning if no
