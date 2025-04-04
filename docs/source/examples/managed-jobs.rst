@@ -301,6 +301,12 @@ Below is an example of mounting a bucket to :code:`/checkpoint`:
 
 To learn more about the different modes, see :ref:`SkyPilot bucket mounting <sky-storage>` and :ref:`high-performance training <training-guide>`.
 
+Real-world examples
+~~~~~~~~~~~~~~~~~~~
+
+See the :ref:`Model training guide <training-guide>` for more training examples and best practices.
+
+
 
 .. _failure-recovery:
 
