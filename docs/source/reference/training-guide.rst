@@ -103,7 +103,7 @@ Here's a simplified example showing the core concepts for :code:`torch.save`:
 
 .. code-block:: python
 
-    def load_checkpoint(save_dir: str):
+    def load_checkpoint(save_dir: str='/checkpoints'):
         try:
             # Find all checkpoints, sorted by step (newest first)
             checkpoints = sorted(
