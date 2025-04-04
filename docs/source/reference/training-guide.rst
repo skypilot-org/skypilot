@@ -388,6 +388,7 @@ BERT end-to-end
 We can take the SkyPilot YAML for BERT fine-tuning from :ref:`above <managed-job-quickstart>`, and add checkpointing/recovery to get everything working end-to-end.
 
 .. note::
+    
   You can find all the code for this example `in the documentation <https://docs.skypilot.co/en/latest/examples/spot/bert_qa.html>`_
 
 In this example, we fine-tune a BERT model on a question-answering task with HuggingFace.
