@@ -59,6 +59,10 @@ async def websocket_to_stdout(websocket):
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
-    websocket_url = (f'ws://{server_url}/kubernetes-pod-ssh-proxy'
-                     f'?cluster_name={sys.argv[2]}')
+    if '://' in server_url:
+        websocket_url = (f'{server_url}/kubernetes-pod-ssh-proxy'
+                         f'?cluster_name={sys.argv[2]}')
+    else:
+        websocket_url = (f'ws://{server_url}/kubernetes-pod-ssh-proxy'
+                         f'?cluster_name={sys.argv[2]}')
     asyncio.run(main(websocket_url))
