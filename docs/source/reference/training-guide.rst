@@ -79,18 +79,25 @@ When using spot instances, robust checkpointing is crucial for recovering from p
 
 This approach ensures your job can seamlessly resume from where it left off after preemption. On the first run, no checkpoints will exist, but on subsequent restarts, your job will automatically recover its state.
 
-To make checkpointing reading robust against preemptions, use this recipe:
+Basic checkpointing
+^^^^^^^^^^^^^^^^^^^^
+
+Saving to the bucket is easy -- simply save to the mounted directory ``/checkpoints`` specified above as if it is a local disk.
+
+
+.. code-block:: python
+
+    def save_checkpoint(step: int, model: torch.nn.Module):
+        # save checkpoint to local disk with step number
+        torch.save(model.state_dict(), f'/checkpoints/model_{step}.pt')
+
+To make loading checkpoint robust against preemptions and incomplete checkpoitns, here is the recipe:
 
 - Always try loading from the latest checkpoint first 
 - If the latest checkpoint is found to be corrupted or incomplete,  fallback to earlier checkpoints
 
 Here's a simplified example showing the core concepts for :code:`torch.save`:
 
-.. code-block:: python
-
-    def save_checkpoint(step: int, model: torch.nn.Module):
-        # save checkpoint to local disk with step number
-        torch.save(model.state_dict(), f"checkpoints/model_{step}.pt")
 
 
 .. code-block:: python
