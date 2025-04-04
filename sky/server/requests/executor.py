@@ -260,6 +260,8 @@ def _request_execution_wrapper(request_id: str,
                 f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
+            # Kill all children processes related to this request.
+            subprocess_utils.kill_children_processes()
             _restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
