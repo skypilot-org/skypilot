@@ -3062,10 +3062,15 @@ def _down_or_stop_clusters(
                 'Letting --all take effect.')
         # We should not remove controllers when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a controller.
+
+        # do not select already stopped clusters for stop command.
+        # stopped clusters are still included for down or autostop commands.
         names = [
             record['name']
             for record in all_clusters
             if controller_utils.Controllers.from_name(record['name']) is None
+            and (down or idle_minutes_to_autostop is not None or
+                 record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
 
     clusters = names
