@@ -107,7 +107,7 @@ _ACC_INSTANCE_TYPE_DICTS = {
     }
 }
 # Enable GPU type inference from instance types
-_INTANCE_TYPE_TO_ACC = {
+_INSTANCE_TYPE_TO_ACC = {
     instance_type: {
         acc_name: acc_count
     } for acc_name, acc_count_to_instance_type in
@@ -115,7 +115,7 @@ _INTANCE_TYPE_TO_ACC = {
     for acc_count, instance_types in acc_count_to_instance_type.items()
     for instance_type in instance_types
 }
-_ACC_INSTANCE_TYPES = list(_INTANCE_TYPE_TO_ACC.keys())
+_ACC_INSTANCE_TYPES = list(_INSTANCE_TYPE_TO_ACC.keys())
 
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
@@ -292,7 +292,7 @@ def get_accelerators_from_instance_type(instance_type: str) -> Dict[str, int]:
     Returns:
         A dictionary mapping from the accelerator name to the accelerator count.
     """
-    return _INTANCE_TYPE_TO_ACC[instance_type]
+    return _INSTANCE_TYPE_TO_ACC[instance_type]
 
 
 def get_instance_type_for_accelerator(
