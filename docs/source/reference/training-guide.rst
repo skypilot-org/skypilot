@@ -124,6 +124,7 @@ Here's a simplified example showing the core concepts for :code:`torch.save`:
         except Exception as e:
             logger.error(f"Failed to find checkpoints: {e}")
             return None
+            
 Robust checkpointing with error handling
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 For a complete implementation with additional features like custom prefixes, extended metadata, and more detailed error handling, see the code below:

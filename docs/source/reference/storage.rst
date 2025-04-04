@@ -29,7 +29,7 @@ Object storages are specified using the :code:`file_mounts` field in a SkyPilot 
           file_mounts:
             /my_data:
               source: s3://my-bucket/  # or gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>, oci://<bucket_name>
-              mode: MOUNT  # How buckets are mounted to nodes. MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
+              mode: MOUNT  # MOUNT or COPY or MOUNT_CACHED. Defaults to MOUNT. Optional.
 
         This will `mount <storage-mounting-modes_>`__ the contents of the bucket at ``s3://my-bucket/`` to the remote VM at ``/my_data``.
 
@@ -103,26 +103,6 @@ A cloud storage can be used in :code:`MOUNT` mode, :code:`COPY` mode, or :code:`
     :align: center
     :alt: sky-storage-modes
 
-MOUNT_CACHED mode in detail
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-:code:`MOUNT_CACHED` mode uses `rclone <https://rclone.org/>`_
-to provide a virtual filesystem that is asynchronously synced with the bucket.
-Calling :code:`close()` does not guarantee that the file is written to the bucket.
-rclone will sync written files back to the bucket asynchronously in the order they were written.
-The local filesystem should be fully consistent, but a bucket using 
-`MOUNT_CACHED` on multiple nodes may only be eventually consistent.
-
-Important considerations for :code:`MOUNT_CACHED` mode:
-
-* If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted.
-* Files only begin uploading after they are closed by all processes.
-* By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally.
-* The write performance depends on the disk tier used for caching - faster disks provide better performance.
-
-Files only begin uploading after they are closed by all processes.
-When a task completes, SkyPilot ensures all cached data is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
-
 Picking a storage mode
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -158,7 +138,7 @@ its performance requirements and size of the data.
     operations may fail. Most notably, random writes and append operations are
     not supported.
 
-.. [2] In ``MOUNT_CACHED`` mode, writes are not immediately consistent across multiple nodes.
+.. [2] In ``MOUNT_CACHED`` mode, writes are not immediately consistent across multiple nodes. See :ref:`MOUNT_CACHED mode in detail <mount_cached_mode_in_detail>` for more details.
 
 .. [3] Disk size smaller than the object size may cause performance degradation
     in ``MOUNT`` mode.
@@ -180,6 +160,29 @@ its performance requirements and size of the data.
     For local ``file_mounts`` that are directly rsynced to the VM,
     the symbolic links are directly copied, not their target data.
     The targets must be separately mounted or else the symlinks may break.
+
+.. _mount_cached_mode_in_detail:
+
+MOUNT_CACHED mode in detail
+~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:code:`MOUNT_CACHED` mode uses `rclone <https://rclone.org/>`_
+to provide a virtual filesystem that is asynchronously synced with the bucket.
+Calling :code:`close()` does not guarantee that the file is written to the bucket.
+rclone will sync written files back to the bucket asynchronously in the order they were written.
+The local filesystem should be fully consistent, but a bucket using 
+`MOUNT_CACHED` on multiple nodes may only be eventually consistent.
+
+Important considerations for :code:`MOUNT_CACHED` mode:
+
+* If files are written faster than they can be uploaded to remote storage, the cache will grow until disk space is exhausted.
+* Files only begin uploading after they are closed by all processes.
+* By default, SkyPilot uses a single transfer at a time to ensure files are committed to remote storage in the same order they are created locally.
+* The write performance depends on the disk tier used for caching - faster disks provide better performance.
+
+Files only begin uploading after they are closed by all processes.
+When a task completes, SkyPilot ensures all cached data is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
+
 
 Common patterns
 ---------------
