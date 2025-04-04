@@ -48,6 +48,7 @@ Example configuration:
 
   resources:
     disk_tier: best  # Use highest performance disk tier.
+    disk_size: 1000 # GiB. Make the disk size large enough for checkpoints.
 
 
 Use ``MOUNT_CACHED`` for checkpointing
