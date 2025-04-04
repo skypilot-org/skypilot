@@ -62,7 +62,7 @@ Example configuration:
 .. code-block:: yaml
 
     file_mounts:
-      /checkpoint:
+      /checkpoints:
         name: my-checkpoint-bucket  
         mode: MOUNT_CACHED
 
