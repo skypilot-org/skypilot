@@ -8,10 +8,8 @@ import unittest
 import uuid
 
 import boto3
-import botocore.exceptions
 import fastapi
 from fastapi import testclient
-import moto
 import pandas as pd
 import pytest
 import requests
