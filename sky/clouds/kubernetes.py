@@ -679,7 +679,8 @@ class Kubernetes(clouds.Cloud):
         success = False
         for context in existing_allowed_contexts:
             try:
-                check_result = kubernetes_utils.check_credentials(context)
+                check_result = kubernetes_utils.check_credentials(
+                    context, run_optional_checks=True)
                 if check_result[0]:
                     success = True
                     if check_result[1] is not None:
