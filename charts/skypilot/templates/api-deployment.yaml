@@ -161,7 +161,7 @@ spec:
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
-        {{- end }}      
+        {{- end }}
         image: google/cloud-sdk:latest
         command: ["/bin/sh", "-c"]
         env:
