@@ -162,7 +162,7 @@ def _get_cluster_records_and_set_ssh_config(
                     # updating skypilot.
                     f'\'{sys.executable} {sky.__root_dir__}/templates/'
                     f'websocket_proxy.py '
-                    f'{server_common.get_server_url().split("://")[1]} '
+                    f'{server_common.get_server_url().replace("http://", "ws://").replace("https://", "wss://").split("://")[1]} '
                     f'{handle.cluster_name}\'')
                 credentials['ssh_proxy_command'] = proxy_command
             cluster_utils.SSHConfigHelper.add_cluster(
@@ -1796,7 +1796,6 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                                                            skip_finished=True,
                                                            all_users=all_users)
     show_endpoints = endpoints or endpoint is not None
-    show_single_endpoint = endpoint is not None
     show_services = show_services and not any([clusters, ip, endpoints])
     if show_services:
         # Run the sky serve service query in parallel to speed up the
@@ -1835,7 +1834,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
                         property='IP address' if ip else 'endpoint(s)',
                         flag='ip' if ip else
                         ('endpoint port'
-                         if show_single_endpoint else 'endpoints')))
+                         if endpoint is not None else 'endpoints')))
     else:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}Clusters'
                    f'{colorama.Style.RESET_ALL}')
@@ -2075,6 +2074,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
             fg='yellow')
 
 
+@cli.command()
 @cli.command()
 @click.option(
     '--sync-down',
