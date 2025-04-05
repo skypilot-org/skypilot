@@ -625,6 +625,28 @@ you can still tear it down manually with
 .. note::
   Tearing down the jobs controller loses all logs and status information for the finished managed jobs. It is only allowed when there are no in-progress managed jobs to ensure no resource leakage.
 
+To adjust the size of the jobs controller instance, see :ref:`jobs-controller-custom-resources`.
+
+
+Setup and best practices
+------------------------
+
+.. _static-creds:
+
+Using static credentials
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's crucial to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks.
+
+To use static credentials for the jobs controller, just make sure the static credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller.
+
+To set up static credentials:
+
+- **AWS**: :ref:`Create a dedicated SkyPilot IAM user <dedicated-aws-user>`.
+- **GCP**: :ref:`Create a GCP service account <gcp-service-account>`.
+- **Other clouds**: Make sure you are using credentials that do not expire.
+
+.. _jobs-controller-custom-resources:
 
 Customizing jobs controller resources
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -706,7 +728,7 @@ Best practices for scaling up the jobs controller
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. tip::
-  For managed jobs, it's highly recommended to use service accounts for :ref:`cloud authentication <cloud-auth>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
+  For managed jobs, it's highly recommended to use :ref:`static credentials for cloud authentication <static-creds>`. This is so that the jobs controller credentials do not expire. This is particularly important in large production runs to avoid leaking resources.
 
 The number of active jobs that the controller supports is based on the controller size. There are two limits that apply:
 

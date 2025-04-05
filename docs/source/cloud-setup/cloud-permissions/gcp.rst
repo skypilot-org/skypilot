@@ -1,7 +1,37 @@
-.. _cloud-permissions-gcp:
-
 GCP
 =============
+
+
+.. _gcp-service-account:
+
+GCP service account
+-------------------
+
+`GCP service accounts
+<https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
+
+.. tip::
+    A service account on your local machine can avoid the periodic
+    ``google.auth.exceptions.RefreshError: Reauthentication is needed. Please
+    run `gcloud auth application-default login` to reauthenticate.`` error. A
+    service account is long-lived as it does not have an expiry time.
+
+Set up a service account as follows:
+
+1. Follow the :ref:`instructions <gcp-service-account-creation>` to create a service account with the appropriate roles/permissions.
+2. In the "Service Accounts" tab in the `IAM & Admin console
+   <https://console.cloud.google.com/iam-admin/iam>`__, click on the service
+   account to go to its detailed page. Click on the **KEYS** tab, then click on
+   **ADD KEY** to add a JSON key.  The key will be downloaded automatically.
+3. Set the environment variable ``GOOGLE_APPLICATION_CREDENTIALS`` to the path of the key file, and configure the gcloud CLI tool:
+
+   .. code-block:: console
+
+       $ export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+       $ gcloud auth activate-service-account --key-file=$GOOGLE_APPLICATION_CREDENTIALS
+       $ gcloud config set project your-project-id
+
+   You may want to add the export statement in your profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that it is set automatically in all new terminal sessions.
 
 
 Generally, the administrator can choose among three "levels" of permissions, from the most permissive and least setup effort, to the least permissive and more setup effort:
@@ -10,10 +40,15 @@ Generally, the administrator can choose among three "levels" of permissions, fro
 * :ref:`Medium <gcp-medium-permissions>`: easy setup, with a medium set of permissions
 * :ref:`Minimal <gcp-minimal-permissions>`: more setup, with the minimal set of permissions
 
+.. _cloud-permissions-gcp:
+
+Setting permissions
+-------------------
+
 .. _gcp-medium-permissions:
 
 Medium permissions
------------------------
+~~~~~~~~~~~~~~~~~~
 
 The easiest way to grant permissions to a user access your GCP project without the ``Owner`` role is to add the following roles to the user principals:
 
@@ -42,12 +77,9 @@ You can grant those accesses via GCP's `IAM & Admin console <https://console.clo
 .. _gcp-minimal-permissions:
 
 Minimal permissions
------------------------
+~~~~~~~~~~~~~~~~~~~
 
 The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions for some GCP services to the user.  If you would like to grant finer-grained and more minimal permissions to your users in your organization / project, you can create a custom role by following the steps below:
-
-User
-~~~~~~~~~~~~
 
 1. Go to GCP's `IAM & Admin console <https://console.cloud.google.com/iam-admin/roles>`__ and click on **Create Role**.
 
