@@ -227,7 +227,7 @@ Environment variables for ``run``
        Each task's logs are stored on the cluster at ``~/sky_logs/${SKYPILOT_TASK_ID%%_*}/tasks/*.log``.
 
        If a task is run as a :ref:`managed spot job <spot-jobs>`, then all
-       recoveries of that job will have the same ID value. The ID is in the format "sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>", where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a managed spot job. Read more :ref:`here <spot-jobs-end-to-end>`.
+       recoveries of that job will have the same ID value. The ID is in the format "sky-managed-<timestamp>_<job-name>(_<task-name>)_<job-id>-<task-id>", where ``<task-name>`` will appear when a pipeline is used, i.e., more than one task in a managed spot job. 
      - sky-2023-07-06-21-18-31-563597_myclus_1
 
        For managed spot jobs: sky-managed-2023-07-06-21-18-31-563597_my-job-name_1-0
