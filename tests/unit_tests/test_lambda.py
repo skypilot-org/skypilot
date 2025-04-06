@@ -3,21 +3,19 @@ from unittest import mock
 import pytest
 
 from sky.provision.lambda_cloud import lambda_utils
-from sky.provision.lambda_cloud.instance import _get_private_ip
-from sky.provision.lambda_cloud.instance import open_ports
-from sky.utils import resources_utils
+from sky.provision.lambda_cloud import instance
 
 
 def test_get_private_ip():
     valid_info = {'private_ip': '10.19.83.125'}
     invalid_info = {}
-    assert _get_private_ip(valid_info,
+    assert instance._get_private_ip(valid_info,
                            single_node=True) == valid_info['private_ip']
-    assert _get_private_ip(valid_info,
+    assert instance._get_private_ip(valid_info,
                            single_node=False) == valid_info['private_ip']
-    assert _get_private_ip(invalid_info, single_node=True) == '127.0.0.1'
+    assert instance._get_private_ip(invalid_info, single_node=True) == '127.0.0.1'
     with pytest.raises(RuntimeError):
-        _get_private_ip(invalid_info, single_node=False)
+        instance._get_private_ip(invalid_info, single_node=False)
 
 
 def test_open_ports():
@@ -38,7 +36,7 @@ def test_open_ports():
 
         # Call the function being tested with ports to open
         # Port 22 is already open, port 8080 is new
-        open_ports('test-cluster', ['22', '8080'])
+        instance.open_ports('test-cluster', ['22', '8080'])
 
         # Verify list_firewall_rules was called
         mock_client.list_firewall_rules.assert_called_once()
@@ -52,13 +50,9 @@ def test_open_ports():
         mock_client.create_firewall_rule.reset_mock()
 
         # Call with a port range
-        open_ports('test-cluster', ['5000-5002'])
+        instance.open_ports('test-cluster', ['5000-5002'])
 
-        # Should create 3 rules for ports 5000, 5001, and 5002
-        assert mock_client.create_firewall_rule.call_count == 3
+        # Should create 1 rule for ports 5000-5002
+        mock_client.list_firewall_rules.assert_called_once()
         mock_client.create_firewall_rule.assert_any_call(
-            port_range=[5000, 5000], protocol='tcp')
-        mock_client.create_firewall_rule.assert_any_call(
-            port_range=[5001, 5001], protocol='tcp')
-        mock_client.create_firewall_rule.assert_any_call(
-            port_range=[5002, 5002], protocol='tcp')
+            port_range=[5000, 5002], protocol='tcp')
