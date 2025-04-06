@@ -335,6 +335,9 @@ def cleanup_ports(cluster_name_on_cloud: str,
     Lambda Cloud firewall rules are global to the account, not cluster-specific.
     We skip cleanup because rules may be used by other clusters.
 
+    TODO(zhwu): the firewall rules may accumulate over time, and we may need
+    to add a way to automatically clean them up.
+
     Args:
         cluster_name_on_cloud: Unused.
         ports: Unused.
