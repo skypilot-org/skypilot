@@ -2,18 +2,19 @@ from unittest import mock
 
 import pytest
 
-from sky.provision.lambda_cloud import lambda_utils
 from sky.provision.lambda_cloud import instance
+from sky.provision.lambda_cloud import lambda_utils
 
 
 def test_get_private_ip():
     valid_info = {'private_ip': '10.19.83.125'}
     invalid_info = {}
-    assert instance._get_private_ip(valid_info,
-                           single_node=True) == valid_info['private_ip']
-    assert instance._get_private_ip(valid_info,
-                           single_node=False) == valid_info['private_ip']
-    assert instance._get_private_ip(invalid_info, single_node=True) == '127.0.0.1'
+    assert instance._get_private_ip(
+        valid_info, single_node=True) == valid_info['private_ip']
+    assert instance._get_private_ip(
+        valid_info, single_node=False) == valid_info['private_ip']
+    assert instance._get_private_ip(invalid_info,
+                                    single_node=True) == '127.0.0.1'
     with pytest.raises(RuntimeError):
         instance._get_private_ip(invalid_info, single_node=False)
 
