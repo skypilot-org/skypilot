@@ -7,7 +7,8 @@
 
 [Llama 4](https://ai.meta.com/blog/llama-4-multimodal-intelligence/) family was released by Meta on Apr 5, 2025.
 
-https://github.com/user-attachments/assets/48cdc44a-31a5-45f0-93be-7a8b6c6a0ded
+![](https://i.imgur.com/kjqLX87.png)
+
 
 ## Prerequisites
 
@@ -15,12 +16,19 @@ https://github.com/user-attachments/assets/48cdc44a-31a5-45f0-93be-7a8b6c6a0ded
 - Check that you have installed SkyPilot ([docs](https://docs.skypilot.co/en/latest/getting-started/installation.html)).
 - Check that `sky check` shows clouds or Kubernetes are enabled.
 
-## SkyPilot YAML
+## Run Llama 4
 
+```bash
+sky launch llama4.yaml -c llama4 --env HF_TOKEN
+```
+
+https://github.com/user-attachments/assets/48cdc44a-31a5-45f0-93be-7a8b6c6a0ded
+
+
+The `llama4.yaml` file is as follows:
 ```yaml
 envs:
   MODEL_NAME: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
-  # MODEL_NAME: meta-llama/Llama-3.2-3B-Vision
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
 
 resources:
@@ -43,7 +51,11 @@ run: |
 
 ```
 
-Wait until the model is ready (this can take 10+ minutes).
+You can use other models by setting different `MODEL_NAME`.
+```bash
+sky launch llama4.yaml -c llama4 --env HF_TOKEN --env MODEL_NAME=meta-llama/Llama-4-Scout-17B-16E-Instruct
+```
+
 
 🎉 **Congratulations!** 🎉 You have now launched the Llama 4 Maverick Instruct LLM on your infra.
 
