@@ -281,7 +281,8 @@ def get_default_instance_type(
                                                       memory_gb_or_ratio)
 
 
-def get_accelerators_from_instance_type(instance_type: str) -> Dict[str, int]:
+def get_accelerators_from_instance_type(
+        instance_type: str) -> Optional[Dict[str, int]]:
     """Infer the GPU type from the instance type.
 
     This inference logic is GCP-specific. Unlike other clouds, we don't call
@@ -293,7 +294,11 @@ def get_accelerators_from_instance_type(instance_type: str) -> Dict[str, int]:
     Returns:
         A dictionary mapping from the accelerator name to the accelerator count.
     """
-    return _INSTANCE_TYPE_TO_ACC[instance_type]
+    if instance_type in _ACC_INSTANCE_TYPES:
+        return _INSTANCE_TYPE_TO_ACC[instance_type]
+    else:
+        # General CPU instance types don't come with pre-attached accelerators.
+        return None
 
 
 def get_instance_type_for_accelerator(
