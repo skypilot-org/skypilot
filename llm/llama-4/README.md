@@ -16,26 +16,11 @@
 
 ## SkyPilot YAML
 
-<details>
-<summary>Click to see the full recipe YAML</summary>
-
 ```yaml
 envs:
   MODEL_NAME: meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8
   # MODEL_NAME: meta-llama/Llama-3.2-3B-Vision
   HF_TOKEN: # TODO: Fill with your own huggingface token, or use --env to pass.
-
-service:
-  replicas: 2
-  # An actual request for readiness probe.
-  readiness_probe:
-    path: /v1/chat/completions
-    post_data:
-      model: $MODEL_NAME
-      messages:
-        - role: user
-          content: Hello! What is your name?
-      max_tokens: 1
 
 resources:
   accelerators: { H100:8, H200:8, B100:8, B200:8, GB200:8 }
@@ -65,9 +50,9 @@ Wait until the model is ready (this can take 10+ minutes).
 
 To curl `/v1/chat/completions`:
 ```console
-ssh -L 8081:localhost:8081 llama4
+ENDPOINT=$(sky status --endpoint 8081 llama4)
 
-curl http://localhost:8081/v1/chat/completions \
+curl http://$ENDPOINT/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
@@ -82,10 +67,6 @@ curl http://localhost:8081/v1/chat/completions \
       }
     ]
   }' | jq .
-```
-Example outputs:
-```console
-...
 ```
 
 To stop the instance:
@@ -116,13 +97,13 @@ watch -n10 sky serve status llama4
 
 ```console
 Services
-NAME  VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
-llama4  1        35s     READY   2/2       xx.yy.zz.100:30001
+NAME   VERSION  UPTIME  STATUS  REPLICAS  ENDPOINT
+llama4 1        35s     READY   2/2       xx.yy.zz.100:30001
 
 Service Replicas
-SERVICE_NAME  ID  VERSION  IP            LAUNCHED     RESOURCES                       STATUS  REGION
-llama4          1   1        xx.yy.zz.121  18 mins ago  1x GCP([Spot]{'H100': 8})  READY   us-east4
-llama4          2   1        xx.yy.zz.245  18 mins ago  1x GCP([Spot]{'H100': 8})  READY   us-east4
+SERVICE_NAME  ID  VERSION  IP            LAUNCHED     RESOURCES                  STATUS  REGION
+llama4        1   1        xx.yy.zz.121  18 mins ago  1x GCP([Spot]{'H100': 8})  READY   us-east4
+llama4        2   1        xx.yy.zz.245  18 mins ago  1x GCP([Spot]{'H100': 8})  READY   us-east4
 ```
 </details>
 
