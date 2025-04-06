@@ -7,7 +7,7 @@
 
 [Llama 4](https://ai.meta.com/blog/llama-4-multimodal-intelligence/) family was released by Meta on Apr 5, 2025.
 
-https://github.com/user-attachments/assets/4cd40fde-6418-4722-94db-372edf50eb5e
+https://github.com/user-attachments/assets/48cdc44a-31a5-45f0-93be-7a8b6c6a0ded
 
 ## Prerequisites
 
