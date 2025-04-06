@@ -267,7 +267,8 @@ class LambdaCloudClient:
         """Create a firewall rule.
 
         Args:
-            port_range: Port range as [min_port, max_port]. For a single port, use [port, port].
+            port_range: Port range as [min_port, max_port]. For a single port,
+              use [port, port].
             protocol: Protocol ('tcp', 'udp', 'icmp', or 'all').
             description: Description for the rule.
 
@@ -294,12 +295,12 @@ class LambdaCloudClient:
                 rule_list.append(api_rule)
 
         # Add our new rule
-        new_rule = {
+        new_rule: Dict[str, Any] = {
             'protocol': protocol,
             'source_network': '0.0.0.0/0',  # Allow from any IP address
-            'description':
-                description or
-                f'SkyPilot auto-generated rule for port {port_range[0]}-{port_range[1]}/{protocol}'
+            'description': description or
+                           ('SkyPilot auto-generated rule for port '
+                            f'{port_range[0]}-{port_range[1]}/{protocol}')
         }
 
         # Add port_range for non-icmp protocols

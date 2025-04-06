@@ -849,7 +849,7 @@ def test_lambda_cloud_open_ports():
         # Get initial rules for debugging and tracking purposes
         initial_rules = lambda_client.list_firewall_rules()
         print(f"Initial firewall rules count: {len(initial_rules)}")
-        
+
         # Print example rule structure for debugging
         if initial_rules:
             print(f"Example rule structure: {initial_rules[0]}")
@@ -867,7 +867,7 @@ def test_lambda_cloud_open_ports():
         print(f"Error in test: {e}")
         print(traceback.format_exc())
         pytest.fail(f"Error testing Lambda Cloud open_ports: {str(e)}")
-    
+
     finally:
         # Clean up the test port we created, being careful to preserve pre-existing rules
         if lambda_client is None:
@@ -878,83 +878,87 @@ def test_lambda_cloud_open_ports():
             try:
                 # We need to clean up manually since instance.cleanup_ports intentionally skips cleanup
                 # for Lambda Cloud (as firewall rules are global to the account)
-                
+
                 # Get all current rules
                 current_rules = lambda_client.list_firewall_rules()
-                
+
                 # Create a set of "fingerprints" for initial rules for faster comparison
                 # Use a tuple of (protocol, source_network, port_range) as a fingerprint
                 initial_rule_fingerprints = set()
                 for rule in initial_rules:
                     # Convert port_range to a tuple so it can be hashed
-                    port_range_tuple = tuple(rule.get('port_range', [])) if rule.get('port_range') else None
-                    fingerprint = (
-                        rule.get('protocol'),
-                        rule.get('source_network'),
-                        port_range_tuple
-                    )
+                    port_range_tuple = tuple(rule.get(
+                        'port_range', [])) if rule.get('port_range') else None
+                    fingerprint = (rule.get('protocol'),
+                                   rule.get('source_network'), port_range_tuple)
                     initial_rule_fingerprints.add(fingerprint)
-                
+
                 # Identify rules that match our test port and weren't in the initial set
                 rules_to_remove = []
                 for rule in current_rules:
                     # Create fingerprint for this rule
-                    port_range_tuple = tuple(rule.get('port_range', [])) if rule.get('port_range') else None
-                    fingerprint = (
-                        rule.get('protocol'),
-                        rule.get('source_network'),
-                        port_range_tuple
-                    )
-                    
+                    port_range_tuple = tuple(rule.get(
+                        'port_range', [])) if rule.get('port_range') else None
+                    fingerprint = (rule.get('protocol'),
+                                   rule.get('source_network'), port_range_tuple)
+
                     # Skip rules that existed before our test
                     if fingerprint in initial_rule_fingerprints:
                         continue
-                    
+
                     # Check if this rule matches our test port
-                    if (rule.get('protocol') == 'tcp' and 
-                        rule.get('port_range') and 
-                        len(rule.get('port_range')) == 2 and
-                        rule.get('port_range')[0] == test_port_int and 
-                        rule.get('port_range')[1] == test_port_int):
-                        
+                    if (rule.get('protocol') == 'tcp' and
+                            rule.get('port_range') and
+                            len(rule.get('port_range')) == 2 and
+                            rule.get('port_range')[0] == test_port_int and
+                            rule.get('port_range')[1] == test_port_int):
+
                         # Additional check: ensure it's our auto-generated rule
                         description = rule.get('description', '')
                         if 'SkyPilot auto-generated' in description and f'port {test_port_int}' in description:
                             rules_to_remove.append(rule)
-                            print(f"Found test firewall rule to clean up: TCP {test_port_int}-{test_port_int}")
-                
+                            print(
+                                f"Found test firewall rule to clean up: TCP {test_port_int}-{test_port_int}"
+                            )
+
                 if rules_to_remove:
-                    print(f"Cleaning up {len(rules_to_remove)} test firewall rule(s)")
-                    
+                    print(
+                        f"Cleaning up {len(rules_to_remove)} test firewall rule(s)"
+                    )
+
                     # Build rule list without our test rules
                     api_rules = []
                     for rule in current_rules:
                         # Check if this rule should be removed
                         should_remove = False
                         for rule_to_remove in rules_to_remove:
-                            if (rule.get('protocol') == rule_to_remove.get('protocol') and
-                                rule.get('source_network') == rule_to_remove.get('source_network') and
-                                rule.get('port_range') == rule_to_remove.get('port_range')):
+                            if (rule.get('protocol')
+                                    == rule_to_remove.get('protocol') and
+                                    rule.get('source_network')
+                                    == rule_to_remove.get('source_network') and
+                                    rule.get('port_range')
+                                    == rule_to_remove.get('port_range')):
                                 should_remove = True
                                 break
-                        
+
                         # Skip if this rule should be removed
                         if should_remove:
                             continue
-                        
+
                         if rule.get('protocol') and rule.get('source_network'):
                             api_rule = {
                                 'protocol': rule.get('protocol'),
                                 'source_network': rule.get('source_network'),
                                 'description': rule.get('description', '')
                             }
-                            
+
                             # Add port_range for non-icmp protocols
-                            if rule.get('protocol') != 'icmp' and rule.get('port_range'):
+                            if rule.get('protocol') != 'icmp' and rule.get(
+                                    'port_range'):
                                 api_rule['port_range'] = rule.get('port_range')
-                            
+
                             api_rules.append(api_rule)
-                    
+
                     # Update the rules without our test rule(s)
                     data = json.dumps({'data': api_rules})
                     lambda_utils._try_request_with_backoff(
