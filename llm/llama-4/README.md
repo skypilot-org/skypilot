@@ -118,20 +118,20 @@ ENDPOINT=$(sky serve status --endpoint llama4)
 To curl the endpoint:
 ```console
 curl http://$ENDPOINT/v1/chat/completions \
-    -H 'Content-Type: application/json' \
-    -H 'Authorization: Bearer token' \
-    --data '{
-        "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
-        "messages": [
-        {
-            "role": "user",
-            "content": [
-                {"type" : "text", "text": "Covert this logo to ASCII art"},
-                {"type": "image_url", "image_url": {"url": "https://pbs.twimg.com/profile_images/1584596138635632640/HWexMoH5_400x400.jpg"}}
-            ]
-        }],
-        "max_tokens": 2048
-    }' | jq .
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8",
+    "messages": [
+      {
+        "role": "system",
+        "content": "You are a helpful assistant."
+      },
+      {
+        "role": "user",
+        "content": "Who are you?"
+      }
+    ]
+  }' | jq .
 ```
 
 To shut down all resources:
