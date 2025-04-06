@@ -267,7 +267,8 @@ def open_ports(cluster_name_on_cloud: str,
     if provider_config is not None:
         region = provider_config.get('region')
 
-    # Skip port opening for us-south-1
+    # Skip port opening for us-south-1, as it's not supported by Lambda Cloud
+    # https://cloud.lambda.ai/api/v1/docs#get-/api/v1/firewall-rules
     if region == 'us-south-1':
         logger.warning(
             f'Skipping port opening for cluster {cluster_name_on_cloud} in '
