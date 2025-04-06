@@ -1,7 +1,7 @@
 """Lambda Cloud instance provisioning."""
 
 import time
-from typing import Any, Dict, List, Optional, Set
+from typing import Any, Dict, List, Optional
 
 from sky import sky_logging
 from sky.provision import common
@@ -252,35 +252,44 @@ def query_instances(
 def open_ports(cluster_name_on_cloud: str,
                ports: List[str],
                provider_config: Optional[Dict[str, Any]] = None) -> None:
-    """Open ports for a cluster.
+    """Open firewall ports for Lambda Cloud.
 
     Args:
-        cluster_name_on_cloud: The cluster name (unused as rules are global).
-        ports: The ports to open.
-        provider_config: The provider config (unused).
+        cluster_name_on_cloud: Cluster name on Lambda Cloud.
+        ports: List of ports to open.
+        provider_config: Lambda Cloud provider config. Contains the API key.
     """
-    del cluster_name_on_cloud, provider_config  # Unused.
+    if not ports:
+        return
 
-    # Lambda Cloud firewall rules are global (not cluster-specific)
-    # Initialize Lambda Cloud client
+    # Skip port opening for us-south-1 region where it's not supported
+    region = None
+    if provider_config is not None:
+        region = provider_config.get('region')
+
+    # Skip port opening for us-south-1
+    if region == 'us-south-1':
+        logger.warning(
+            f'Skipping port opening for cluster {cluster_name_on_cloud} in '
+            f'us-south-1 region, as firewall rules are not supported there.')
+        return
+
+    del provider_config, cluster_name_on_cloud  # No longer needed
+
     lambda_client = lambda_utils.LambdaCloudClient()
 
-    # Get existing firewall rules
+    # Get existing rules to avoid duplicates
     existing_rules = lambda_client.list_firewall_rules()
-
-    # Extract existing ports
-    existing_ports: Set[int] = set()
+    existing_ports = set()
     for rule in existing_rules:
-        if rule.get('protocol') == 'tcp':
-            port_range = rule.get('port_range')
-            if port_range and len(port_range) == 2:
-                # If it's a single port (same min and max)
-                if port_range[0] == port_range[1]:
-                    existing_ports.add(port_range[0])
-                else:
-                    # For port ranges, add all ports in the range
-                    existing_ports.update(
-                        range(port_range[0], port_range[1] + 1))
+        port_range = rule.get('port_range')
+        if rule.get('protocol') == 'tcp' and port_range is not None:
+            if len(port_range) == 1:
+                # For single ports
+                existing_ports.add(port_range[0])
+            elif len(port_range) == 2:
+                # For port ranges, add all ports in the range
+                existing_ports.update(range(port_range[0], port_range[1] + 1))
 
     # Convert port strings to a set of individual ports
     ports_to_open = resources_utils.port_ranges_to_set(ports)
@@ -288,14 +297,33 @@ def open_ports(cluster_name_on_cloud: str,
     # Remove ports that are already open
     ports_to_open = ports_to_open - existing_ports
 
-    # Open new ports
-    for port in ports_to_open:
-        logger.info(f'Opening port {port}/tcp')
-        try:
-            lambda_client.create_firewall_rule(port_range=[port, port],
-                                               protocol='tcp')
-        except lambda_utils.LambdaCloudError as e:
-            logger.warning(f'Failed to open port {port}: {e}')
+    # If no ports need to be opened, return early
+    if not ports_to_open:
+        return
+
+    # Convert individual ports to consolidated ranges
+    port_ranges = resources_utils.port_set_to_ranges(ports_to_open)
+
+    # Open port ranges
+    for port_range in port_ranges:
+        if '-' in port_range:
+            # Handle range (e.g., "1000-1010")
+            start, end = map(int, port_range.split('-'))
+            logger.debug(f'Opening port range {port_range}/tcp')
+            try:
+                lambda_client.create_firewall_rule(port_range=[start, end],
+                                                   protocol='tcp')
+            except lambda_utils.LambdaCloudError as e:
+                logger.warning(f'Failed to open port range {port_range}: {e}')
+        else:
+            # Handle single port
+            port = int(port_range)
+            logger.debug(f'Opening port {port}/tcp')
+            try:
+                lambda_client.create_firewall_rule(port_range=[port, port],
+                                                   protocol='tcp')
+            except lambda_utils.LambdaCloudError as e:
+                logger.warning(f'Failed to open port {port}: {e}')
 
 
 def cleanup_ports(cluster_name_on_cloud: str,
