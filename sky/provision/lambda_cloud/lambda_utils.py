@@ -334,15 +334,3 @@ class LambdaCloudClient:
             headers=self.headers,
         )
         return response.json().get('data', {})
-
-    def delete_firewall_rule(self, rule_id: str) -> None:
-        """Delete a firewall rule.
-
-        Args:
-            rule_id: ID of the firewall rule to delete.
-        """
-        _try_request_with_backoff(
-            'post',
-            f'{API_ENDPOINT}/firewall-rules/{rule_id}/delete',
-            headers=self.headers,
-        )

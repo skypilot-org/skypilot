@@ -814,8 +814,6 @@ def test_cli_exit_codes(generic_cloud: str):
 
 
 @pytest.mark.lambda_cloud
-@pytest.mark.skipif(not Lambda._check_compute_credentials()[0],
-                    reason='Lambda Cloud credentials not available')
 def test_lambda_cloud_open_ports():
     """Test Lambda Cloud open ports functionality.
     
