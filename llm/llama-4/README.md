@@ -2,7 +2,7 @@
 <!-- $REMOVE -->
 # Run Llama 4 on Kubernetes or Any Cloud
 <!-- $END_REMOVE -->
-<!-- $UNCOMMENT# Vision Llama 3.2 -->
+<!-- $UNCOMMENT# Llama 4 -->
 
 
 [Llama 4](https://ai.meta.com/blog/llama-4-multimodal-intelligence/) family was released by Meta on Apr 5, 2025.
@@ -61,7 +61,7 @@ Wait until the model is ready (this can take 10+ minutes).
 
 🎉 **Congratulations!** 🎉 You have now launched the Llama 4 Maverick Instruct LLM on your infra.
 
-### Chat with Llama 4 Maverick with OpenAI API
+### Chat with Llama 4 with OpenAI API
 
 To curl `/v1/chat/completions`:
 ```console
