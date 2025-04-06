@@ -31,7 +31,7 @@ resources:
   ports: 8081  # Expose to internet traffic.
 
 setup: |
-  uv pip install vllm>0.8.2
+  uv pip install vllm==0.8.3
 
 run: |
   echo 'Starting vllm api server...'
