@@ -116,6 +116,7 @@ _INSTANCE_TYPE_TO_ACC = {
     for instance_type in instance_types
 }
 _ACC_INSTANCE_TYPES = list(_INSTANCE_TYPE_TO_ACC.keys())
+GCP_ACC_INSTANCE_TYPES = _ACC_INSTANCE_TYPES
 
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
@@ -278,6 +279,21 @@ def get_default_instance_type(
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
+
+
+def get_accelerators_from_instance_type(instance_type: str) -> Dict[str, int]:
+    """Infer the GPU type from the instance type.
+
+    This inference logic is GCP-specific. Unlike other clouds, we don't call
+    the internal implementation defined in common.py.
+
+    Args:
+        instance_type: the instance type to use.
+
+    Returns:
+        A dictionary mapping from the accelerator name to the accelerator count.
+    """
+    return _INSTANCE_TYPE_TO_ACC[instance_type]
 
 
 def get_instance_type_for_accelerator(

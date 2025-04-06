@@ -583,7 +583,10 @@ class GCP(clouds.Cloud):
                                         resources.disk_tier)
             if not ok:
                 return resources_utils.FeasibleResources([], [], None)
-            return resources_utils.FeasibleResources([resources], [], None)
+
+            if resources.instance_type not in service_catalog.gcp_catalog.GCP_ACC_INSTANCE_TYPES:
+                # General CPU instance types without accelerators
+                return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
@@ -688,9 +691,11 @@ class GCP(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        # GCP handles accelerators separately from regular instance types,
-        # hence return none here.
-        return None
+        # GCP handles accelerators separately from regular instance types.
+        # This method supports automatically inferring the GPU type for
+        # the instance type that come with GPUs pre-attached.
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='gcp')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
