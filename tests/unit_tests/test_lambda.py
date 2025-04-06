@@ -30,9 +30,9 @@ def test_open_ports():
         # Mock existing firewall rules (one port already open)
         mock_client.list_firewall_rules.return_value = [{
             'id': 'rule1',
-            'port': 22,
             'protocol': 'tcp',
-            'ip_range': '0.0.0.0/0',
+            'port_range': [22, 22],
+            'source_network': '0.0.0.0/0',
             'description': 'SSH'
         }]
 
@@ -44,8 +44,8 @@ def test_open_ports():
         mock_client.list_firewall_rules.assert_called_once()
 
         # Verify create_firewall_rule was called for port 8080 but not for port 22
-        mock_client.create_firewall_rule.assert_called_once_with(port=8080,
-                                                                 protocol='tcp')
+        mock_client.create_firewall_rule.assert_called_once_with(
+            port_range=[8080, 8080], protocol='tcp')
 
         # Test with port range
         mock_client.list_firewall_rules.reset_mock()
@@ -56,9 +56,9 @@ def test_open_ports():
 
         # Should create 3 rules for ports 5000, 5001, and 5002
         assert mock_client.create_firewall_rule.call_count == 3
-        mock_client.create_firewall_rule.assert_any_call(port=5000,
-                                                         protocol='tcp')
-        mock_client.create_firewall_rule.assert_any_call(port=5001,
-                                                         protocol='tcp')
-        mock_client.create_firewall_rule.assert_any_call(port=5002,
-                                                         protocol='tcp')
+        mock_client.create_firewall_rule.assert_any_call(
+            port_range=[5000, 5000], protocol='tcp')
+        mock_client.create_firewall_rule.assert_any_call(
+            port_range=[5001, 5001], protocol='tcp')
+        mock_client.create_firewall_rule.assert_any_call(
+            port_range=[5002, 5002], protocol='tcp')

@@ -272,9 +272,15 @@ def open_ports(cluster_name_on_cloud: str,
     existing_ports: Set[int] = set()
     for rule in existing_rules:
         if rule.get('protocol') == 'tcp':
-            port = rule.get('port')
-            if port is not None:
-                existing_ports.add(port)
+            port_range = rule.get('port_range')
+            if port_range and len(port_range) == 2:
+                # If it's a single port (same min and max)
+                if port_range[0] == port_range[1]:
+                    existing_ports.add(port_range[0])
+                else:
+                    # For port ranges, add all ports in the range
+                    existing_ports.update(
+                        range(port_range[0], port_range[1] + 1))
 
     # Convert port strings to a set of individual ports
     ports_to_open = resources_utils.port_ranges_to_set(ports)
@@ -286,7 +292,8 @@ def open_ports(cluster_name_on_cloud: str,
     for port in ports_to_open:
         logger.info(f'Opening port {port}/tcp')
         try:
-            lambda_client.create_firewall_rule(port=port, protocol='tcp')
+            lambda_client.create_firewall_rule(port_range=[port, port],
+                                               protocol='tcp')
         except lambda_utils.LambdaCloudError as e:
             logger.warning(f'Failed to open port {port}: {e}')
 
