@@ -11,12 +11,7 @@ resources:
   ports: 8081
 
 setup: |
-  # uv pip install vllm>0.8.2
-  git clone https://github.com/houseroad/vllm.git
-  cd vllm
-  git checkout init_pr
-  export VLLM_USE_PRECOMPILED=1
-  pip install -e .
+  uv pip install "vllm>=0.8.3"
 
 run: |
   echo 'Starting vllm api server...'
