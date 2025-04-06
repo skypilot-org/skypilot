@@ -249,4 +249,53 @@ class LambdaCloudClient:
         response = _try_request_with_backoff('get',
                                              f'{API_ENDPOINT}/instance-types',
                                              headers=self.headers)
+        return response.json().get('data', {})
+
+    def list_firewall_rules(self) -> List[Dict[str, Any]]:
+        """List firewall rules."""
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/firewall-rules',
+                                             headers=self.headers)
         return response.json().get('data', [])
+
+    def create_firewall_rule(self,
+                             port: int,
+                             protocol: str = 'tcp',
+                             description: str = '') -> Dict[str, Any]:
+        """Create a firewall rule.
+
+        Args:
+            port: Port number to open.
+            protocol: Protocol ('tcp' or 'udp').
+            description: Description for the rule.
+
+        Returns:
+            The created firewall rule.
+        """
+        data = json.dumps({
+            'port': port,
+            'ip_range': '0.0.0.0/0',  # Allow from any IP address
+            'protocol': protocol,
+            'description':
+                description
+                or f'SkyPilot auto-generated rule for port {port}/{protocol}'
+        })
+        response = _try_request_with_backoff(
+            'post',
+            f'{API_ENDPOINT}/firewall-rules',
+            data=data,
+            headers=self.headers,
+        )
+        return response.json().get('data', {})
+
+    def delete_firewall_rule(self, rule_id: str) -> None:
+        """Delete a firewall rule.
+
+        Args:
+            rule_id: ID of the firewall rule to delete.
+        """
+        _try_request_with_backoff(
+            'post',
+            f'{API_ENDPOINT}/firewall-rules/{rule_id}/delete',
+            headers=self.headers,
+        )

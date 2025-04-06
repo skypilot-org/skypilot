@@ -30,6 +30,9 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky.clouds import Lambda
+from sky.provision.lambda_cloud import instance
+from sky.provision.lambda_cloud import lambda_utils
 from sky.skylet import constants
 from sky.skylet import events
 import sky.skypilot_config
@@ -809,3 +812,52 @@ def test_cli_exit_codes(generic_cloud: str):
         timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
+
+
+@pytest.mark.lambda_cloud
+@pytest.mark.skipif(not Lambda._check_credentials()[0],
+                    reason='Lambda Cloud credentials not available')
+def test_lambda_cloud_open_ports():
+    """Test Lambda Cloud open ports functionality.
+    
+    This test will only run if:
+    1. The test is explicitly requested with --lambda_cloud marker
+    2. Lambda Cloud credentials are properly configured
+    
+    It tests the functionality by opening a test port and verifying it was created.
+    """
+    try:
+        # Use a port that's unlikely to be already open
+        test_port = '12345'
+        test_port_int = int(test_port)
+
+        # Get initial firewall rules
+        lambda_client = lambda_utils.LambdaCloudClient()
+        initial_rules = lambda_client.list_firewall_rules()
+
+        # Check if our test port is already open
+        for rule in initial_rules:
+            if rule.get('protocol') == 'tcp' and rule.get(
+                    'port') == test_port_int:
+                # Port already open, we need to choose a different port for testing
+                # or delete this rule first
+                rule_id = rule.get('id')
+                if rule_id:
+                    lambda_client.delete_firewall_rule(rule_id)
+
+        # Open the test port
+        instance.open_ports("smoke-test-cluster", [test_port])
+
+        # Verify the port was opened
+        new_rules = lambda_client.list_firewall_rules()
+        port_found = False
+        for rule in new_rules:
+            if rule.get('protocol') == 'tcp' and rule.get(
+                    'port') == test_port_int:
+                port_found = True
+                break
+
+        assert port_found, f"Failed to find rule for port {test_port}"
+
+    except Exception as e:
+        pytest.fail(f"Error testing Lambda Cloud open_ports: {str(e)}")

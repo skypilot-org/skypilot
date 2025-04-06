@@ -1,12 +1,13 @@
-"""Lambda instance provisioning."""
+"""Lambda Cloud instance provisioning."""
 
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 from sky import sky_logging
 from sky.provision import common
-import sky.provision.lambda_cloud.lambda_utils as lambda_utils
+from sky.provision.lambda_cloud import lambda_utils
 from sky.utils import common_utils
+from sky.utils import resources_utils
 from sky.utils import status_lib
 from sky.utils import ux_utils
 
@@ -248,18 +249,63 @@ def query_instances(
     return statuses
 
 
-def open_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
-    raise NotImplementedError('open_ports is not supported for Lambda Cloud')
+def open_ports(cluster_name_on_cloud: str,
+               ports: List[str],
+               provider_config: Optional[Dict[str, Any]] = None) -> None:
+    """Open ports for a cluster.
+
+    Args:
+        cluster_name_on_cloud: The cluster name (unused as rules are global).
+        ports: The ports to open.
+        provider_config: The provider config (unused).
+    """
+    del cluster_name_on_cloud, provider_config  # Unused.
+
+    # Lambda Cloud firewall rules are global (not cluster-specific)
+    # Initialize Lambda Cloud client
+    lambda_client = lambda_utils.LambdaCloudClient()
+
+    # Get existing firewall rules
+    existing_rules = lambda_client.list_firewall_rules()
+
+    # Extract existing ports
+    existing_ports: Set[int] = set()
+    for rule in existing_rules:
+        if rule.get('protocol') == 'tcp':
+            port = rule.get('port')
+            if port is not None:
+                existing_ports.add(port)
+
+    # Convert port strings to a set of individual ports
+    ports_to_open = resources_utils.port_ranges_to_set(ports)
+
+    # Remove ports that are already open
+    ports_to_open = ports_to_open - existing_ports
+
+    # Open new ports
+    for port in ports_to_open:
+        logger.info(f'Opening port {port}/tcp')
+        try:
+            lambda_client.create_firewall_rule(port=port, protocol='tcp')
+        except lambda_utils.LambdaCloudError as e:
+            logger.warning(f'Failed to open port {port}: {e}')
 
 
-def cleanup_ports(
-    cluster_name_on_cloud: str,
-    ports: List[str],
-    provider_config: Optional[Dict[str, Any]] = None,
-) -> None:
-    """See sky/provision/__init__.py"""
+def cleanup_ports(cluster_name_on_cloud: str,
+                  ports: List[str],
+                  provider_config: Optional[Dict[str, Any]] = None) -> None:
+    """Skip cleanup of firewall rules.
+
+    Lambda Cloud firewall rules are global to the account, not cluster-specific.
+    We skip cleanup because rules may be used by other clusters.
+
+    Args:
+        cluster_name_on_cloud: Unused.
+        ports: Unused.
+        provider_config: Unused.
+    """
     del cluster_name_on_cloud, ports, provider_config  # Unused.
+
+    # Break the long line by splitting it
+    logger.info('Skipping cleanup of Lambda Cloud firewall rules '
+                'as they are account-wide.')
