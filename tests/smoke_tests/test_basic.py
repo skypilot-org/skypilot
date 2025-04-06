@@ -814,17 +814,12 @@ def test_cli_exit_codes(generic_cloud: str):
 
 
 @pytest.mark.lambda_cloud
-@pytest.mark.skipif(not Lambda._check_compute_credentials()[0],
-                    reason='Lambda Cloud credentials not available')
 def test_lambda_cloud_open_ports():
     """Test Lambda Cloud open ports functionality.
-    
-    This test will only run if:
-    1. The test is explicitly requested with --lambda_cloud marker
-    2. Lambda Cloud credentials are properly configured
-    
+
     It tests the functionality by opening both a single port and a port range,
-    verifying that both types of rules are created successfully.
+    verifying that both types of rules are created successfully. It also tests
+    that consecutive individual ports are properly merged into a single range rule.
     """
     # Test ports and port ranges
     single_port = '12345'
@@ -832,6 +827,11 @@ def test_lambda_cloud_open_ports():
     port_range = '5000-5010'
     port_range_start = 5000
     port_range_end = 5010
+
+    # Consecutive ports that should be merged
+    consecutive_ports = ['6000', '6001', '6002']
+    consecutive_start = 6000
+    consecutive_end = 6002
 
     # Store initial rules to avoid modifying rules that existed before the test
     initial_rules = []
@@ -848,63 +848,100 @@ def test_lambda_cloud_open_ports():
         if not hasattr(lambda_client, 'list_firewall_rules') or not hasattr(
                 lambda_client, 'create_firewall_rule'):
             pytest.skip(
-                "LambdaCloudClient doesn't have required firewall rule methods")
+                'LambdaCloudClient doesn\'t have required firewall rule methods'
+            )
 
         # Skip test for us-south-1 region where firewall rules are not supported
-        if any("us-south-1" in str(rule) for rule in lambda_client.list_catalog().values()):
+        if any('us-south-1' in str(rule)
+               for rule in lambda_client.list_catalog().values()):
             # Check if our current region is us-south-1
             instances = lambda_client.list_instances()
             for inst in instances:
                 if inst.get('region', {}).get('name') == 'us-south-1':
-                    pytest.skip("Firewall rules not supported in us-south-1 region")
+                    pytest.skip(
+                        'Firewall rules not supported in us-south-1 region')
 
         # Get initial rules for debugging and tracking purposes
         initial_rules = lambda_client.list_firewall_rules()
-        print(f"Initial firewall rules count: {len(initial_rules)}")
+        print(f'Initial firewall rules count: {len(initial_rules)}')
 
         # Print example rule structure for debugging
         if initial_rules:
-            print(f"Example rule structure: {initial_rules[0]}")
+            print(f'Example rule structure: {initial_rules[0]}')
 
         # 1. Test opening a single port
-        print(f"Opening single port {single_port}")
-        instance.open_ports("smoke-test-cluster", [single_port])
-        print(f"Successfully called open_ports for single port {single_port}")
+        print(f'Opening single port {single_port}')
+        instance.open_ports('smoke-test-cluster', [single_port])
+        print(f'Successfully called open_ports for single port {single_port}')
 
         # 2. Test opening a port range
-        print(f"Opening port range {port_range}")
-        instance.open_ports("smoke-test-cluster", [port_range])
-        print(f"Successfully called open_ports for port range {port_range}")
+        print(f'Opening port range {port_range}')
+        instance.open_ports('smoke-test-cluster', [port_range])
+        print(f'Successfully called open_ports for port range {port_range}')
+
+        # 3. Test opening consecutive ports to verify merging
+        print(f'Opening consecutive ports {", ".join(consecutive_ports)}')
+        instance.open_ports('smoke-test-cluster', consecutive_ports)
+        print('Successfully called open_ports for consecutive ports '
+              f'{", ".join(consecutive_ports)}')
 
         # Verify rules were created by getting current rules
         current_rules = lambda_client.list_firewall_rules()
-        print(f"Rules after adding our test ports: {len(current_rules)}")
+        print(f'Rules after adding our test ports: {len(current_rules)}')
 
-        # Basic verification that rules were added (should have at least as many rules as before)
-        assert len(current_rules) >= len(initial_rules), "No new rules were added"
+        # Basic verification that rules were added
+        # (should have at least as many rules as before)
+        assert len(current_rules) >= len(
+            initial_rules), 'No new rules were added'
+
+        # 4. Verify consecutive ports were merged into a range
+        merged_range_found = False
+        for rule in current_rules:
+            if (rule.get('protocol') == 'tcp' and rule.get('port_range') and
+                    len(rule.get('port_range')) == 2 and
+                    rule.get('port_range')[0] == consecutive_start and
+                    rule.get('port_range')[1] == consecutive_end):
+
+                # Check that it's our auto-generated rule
+                description = rule.get('description', '')
+                if 'SkyPilot auto-generated' in description:
+                    merged_range_found = True
+                    print('Found merged port range rule: TCP '
+                          f'{consecutive_start}-{consecutive_end}')
+                    break
+
+        # Make sure port merging worked - now with a hard assertion
+        assert merged_range_found, (
+            f'Ports {consecutive_ports} were not merged into a single range '
+            f'rule {consecutive_start}-{consecutive_end}. '
+            'Port rule merging is not working as expected.')
 
     except Exception as e:
         import traceback
-        print(f"Error in test: {e}")
+        print(f'Error in test: {e}')
         print(traceback.format_exc())
-        pytest.fail(f"Error testing Lambda Cloud open_ports: {str(e)}")
+        pytest.fail(f'Error testing Lambda Cloud open_ports: {str(e)}')
 
     finally:
-        # Clean up the test ports we created, being careful to preserve pre-existing rules
+        # Clean up the test ports we created, being careful to preserve
+        # pre-existing rules
         if lambda_client is None:
-            print("Lambda client not initialized, skipping cleanup")
+            print('Lambda client not initialized, skipping cleanup')
         elif not initial_rules:
-            print("No initial rules were recorded, skipping cleanup for safety")
+            print('No initial rules were recorded, skipping cleanup for safety')
         else:
             try:
-                # We need to clean up manually since instance.cleanup_ports intentionally skips cleanup
-                # for Lambda Cloud (as firewall rules are global to the account)
+                # We need to clean up manually since instance.cleanup_ports
+                # intentionally skips cleanup for Lambda Cloud (as firewall
+                # rules are global to the account)
 
                 # Get all current rules
                 current_rules = lambda_client.list_firewall_rules()
 
-                # Create a set of "fingerprints" for initial rules for faster comparison
-                # Use a tuple of (protocol, source_network, port_range) as a fingerprint
+                # Create a set of "fingerprints" for initial rules for faster
+                # comparison.
+                # Use a tuple of (protocol, source_network, port_range) as a
+                # fingerprint.
                 initial_rule_fingerprints = set()
                 for rule in initial_rules:
                     # Convert port_range to a tuple so it can be hashed
@@ -914,7 +951,8 @@ def test_lambda_cloud_open_ports():
                                    rule.get('source_network'), port_range_tuple)
                     initial_rule_fingerprints.add(fingerprint)
 
-                # Identify rules that match our test ports and weren't in the initial set
+                # Identify rules that match our test ports and weren't in the
+                # initial set.
                 rules_to_remove = []
                 for rule in current_rules:
                     # Create fingerprint for this rule
@@ -927,7 +965,8 @@ def test_lambda_cloud_open_ports():
                     if fingerprint in initial_rule_fingerprints:
                         continue
 
-                    # Description check (all our rules should have SkyPilot in description)
+                    # Description check (all our rules should have SkyPilot in
+                    # description).
                     description = rule.get('description', '')
                     if 'SkyPilot auto-generated' not in description:
                         continue
@@ -939,7 +978,8 @@ def test_lambda_cloud_open_ports():
                             rule.get('port_range')[0] == single_port_int and
                             rule.get('port_range')[1] == single_port_int):
                         rules_to_remove.append(rule)
-                        print(f"Found test single port rule to clean up: TCP {single_port_int}")
+                        print(f'Found test single port rule to clean up: '
+                              f'TCP {single_port_int}')
 
                     # Check if this rule matches our port range
                     elif (rule.get('protocol') == 'tcp' and
@@ -948,12 +988,36 @@ def test_lambda_cloud_open_ports():
                           rule.get('port_range')[0] == port_range_start and
                           rule.get('port_range')[1] == port_range_end):
                         rules_to_remove.append(rule)
-                        print(f"Found test port range rule to clean up: TCP {port_range_start}-{port_range_end}")
+                        print(f'Found test port range rule to clean up: '
+                              f'TCP {port_range_start}-{port_range_end}')
+
+                    # Check if this rule matches our consecutive ports
+                    # (either merged or individual)
+                    elif (rule.get('protocol') == 'tcp' and
+                          rule.get('port_range') and
+                          len(rule.get('port_range')) == 2):
+                        port_start = rule.get('port_range')[0]
+                        port_end = rule.get('port_range')[1]
+
+                        # Check if it's the merged range
+                        if (port_start == consecutive_start and
+                                port_end == consecutive_end):
+                            rules_to_remove.append(rule)
+                            print(
+                                f'Found merged consecutive ports rule to clean up: '
+                                f'TCP {consecutive_start}-{consecutive_end}')
+
+                        # Check if it's an individual port from our consecutive
+                        # range.
+                        elif (port_start == port_end and consecutive_start <=
+                              port_start <= consecutive_end):
+                            rules_to_remove.append(rule)
+                            print(f'Found individual consecutive port rule to '
+                                  f'clean up: TCP {port_start}')
 
                 if rules_to_remove:
-                    print(
-                        f"Cleaning up {len(rules_to_remove)} test firewall rule(s)"
-                    )
+                    print(f'Cleaning up {len(rules_to_remove)} test firewall '
+                          'rule(s)')
 
                     # Build rule list without our test rules
                     api_rules = []
@@ -996,9 +1060,9 @@ def test_lambda_cloud_open_ports():
                         data=data,
                         headers=lambda_client.headers,
                     )
-                    print("Cleanup completed successfully")
+                    print('Cleanup completed successfully')
                 else:
-                    print("No matching new rules found to clean up")
+                    print('No matching new rules found to clean up')
             except Exception as e:
-                print(f"Warning: Failed to clean up test firewall rule: {e}")
+                print(f'Warning: Failed to clean up test firewall rule: {e}')
                 # Don't fail the test if cleanup fails
