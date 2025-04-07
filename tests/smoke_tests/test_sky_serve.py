@@ -246,12 +246,12 @@ def _check_replica_in_status(name: str,
     if timeout_seconds > 0:
         # Create a timeout mechanism that will wait up to timeout_seconds
         check_cmd = (
-            'start_time=$(date +%s); '
+            f'start_time=$(date +%s); '
             f'timeout={timeout_seconds}; '  # Use the provided timeout
-            'while true; do '
-            '    s=$(sky serve status {name}); '
-            '    echo "$s"; '
-            '    all_conditions_met=true; ')
+            f'while true; do '
+            f'    s=$(sky serve status {name}); '
+            f'    echo "$s"; '
+            f'    all_conditions_met=true; ')
 
         # Add each condition to the check
         for condition in check_conditions:
