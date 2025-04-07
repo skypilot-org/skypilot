@@ -601,6 +601,17 @@ def _configure_fuse_mounting(provider_config: Dict[str, Any]) -> None:
         if e.status == 409:
             logger.info('_configure_fuse_mounting: DaemonSet already exists '
                         f'in namespace {fuse_proxy_namespace!r}')
+            existing_ds = kubernetes.apps_api(
+                context).read_namespaced_daemon_set(
+                    daemonset['metadata']['name'], fuse_proxy_namespace)
+            ds_image = daemonset['spec']['template']['spec']['containers'][0][
+                'image']
+            if existing_ds.spec.template.spec.containers[0].image != ds_image:
+                logger.info(
+                    '_configure_fuse_mounting: Updating DaemonSet image.')
+                kubernetes.apps_api(context).patch_namespaced_daemon_set(
+                    daemonset['metadata']['name'], fuse_proxy_namespace,
+                    daemonset)
         elif e.status == 403 or e.status == 401:
             logger.error('SkyPilot does not have permission to create '
                          'fusermount-server DaemonSet in namespace '
