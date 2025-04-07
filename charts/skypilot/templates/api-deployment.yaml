@@ -30,7 +30,7 @@ spec:
         {{- with .Values.securityContext }}
         securityContext:
           {{- toYaml . | nindent 10 }}
-        {{- end }}        
+        {{- end }}
         resources:
           {{- toYaml .Values.apiService.resources | nindent 10 }}
         env:
@@ -123,6 +123,10 @@ spec:
       initContainers:
       {{- if .Values.awsCredentials.enabled }}
       - name: create-aws-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         image: {{ .Values.apiService.image }}
         command: ["/bin/sh", "-c"]
         args:
@@ -154,6 +158,10 @@ spec:
       {{- end }}
       {{- if .Values.gcpCredentials.enabled }}
       - name: setup-gcp-credentials
+        {{- with .Values.securityContext }}
+        securityContext:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
         image: google/cloud-sdk:latest
         command: ["/bin/sh", "-c"]
         env:
