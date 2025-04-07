@@ -235,7 +235,7 @@ AWS
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-To set up AWS credentials, log into the AWS console and `create an access key for yourself <https://docs.aws.amazon.com/IAM/latest/UserGuide/access-key-self-managed.html#Using_CreateAccessKey>`_. If you don't see the "Security credentials link", you may be using SSO - see :ref:`aws-sso`.
+To set up AWS credentials, log into the AWS console and `create an access key for yourself <https://docs.aws.amazon.com/IAM/latest/UserGuide/access-key-self-managed.html#Using_CreateAccessKey>`_. If you don't see the "Security credentials" link shown in the AWS instructions, you may be using SSO - see :ref:`aws-sso`.
 
 Now configure your credentials.
 

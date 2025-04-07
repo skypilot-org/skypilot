@@ -12,7 +12,7 @@ Using AWS SSO
 `AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (Successor to AWS Single Sign-On, or SSO) is supported.
 
 .. warning::
-  SSO login *will not work across multiple clouds*. If you use multiple clouds, you should **LINK ME** :ref:`set up a dedicated user and credentials <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
+  SSO login *will not work across multiple clouds*. If you use multiple clouds, you should :ref:`set up a dedicated user and credentials <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
 To use it, ensure that your machine `has AWS CLI V2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_ (by default, ``pip install skypilot[aws]`` installs V1; V2 cannot be installed via pip).
 
