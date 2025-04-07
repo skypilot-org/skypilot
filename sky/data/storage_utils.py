@@ -227,6 +227,9 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
+    # Fail fast if the source is a file.
+    if os.path.isfile(expand_src_dir_path):
+        raise ValueError(f'{src_dir_path} is a file, not a directory.')
     if os.path.exists(skyignore_path):
         logger.debug(f'  {colorama.Style.DIM}'
                      f'Excluded files to sync to cluster based on '
