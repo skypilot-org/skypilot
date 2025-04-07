@@ -132,7 +132,7 @@ its performance requirements and size of the data.
    * - Disk Size
      - |:white_check_mark:| No disk size requirements [3]_ .
      - |:yellow_circle:| VM disk size must be greater than the size of the bucket.
-     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk. 
+     - |:yellow_circle:| No disk size requirements, but cached data needs to fit on disk.
 
 .. [1] ``MOUNT`` mode does not support the full POSIX interface and some file
     operations may fail. Most notably, random writes and append operations are
@@ -170,7 +170,7 @@ MOUNT_CACHED mode in detail
 to provide a virtual filesystem that is asynchronously synced with the bucket.
 Calling :code:`close()` does not guarantee that the file is written to the bucket.
 rclone will sync written files back to the bucket asynchronously in the order they were written.
-The local filesystem should be fully consistent, but a bucket using 
+The local filesystem should be fully consistent, but a bucket using
 `MOUNT_CACHED` on multiple nodes may only be eventually consistent.
 
 Important considerations for :code:`MOUNT_CACHED` mode:
@@ -181,7 +181,7 @@ Important considerations for :code:`MOUNT_CACHED` mode:
 * The write performance depends on the disk tier used for caching - faster disks provide better performance.
 
 Files only begin uploading after they are closed by all processes.
-When a task completes, SkyPilot ensures all cached data is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
+When a task completes, SkyPilot ensures all cached data from the `run` section of the SkyPilot YAML is successfully uploaded to the remote bucket before marking the task as finished. This guarantees that all task outputs are safely stored in cloud storage, even if the task finished execution before uploads completed. For long-running tasks with frequent writes, this may result in additional time spent flushing the cache after the main computation has finished.
 
 
 Common patterns
@@ -269,7 +269,7 @@ workers running on different nodes.
 Storing model checkpoints
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
-:code:`MOUNT_CACHED` mode can efficiently store large model checkpoints in a cloud bucket 
+:code:`MOUNT_CACHED` mode can efficiently store large model checkpoints in a cloud bucket
 without blocking the training loop.
 
 **💡 Example use case**: Saving model checkpoints to a cloud bucket.
