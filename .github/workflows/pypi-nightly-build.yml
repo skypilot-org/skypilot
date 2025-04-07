@@ -102,9 +102,18 @@ jobs:
           attempt=0
 
           while [ $attempt -lt $max_attempts ]; do
-            status=$(curl -s -H "Authorization: Bearer $BUILDKITE_TOKEN" \
-              "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds/$build_number" | \
-              jq -r '.state')
+            response=$(curl -s -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds/$build_number")
+
+            # Check if response contains only an error message
+            if [ $(echo "$response" | jq 'has("message") and length == 1') == "true" ]; then
+              error_message=$(echo "$response" | jq -r '.message')
+              echo "Error from Buildkite API: $error_message"
+              echo "::set-output name=build_status::failure"
+              exit 1
+            fi
+
+            status=$(echo "$response" | jq -r '.state')
 
             case $status in
               "passed")
