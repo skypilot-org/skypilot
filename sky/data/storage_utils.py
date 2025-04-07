@@ -18,12 +18,6 @@ from sky.utils import log_utils
 
 logger = sky_logging.init_logger(__name__)
 
-_FILE_EXCLUSION_FROM_GITIGNORE_FAILURE_MSG = (
-    f'{colorama.Fore.YELLOW}Warning: Files/dirs '
-    'specified in .gitignore will be uploaded '
-    'to the cloud storage for {path!r}'
-    'due to the following error: {error_msg!r}')
-
 _USE_SKYIGNORE_HINT = (
     'To avoid using .gitignore, you can create a .skyignore file instead.')
 
@@ -172,7 +166,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     submodules = submodules_output.stdout.split('\0')[:-1]
 
     # The empty string is the relative reference to the src_dir_path.
-    all_git_repos = ['.'] + [
+    all_git_repos = [''] + [
         # We only care about submodules that are a subdirectory of src_dir_path.
         submodule for submodule in submodules if not submodule.startswith('../')
     ]
@@ -208,7 +202,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 
         for item in output_list:
 
-            if repo == '.' and item == './':
+            if repo == '' and item == './':
                 logger.warning(f'{src_dir_path} is within a git repo, but the '
                                'entire directory is ignored by git. We will '
                                'ignore all git exclusions. '
@@ -229,7 +223,7 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 def get_excluded_files(src_dir_path: str) -> List[str]:
     # TODO: this could return a huge list of files,
     # should think of ways to optimize.
-    """ List files and directories to be excluded."""
+    """List files and directories to be excluded."""
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
@@ -279,12 +273,22 @@ def zip_files_and_folders(items: List[str],
                     zipf.write(item)
                 elif os.path.isdir(item):
                     for root, dirs, files in os.walk(item, followlinks=False):
+                        # Modify dirs in-place to control os.walk()'s traversal
+                        # behavior. This filters out excluded directories BEFORE
+                        # os.walk() visits the files and sub-directories under
+                        # them, preventing traversal into any excluded directory
+                        # and its contents.
+                        # Note: dirs[:] = ... is required for in-place
+                        # modification.
+                        dirs[:] = [
+                            d for d in dirs
+                            if os.path.join(root, d) not in excluded_files
+                        ]
+
                         # Store directory entries (important for empty
                         # directories)
                         for dir_name in dirs:
                             dir_path = os.path.join(root, dir_name)
-                            if dir_path in excluded_files:
-                                continue
                             # If it's a symlink, store it as a symlink
                             if os.path.islink(dir_path):
                                 _store_symlink(zipf, dir_path, is_dir=True)
