@@ -210,10 +210,6 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
                 return []
 
             to_be_excluded = os.path.join(repo, item)
-            if item.endswith('/'):
-                # aws s3 sync and gsutil rsync require * to exclude
-                # files/dirs under the specified directory.
-                to_be_excluded += '*'
 
             excluded_list.append(to_be_excluded)
 
@@ -223,21 +219,41 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
 def get_excluded_files(src_dir_path: str) -> List[str]:
     # TODO: this could return a huge list of files,
     # should think of ways to optimize.
-    """List files and directories to be excluded."""
+    """List files and directories to be excluded.
+
+    Args:
+        src_dir_path (str): The path to the source directory.
+
+    Returns:
+        A list of relative paths to files and directories to be excluded from
+        the source directory. For all directories, a tailing '/*' is added to
+        exclude all contents under the directory.
+    """
+    assert os.path.isdir(src_dir_path), src_dir_path
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
+
     if os.path.exists(skyignore_path):
         logger.debug(f'  {colorama.Style.DIM}'
                      f'Excluded files to sync to cluster based on '
                      f'{constants.SKY_IGNORE_FILE}.'
                      f'{colorama.Style.RESET_ALL}')
-        return get_excluded_files_from_skyignore(src_dir_path)
-    logger.debug(f'  {colorama.Style.DIM}'
-                 f'Excluded files to sync to cluster based on '
-                 f'{constants.GIT_IGNORE_FILE}.'
-                 f'{colorama.Style.RESET_ALL}')
-    return get_excluded_files_from_gitignore(src_dir_path)
+        excluded_paths = get_excluded_files_from_skyignore(src_dir_path)
+    else:
+        logger.debug(f'  {colorama.Style.DIM}'
+                     f'Excluded files to sync to cluster based on '
+                     f'{constants.GIT_IGNORE_FILE}.'
+                     f'{colorama.Style.RESET_ALL}')
+        excluded_paths = get_excluded_files_from_gitignore(src_dir_path)
+    for i, excluded_path in enumerate(excluded_paths):
+        if (excluded_path.endswith('/') or
+                os.path.isdir(os.path.join(src_dir_path, excluded_path))):
+            # aws s3 sync and gsutil rsync require * to exclude
+            # files/dirs under the specified directory.
+            excluded_paths[i] = excluded_path.rstrip('/') + '/*'
+
+    return excluded_paths
 
 
 def zip_files_and_folders(items: List[str],
