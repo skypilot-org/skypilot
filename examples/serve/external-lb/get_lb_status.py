@@ -6,7 +6,7 @@ from rich import print as rp
 
 import sky
 
-# st = sky.serve.status('llmtest4')
+# st = sky.serve.status('skysgl2')
 # st = sky.client.sdk.get(st)[0]
 # rp('Replicas:')
 # for r in st['replica_info']:
@@ -19,16 +19,16 @@ import sky
 
 external_lb_info = [
     {
-        'endpoint': 'http://3.15.188.113:8000'
+        'endpoint': 'http://18.118.154.134:8000'
     },
     {
-        'endpoint': 'http://13.115.68.125:8000'
+        'endpoint': 'http://13.231.128.89:8000'
     },
     # {
-    #     'endpoint': 'http://3.84.5.14:9002'
+    #     'endpoint': 'http://54.147.216.103:9002'
     # }
 ]
-with open('@temp/result_queue_size_q72_sky_sgl.txt', 'w') as f:
+with open('@temp/result_queue_size_q72_sky_sgl_v3.txt', 'w') as f:
     while True:
         lb2confs = {'time': time.time()}
         for lb in external_lb_info:

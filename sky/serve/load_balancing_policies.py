@@ -101,9 +101,9 @@ class LoadBalancingPolicy:
                                 request: 'fastapi.Request') -> None:
         pass
 
-    async def select_replica_from_subset(
-            self, request: 'fastapi.Request',
-            available_replicas: List[str]) -> Optional[str]:
+    async def select_replica_from_subset(self, request: 'fastapi.Request',
+                                         available_replicas: List[str],
+                                         **kwargs) -> Optional[str]:
         """Select a replica from a subset of available replicas.
 
         This is used when we want to select only from replicas that have
@@ -120,7 +120,7 @@ class LoadBalancingPolicy:
         self.ready_replicas = available_replicas
 
         # Select using the existing policy logic
-        replica = await self._select_replica(request)
+        replica = await self._select_replica(request, **kwargs)
 
         # Restore original replicas
         self.ready_replicas = original_replicas
@@ -145,9 +145,9 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         self.ready_replicas = ready_replicas
         self.index = 0
 
-    async def _select_replica(self,
-                              request: 'fastapi.Request') -> Optional[str]:
-        del request  # Unused.
+    async def _select_replica(self, request: 'fastapi.Request',
+                              **kwargs) -> Optional[str]:
+        del request, kwargs  # Unused.
         if not self.ready_replicas:
             return None
         ready_replica_url = self.ready_replicas[self.index %
@@ -175,9 +175,9 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
 
-    async def _select_replica(self,
-                              request: 'fastapi.Request') -> Optional[str]:
-        del request  # Unused.
+    async def _select_replica(self, request: 'fastapi.Request',
+                              **kwargs) -> Optional[str]:
+        del request, kwargs  # Unused.
         if not self.ready_replicas:
             return None
         async with self.lock:
@@ -232,9 +232,9 @@ class ProximateFirstPolicy(LeastLoadPolicy, name='proximate_first'):
             self.replica2latency[url] = await _check_lb_latency(url)
         logger.info(f'Updated latencies: {self.replica2latency}')
 
-    async def _select_replica(self,
-                              request: 'fastapi.Request') -> Optional[str]:
-        del request  # Unused.
+    async def _select_replica(self, request: 'fastapi.Request',
+                              **kwargs) -> Optional[str]:
+        del request, kwargs  # Unused.
         if not self.ready_replicas:
             return None
 
@@ -335,8 +335,8 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
         await super().set_ready_replicas(ready_replicas)
         self._build_ring()
 
-    async def _select_replica(self,
-                              request: 'fastapi.Request') -> Optional[str]:
+    async def _select_replica(self, request: 'fastapi.Request',
+                              **kwargs) -> Optional[str]:
         if not self.ready_replicas:
             return None
 
@@ -345,7 +345,7 @@ class ConsistentHashingPolicy(LeastLoadPolicy, name='consistent_hashing'):
             logger.error(
                 f'No {self.hash_key} header found in request '
                 f'{_request_repr(request)}. Falling back to least load.')
-            return await super()._select_replica(request)
+            return await super()._select_replica(request, **kwargs)
 
         return await self._select_replica_from_key(key)
 
@@ -407,8 +407,8 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
                 await self.tree.remove_replica(replica)
         await super().set_ready_replicas(ready_replicas)
 
-    async def _select_replica(self,
-                              request: 'fastapi.Request') -> Optional[str]:
+    async def _select_replica(self, request: 'fastapi.Request',
+                              **kwargs) -> Optional[str]:
         if not self.ready_replicas:
             return None
         text = await _get_text(request)
@@ -416,17 +416,32 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             logger.warning(
                 f'No text found in request {_request_repr(request)}. '
                 'Falling back to least load.')
-            return await super()._select_replica(request)
+            return await super()._select_replica(request, **kwargs)
+        disabled_url = kwargs.get('disabled_url_in_low_match_rate', None)
+        cache_threshold = kwargs.get('cache_threshold', None)
         replica2load = {r: self.load_map.get(r, 0) for r in self.ready_replicas}
+        if len(text) < 1024:
+            replica2load.pop(disabled_url, None)
+            if not replica2load:
+                return None
+            return min(replica2load, key=replica2load.get)
         matched_text, replica = await self.tree.prefix_match(text, replica2load)
         matched_rate = len(matched_text) / len(text)
         logger.info(f'Matched rate: {matched_rate} for request '
                     f'{_request_repr(request)}.')
-        if matched_rate > self.config.cache_threshold:
+        if cache_threshold is None:
+            cache_threshold = self.config.cache_threshold
+        if matched_rate > cache_threshold:
+            # TODO(tian): Hack. Fix this.
             return replica
         logger.info('Falling back to least char count load. '
                     f'{self.tree.replica_char_count}')
-        return await self.tree.get_smallest_replica(self.ready_replicas)
+        replica2load.pop(disabled_url, None)
+        if not replica2load:
+            return None
+        return min(replica2load, key=replica2load.get)
+        return await self.tree.get_smallest_replica(self.ready_replicas,
+                                                    disabled_url)
 
     async def pre_execute_hook(self, replica_url: str,
                                request: 'fastapi.Request') -> None:

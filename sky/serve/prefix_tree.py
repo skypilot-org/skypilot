@@ -301,11 +301,13 @@ class PrefixTree:
                 replica = random.choice(min_load_replicas)
 
         # Update the last access time for the replica on this path.
-        if replica is not None:
-            reverse_node: Optional[PrefixTreeNode] = current_node
-            while reverse_node is not None:
-                await reverse_node.replica_access(replica)
-                reverse_node = await reverse_node.get_parent()
+        # NOTE(tian): Seems like we don't need this as this will be updated
+        # later in the insert function called by pre_execute_hook.
+        # if replica is not None:
+        #     reverse_node: Optional[PrefixTreeNode] = current_node
+        #     while reverse_node is not None:
+        #         await reverse_node.replica_access(replica)
+        #         reverse_node = await reverse_node.get_parent()
 
         return text[:current_idx], replica
 
@@ -419,19 +421,32 @@ class PrefixTree:
 
     async def get_smallest_replica(
             self,
-            available_replicas: Optional[List[str]] = None) -> Optional[str]:
+            available_replicas: Optional[List[str]] = None,
+            disabled_url: Optional[str] = None) -> Optional[str]:
         """Get the smallest replica in the tree."""
+        if disabled_url is not None:
+            logger.info(f'disabled_url: {disabled_url} in get_smallest_replica')
         async with self.tree_lock:
             if not self.replica_char_count:
                 return None
             available_replica_to_char_count: Mapping[str, Union[int, float]]
             if available_replicas is None:
-                available_replica_to_char_count = self.replica_char_count
+                if disabled_url is None:
+                    available_replica_to_char_count = self.replica_char_count
+                else:
+                    available_replica_to_char_count = {
+                        r: self.replica_char_count.get(r, float('inf'))
+                        for r in self.replica_char_count
+                        if r != disabled_url
+                    }
             else:
                 available_replica_to_char_count = {
                     r: self.replica_char_count.get(r, float('inf'))
                     for r in available_replicas
+                    if r != disabled_url
                 }
+            if not available_replica_to_char_count:
+                return None
             return min(available_replica_to_char_count.items(),
                        key=lambda x: x[1])[0]
 

@@ -18,6 +18,7 @@ import uvicorn
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
+from sky.serve import prefix_tree
 from sky.serve import serve_utils
 from sky.utils import common_utils
 
@@ -41,6 +42,7 @@ _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
 _USE_IE_QUEUE_INDICATOR = True
 _IE_QUEUE_PROBE_INTERVAL = 0.2
 _MIN_STEAL_INTERVAL = 1.0
+_MAX_CACHE_HIT_DELAY_TIMES = 3
 
 
 class QueueSizeFilter(logging.Filter):
@@ -148,14 +150,15 @@ class ClientPool:
                     self._available_replicas.remove(replica_url)
         return close_client_tasks
 
-    async def select_replica(self, request: fastapi.Request) -> Optional[str]:
+    async def select_replica(self, request: fastapi.Request,
+                             **kwargs) -> Optional[str]:
         async with self._lock:
             # Get available replicas (those with capacity)
             # Only select from replicas that have capacity
             if not self._available_replicas:
                 return None
             return await self._load_balancing_policy.select_replica_from_subset(
-                request, self._available_replicas)
+                request, self._available_replicas, **kwargs)
 
     async def empty(self) -> bool:
         async with self._lock:
@@ -253,6 +256,7 @@ class SkyServeLoadBalancer:
                 Defaults to 10.
             max_queue_size: Maximum size of the request queue. Defaults to 1000.
         """
+        self._url: Optional[str] = None
         self._app: fastapi.FastAPI = fastapi.FastAPI()
         self._controller_url: str = controller_url
         self._load_balancer_port: int = load_balancer_port
@@ -359,22 +363,25 @@ class SkyServeLoadBalancer:
                     logger.info(f'Available LB URLs: {all_lb_urls}')
                     close_client_tasks.extend(
                         await self._lb_pool.refresh_with_new_urls(all_lb_urls))
-                    await self._lb_pool.set_all_replicas_unavailable_except(
-                        await self._lbs_with_steal_requests())
-                    async with self._steal_requests_lock:
-                        available_lbs = await self._lb_pool.available_replicas()
-                        logger.info(f'LBs with steal requests: '
-                                    f'{self._lb_to_steal_requests}, '
-                                    f'Available LBs: {available_lbs}')
+                    # await self._lb_pool.set_all_replicas_unavailable_except(
+                    #     await self._lbs_with_steal_requests())
+                    # async with self._steal_requests_lock:
+                    #     available_lbs = (
+                    #         await self._lb_pool.available_replicas())
+                    #     logger.info(f'LBs with steal requests: '
+                    #                 f'{self._lb_to_steal_requests}, '
+                    #                 f'Available LBs: {available_lbs}')
 
             await asyncio.sleep(constants.LB_CONTROLLER_SYNC_INTERVAL_SECONDS)
             # Await those tasks after the interval to avoid blocking.
             await asyncio.gather(*close_client_tasks)
 
-    async def _proxy_request_to(
-            self, pool_to_use: ClientPool, proxy_request: httpx.Request,
-            client: httpx.AsyncClient, url: str, request: fastapi.Request,
-            extra_header: Dict[str, str]) -> fastapi.responses.Response:
+    async def _proxy_request_to(self, pool_to_use: ClientPool,
+                                proxy_request: httpx.Request,
+                                client: httpx.AsyncClient, url: str,
+                                request: fastapi.Request,
+                                extra_header: Dict[str, str],
+                                is_from_lb: bool) -> fastapi.responses.Response:
         """Proxy the request to the specified URL.
 
         Returns:
@@ -387,6 +394,9 @@ class SkyServeLoadBalancer:
         async def background_func():
             await proxy_response.aclose()
             await pool_to_use.post_execute_hook(url, request)
+            # Post execute hook for self LB here.
+            if not is_from_lb and self._url is not None:
+                await self._lb_pool.post_execute_hook(self._url, request)
 
         proxy_response.headers.update(extra_header)
         return fastapi.responses.StreamingResponse(
@@ -399,12 +409,20 @@ class SkyServeLoadBalancer:
                                        proxy_request: httpx.Request,
                                        client: httpx.AsyncClient, url: str,
                                        entry: RequestEntry,
-                                       extra_header: Dict[str, str]) -> None:
-        response = await self._proxy_request_to(pool_to_use, proxy_request,
-                                                client, url, entry.request,
-                                                extra_header)
-        entry.response_future.set_result(response)
-        entry.request_event.set()
+                                       extra_header: Dict[str, str],
+                                       is_from_lb: bool) -> None:
+        try:
+            response = await self._proxy_request_to(pool_to_use, proxy_request,
+                                                    client, url, entry.request,
+                                                    extra_header, is_from_lb)
+            entry.response_future.set_result(response)
+            entry.request_event.set()
+        except Exception as e:  # pylint: disable=broad-except
+            logger.error(f'Error when proxy request to {url}: '
+                         f'{common_utils.format_exception(e)}\n'
+                         f'  Traceback: {traceback.format_exc()}')
+            entry.response_future.set_exception(e)
+            entry.request_event.set()
 
     async def _handle_requests(self, url: str, entry: RequestEntry,
                                is_from_lb: bool) -> None:
@@ -413,6 +431,9 @@ class SkyServeLoadBalancer:
         try:
             pool_to_use = self._lb_pool if is_from_lb else self._replica_pool
             await pool_to_use.pre_execute_hook(url, entry.request)
+            # Record the cache for self LB here.
+            if not is_from_lb and self._url is not None:
+                await self._lb_pool.pre_execute_hook(self._url, entry.request)
             # We defer the get of the client here on purpose, for case when the
             # replica is ready in `_put_request_to_queue` but refreshed before
             # entering this function. In that case we will return an error here
@@ -449,7 +470,7 @@ class SkyServeLoadBalancer:
                     f'Select LB in region {lb_region} ({url})')
             coro = self._request_finish_callback(pool_to_use, proxy_request,
                                                  client, url, entry,
-                                                 extra_header)
+                                                 extra_header, is_from_lb)
             self._handle_request_tasks.append(self._loop.create_task(coro))
         except (httpx.RequestError, httpx.HTTPStatusError) as e:
             logger.error(f'Error when proxy request to {url}: '
@@ -481,6 +502,11 @@ class SkyServeLoadBalancer:
         assert self._loop is not None
         assert self._request_queue is not None
         logger.info('Starting request queue processor')
+        assert isinstance(self._lb_pool._load_balancing_policy,
+                          lb_policies.ProximateTreePolicy)
+        # cache_hit_delay_times = 0
+        cache_threshold = (
+            self._lb_pool._load_balancing_policy.config.cache_threshold)
         while True:
             await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
             try:
@@ -509,9 +535,14 @@ class SkyServeLoadBalancer:
                                     lb_url)
                                 logger.info(f'{lb_url} has no steal '
                                             'requests. Set it to unavailable.')
+                            # elif self._lb_to_steal_requests[lb_url][0] > 0:
+                            else:
+                                await self._lb_pool.set_replica_available(lb_url
+                                                                         )
+                                logger.info(f'{lb_url} has steal requests. '
+                                            'Set it to available.')
                     continue
 
-                # TODO(tian): Use dataclass to avoid this.
                 assert isinstance(entry, RequestEntry)
 
                 # TODO(tian): In this no replica case, if there is any replica
@@ -529,36 +560,31 @@ class SkyServeLoadBalancer:
                     entry.response_future.set_exception(exception)
                     entry.request_event.set()
 
-                # Attempt to find an available replica
-                ready_replica_url = await self._replica_pool.select_replica(
-                    entry.request)
-
-                if ready_replica_url is not None:
-                    # Process the request if a replica is available
-                    # Now we can safely remove it from the queue
-                    await self._request_queue.get_and_remove()
-                    try:
-                        logger.info(
-                            f'Processing queued request {entry.request.url} '
-                            f'from User to Replica {ready_replica_url}.')
-                        await self._handle_requests(ready_replica_url,
-                                                    entry,
-                                                    is_from_lb=False)
-                    except Exception as e:  # pylint: disable=broad-except
-                        # Set exception to propagate to the waiting handler
-                        entry.response_future.set_exception(e)
-                        entry.request_event.set()
-                    continue
                 # Let other LBs steal requests from this LB.
-                lbs = await self._lbs_with_steal_requests()
-                if not lbs:
-                    continue
+                # lbs = await self._lbs_with_steal_requests()
+                # if not lbs:
+                #     continue
                 # TODO(tian): Maybe we can select from the local region LB and
                 # the remote region LB. Not necessarily to let them steal - some
                 # requests with high match rate might worth to wait for a while.
                 # And for low match rate, we can let them steal.
-                lb = await self._lb_pool.select_replica(entry.request)
-                if lb is not None:
+                # TODO(tian): Disable local region when there is any LB trying
+                # to steal.
+                lb_available_replicas = await self._lb_pool.available_replicas()
+                if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
+                    # It is a request from LB. Skip routing to another LB to
+                    # avoid bouncing back and forth.
+                    lb = None
+                else:
+                    logger.info('LB available replicas: '
+                                f'{lb_available_replicas}')
+                    lb = await self._lb_pool.select_replica(
+                        entry.request,
+                        disabled_url_in_low_match_rate=self._url,
+                        cache_threshold=cache_threshold)
+                # If the selected LB is not the same as the current LB, then
+                # we route it to another LB.
+                if lb is not None and lb != self._url:
                     await self._request_queue.get_and_remove()
                     try:
                         logger.info(
@@ -574,12 +600,72 @@ class SkyServeLoadBalancer:
                             logger.info(f'{lb} steals one '
                                         'request. Current steal requests: '
                                         f'{self._lb_to_steal_requests}')
+                            # if self._lb_to_steal_requests[lb][0] <= 0:
+                            #     await self._lb_pool.set_replica_unavailable(lb)
+                            #     logger.info(f'{lb} has no steal requests. '
+                            #                 'Set it to unavailable.')
                     except Exception as e:  # pylint: disable=broad-except
+                        logger.error(f'Error when processing queued request '
+                                     f'to LB {lb}: '
+                                     f'{common_utils.format_exception(e)}\n'
+                                     f'  Traceback: {traceback.format_exc()}')
                         entry.response_future.set_exception(e)
                         entry.request_event.set()
+                    continue
+
+                # Either because of there is no LBs stealing requests, or
+                # because the match rate is high so the local region is
+                # selected, we attempt to find an available replica here.
+                ready_replica_url = await self._replica_pool.select_replica(
+                    entry.request)
+
+                if ready_replica_url is not None:
+                    # Process the request if a replica is available
+                    # Now we can safely remove it from the queue
+                    await self._request_queue.get_and_remove()
+                    try:
+                        logger.info(
+                            f'Processing queued request {entry.request.url} '
+                            f'from User to Replica {ready_replica_url}.')
+                        await self._handle_requests(ready_replica_url,
+                                                    entry,
+                                                    is_from_lb=False)
+                    except Exception as e:  # pylint: disable=broad-except
+                        logger.error(f'Error when processing queued request '
+                                     f'to Replica {ready_replica_url}: '
+                                     f'{common_utils.format_exception(e)}\n'
+                                     f'  Traceback: {traceback.format_exc()}')
+                        # Set exception to propagate to the waiting handler
+                        entry.response_future.set_exception(e)
+                        entry.request_event.set()
+                    continue
+
+                # If a request stuck at head of queue for too long (happens
+                # due to we have a cache hit larger than threshold on local
+                # region), we put it to the back of the queue.
+                # if is_cache_hit and lb == self._url:
+                #     cache_hit_delay_times += 1
+                #     if cache_hit_delay_times > _MAX_CACHE_HIT_DELAY_TIMES:
+                #         # Put it to the back of the queue if it is delayed by
+                #         # a cache hit too much times.
+                #         await self._request_queue.get_and_remove()
+                #         await self._request_queue.put(entry)
+                #         logger.info(f'Put request {entry.request.url} to the '
+                #                   'back of the queue due to cache hit delay.')
+                #         cache_hit_delay_times = 0
+
+                # We decrease the cache threshold if it is a cache hit and there
+                # is some replica requesting requests.
+                if lb is not None and lb == self._url and len(
+                        lb_available_replicas) > 1:
+                    logger.info('Decreasing cache threshold from '
+                                f'{cache_threshold} to {cache_threshold / 2}')
+                    cache_threshold /= 2
+
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in queue processor: '
-                             f'{common_utils.format_exception(e)}')
+                             f'{common_utils.format_exception(e)}\n'
+                             f'  Traceback: {traceback.format_exc()}')
 
     async def _put_request_to_queue(
             self, request: fastapi.Request) -> fastapi.responses.Response:
@@ -637,8 +723,9 @@ class SkyServeLoadBalancer:
                 # Barrier entry for steal requests.
                 if isinstance(entry, StealBarrierEntry):
                     lb_url = entry
-                    num -= self._lb_to_steal_requests[lb_url][
-                        lb_to_barrier_idx[lb_url]]
+                    num -= max(
+                        0, self._lb_to_steal_requests[lb_url][
+                            lb_to_barrier_idx[lb_url]])
                     lb_to_barrier_idx[lb_url] += 1
                     continue
                 assert isinstance(entry, RequestEntry)
@@ -698,6 +785,10 @@ class SkyServeLoadBalancer:
                 if not self._replica_pool.ready_replicas():
                     continue
                 steal_targets, self_url = self._steal_targets()
+                if self._url is None:
+                    self._url = self_url
+                else:
+                    assert self._url == self_url
                 # logger.info(f'Steal targets: {steal_targets}, '
                 #             f'self_url: {self_url}')
                 # It is possible that self_url is not ready in the LB
@@ -739,7 +830,8 @@ class SkyServeLoadBalancer:
                                     f'from {steal_target}.')
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in request stealing loop: '
-                             f'{common_utils.format_exception(e)}')
+                             f'{common_utils.format_exception(e)}\n'
+                             f'  Traceback: {traceback.format_exc()}')
 
     async def _steal_request(
             self, steal_request: fastapi.Request) -> fastapi.responses.Response:
@@ -830,7 +922,8 @@ class SkyServeLoadBalancer:
                     return f.samples[0].value, replica
         except Exception as e:  # pylint: disable=broad-except
             logger.error(f'Error probing inference engine queue of {replica}: '
-                         f'{common_utils.format_exception(e)}')
+                         f'{common_utils.format_exception(e)}\n'
+                         f'  Traceback: {traceback.format_exc()}')
         return None, replica
 
     async def _probe_ie_queue(self) -> None:
@@ -956,6 +1049,7 @@ class SkyServeLoadBalancer:
 
         logger.info('SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}')
+        logger.info('Started lb in version 2.')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',
