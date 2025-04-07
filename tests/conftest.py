@@ -373,7 +373,7 @@ def setup_docker_container(request):
         logger.info('Waiting for container to be ready...')
         url = docker_utils.get_api_server_endpoint_inside_docker()
         health_endpoint = f'{url}/api/health'
-        max_retries = 20
+        max_retries = 40
         retry_count = 0
 
         while retry_count < max_retries:
