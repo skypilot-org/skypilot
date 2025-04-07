@@ -52,15 +52,95 @@ jobs:
           --wheel
           --outdir dist/
           .
+
+      # Trigger Buildkite smoke tests
+      - name: Trigger Buildkite Smoke Tests
+        id: trigger_buildkite
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+        run: |
+          data='{
+            "commit": "${{ github.sha }}",
+            "branch": "master",
+            "message": "nightly-build-pypi",
+            "ignore_pipeline_branch_filters": true,
+            "env": {
+              "ARGS": "--aws"
+            }
+          }'
+
+          response=$(curl -w "%{http_code}" -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+            -X POST "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds" \
+            -d "$data")
+
+          http_code=$(echo "$response" | tail -n 1)
+          response_body=$(echo "$response" | head -n -1)
+
+          if [ "$http_code" != "201" ]; then
+            echo "Error: Buildkite API returned HTTP status code $http_code"
+            echo "Response body:"
+            echo "$response_body"
+            exit 1
+          fi
+
+          build_url=$(echo "$response_body" | jq -r '.web_url')
+          build_number=$(echo "$response_body" | jq -r '.number')
+
+          echo "Build triggered successfully (HTTP status code: $http_code)"
+          echo "Build URL: $build_url"
+          echo "::set-output name=build_url::$build_url"
+          echo "::set-output name=build_number::$build_number"
+
+      # Wait for Buildkite build to complete (2 hour timeout)
+      - name: Wait for Buildkite build completion
+        id: wait_buildkite
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+        run: |
+          build_number=${{ steps.trigger_buildkite.outputs.build_number }}
+          max_attempts=240  # 2 hours with 30-second intervals (240 attempts = 120 minutes)
+          attempt=0
+
+          while [ $attempt -lt $max_attempts ]; do
+            status=$(curl -s -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds/$build_number" | \
+              jq -r '.state')
+
+            case $status in
+              "passed")
+                echo "Buildkite build succeeded"
+                echo "::set-output name=build_status::success"
+                exit 0
+                ;;
+              "failed"|"canceled"|"blocked")
+                echo "Buildkite build failed with status: $status"
+                echo "::set-output name=build_status::failure"
+                exit 1
+                ;;
+              *)
+                echo "Buildkite build status: $status - waiting..."
+                sleep 30
+                attempt=$((attempt+1))
+                ;;
+            esac
+          done
+
+          echo "Timeout waiting for Buildkite build to complete (2 hour limit reached)"
+          echo "::set-output name=build_status::timeout"
+          exit 1
+
+      # Publish to PyPI only if Buildkite build succeeded
       - name: Publish distribution to Test PyPI
+        if: steps.wait_buildkite.outputs.build_status == 'success'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+
       - name: Publish distribution to PyPI
+        if: steps.wait_buildkite.outputs.build_status == 'success'
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
-
