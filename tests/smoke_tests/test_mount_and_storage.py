@@ -614,8 +614,12 @@ exclude.py
             f'sky logs {name} 1 --status',  # Ensure the job succeeded
 
             # Test with sky jobs launch
-            f'sky jobs launch -y --name {jobs_name} --workdir {temp_dir} {yaml_path}',
-            f'sky jobs logs {jobs_name} --status',  # Ensure the job succeeded
+            f'sky jobs launch -y -n {jobs_name} --workdir {temp_dir} {yaml_path}',
+            smoke_tests_utils.
+            get_cmd_wait_until_managed_job_status_contains_matching_job_name(
+                job_name=f'{jobs_name}',
+                job_status=[sky.ManagedJobStatus.SUCCEEDED],
+                timeout=60),
         ]
 
         teardown_commands = [
