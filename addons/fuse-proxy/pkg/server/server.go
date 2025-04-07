@@ -195,7 +195,7 @@ func (s *Server) ensureFuseDevice(nspath string) error {
 	)
 
 	if output, err := chmodCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to set permissions on /dev/fuse: %v, output: %s", err, string(output))
+		return fmt.Errorf("failed to set permissions on /dev/fuse: %w, output: %s", err, string(output))
 	}
 
 	return nil
