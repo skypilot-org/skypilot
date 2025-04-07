@@ -36,7 +36,7 @@ SkyPilot **is easy to use for AI users**:
 
 SkyPilot **unifies multiple clusters, clouds, and hardware**:
 
-- One interface to use reserved GPUs, Kubernetes clusters, or 15+ clouds
+- One interface to use reserved GPUs, Kubernetes clusters, or 16+ clouds
 - :ref:`Flexible provisioning <auto-failover>` of GPUs, TPUs, CPUs, with smart failover
 - :ref:`Team deployment <sky-api-server>` and resource sharing
 

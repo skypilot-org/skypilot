@@ -112,6 +112,8 @@ def _try_request_with_backoff(method: str,
             response = requests.get(url, headers=headers)
         elif method == 'post':
             response = requests.post(url, headers=headers, data=data)
+        elif method == 'put':
+            response = requests.put(url, headers=headers, data=data)
         else:
             raise ValueError(f'Unsupported requests method: {method}')
         # If rate limited, wait and try again
@@ -249,4 +251,86 @@ class LambdaCloudClient:
         response = _try_request_with_backoff('get',
                                              f'{API_ENDPOINT}/instance-types',
                                              headers=self.headers)
+        return response.json().get('data', {})
+
+    def list_firewall_rules(self) -> List[Dict[str, Any]]:
+        """List firewall rules."""
+        response = _try_request_with_backoff('get',
+                                             f'{API_ENDPOINT}/firewall-rules',
+                                             headers=self.headers)
         return response.json().get('data', [])
+
+    def create_firewall_rule(self,
+                             port_range: List[int],
+                             protocol: str = 'tcp',
+                             description: str = '') -> Dict[str, Any]:
+        """Create a firewall rule.
+
+        Args:
+            port_range: Port range as [min_port, max_port]. For a single port,
+              use [port, port].
+            protocol: Protocol ('tcp', 'udp', 'icmp', or 'all').
+            description: Description for the rule.
+
+        Returns:
+            The created firewall rule.
+        """
+        # First, get all existing rules
+        existing_rules = self.list_firewall_rules()
+
+        # Convert existing rules to the format expected by the API
+        rule_list = []
+        for rule in existing_rules:
+            if rule.get('protocol') and rule.get('source_network'):
+                api_rule = {
+                    'protocol': rule.get('protocol'),
+                    'source_network': rule.get('source_network'),
+                    'description': rule.get('description', '')
+                }
+
+                # Add port_range for non-icmp protocols
+                if rule.get('protocol') != 'icmp' and rule.get('port_range'):
+                    api_rule['port_range'] = rule.get('port_range')
+
+                rule_list.append(api_rule)
+
+        # Add our new rule
+        new_rule: Dict[str, Any] = {
+            'protocol': protocol,
+            'source_network': '0.0.0.0/0',  # Allow from any IP address
+            'description': description or
+                           ('SkyPilot auto-generated rule for port '
+                            f'{port_range[0]}-{port_range[1]}/{protocol}')
+        }
+
+        # Add port_range for non-icmp protocols
+        if protocol != 'icmp':
+            new_rule['port_range'] = port_range
+
+        # Check if this rule already exists to avoid duplicates
+        rule_exists = False
+        for rule in rule_list:
+            if (rule.get('protocol') == protocol and
+                    rule.get('source_network') == '0.0.0.0/0'):
+                if protocol != 'icmp':
+                    if rule.get('port_range') == port_range:
+                        rule_exists = True
+                        break
+                else:
+                    rule_exists = True
+                    break
+
+        # Only add the rule if it doesn't already exist
+        if not rule_exists:
+            rule_list.append(new_rule)
+
+        # Create a data structure that matches the API schema
+        data = json.dumps({'data': rule_list})
+
+        response = _try_request_with_backoff(
+            'put',  # Using PUT instead of POST as per API documentation
+            f'{API_ENDPOINT}/firewall-rules',
+            data=data,
+            headers=self.headers,
+        )
+        return response.json().get('data', {})

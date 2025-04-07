@@ -260,6 +260,12 @@ def _request_execution_wrapper(request_id: str,
                 f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
+            # Kill all children processes related to this request.
+            # Each executor handles a single request, so we can safely kill all
+            # children processes related to this request.
+            # This is required as python does not pass the KeyboardInterrupt
+            # to the threads that are not main thread.
+            subprocess_utils.kill_children_processes()
             _restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
@@ -465,7 +471,7 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
         sub_procs.append(queue_server)
-        mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
+        mp_queue.wait_for_queues_to_be_ready(queue_names, queue_server, port)
 
     logger.info('Request queues created')
 

@@ -253,7 +253,8 @@ def _async_call_or_wait(request_id: str, async_call: bool,
                     fg='green')
         click.echo(
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Check logs with: '
-            f'sky api logs {short_request_id}{colorama.Style.RESET_ALL}\n'
+            f'{ux_utils.BOLD}sky api logs {short_request_id}'
+            f'{colorama.Style.RESET_ALL}\n'
             f'{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}Or, visit: '
             f'{server_common.get_server_url()}/api/stream?'
             f'request_id={short_request_id}'
@@ -3061,10 +3062,15 @@ def _down_or_stop_clusters(
                 'Letting --all take effect.')
         # We should not remove controllers when --all is specified.
         # Otherwise, it would be very easy to accidentally delete a controller.
+
+        # do not select already stopped clusters for stop command.
+        # stopped clusters are still included for down or autostop commands.
         names = [
             record['name']
             for record in all_clusters
             if controller_utils.Controllers.from_name(record['name']) is None
+            and (down or idle_minutes_to_autostop is not None or
+                 record['status'] != status_lib.ClusterStatus.STOPPED)
         ]
 
     clusters = names
@@ -3900,8 +3906,11 @@ def jobs_launch(
 
     common_utils.check_cluster_name_is_valid(name)
 
-    click.secho(f'Managed job {dag.name!r} will be launched on (estimated):',
-                fg='yellow')
+    # Optimize info is only show if _need_confirmation.
+    if not yes:
+        click.secho(
+            f'Managed job {dag.name!r} will be launched on (estimated):',
+            fg='yellow')
 
     request_id = managed_jobs.launch(dag, name, _need_confirmation=not yes)
     job_id_handle = _async_call_or_wait(request_id, async_call,
@@ -3943,6 +3952,7 @@ def jobs_launch(
               required=False,
               help='Show jobs from all users.')
 @click.option('--all',
+              '-a',
               default=False,
               is_flag=True,
               required=False,
@@ -4394,6 +4404,7 @@ def serve_up(
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
+    serve_lib.validate_service_task(task)
 
     click.secho('Each replica will use the following resources (estimated):',
                 fg='cyan')
@@ -4493,6 +4504,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
     )
     click.secho('Service spec:', fg='cyan')
     click.echo(task.service)
+    serve_lib.validate_service_task(task)
 
     click.secho('New replica will use the following resources (estimated):',
                 fg='cyan')

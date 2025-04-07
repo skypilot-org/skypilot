@@ -280,6 +280,8 @@ class DO(clouds.Cloud):
         return True, None
 
     def get_credential_file_mounts(self) -> Dict[str, str]:
+        if do_utils.CREDENTIALS_PATH is None:
+            return {}
         if not os.path.exists(os.path.expanduser(do_utils.CREDENTIALS_PATH)):
             return {}
         return {
