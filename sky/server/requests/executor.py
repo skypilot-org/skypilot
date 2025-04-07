@@ -47,6 +47,7 @@ from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import timeline
 
 if typing.TYPE_CHECKING:
