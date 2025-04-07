@@ -3,7 +3,7 @@
 Troubleshooting SkyPilot API Server
 ===================================
 
-If you're unable to run SkyPilot API server, this guide will help you debug common issues.
+This guide includes tips for troubleshooting common issues with API server deployment.
 
 If this guide does not help resolve your issue, please reach out to us on `Slack <https://slack.skypilot.co>`_ or `GitHub <http://www.github.com/skypilot-org/skypilot>`_.
 
@@ -25,8 +25,8 @@ If the API server pod is pending, you can inspect the pending reason with:
 
 If the pending reason is ``FailedScheduling`` and the information indicates there is insufficient cpu/memory, you can either:
 
-- Adding more resources to the Kubernetes cluster, or
-- Using a smaller API server resources request, for example (change the cpu and memory to your desired values):
+- Add more resources to the Kubernetes cluster, or
+- Use a smaller API server resources request; for example (change the cpu and memory to your desired values):
 
 .. code-block:: bash
 
@@ -39,4 +39,4 @@ If the pending reason is ``FailedScheduling`` and the information indicates ther
 
 .. note::
 
-    API server requires at least 4 CPU cores and 8 GiB memory, setting lower values may cause degraded performance.
+    API server requires at least 4 CPU cores and 8 GiB memory. Setting lower values may cause degraded performance.
