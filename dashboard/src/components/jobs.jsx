@@ -40,6 +40,7 @@ import {
   RotateCwIcon,
   MonitorPlay,
   Filter,
+  PowerIcon,
 } from 'lucide-react';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { handleJobAction } from '@/data/connectors/jobs';
@@ -76,11 +77,36 @@ export function ManagedJobs() {
   const [activeTab, setActiveTab] = useState('active');
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
+  const [confirmationModal, setConfirmationModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null,
+  });
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
+  };
+
+  const handleRestartController = () => {
+    setConfirmationModal({
+      isOpen: true,
+      title: 'Restart Controller',
+      message: `Are you sure you want to restart the job controller?`,
+      onConfirm: async () => {
+        try {
+          await handleJobAction('restartcontroller', null, null, true);
+          // Only refresh after handleJobAction succeeds
+          if (refreshDataRef.current) {
+            refreshDataRef.current();
+          }
+        } finally {
+          setConfirmationModal({ ...confirmationModal, isOpen: false });
+        }
+      },
+    });
   };
 
   return (
@@ -116,9 +142,20 @@ export function ManagedJobs() {
             size="icon"
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright"
+            className="text-sky-blue hover:text-sky-blue-bright mr-2"
+            title="Refresh"
           >
             <RotateCwIcon className="h-5 w-5" />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={handleRestartController}
+            disabled={loading}
+            className="text-sky-blue hover:text-sky-blue-bright"
+            title="Restart Controller"
+          >
+            <PowerIcon className="h-5 w-5" />
           </Button>
         </div>
       </div>
@@ -127,6 +164,13 @@ export function ManagedJobs() {
         refreshInterval={20000}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+      />
+      <ConfirmationModal
+        isOpen={confirmationModal.isOpen}
+        onClose={() => setConfirmationModal({ ...confirmationModal, isOpen: false })}
+        onConfirm={confirmationModal.onConfirm}
+        title={confirmationModal.title}
+        message={confirmationModal.message}
       />
     </Layout>
   );
@@ -182,7 +226,7 @@ export function ManagedJobsTable({
     setLoading(false); // Stop loading for parent component
     setLocalLoading(false); // Stop loading locally
     setIsInitialLoad(false); // No longer initial load after first data fetch
-  }, [setLoading]); // Remove sortConfig from dependencies
+  }, [setLoading]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
