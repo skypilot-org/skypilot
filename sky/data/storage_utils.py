@@ -4,7 +4,7 @@ import os
 import pathlib
 import shlex
 import subprocess
-from typing import Any, Dict, List, Optional, TextIO, Union
+from typing import Any, Dict, List, Optional, Set, TextIO, Union
 import warnings
 import zipfile
 
@@ -71,7 +71,7 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
     """List files and patterns ignored by the .skyignore file
     in the given source directory.
     """
-    excluded_list: List[str] = []
+    excluded_list: Set[str] = set()
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
@@ -95,12 +95,12 @@ def get_excluded_files_from_skyignore(src_dir_path: str) -> List[str]:
                     for i in range(len(matching_files)):
                         matching_files[i] = os.path.relpath(
                             matching_files[i], expand_src_dir_path)
-                    excluded_list.extend(matching_files)
+                    excluded_list.update(matching_files)
     except IOError as e:
         logger.warning(f'Error reading {skyignore_path}: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
-    return excluded_list
+    return list(excluded_list)
 
 
 def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
@@ -111,8 +111,8 @@ def get_excluded_files_from_gitignore(src_dir_path: str) -> List[str]:
     This will also be run for all submodules under the src_dir_path.
 
     Returns:
-        List[str] containing files and patterns to be ignored.  Some of the
-        patterns include, **/mydir/*.txt, !myfile.log, or file-*/.
+        List[str] containing files and folders to be ignored. There won't be any
+        patterns.
     """
     expand_src_dir_path = os.path.expanduser(src_dir_path)
 
@@ -246,13 +246,6 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
                      f'{constants.GIT_IGNORE_FILE}.'
                      f'{colorama.Style.RESET_ALL}')
         excluded_paths = get_excluded_files_from_gitignore(src_dir_path)
-    for i, excluded_path in enumerate(excluded_paths):
-        if (excluded_path.endswith('/') or
-                os.path.isdir(os.path.join(src_dir_path, excluded_path))):
-            # aws s3 sync and gsutil rsync require * to exclude
-            # files/dirs under the specified directory.
-            excluded_paths[i] = excluded_path.rstrip('/') + '/*'
-
     return excluded_paths
 
 
@@ -283,8 +276,10 @@ def zip_files_and_folders(items: List[str],
                 item = os.path.expanduser(item)
                 if not os.path.isfile(item) and not os.path.isdir(item):
                     raise ValueError(f'{item} does not exist.')
-                excluded_files = set(
-                    [os.path.join(item, f) for f in get_excluded_files(item)])
+                excluded_files = set([
+                    os.path.join(item, f.rstrip('/'))
+                    for f in get_excluded_files(item)
+                ])
                 if os.path.isfile(item) and item not in excluded_files:
                     zipf.write(item)
                 elif os.path.isdir(item):
