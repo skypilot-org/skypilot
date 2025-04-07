@@ -21,7 +21,7 @@ def list_all_files(dir_path):
 
 if __name__ == '__main__':
     workdir = os.path.expanduser(sys.argv[1])
-    print(f"Workdir: {workdir}")
+    print(f'Workdir: {workdir}')
 
     # These files should be present (not excluded)
     expected_files = [
@@ -40,20 +40,19 @@ if __name__ == '__main__':
     ]
 
     all_files = list_all_files(workdir)
-    print("All files:", all_files)
+    print('All files:', all_files)
 
     # Check if expected files exist
     missing = [f for f in expected_files if f not in all_files]
     if missing:
-        print(f"ERROR: Expected files missing: {missing}")
+        print(f'ERROR: Expected files missing: {missing}')
         sys.exit(1)
 
     # Check if excluded files don't exist
     present = [f for f in excluded_files if f in all_files]
     if present:
-        print(f"ERROR: Excluded files present: {present}")
+        print(f'ERROR: Excluded files present: {present}')
         sys.exit(1)
 
-    print(
-        "SUCCESS: All expected files present and all excluded files absent")
+    print('SUCCESS: All expected files present and all excluded files absent')
     sys.exit(0)

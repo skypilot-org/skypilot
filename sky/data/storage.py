@@ -1616,9 +1616,26 @@ class S3Store(AbstractStore):
             # we exclude .git directory from the sync
             excluded_list = storage_utils.get_excluded_files(src_dir_path)
             excluded_list.append('.git/*')
+
+            # Process exclusion patterns to make them work correctly with aws
+            # s3 sync
+            processed_excludes = []
+            for excluded_path in excluded_list:
+                # Check if the path is a directory exclusion pattern
+                # For AWS S3 sync, directory patterns need to end with "/**" to
+                # exclude all contents
+                if (excluded_path.endswith('/') or os.path.isdir(
+                        os.path.join(src_dir_path, excluded_path.rstrip('/')))):
+                    # Remove any trailing slash and add '/**' to exclude all
+                    # contents
+                    processed_excludes.append(
+                        f'{excluded_path.rstrip("/")}/**')
+                else:
+                    processed_excludes.append(excluded_path)
+
             excludes = ' '.join([
                 f'--exclude {shlex.quote(file_name)}'
-                for file_name in excluded_list
+                for file_name in processed_excludes
             ])
             src_dir_path = shlex.quote(src_dir_path)
             sync_command = (f'aws s3 sync --no-follow-symlinks {excludes} '
