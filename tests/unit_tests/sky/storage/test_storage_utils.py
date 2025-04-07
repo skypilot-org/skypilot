@@ -17,7 +17,10 @@ from sky.skylet import constants
 def tmp_dir_with_files_to_ignore():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create workdir
-        dirs = ['remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir', 'remove_dir_pattern']
+        dirs = [
+            'remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir',
+            'remove_dir_pattern'
+        ]
         files = [
             'remove.py',
             'remove.sh',
@@ -114,12 +117,13 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     # Test function
     excluded_files = storage_utils.get_excluded_files_from_skyignore(
         skyignore_dir)
-    
+
     print(excluded_files)
     # Validate results
     expected_excluded_files = [
         'remove.py', 'remove_dir', 'remove.sh', 'dir/remove.sh', 'dir/remove.b',
-        'remove.a', 'dir/remove.a', 'remove_dir_pattern', 'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a'
+        'remove.a', 'dir/remove.a', 'remove_dir_pattern',
+        'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a'
     ]
     for file_path in expected_excluded_files:
         assert file_path in excluded_files
@@ -134,7 +138,9 @@ def test_get_excluded_files_from_gitignore(gitignore_dir):
     # Validate results
     expected_excluded_files = [
         'remove.py', 'remove_dir/', 'remove.sh', 'dir/remove.sh',
-        'dir/remove.b', 'remove.a', 'dir/remove.a', 'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a', 'remove_dir_pattern/'
+        'dir/remove.b', 'remove.a', 'dir/remove.a',
+        'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a',
+        'remove_dir_pattern/'
     ]
     print(sorted(excluded_files))
     print(sorted(expected_excluded_files))
