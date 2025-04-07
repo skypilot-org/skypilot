@@ -208,11 +208,12 @@ export async function handleJobAction(action, jobId, cluster, managed) {
         requestBody = { job_ids: [jobId], cluster_name: cluster };
       }
       break;
-    case 'restart_controller':
-      logStarter = 'Restarting controller for';
-      logMiddle = 'controller restarted';
-      apiPath = 'jobs/restart_controller';
-      requestBody = { job_ids: [jobId] };
+    case 'restartcontroller':
+      logStarter = 'Restarting';
+      logMiddle = 'restarted';
+      apiPath = 'jobs/queue';
+      requestBody = { all_users: true, refresh: true };
+      jobId = 'controller';
       break;
     default:
       throw new Error(`Invalid action: ${action}`);
