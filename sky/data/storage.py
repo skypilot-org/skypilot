@@ -1628,8 +1628,7 @@ class S3Store(AbstractStore):
                         os.path.join(src_dir_path, excluded_path.rstrip('/')))):
                     # Remove any trailing slash and add '/**' to exclude all
                     # contents
-                    processed_excludes.append(
-                        f'{excluded_path.rstrip("/")}/**')
+                    processed_excludes.append(f'{excluded_path.rstrip("/")}/**')
                 else:
                     processed_excludes.append(excluded_path)
 
