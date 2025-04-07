@@ -34,16 +34,18 @@ Set up a service account as follows:
    You may want to add the export statement in your profile (e.g. ``~/.bashrc``, ``~/.zshrc``) so that it is set automatically in all new terminal sessions.
 
 
+
+.. _cloud-permissions-gcp:
+
+Setting permissions
+-------------------
+
 Generally, the administrator can choose among three "levels" of permissions, from the most permissive and least setup effort, to the least permissive and more setup effort:
 
 * Default: no setup, give users Owner-level permissions (i.e., you do not need to follow the instructions in this section)
 * :ref:`Medium <gcp-medium-permissions>`: easy setup, with a medium set of permissions
 * :ref:`Minimal <gcp-minimal-permissions>`: more setup, with the minimal set of permissions
 
-.. _cloud-permissions-gcp:
-
-Setting permissions
--------------------
 
 .. _gcp-medium-permissions:
 
