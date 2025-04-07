@@ -28,7 +28,7 @@
 
 {{- if or (lt $cpuNum 4.0) (lt $memNum 8.0) -}}
 {{/* TODO(aylei): add a reference to the tuning guide once complete */}}
-  {{- fail "Error\nAPI server requires at least 4 CPU cores and 8 GiB memory. You can either:\n1. increase .apiService.resources.requests.* to meet the requirements or unset them to use defaults\n2. add `--set apiService.skipResourceCheck=true` in command args to bypass this check (not recommended for production)\nto resolve this issue and then try again." -}}
+  {{- fail "Error\nDeploying a SkyPilot API server requires at least 4 CPU cores and 8 GiB memory. You can either:\n1. Change `--set apiService.resources.requests.cpu` and `--set apiService.resources.requests.memory` to meet the requirements or unset them to use defaults\n2. add `--set apiService.skipResourceCheck=true` in command args to bypass this check (not recommended for production)\nto resolve this issue and then try again." -}}
 {{- end -}}
 
 {{- end -}} 
