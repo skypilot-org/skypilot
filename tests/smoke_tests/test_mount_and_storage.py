@@ -549,15 +549,88 @@ def test_ibm_storage_mounts():
         smoke_tests_utils.run_one_test(test)
 
 
-# ---------- Testing Storage ----------
-# These tests are essentially unit tests for Storage, but they require
-# credentials and network connection. Thus, they are included with smoke tests.
-# Since these tests require cloud credentials to verify bucket operations,
-# they should not be run when the API server is remote and the user does not
-# have any credentials locally.
-# TODO(SKY-1219): In the future, we should figure out a way to ship these tests
-#  to the API server and run them there. Maybe these tests can be packaged as a
-#  SkyPilot task run on a remote cluster launched via the API server.
+@pytest.mark.no_vast  # VAST does not support multi-cloud features
+@pytest.mark.no_fluidstack  # FluidStack doesn't have stable package installation
+def test_skyignore_exclusions(generic_cloud: str):
+    """Tests that .skyignore patterns correctly exclude files when using sky launch and sky jobs launch.
+    
+    Creates a temporary directory with various files and folders, adds a .skyignore file
+    that excludes specific files and folders, then verifies the exclusions work properly
+    when using sky launch and sky jobs launch commands.
+    """
+    name = smoke_tests_utils.get_cluster_name()
+    jobs_name = f"{name}-job"
+
+    # Path to the YAML file that defines the task
+    yaml_path = "tests/test_yamls/test_skyignore.yaml"
+
+    # Prepare a temporary directory with test files and .skyignore
+    with tempfile.TemporaryDirectory() as temp_dir:
+        # Create directory structure
+        dirs = [
+            'keep_dir', 'exclude_dir', 'nested/keep_subdir',
+            'nested/exclude_subdir'
+        ]
+        files = [
+            'script.py',  # Keep (not relevant as we don't use it)
+            'exclude.py',  # Exclude
+            'data.txt',  # Keep
+            'temp.log',  # Exclude
+            'keep_dir/keep.txt',  # Keep
+            'exclude_dir/notes.md',  # Directory excluded
+            'nested/keep_subdir/test.py',  # Keep
+            'nested/exclude_subdir/test.sh',  # Directory excluded
+        ]
+
+        # Create directories
+        for dir_name in dirs:
+            os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
+
+        # Create files
+        for file_path in files:
+            full_path = os.path.join(temp_dir, file_path)
+            with open(full_path, 'w', encoding='utf-8') as f:
+                f.write(f'Content for {file_path}')
+
+        # Create .skyignore file
+        skyignore_content = """
+# Exclude specific files
+exclude.py
+*.log
+
+# Exclude directories
+/exclude_dir
+/nested/exclude_subdir
+"""
+        with open(os.path.join(temp_dir, constants.SKY_IGNORE_FILE),
+                  'w',
+                  encoding='utf-8') as f:
+            f.write(skyignore_content)
+
+        # Run test commands
+        test_commands = [
+            # Test with sky launch
+            f'sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} --workdir {temp_dir} {yaml_path}',
+            f'sky logs {name} 1 --status',  # Ensure the job succeeded
+
+            # Test with sky jobs launch
+            f'sky jobs launch -y --name {jobs_name} --workdir {temp_dir} {yaml_path}',
+            f'sky jobs logs {jobs_name} --status',  # Ensure the job succeeded
+        ]
+
+        teardown_commands = [
+            f'sky down -y {name}', f'sky jobs cancel -y {jobs_name}'
+        ]
+
+        test = smoke_tests_utils.Test(
+            'skyignore_exclusion_test',
+            test_commands,
+            teardown_commands,
+            smoke_tests_utils.get_timeout(generic_cloud, 15 * 60),  # 15 mins
+        )
+        smoke_tests_utils.run_one_test(test)
+
+
 @pytest.mark.local
 class TestStorageWithCredentials:
     """Storage tests which require credentials and network connection"""
