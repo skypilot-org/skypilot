@@ -161,7 +161,15 @@ async def dashboard(request: fastapi.Request,
                     response = await client.request('GET',
                                                     dashboard_url,
                                                     timeout=5)
-                break  # Connection successful, proceed with the request
+                if response.status_code == 200:
+                    break  # Connection successful, proceed with the request
+                else:
+                    msg = ('Dashboard ping failed with status code: '
+                           f'{response.status_code}')
+                    # Raise an HTTPException here which will be caught by the
+                    # following except block to retry with new connection
+                    raise fastapi.HTTPException(
+                        status_code=response.status_code, detail=msg)
             except Exception as e:  # pylint: disable=broad-except
                 # We catch all exceptions to gracefully handle unknown
                 # errors and retry or raise an HTTPException to the client.
