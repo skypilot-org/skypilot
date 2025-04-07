@@ -1,0 +1,143 @@
+name: test-pypi-publish-nightly
+on:
+  schedule:
+    - cron: '35 10 * * *' # 10:35am UTC, 2:35am PST, 5:35am EST
+  workflow_dispatch:
+
+jobs:
+  # nightly release check from https://stackoverflow.com/a/67527144
+  check-date:
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.should_run.outputs.should_run }}
+    steps:
+      - uses: actions/checkout@v3
+      - name: print latest_commit
+        run: echo ${{ github.sha }}
+      - id: should_run
+        continue-on-error: true
+        name: check latest commit is less than a day
+        if: ${{ github.event_name == 'schedule' }}
+        run: test -z $(git rev-list  --after="24 hours"  ${{ github.sha }}) && echo "::set-output name=should_run::false"
+
+  nightly-build-pypi:
+    runs-on: ubuntu-latest
+    needs: check-date
+    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v3
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip' # caching pip dependencies
+      - name: Install pypa/build
+        run: >-
+          python -m
+          pip install
+          build
+          --user
+      - name: Set release version
+        run: |
+          RELEASE_VERSION=$(date +%Y%m%d)
+          sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
+          sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
+          sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
+      - name: Build a binary wheel and a source tarball
+        run: >-
+          python -m
+          build
+          --sdist
+          --wheel
+          --outdir dist/
+          .
+
+      # Trigger Buildkite smoke tests
+      - name: Trigger Buildkite Smoke Tests
+        id: trigger_buildkite
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+        run: |
+          data='{
+            "commit": "${{ github.sha }}",
+            "branch": "master",
+            "message": "nightly-build-pypi",
+            "ignore_pipeline_branch_filters": true,
+            "env": {
+              "ARGS": "--aws -k test_copy_mount_existing_storage"
+            }
+          }'
+
+          response=$(curl -w "%{http_code}" -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+            -X POST "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds" \
+            -d "$data")
+
+          http_code=$(echo "$response" | tail -n 1)
+          response_body=$(echo "$response" | head -n -1)
+
+          if [ "$http_code" != "201" ]; then
+            echo "Error: Buildkite API returned HTTP status code $http_code"
+            echo "Response body:"
+            echo "$response_body"
+            exit 1
+          fi
+
+          build_url=$(echo "$response_body" | jq -r '.web_url')
+          build_number=$(echo "$response_body" | jq -r '.number')
+
+          echo "Build triggered successfully (HTTP status code: $http_code)"
+          echo "Build URL: $build_url"
+          echo "::set-output name=build_url::$build_url"
+          echo "::set-output name=build_number::$build_number"
+
+      # Wait for Buildkite build to complete (2 hour timeout)
+      - name: Wait for Buildkite build completion
+        id: wait_buildkite
+        env:
+          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+        run: |
+          build_number=${{ steps.trigger_buildkite.outputs.build_number }}
+          max_attempts=240  # 2 hours with 30-second intervals (240 attempts = 120 minutes)
+          attempt=0
+
+          while [ $attempt -lt $max_attempts ]; do
+            status=$(curl -s -H "Authorization: Bearer $BUILDKITE_TOKEN" \
+              "https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds/$build_number" | \
+              jq -r '.state')
+
+            case $status in
+              "passed")
+                echo "Buildkite build succeeded"
+                echo "::set-output name=build_status::success"
+                exit 0
+                ;;
+              "failed"|"canceled"|"blocked")
+                echo "Buildkite build failed with status: $status"
+                echo "::set-output name=build_status::failure"
+                exit 1
+                ;;
+              *)
+                echo "Buildkite build status: $status - waiting..."
+                sleep 30
+                attempt=$((attempt+1))
+                ;;
+            esac
+          done
+
+          echo "Timeout waiting for Buildkite build to complete (2 hour limit reached)"
+          echo "::set-output name=build_status::timeout"
+          exit 1
+
+      # Publish to PyPI only if Buildkite build succeeded
+      - name: Test PyPI Publish (Mock)
+        if: steps.wait_buildkite.outputs.build_status == 'success'
+        run: |
+          echo success
+          exit 0
+
+      - name: Test PyPI Publish Failure (Mock)
+        if: steps.wait_buildkite.outputs.build_status != 'success'
+        run: |
+          echo failure
+          exit 1
