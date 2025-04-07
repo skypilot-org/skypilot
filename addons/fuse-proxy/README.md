@@ -111,4 +111,4 @@ Refer to [fusermount-wrapper](./cmd/fusermount-wrapper/main.go) for more impleme
 
 ## Acknowledgements
 
-This component is inspired by [k8s-fuse-csi-plugin](https://github.com/pfnet-research/k8s-fuse-csi-plugin). Kudos to the author for the great work!
+This component is inspired by [k8s-fuse-csi-plugin](https://github.com/pfnet-research/meta-fuse-csi-plugin). Kudos to the author for the great work!
