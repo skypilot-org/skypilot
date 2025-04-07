@@ -23,7 +23,7 @@ You can use the following to check version:
     $ aws --version
     aws-cli/2.25.6 ...
 
-Visit your SSO login portal (e.g. ``https://my-sso-portal.awsapps.com/start``), and click on **Access keys** under the corresponding account. Under "AWS IAM Identity Center credentials (Recommended)" note:
+Visit your SSO login portal (e.g. ``https://my-sso-portal.awsapps.com/start``), and click on **Access keys** under the corresponding account. Under "AWS IAM Identity Center credentials (Recommended)", copy these values:
 
 - the ``SSO start URL``
 - the ``SSO Region``
@@ -63,45 +63,45 @@ Follow these steps to create a new AWS user:
 
 1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_ in the AWS console and click on the **Users** tab. Then, click **Create User** and enter the user's name. Click **Next**.
 
-TODO these screenshots are all outdated
+   **TODO: fix screenshots**
 
-.. image:: ../../images/screenshots/aws/aws-add-user.png
-    :width: 80%
-    :align: center
-    :alt: AWS Add User
+   .. image:: ../../images/screenshots/aws/aws-add-user.png
+       :width: 80%
+       :align: center
+       :alt: AWS Add User
 
 2. In the **Permissions options** section, select "Attach existing policies directly". Depending on whether you want simplified or minimal permissions, follow the instructions below:
 
-    .. tab-set::
+   .. tab-set::
 
-        .. tab-item:: Simplified permissions
+       .. tab-item:: Simplified permissions
 
-            Search for the **AdministratorAccess** policy, and check the box to add it. Click **Next** to proceed.
+           Search for the **AdministratorAccess** policy, and check the box to add it. Click **Next** to proceed.
 
-        .. tab-item:: Minimal permissions
+       .. tab-item:: Minimal permissions
 
-            Click on **Create Policy**.
+           Click on **Create Policy**.
 
-            .. image:: ../../images/screenshots/aws/aws-create-policy.png
-                :width: 80%
-                :align: center
-                :alt: AWS Create Policy
+           .. image:: ../../images/screenshots/aws/aws-create-policy.png
+               :width: 80%
+               :align: center
+               :alt: AWS Create Policy
 
-            This will open a new window to define the minimal policy.
+           This will open a new window to define the minimal policy.
 
-            Choose "JSON" tab and copy the needed minimal policy rules.
-            **See** :ref:`aws-minimal-policy` **for all the policy rules.**
+           Choose "JSON" tab and copy the needed minimal policy rules.
+           **See** :ref:`aws-minimal-policy` **for all the policy rules.**
 
-            Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+           Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
-            Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
+           Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
-            .. image:: ../../images/screenshots/aws/aws-add-policy.png
-                :width: 80%
-                :align: center
-                :alt: AWS Add Policy
+           .. image:: ../../images/screenshots/aws/aws-add-policy.png
+               :width: 80%
+               :align: center
+               :alt: AWS Add Policy
 
-            Check the box to add the policy, and click **Next** to proceed.
+           Check the box to add the policy, and click **Next** to proceed.
 
 3. Click on **Next** and follow the instructions to create the user.
 
@@ -111,14 +111,23 @@ TODO these screenshots are all outdated
 
 6. Use the newly created access key to configure your credentials with the AWS CLI:
 
-.. code-block:: shell
+   .. code-block:: console
+     :emphasize-lines: 9-10
 
-  # Configure your AWS credentials
-  aws configure
+     $ # Configure your AWS credentials
+     $ aws configure
 
-  # Validate that credentials are working
-  sky check aws
+     $ # Check that AWS sees the shared-credentials-files
+     $ aws configure list
+           Name                    Value             Type    Location
+           ----                    -----             ----    --------
+        profile                <not set>             None    None
+     access_key     ****************xxxx shared-credentials-file
+     secret_key     ****************xxxx shared-credentials-file
+         region                <not set>             None    None
 
+     $ # Validate that credentials are working
+     $ sky check aws
 
 
 .. _several-aws-profiles:
@@ -137,6 +146,132 @@ Example of mixing a default profile and an SSO profile:
 
     $ # A cluster launched under a different profile.
     $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c my-sso-cluster
+
+
+.. _aws-troubleshooting:
+
+Troubleshooting issues
+----------------------
+
+If your credentials are not being picked up, or you're seeing the wrong credentials in SkyPilot, here are some steps you can take to troubleshoot:
+
+1. **Check** ``aws configure list``. This command should show the currently configured credentials.
+
+   If you have static credentials set up correctly, you should see something like this:
+
+   .. code-block:: console
+
+       $ aws configure list
+             Name                    Value             Type    Location
+             ----                    -----             ----    --------
+          profile                <not set>             None    None
+       access_key     ****************xxxx shared-credentials-file
+       secret_key     ****************xxxx shared-credentials-file
+           region                <not set>             None    None
+
+   If you have SSO credentials set up correctly, you should see something like this:
+
+   .. code-block:: console
+
+       $ aws configure list
+             Name                    Value             Type    Location
+             ----                    -----             ----    --------
+          profile                <not set>             None    None
+       access_key     ****************xxxx              sso
+       secret_key     ****************xxxx              sso
+           region                <not set>             None    None
+
+2. **Check** ``sky check aws``. This should show whether SkyPilot is picking up the credentials and has the necessary permissions.
+
+   .. code-block:: console
+
+       $ sky check aws
+       Checking credentials to enable clouds for SkyPilot.
+         AWS: enabled [compute, storage]
+       ...
+
+**Common issues:**
+
+- **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set - see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
+
+  You may have previously set ``AWS_PROFILE`` in your ``.bashrc`` file or similar. Try to double-check the value:
+
+  .. code-block:: console
+      :emphasize-lines: 5
+
+      $ # See the currently enabled profile.
+      $ aws configure list
+            Name                    Value             Type    Location
+            ----                    -----             ----    --------
+         profile     AWSPowerUserAccess-xxxxxxx        env    ['AWS_DEFAULT_PROFILE', 'AWS_PROFILE']
+      access_key     ****************xxxx shared-credentials-file
+      secret_key     ****************xxxx shared-credentials-file
+          region                <not set>             None    None
+      $ # See the currently enabled AWS account and user/role.
+      $ aws sts get-caller-identity
+
+      $ # See if the environment variable has been set.
+      $ echo $AWS_PROFILE
+      AWSPowerUserAccess-xxxxxxx
+      $ # This profile will be used.
+      $ sky check aws
+
+      $ unset AWS_PROFILE
+      $ # Now, default profile will be used.
+      $ aws configure list
+            Name                    Value             Type    Location
+            ----                    -----             ----    --------
+         profile                <not set>             None    None
+         ...
+      $ sky check aws
+      $ # Delete from .bashrc/.zshrc to make the change permanent.
+
+- **Profile is not set**. If ``sky check aws`` and ``aws configure list`` cannot find credentials, you may not have a default profile set.
+
+  1. If the environment variable ``AWS_PROFILE`` is set, this profile name will be used.
+  2. If there is a profile named ``default``, it will be used.
+  3. Otherwise, the profile will not be accessible.
+
+  Note that even if there is only one profile, it will not be used unless ``AWS_PROFILE`` is set or the profile is named ``default``.
+
+  In AWS CLI v1, you can check ``~/.aws/credentials`` and ``~/.aws/config`` to look for profile names. In AWS CLI v2, you can check from the CLI.
+
+  .. code-block:: console
+
+      $ # AWS CLI v2 only
+      $ aws --version
+      aws-cli/2.25.6 ...
+
+      $ # List all profiles
+      $ aws configure list-profiles
+      AWSPowerUserAccess-xxxxxxx
+      default
+
+  If there is no ``default`` profile, you can edit the configuration directly:
+
+  .. code-block:: cfg
+      :emphasize-lines: 2
+
+      # ~/.aws/config
+      [profile default]
+      sso_session = my-skypilot-session
+      sso_account_id = XXXXXXXXXX
+      ...
+
+  .. code-block:: cfg
+      :emphasize-lines: 2
+
+      # ~/.aws/config
+      [default]
+      aws_access_key_id = XXXXXXXXXXXXXXXXXXXX
+      aws_secret_access_key = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+  Or, you can set the ``AWS_PROFILE`` environment variable in your shell config:
+
+  .. code-block:: shell
+
+      # .bashrc / .zshrc
+      export AWS_PROFILE='AWSPowerUserAccess-xxxxxxx'
 
 
 .. _cloud-permissions-aws-user-creation:

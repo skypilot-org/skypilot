@@ -636,9 +636,9 @@ Setup and best practices
 Using static credentials
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
-Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's crucial to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks.
+Since the :ref:`jobs controller <jobs-controller>` is a long-lived instance that will manage other cloud instances, it's best to **use static credentials that do not expire**. If a credential expires, it could leave the controller with no way to clean up a job, leading to expensive cloud instance leaks.
 
-To use static credentials for the jobs controller, just make sure the static credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller.
+To use static credentials for the jobs controller, just make sure the static credentials are in use by SkyPilot. They will be automatically uploaded to the jobs controller. **If you're already using local credentials that don't expire, no action is needed!**
 
 To set up static credentials:
 
