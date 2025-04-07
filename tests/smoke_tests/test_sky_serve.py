@@ -167,6 +167,27 @@ _WAIT_NO_NOT_READY = (
     '    sleep 10; '
     'done')
 
+# Shell script snippet to wait for a specific number of replicas to be in SHUTTING_DOWN state
+# with a timeout of 120 seconds (2 minutes)
+_WAIT_FOR_SHUTTING_DOWN = (
+    'start_time=$(date +%s); '
+    'timeout=120; '  # 2 minutes timeout
+    'while true; do '
+    '    s=$(sky serve status {name}); '
+    '    shutting_down_count=$(echo "$s" | grep "SHUTTING_DOWN" | wc -l); '
+    '    [ "$shutting_down_count" -eq {count} ] && break; '
+    '    current_time=$(date +%s); '
+    '    elapsed=$((current_time - start_time)); '
+    '    if [ "$elapsed" -ge "$timeout" ]; then '
+    '        echo "Timeout: Expected {count} replicas in SHUTTING_DOWN state, but found $shutting_down_count"; '
+    '        echo "$s"; '
+    '        exit 1; '
+    '    fi; '
+    '    echo "Waiting for {count} replicas to be in SHUTTING_DOWN state (currently $shutting_down_count)..."; '
+    '    sleep 10; '
+    'done; '
+    'echo "Found {count} replicas in SHUTTING_DOWN state"')
+
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
     return (f'ip{replica_id}=$(echo "$s" | '
@@ -192,8 +213,9 @@ def _get_skyserve_http_test(name: str, cloud: str,
     return test
 
 
-def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
-                                                                 str]]) -> str:
+def _check_replica_in_status(name: str,
+                             check_tuples: List[Tuple[int, bool, str]],
+                             timeout_seconds: int = 0) -> str:
     """Check replicas' status and count in sky serve status
 
     We will check vCPU=2, as all our tests use vCPU=2.
@@ -202,8 +224,12 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
         name: the name of the service
         check_tuples: A list of replica property to check. Each tuple is
             (count, is_spot, status)
+        timeout_seconds: If greater than 0, wait up to this many seconds for the
+            conditions to be met, checking every 5 seconds. If 0, use the original
+            logic that fails immediately if conditions aren't met.
     """
-    check_cmd = ''
+    # Build the check conditions
+    check_conditions = []
     for check_tuple in check_tuples:
         count, is_spot, status = check_tuple
         resource_str = ''
@@ -213,8 +239,46 @@ def _check_replica_in_status(name: str, check_tuples: List[Tuple[int, bool,
             if is_spot:
                 spot_str = '\[Spot\]'
             resource_str = f'({spot_str}vCPU=2)'
-        check_cmd += (f' echo "$s" | grep "{resource_str}" | '
-                      f'grep "{status}" | wc -l | grep {count} || exit 1;')
+        check_conditions.append(
+            f'echo "$s" | grep "{resource_str}" | grep "{status}" | wc -l | '
+            f'grep {count}')
+
+    if timeout_seconds > 0:
+        # Create a timeout mechanism that will wait up to timeout_seconds
+        check_cmd = (
+            'start_time=$(date +%s); '
+            f'timeout={timeout_seconds}; '  # Use the provided timeout
+            'while true; do '
+            '    s=$(sky serve status {name}); '
+            '    echo "$s"; '
+            '    all_conditions_met=true; ')
+
+        # Add each condition to the check
+        for condition in check_conditions:
+            check_cmd += f'    {condition} || {{ all_conditions_met=false; }}; '
+
+        # Add the timeout logic
+        check_cmd += (
+            '    if [ "$all_conditions_met" = true ]; then '
+            '        echo "All replica status conditions met"; '
+            '        break; '
+            '    fi; '
+            '    current_time=$(date +%s); '
+            '    elapsed=$((current_time - start_time)); '
+            '    if [ "$elapsed" -ge "$timeout" ]; then '
+            '        echo "Timeout: Replica status conditions not met after '
+            '$timeout seconds"; '
+            '        exit 1; '
+            '    fi; '
+            '    echo "Waiting for replica status conditions to be met..."; '
+            '    sleep 5; '  # Check every 5 seconds
+            'done')
+    else:
+        # Original logic that fails immediately if conditions aren't met
+        check_cmd = ''
+        for condition in check_conditions:
+            check_cmd += f'{condition} || exit 1; '
+
     return (f'{_SERVE_STATUS_WAIT.format(name=name)}; '
             f'{_WAIT_PROVISION_REPR.format(name=name)}; '
             f'{_WAIT_NO_NOT_READY.format(name=name)}; '
@@ -644,7 +708,7 @@ def test_skyserve_large_readiness_timeout(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_update(generic_cloud: str):
@@ -667,7 +731,8 @@ def test_skyserve_update(generic_cloud: str):
             'curl $endpoint | grep "Hi, new SkyPilot here"',
             # The latest 2 version should be READY and the older versions should be shutting down
             (_check_replica_in_status(name, [(2, False, 'READY'),
-                                             (2, False, 'SHUTTING_DOWN')]) +
+                                             (2, False, 'SHUTTING_DOWN')],
+                                      timeout_seconds=60) +
              _check_service_version(name, "2")),
         ],
         _TEARDOWN_SERVICE.format(name=name),
@@ -681,7 +746,7 @@ def test_skyserve_update(generic_cloud: str):
 @pytest.mark.no_fluidstack
 @pytest.mark.no_do  # DO does not support `--cpus 2`
 @pytest.mark.no_vast  # Vast doesn't support opening ports
-@pytest.mark.no_nebius  # Autodown and Autostop not supported.
+@pytest.mark.no_nebius  # Autodown and Autostop not supported
 @pytest.mark.serve
 @pytest.mark.resource_heavy
 def test_skyserve_rolling_update(generic_cloud: str):
@@ -691,7 +756,8 @@ def test_skyserve_rolling_update(generic_cloud: str):
     name = _get_service_name()
     single_new_replica = _check_replica_in_status(
         name, [(2, False, 'READY'), (1, False, _SERVICE_LAUNCHING_STATUS_REGEX),
-               (1, False, 'SHUTTING_DOWN')])
+               (1, False, 'SHUTTING_DOWN')],
+        timeout_seconds=60)
     with smoke_tests_utils.increase_initial_delay_seconds_for_slow_cloud(
             generic_cloud) as increase_initial_delay_seconds:
         test = smoke_tests_utils.Test(
