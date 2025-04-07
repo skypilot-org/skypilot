@@ -202,26 +202,21 @@ func (s *Server) ensureFuseDevice(nspath string) error {
 }
 
 // createSocketPair creates a pair of connected Unix domain sockets
-func createSocketPair() (conns [2]net.Conn, err error) {
-	defer func() {
-		if err != nil {
-			for _, conn := range conns {
-				conn.Close()
-			}
-		}
-	}()
+func createSocketPair() ([2]net.Conn, error) {
 	// Create a pair of socket file descriptors
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
-		return [2]net.Conn{}, fmt.Errorf("socketpair failed: %w", err)
+		return [2]net.Conn{}, fmt.Errorf("socketpair failed: %v", err)
 	}
-	for _, fd := range fds {
-		conn, err := net.FileConn(os.NewFile(uintptr(fd), ""))
-		if err != nil {
-			return [2]net.Conn{}, fmt.Errorf("failed to create connection: %w", err)
-		}
-		conns.append(conn)
+	// Convert the file descriptors to net.Conn
+	conn1, err1 := net.FileConn(os.NewFile(uintptr(fds[0]), ""))
+	if err1 != nil {
+		return [2]net.Conn{}, fmt.Errorf("failed to create first connection: %v", err1)
 	}
-	
-	return conns, nil
+	conn2, err2 := net.FileConn(os.NewFile(uintptr(fds[1]), ""))
+	if err2 != nil {
+		conn1.Close()
+		return [2]net.Conn{}, fmt.Errorf("failed to create second connection: %v", err2)
+	}
+	return [2]net.Conn{conn1, conn2}, nil
 }
