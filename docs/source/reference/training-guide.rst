@@ -13,7 +13,7 @@ SkyPilot supports all distributed training frameworks, including but not limited
 - `PyTorch Distributed Data Parallel (DDP) <https://docs.skypilot.co/en/latest/examples/training/distributed-pytorch.html>`_
 - `DeepSpeed <https://docs.skypilot.co/en/latest/examples/training/deepspeed.html>`_
 - `Ray Train <https://docs.skypilot.co/en/latest/examples/training/ray.html>`_
-- `TensorFlow Distribution Strategies <https://docs.skypilot.co/en/latest/examples/tensorflow.html>`_
+- `TensorFlow Distribution Strategies <https://docs.skypilot.co/en/latest/examples/training/distributed-tensorflow.html>`_
 
 The choice of framework depends on your specific needs, but all can be easily configured through SkyPilot's YAML specification.
 
