@@ -391,14 +391,14 @@ available_node_types:
                 {% if k8s_fuse_device_required %}
                 set -e
                 # Mask fusermount binary before enabling SSH access
-                FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
+                FUSERMOUNT_PATH=$(which fusermount)
                 if [ -z "$FUSERMOUNT_PATH" ]; then
                     echo "Error: fusermount binary not found"
                     exit 1
                 fi
                 $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
                 $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
-                FUSERMOUNT3_PATH=$(whereis fusermount3 | awk '{print $2}')
+                FUSERMOUNT3_PATH=$(which fusermount3)
                 if [ -z "$FUSERMOUNT3_PATH" ]; then
                     FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
                 fi

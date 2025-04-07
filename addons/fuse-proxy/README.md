@@ -45,12 +45,12 @@ spec:
 # Install fuse2 and fuse3
 apt-get install -y fuse fuse3
 # Locate the original fusermount binary.
-FUSERMOUNT_PATH=$(whereis fusermount | awk '{print $2}')
+FUSERMOUNT_PATH=$(which fusermount)
 if [ -z "$FUSERMOUNT_PATH" ]; then
     echo "Error: fusermount binary not found"
     exit 1
 fi
-FOURSMOUNE3_PATH=$(whereis fusemount3 | awk '{print $2}')
+FOURSMOUNE3_PATH=$(which fusemount3)
 if [ -z "$FOURSMOUNE3_PATH" ]; then
     echo "Error: fusemount3 binary not found"
     exit 1
