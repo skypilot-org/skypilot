@@ -160,6 +160,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
     )
     smoke_tests_utils.run_one_test(test)
 
+
 # We override the AWS config to force the cluster to relaunch, so only run the
 # test on AWS.
 @pytest.mark.aws
