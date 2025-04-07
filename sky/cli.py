@@ -53,6 +53,7 @@ from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -1104,6 +1105,14 @@ def cli():
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
+@click.option('--project-config',
+              required=False,
+              type=str,
+              help='Project config file to use for the status command.')
+@click.option('--config',
+              required=False,
+              type=str,
+              help='Comma-separated list of individual config overrides.')
 @usage_lib.entrypoint
 def launch(
         entrypoint: Tuple[str, ...],
@@ -1135,7 +1144,9 @@ def launch(
         no_setup: bool,
         clone_disk_from: Optional[str],
         fast: bool,
-        async_call: bool):
+        async_call: bool,
+        project_config: Optional[str],
+        config: Optional[str]):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1144,6 +1155,40 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    # a not-so-elegant way to handle project config and config override
+    # it works, but not elegant
+    # priority: CLI arg > env var > project config > default config
+
+    variables: Dict[str, str] = {}
+    for key, value in os.environ.items():
+        prefix = constants.SKYPILOT_ENV_VAR_PREFIX + 'CONFIG'
+        if key[:len(prefix)] == prefix:
+            variables[key[len(prefix):]] = value
+    override_skypilot_config: typing.Dict[str, Any] = {}
+    for key, value in variables.items():
+        split_vars = key.split('__')
+        lowered = tuple([var.lower() for var in split_vars])
+        override_skypilot_config = skypilot_config.set_nested_dict(
+            override_skypilot_config, lowered, value)
+        print('env', override_skypilot_config)
+    if project_config:
+        project_config_dict = skypilot_config.load_config_from_file(
+            project_config)
+        print('project', project_config_dict)
+        override_skypilot_config = skypilot_config.overlay_skypilot_config(
+            original_config=override_skypilot_config,
+            override_configs=project_config_dict)
+    if config:
+        configs = config.split(',')
+        for config in configs:
+            key, value = config.split('=')
+            lowered = tuple([var.lower() for var in key.split('.')])
+            override_skypilot_config = skypilot_config.set_nested_dict(
+                override_skypilot_config, lowered, value)
+
+    print('following overrides are applied:')
+    print(override_skypilot_config)
+
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
@@ -1217,6 +1262,7 @@ def launch(
         clone_disk_from=clone_disk_from,
         fast=fast,
         _need_confirmation=not yes,
+        override_skypilot_config=override_skypilot_config,
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:

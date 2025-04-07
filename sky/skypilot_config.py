@@ -132,6 +132,17 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
     return dict(**copied_dict)
 
 
+def set_nested_dict(original: Dict[str, Any], keys: Tuple[str, ...],
+                    value: Any) -> Dict[str, Any]:
+    """Returns a deep-copied config with the nested key set to value.
+
+    Like get_nested(), if any key is not found, this will not raise an error.
+    """
+    config = config_utils.Config.from_dict(original)
+    config.set_nested(keys, value)
+    return dict(**config)
+
+
 def to_dict() -> config_utils.Config:
     """Returns a deep-copied version of the current config."""
     return copy.deepcopy(_dict)
@@ -175,6 +186,11 @@ def _reload_config() -> None:
                 skip_none=False)
 
         logger.debug('Config syntax check passed.')
+
+
+def load_config_from_file(config_path: str) -> Dict[str, Any]:
+    config = common_utils.read_yaml(config_path)
+    return config
 
 
 def loaded_config_path() -> Optional[str]:
@@ -247,3 +263,18 @@ def override_skypilot_config(
         except Exception:  # pylint: disable=broad-except
             # Failing to delete the file is not critical.
             pass
+
+
+def overlay_skypilot_config(
+        original_config: Optional[Dict[str, Any]],
+        override_configs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+    """Overrides the user configurations."""
+    # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
+    # allowed keys.
+    original_config = config_utils.Config.from_dict(original_config)
+    config = original_config.get_nested(keys=tuple(),
+                                        default_value=None,
+                                        override_configs=override_configs,
+                                        allowed_override_keys=None,
+                                        disallowed_override_keys=None)
+    return config

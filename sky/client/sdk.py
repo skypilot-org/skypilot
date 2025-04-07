@@ -303,6 +303,7 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
+    override_skypilot_config: Optional[Dict[str, Any]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -488,6 +489,7 @@ def launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
+        override_skypilot_config=override_skypilot_config,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/launch',
