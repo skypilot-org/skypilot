@@ -167,27 +167,6 @@ _WAIT_NO_NOT_READY = (
     '    sleep 10; '
     'done')
 
-# Shell script snippet to wait for a specific number of replicas to be in SHUTTING_DOWN state
-# with a timeout of 120 seconds (2 minutes)
-_WAIT_FOR_SHUTTING_DOWN = (
-    'start_time=$(date +%s); '
-    'timeout=120; '  # 2 minutes timeout
-    'while true; do '
-    '    s=$(sky serve status {name}); '
-    '    shutting_down_count=$(echo "$s" | grep "SHUTTING_DOWN" | wc -l); '
-    '    [ "$shutting_down_count" -eq {count} ] && break; '
-    '    current_time=$(date +%s); '
-    '    elapsed=$((current_time - start_time)); '
-    '    if [ "$elapsed" -ge "$timeout" ]; then '
-    '        echo "Timeout: Expected {count} replicas in SHUTTING_DOWN state, but found $shutting_down_count"; '
-    '        echo "$s"; '
-    '        exit 1; '
-    '    fi; '
-    '    echo "Waiting for {count} replicas to be in SHUTTING_DOWN state (currently $shutting_down_count)..."; '
-    '    sleep 10; '
-    'done; '
-    'echo "Found {count} replicas in SHUTTING_DOWN state"')
-
 
 def _get_replica_ip(name: str, replica_id: int) -> str:
     return (f'ip{replica_id}=$(echo "$s" | '
