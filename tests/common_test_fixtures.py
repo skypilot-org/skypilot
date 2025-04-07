@@ -21,7 +21,6 @@ from sky.backends.cloud_vm_ray_backend import CloudVmRayBackend
 from sky.clouds.service_catalog import vsphere_catalog
 from sky.provision import common as provision_common
 from sky.provision.aws import config as aws_config
-from sky.provision.aws import instance as aws_instance
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.serve import serve_state
 from sky.server import common as server_common
