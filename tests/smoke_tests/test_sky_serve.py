@@ -272,7 +272,7 @@ def _check_replica_in_status(name: str,
             '    fi; '
             '    echo "Waiting for replica status conditions to be met..."; '
             '    sleep 5; '  # Check every 5 seconds
-            'done')
+            'done; ')  # Add semicolon here
     else:
         # Original logic that fails immediately if conditions aren't met
         check_cmd = ''
