@@ -551,7 +551,8 @@ def test_ibm_storage_mounts():
 
 @pytest.mark.no_vast  # VAST does not support multi-cloud features
 @pytest.mark.no_fluidstack  # FluidStack doesn't have stable package installation
-@pytest.mark.parametrize('ignore_file', [constants.SKY_IGNORE_FILE, constants.GIT_IGNORE_FILE])
+@pytest.mark.parametrize('ignore_file',
+                         [constants.SKY_IGNORE_FILE, constants.GIT_IGNORE_FILE])
 def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
     """Tests that .skyignore patterns correctly exclude files when using sky launch and sky jobs launch.
     
@@ -559,11 +560,13 @@ def test_ignore_exclusions(generic_cloud: str, ignore_file: str):
     that excludes specific files and folders, then verifies the exclusions work properly
     when using sky launch and sky jobs launch commands.
     """
+    ignore_type = ignore_file.lstrip('.').replace('ignore', '')
     name = smoke_tests_utils.get_cluster_name()
-    jobs_name = f"{name}-job"
+    name = f'{name}-{ignore_type}'
+    jobs_name = f'{name}-job'
 
     # Path to the YAML file that defines the task
-    yaml_path = "tests/test_yamls/test_skyignore.yaml"
+    yaml_path = 'tests/test_yamls/test_skyignore.yaml'
 
     # Prepare a temporary directory with test files and .skyignore or .gitignore
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -603,8 +606,7 @@ exclude.py
 /exclude_dir
 /nested/exclude_subdir
 """
-        with open(os.path.join(temp_dir, ignore_file),
-                  'w',
+        with open(os.path.join(temp_dir, ignore_file), 'w',
                   encoding='utf-8') as f:
             f.write(ignore_content)
         if ignore_file == constants.GIT_IGNORE_FILE:
