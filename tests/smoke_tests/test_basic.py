@@ -53,12 +53,12 @@ def test_minimal(generic_cloud: str):
     test = smoke_tests_utils.Test(
         'minimal',
         [
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             # Output validation done.
             f'sky logs {name} 1 --status',
             f'sky logs {name} --status | grep "Job 1: SUCCEEDED"',  # Equivalent.
             # Test launch output again on existing cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check the logs downloading
@@ -101,11 +101,11 @@ def test_launch_fast(generic_cloud: str):
         'test_launch_fast',
         [
             # First launch to create the cluster
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
 
             # Second launch to test fast launch - should not reprovision
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
             ' echo "$s" && '
             # Validate that cluster was not re-launched.
             '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
@@ -137,7 +137,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
         'test_launch_fast_with_autostop',
         [
             # First launch to create the cluster with a short autostop
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast -i 1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 1 --status',
             f'sky status -r {name} | grep UP',
 
@@ -151,12 +151,48 @@ def test_launch_fast_with_autostop(generic_cloud: str):
             # FIXME(aylei): this can be flaky, sleep longer for now.
             f'sleep 60',
             # Launch again. Do full output validation - we expect the cluster to re-launch
-            f'unset SKYPILOT_DEBUG; s=$(sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast -i 1 tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 2 --status',
             f'sky status -r {name} | grep UP',
         ],
         f'sky down -y {name}',
         timeout=smoke_tests_utils.get_timeout(generic_cloud) + autostop_timeout,
+    )
+    smoke_tests_utils.run_one_test(test)
+
+# We override the AWS config to force the cluster to relaunch, so only run the
+# test on AWS.
+@pytest.mark.aws
+def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
+    name = smoke_tests_utils.get_cluster_name()
+    tmp_config_path = tmp_path / 'config.yaml'
+    test = smoke_tests_utils.Test(
+        'test_launch_fast_with_cluster_changes',
+        [
+            # Initial launch
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --cloud {generic_cloud} --fast {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 1 --status',
+
+            # Launch again - setup and provisioning should be skipped
+            f's=$(SKYPILOT_DEBUG=0 sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && '
+            ' echo "$s" && '
+            # Validate that cluster was not re-launched.
+            '! echo "$s" | grep -A 1 "Launching on" | grep "is up." && '
+            # Validate that setup was not re-run.
+            '! echo "$s" | grep -A 1 "Running setup on" | grep "running setup" && '
+            f'sky logs {name} 2 --status',
+
+            # Copy current config as a base.
+            f'cp ${{SKYPILOT_CONFIG:-~/.sky/config.yaml}} {tmp_config_path} && '
+            # Set config override. This should change the cluster yaml, forcing reprovision/setup
+            f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
+            # Launch and do full output validation. Setup/provisioning should be run.
+            f's=$(SKYPILOT_DEBUG=0 SKYPILOT_CONFIG={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f'sky logs {name} 3 --status',
+            f'sky status -r {name} | grep UP',
+        ],
+        f'sky down -y {name}',
+        timeout=smoke_tests_utils.get_timeout(generic_cloud),
     )
     smoke_tests_utils.run_one_test(test)
 
