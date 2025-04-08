@@ -137,34 +137,6 @@ def _cleanup(service_name: str) -> bool:
     return failed
 
 
-def _cleanup_processes(service_name: str,
-                       processes: List[multiprocessing.Process],
-                       job_id: int) -> None:
-    """Clean up processes and service resources.
-    Kill load balancer process first since it will raise errors if failed
-    to connect to the controller. Then the controller process.
-    """
-    subprocess_utils.kill_children_processes(
-        [process.pid for process in processes], force=True)
-    for process in processes:
-        process.join()
-
-    failed = _cleanup(service_name)
-    if failed:
-        serve_state.set_service_status_and_active_versions(
-            service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
-        logger.error(f'Service {service_name} failed to clean up.')
-    else:
-        service_dir = os.path.expanduser(
-            serve_utils.generate_remote_service_dir_name(service_name))
-        shutil.rmtree(service_dir)
-        serve_state.remove_service(service_name)
-        serve_state.delete_all_versions(service_name)
-        logger.info(f'Service {service_name} terminated successfully.')
-
-    _cleanup_task_run_script(job_id)
-
-
 def _cleanup_task_run_script(job_id: int) -> None:
     """Clean up task run script.
     Please see `kubernetes-ray.yml.j2` for more details.
@@ -325,7 +297,25 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             proc for proc in [load_balancer_process, controller_process]
             if proc is not None
         ]
-        _cleanup_processes(service_name, process_to_kill, job_id)
+        subprocess_utils.kill_children_processes(
+            [process.pid for process in process_to_kill], force=True)
+        for process in process_to_kill:
+            process.join()
+
+        failed = _cleanup(service_name)
+        if failed:
+            serve_state.set_service_status_and_active_versions(
+                service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
+            logger.error(f'Service {service_name} failed to clean up.')
+        else:
+            service_dir = os.path.expanduser(
+                serve_utils.generate_remote_service_dir_name(service_name))
+            shutil.rmtree(service_dir)
+            serve_state.remove_service(service_name)
+            serve_state.delete_all_versions(service_name)
+            logger.info(f'Service {service_name} terminated successfully.')
+
+        _cleanup_task_run_script(job_id)
 
 
 if __name__ == '__main__':
