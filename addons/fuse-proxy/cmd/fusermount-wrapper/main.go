@@ -93,12 +93,12 @@ func main() {
 		} else {
 			log.Infof("Successfully unmounted %s", *mountPoint)
 		}
-
-		log.Fatalf("Failed to run %s: %v", cmd.Path, err)
-	}
-
-	// Get the exit code from the command and exit with the same code
-	if exitErr, ok := err.(*exec.ExitError); ok {
-		os.Exit(exitErr.ExitCode())
+		// Get the exit code from the command and exit with the same code
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			os.Exit(exitErr.ExitCode())
+		} else {
+			// Unknown error
+			log.Fatalf("Failed to run %s: %v", cmd.Path, err)
+		}
 	}
 }
