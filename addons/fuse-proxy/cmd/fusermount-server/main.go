@@ -26,11 +26,11 @@ func main() {
 	// server container since they are running on the same node.
 	cmd := exec.Command("cp", "-p", common.ShimBinPath, shimInstallPath)
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to copy fusermount-shim: %v", err)
+		log.Fatalf("Failed to copy fusermount-shim: %w", err)
 	}
 	cmd = exec.Command("cp", "-p", common.WrapperBinPath, wrapperInstallPath)
 	if err := cmd.Run(); err != nil {
-		log.Fatalf("Failed to copy fusermount-wrapper: %v", err)
+		log.Fatalf("Failed to copy fusermount-wrapper: %w", err)
 	}
 
 	socketPath := common.MustGetServerSocketPath()
@@ -48,12 +48,12 @@ func main() {
 	select {
 	case err := <-errChan:
 		if err != nil {
-			log.Fatalf("Server error: %v", err)
+			log.Fatalf("Server error: %w", err)
 		}
 	case <-sigChan:
 		log.Info("Shutting down server...")
 		if err := srv.Stop(); err != nil {
-			log.Errorf("Error during shutdown: %v", err)
+			log.Errorf("Error during shutdown: %w", err)
 		}
 	}
 }
