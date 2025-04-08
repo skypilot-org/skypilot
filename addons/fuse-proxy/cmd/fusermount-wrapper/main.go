@@ -59,7 +59,7 @@ func main() {
 	// Forward the fusermount request to the server and receive the mounted fd
 	c, err := client.NewClient(socketPath)
 	if err != nil {
-		log.Fatalf("Failed to connect to fusermount server at %s: %w", socketPath, err)
+		log.Fatalf("Failed to connect to fusermount server at %s: %v", socketPath, err)
 	}
 	defer c.Close()
 	fusermountArgs := []string{*mountPoint}
@@ -68,7 +68,7 @@ func main() {
 	}
 	fd, err := c.Fusermount(fusermountArgs)
 	if err != nil {
-		log.Fatalf("An error occurred when calling fusermount server: %w", err)
+		log.Fatalf("An error occurred when calling fusermount server: %v", err)
 	}
 	fuseCmd := flag.Args()
 	for i := range fuseCmd {
@@ -89,7 +89,7 @@ func main() {
 		// Unmount the FUSE device if FUSE command failed
 		unmountCmd := exec.Command("fusermount", "-u", *mountPoint)
 		if unmountErr := unmountCmd.Run(); unmountErr != nil {
-			log.Warningf("Failed to unmount %s: %w", *mountPoint, unmountErr)
+			log.Warningf("Failed to unmount %s: %v", *mountPoint, unmountErr)
 		} else {
 			log.Infof("Successfully unmounted %s", *mountPoint)
 		}
@@ -98,7 +98,7 @@ func main() {
 			os.Exit(exitErr.ExitCode())
 		} else {
 			// Unknown error
-			log.Fatalf("Failed to run %s: %w", cmd.Path, err)
+			log.Fatalf("Failed to run %s: %v", cmd.Path, err)
 		}
 	}
 }

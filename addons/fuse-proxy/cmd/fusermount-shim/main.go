@@ -82,12 +82,12 @@ func main() {
 	// Forward the fusermount request to the server and receive the mounted fd
 	c, err := client.NewClient(socketPath)
 	if err != nil {
-		log.Fatalf("Failed to connect to fusermount server at %s: %w", socketPath, err)
+		log.Fatalf("Failed to connect to fusermount server at %s: %v", socketPath, err)
 	}
 	defer c.Close()
 	fd, err := c.Fusermount(os.Args[1:])
 	if err != nil {
-		log.Fatalf("An error occurred when calling fusermount server: %w", err)
+		log.Fatalf("An error occurred when calling fusermount server: %v", err)
 	}
 	// For mount operation, send the received fd back to caller (the FUSE implementation)
 	if isMount {
@@ -96,7 +96,7 @@ func main() {
 		conn, err := net.FileConn(f)
 		defer conn.Close()
 		if err != nil {
-			log.Fatalf("Failed to connect to _FUSE_COMMFD %d: %w", commFd, err)
+			log.Fatalf("Failed to connect to _FUSE_COMMFD %d: %v", commFd, err)
 		}
 		util.SendMsg(conn, fd, []byte{})
 	}
