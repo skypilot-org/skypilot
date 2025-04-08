@@ -177,11 +177,6 @@ def _reload_config() -> None:
         logger.debug('Config syntax check passed.')
 
 
-def load_config_from_file(config_path: str) -> Dict[str, Any]:
-    config = common_utils.read_yaml(config_path)
-    return config
-
-
 def loaded_config_path() -> Optional[str]:
     """Returns the path to the loaded config file."""
     return _loaded_config_path

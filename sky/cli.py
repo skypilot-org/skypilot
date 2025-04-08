@@ -1162,11 +1162,10 @@ def launch(
     override_skypilot_config: typing.Dict[str, Any] = {}
     # parse and override from project config file
     if project_config:
-        project_config_dict = skypilot_config.load_config_from_file(
-            project_config)
+        project_config = OmegaConf.load(project_config)
         override_skypilot_config = skypilot_config.overlay_skypilot_config(
             original_config=override_skypilot_config,
-            override_configs=project_config_dict)
+            override_configs=OmegaConf.to_object(project_config))
     # parse and override from env vars
     variables: List[str] = []
     for key, value in os.environ.items():
