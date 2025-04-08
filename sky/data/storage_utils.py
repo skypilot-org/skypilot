@@ -232,6 +232,8 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
     # Fail fast if the source is a file.
+    if not os.path.exists(expand_src_dir_path):
+        raise ValueError(f'{src_dir_path} does not exist.')
     if os.path.isfile(expand_src_dir_path):
         raise ValueError(f'{src_dir_path} is a file, not a directory.')
     if os.path.exists(skyignore_path):
