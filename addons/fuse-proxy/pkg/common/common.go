@@ -5,6 +5,8 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+
+	log "k8s.io/klog/v2"
 )
 
 const (
@@ -52,6 +54,7 @@ func getSharedDir() string {
 	if os.Getenv(EnvSharedDir) == "" {
 		return HackConstSharedDir
 	}
+	log.Warningf("Fallback to constant shared dir: %s", os.Getenv(EnvSharedDir))
 	return os.Getenv(EnvSharedDir)
 }
 

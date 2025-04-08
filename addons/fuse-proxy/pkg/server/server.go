@@ -48,7 +48,7 @@ func (s *Server) Start() error {
 	}
 	s.listener = listener
 	// Set socket permissions to allow all users to connect
-	if err := os.Chmod(s.socketPath, 0666); err != nil {
+	if err := os.Chmod(s.socketPath, 0o666); err != nil {
 		return fmt.Errorf("failed to set socket permissions: %w", err)
 	}
 	log.Infof("Server listening on unix socket: %s", s.socketPath)

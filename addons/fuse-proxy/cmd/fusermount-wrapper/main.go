@@ -24,10 +24,11 @@ import (
 )
 
 const (
-	mountPointDescription = "the path to the mount point of the FUSE device"
+	mountPointDescription  = "the path to the mount point of the FUSE device"
 	placeholderDescription = "the placeholder to replace the mount point in fuse implementation command"
-	optionsDescription = "mount options"
+	optionsDescription     = "mount options"
 )
+
 var (
 	mountPoint   = flag.StringP("mount-point", "m", "", mountPointDescription)
 	placeholder  = flag.StringP("placeholder", "p", "{}", placeholderDescription)

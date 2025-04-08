@@ -12,10 +12,8 @@ import (
 	log "k8s.io/klog/v2"
 )
 
-var (
-	// TODO(aylei): hacky, we should not assume specific knowledge in the caller container, need to find a better way.
-	fusermountPath = flag.String("fusermount-path", "/bin/fusermount-original", "Path to fusermount binary in the caller container")
-)
+// TODO(aylei): hacky, we should not assume specific knowledge in the caller container, need to find a better way.
+var fusermountPath = flag.String("fusermount-path", "/bin/fusermount-original", "Path to fusermount binary in the caller container")
 
 func main() {
 	log.InitFlags(nil)

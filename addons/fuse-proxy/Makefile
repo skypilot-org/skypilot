@@ -21,7 +21,7 @@ tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
 
-gofumpt:
+gofumpt: build-deps
 	gofumpt -l -w .
 
 build-deps:
