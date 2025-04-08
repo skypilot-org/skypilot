@@ -621,14 +621,19 @@ rules for SkyPilot to function. If any VPC satisfies these rules, it is
 used. Otherwise, a new VPC named ``skypilot-vpc`` is automatically created
 with the minimal recommended firewall rules and will be used.
 
-If this field is set, SkyPilot will use the VPC with this name. Useful for
-when users want to manually set up a VPC and precisely control its
+If this field is set, SkyPilot will use the VPC with this name. The VPC must
+have the :ref:`necessary firewall rules <gcp-minimum-firewall-rules>`. Useful
+for when users want to manually set up a VPC and precisely control its
 firewall rules. If no region restrictions are given, SkyPilot only
 provisions in regions for which a subnet of this VPC exists. Errors are
 thrown if VPC with this name is not found. The VPC does not get modified
 in any way, except when opening ports (e.g., via ``resources.ports``) in
 which case new firewall rules permitting public traffic to those ports
 will be added.
+
+By default, only VPCs from the current project are used. To use a shared VPC
+from another GCP project, specify the name as ``<project ID>/<vpc name>``,
+e.g. ``my-project-123456/default``.
 
 .. _config-yaml-gcp-use-internal-ips:
 
