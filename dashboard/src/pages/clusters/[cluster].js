@@ -130,22 +130,22 @@ function ActiveTab({ clusterData, clusterJobData }) {
       <h3 className="text-xl font-semibold mb-4">Details</h3>
       <div className="items-center mb-6">
         <Card className="p-3">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Cluster:</span>
-              <span>{clusterData.cluster}</span>
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Cluster</div>
+              <div className="text-sm mt-1">{clusterData.cluster}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">User:</span>
-              <span>{clusterData.user}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">User</div>
+              <div className="text-sm mt-1">{clusterData.user}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Status:</span>
-              <span>{clusterData.status}</span>
-            </div>            
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Resources:</span>
-              <span>{clusterData.resources_str || 'N/A'}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Status</div>
+              <div className="text-sm mt-1">{clusterData.status}</div>
+            </div>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Resources</div>
+              <div className="text-sm mt-1">{clusterData.resources_str || 'N/A'}</div>
             </div>
           </div>
         </Card>

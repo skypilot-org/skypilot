@@ -297,31 +297,38 @@ useEffect(() => {
       {/* Job Info Section */}
       <div className="items-center mb-6">
         <Card className="p-3">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Job ID:</span>
-              <span>{jobData.id}</span>
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Job ID</div>
+              <div className="text-sm mt-1">{jobData.id}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">User:</span>
-              <span>{jobData.user}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">User</div>
+              <div className="text-sm mt-1">{jobData.user}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Status:</span>
-              <span>{jobData.status}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Status</div>
+              <div className="text-sm mt-1">{jobData.status}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Resources:</span>
-              <span>{jobData.resources || 'N/A'}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Resources</div>
+              <div className="text-sm mt-1">{jobData.resources || 'N/A'}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Job Name:</span>
-              <span>{jobData.name}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Job Name</div>
+              <div className="text-sm mt-1">{jobData.name}</div>
             </div>
             {jobData.cluster && (
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">Cluster:</span>
-                <span>{jobData.cluster}</span>
+              <div>
+                <div className="text-gray-600 font-medium text-lg">Cluster</div>
+                <div className="text-sm mt-1">
+                  <Link
+                    href={`/clusters/${jobData.cluster}`}
+                    className="text-sky-blue hover:underline"
+                  >
+                    {jobData.cluster}
+                  </Link>
+                </div>
               </div>
             )}
           </div>

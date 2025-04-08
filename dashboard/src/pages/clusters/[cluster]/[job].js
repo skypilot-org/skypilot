@@ -20,7 +20,7 @@ function JobHeader({
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl flex items-center">
+        <div className="text-sm flex items-center">
           <Link href="/clusters" className="text-sky-blue hover:underline">
             Sky Clusters
           </Link>
@@ -39,20 +39,20 @@ function JobHeader({
             {job}
             {jobData.job && jobData.job != '-' ? ` (${jobData.job})` : ''}
           </Link>
-        </h2>
+        </div>
 
         <div className="flex items-center">
           {(loading || isRefreshing) && (
             <div className="flex items-center mr-2">
-              <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
+              <CircularProgress size={10} className="mt-0" />
+              <span className="text-sm ml-2 text-gray-500">Loading...</span>
             </div>
           )}
           <Tooltip content="Refresh" className="text-sm text-muted-foreground">
             <button
               onClick={onRefresh}
               disabled={loading || isRefreshing}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
+              className="text-sm text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
             >
               <RotateCwIcon className="w-4 h-4 mr-1.5" />
               Refresh

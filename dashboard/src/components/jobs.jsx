@@ -719,7 +719,7 @@ export function JobDetails({
         // Otherwise render default header
         <>
           <div className="flex items-center">
-            <h2 className="text-2xl mb-4">
+            <div className="text-sm mb-4">
               {parent}
               <span className="mx-2 text-gray-500">›</span>
               <Link
@@ -728,7 +728,7 @@ export function JobDetails({
               >
                 {jobData.job} (ID: {jobData.id})
               </Link>
-            </h2>
+            </div>
             {(!jobData.job || loading) && (
               <>
                 <CircularProgress size={15} className="mx-5 mt-7" />
@@ -950,115 +950,52 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
     return (
       <div className="items-center mb-6">
         <Card className="p-3">
-          <div className="grid grid-cols-2 gap-2 text-sm">
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Job ID:</span>
-              <span>{jobData.id}</span>
+          <div className="grid grid-cols-2 gap-6">
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Job ID</div>
+              <div className="text-sm mt-1">{jobData.id}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">User:</span>
-              <span>{jobData.user}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">User</div>
+              <div className="text-sm mt-1">{jobData.user}</div>
             </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Status:</span>
-              <span>{jobData.status}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Status</div>
+              <div className="text-sm mt-1">{jobData.status}</div>
             </div>
             {jobData.resources && (
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">
-                  Resources:
-                </span>
-                <span>{jobData.resources || 'N/A'}</span>
+              <div>
+                <div className="text-gray-600 font-medium text-lg">Resources</div>
+                <div className="text-sm mt-1">{jobData.resources || 'N/A'}</div>
               </div>
             )}
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Job Name:</span>
-              <span>{jobData.job}</span>
+            <div>
+              <div className="text-gray-600 font-medium text-lg">Job Name</div>
+              <div className="text-sm mt-1">{jobData.job}</div>
             </div>
             {jobData.cluster && (
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">Cluster:</span>
-                <Link
-                  href={`/clusters/${jobData.cluster}`}
-                  className="text-blue-600 hover:underline"
-                >
-                  {jobData.cluster}
-                </Link>
+              <div>
+                <div className="text-gray-600 font-medium text-lg">Cluster</div>
+                <div className="text-sm mt-1">
+                  <Link
+                    href={`/clusters/${jobData.cluster}`}
+                    className="text-sky-blue hover:underline"
+                  >
+                    {jobData.cluster}
+                  </Link>
+                </div>
               </div>
             )}
             {jobData.infra && (
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">Infra:</span>
-                <span>{jobData.infra}</span>
+              <div>
+                <div className="text-gray-600 font-medium text-lg">Infra</div>
+                <div className="text-sm mt-1">{jobData.infra}</div>
               </div>
             )}
           </div>
         </Card>
       </div>
     );
-  }
-
-  switch (activeTab) {
-    case 'info':
-      return (
-        <div className="items-center mb-6">
-          <Card className="p-3">
-            <div className="grid grid-cols-2 gap-6">
-              <div>
-                <div className="text-gray-600 font-medium">Job ID</div>
-                <div>{jobData.id}</div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium">User</div>
-                <div>{jobData.user}</div>
-              </div>
-              <div>
-                <div className="text-gray-600 font-medium">Status</div>
-                <div>{jobData.status}</div>
-              </div>
-              {jobData.resources && (
-                <div>
-                  <div className="text-gray-600 font-medium">Resources</div>
-                  <div>{jobData.resources || 'N/A'}</div>
-                </div>
-              )}
-              <div>
-                <div className="text-gray-600 font-medium">Job Name</div>
-                <div>{jobData.job}</div>
-              </div>
-              {jobData.cluster && (
-                <div>
-                  <div className="text-gray-600 font-medium">Cluster</div>
-                  <div>
-                    <Link
-                      href={`/clusters/${jobData.cluster}`}
-                      className="text-sky-blue hover:underline"
-                    >
-                      {jobData.cluster}
-                    </Link>
-                  </div>
-                </div>
-              )}
-              {jobData.infra && (
-                <div>
-                  <div className="text-gray-600 font-medium">Infra</div>
-                  <div>{jobData.infra}</div>
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-      );
-    case 'logs':
-      return (
-        <Card style={contentStyle}>
-          <LogFilter logs={logs.join('')} />
-        </Card>
-      );
-    case 'event':
-      return <EventTable events={jobData.events} />;
-    default:
-      return <></>;
   }
 }
 
