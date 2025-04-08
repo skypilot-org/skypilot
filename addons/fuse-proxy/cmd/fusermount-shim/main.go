@@ -17,15 +17,24 @@ import (
 	log "k8s.io/klog/v2"
 )
 
+const (
+	helpDescription    = "print help"
+	versionDescription = "print version"
+	unmountDescription = "unmount"
+	quietDescription   = "quiet"
+	lazyDescription    = "lazy unmount"
+	optionsDescription = "mount options"
+)
+
 var (
-	printHelp    = flag.BoolP("help", "h", false, "print help")
-	printVersion = flag.BoolP("version", "V", false, "print version")
+	printHelp    = flag.BoolP("help", "h", false, helpDescription)
+	printVersion = flag.BoolP("version", "V", false, versionDescription)
 	// Parse unmount flag to determine if the operation is a mount or unmount
-	unmount = flag.BoolP("unmount", "u", false, "unmount")
+	unmount = flag.BoolP("unmount", "u", false, unmountDescription)
 	// Unused flags, to make pflag parse flags like -uz correctly
-	_ = flag.BoolP("quiet", "q", false, "quiet")
-	_ = flag.BoolP("lazy", "z", false, "lazy unmount")
-	_ = flag.StringP("options", "o", "", "mount options")
+	_ = flag.BoolP("quiet", "q", false, quietDescription)
+	_ = flag.BoolP("lazy", "z", false, lazyDescription)
+	_ = flag.StringP("options", "o", "", optionsDescription)
 )
 
 func usage() {
@@ -33,13 +42,13 @@ func usage() {
 	// https://github.com/libfuse/libfuse/blob/1b86fe4c4de96daa4e766425193595f1c6b88a73/util/fusermount.c#L1435
 	fmt.Printf(`%s: [options] mountpoint
 Options:
- -h		    print help
- -V		    print version
- -o opt[,opt...]    mount options
- -u		    unmount
- -q		    quiet
- -z		    lazy unmount
-`, os.Args[0])
+ -h		    %s
+ -V		    %s
+ -o opt[,opt...]    %s
+ -u		    %s
+ -q		    %s
+ -z		    %s
+`, os.Args[0], helpDescription, versionDescription, optionsDescription, unmountDescription, quietDescription, lazyDescription)
 }
 
 func main() {

@@ -1,4 +1,4 @@
-.PHONY: vet fmt tidy reviewable gofumpt build-deps
+.PHONY: vet fmt tidy reviewable gofumpt
 
 # Default go command
 GO ?= go
@@ -21,9 +21,19 @@ tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
 
-gofumpt: build-deps
-	gofumpt -l -w .
+gofumpt: GOFUMPT_BIN
+	$(GOFUMPT) -l -w .
 
-build-deps:
-	$(GO) install mvdan.cc/gofumpt@latest
+GOFUMPT = $(shell pwd)/bin/gofumpt
+GOFUMPT_BIN:
+	$(call go-get-tool,$(GOFUMPT),mvdan.cc/gofumpt@latest)
 
+# go-get-tool will 'go get' any package $2 and install it to $1.
+PROJECT_DIR := $(shell dirname $(abspath $(lastword $(MAKEFILE_LIST))))
+define go-get-tool
+@[ -f $(1) ] || { \
+set -e ;\
+echo "Downloading $(2)" ;\
+GOBIN=$(PROJECT_DIR)/bin go install $(2); \
+}
+endef
