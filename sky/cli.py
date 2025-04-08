@@ -73,6 +73,7 @@ from sky.utils import annotations
 from sky.utils import cluster_utils
 from sky.utils import common
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import controller_utils
 from sky.utils import dag_utils
 from sky.utils import env_options
@@ -1159,13 +1160,14 @@ def launch(
     # a not-so-elegant way to handle project config and config override
     # it works, but not elegant
     # priority: CLI arg > env var > project config > default config
-    override_skypilot_config: typing.Dict[str, Any] = {}
+    override_skypilot_config: config_utils.Config = config_utils.Config()
     # parse and override from project config file
     if project_config:
-        project_config = OmegaConf.load(project_config)
+        project_override_config = OmegaConf.to_object(
+            OmegaConf.load(project_config))
         override_skypilot_config = skypilot_config.overlay_skypilot_config(
             original_config=override_skypilot_config,
-            override_configs=OmegaConf.to_object(project_config))
+            override_configs=project_override_config)
     # parse and override from env vars
     variables: List[str] = []
     for key, value in os.environ.items():
@@ -1174,16 +1176,17 @@ def launch(
             variables.append(key[len(prefix):].lower().replace('__', '.') +
                              '=' + value)
         if variables:
-            dot_config = OmegaConf.from_dotlist(variables)
+            dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
             override_skypilot_config = skypilot_config.overlay_skypilot_config(
                 original_config=override_skypilot_config,
-                override_configs=OmegaConf.to_object(dot_config))
+                override_configs=dot_config)
     # parse and override from CLI
     if config:
-        dot_config = OmegaConf.from_dotlist(config.split(','))
+        variables = config.split(',')
+        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
         override_skypilot_config = skypilot_config.overlay_skypilot_config(
             original_config=override_skypilot_config,
-            override_configs=OmegaConf.to_object(dot_config))
+            override_configs=dot_config)
 
     print('following overrides are applied:')
     print(override_skypilot_config)

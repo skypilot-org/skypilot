@@ -250,12 +250,13 @@ def override_skypilot_config(
 
 
 def overlay_skypilot_config(
-        original_config: Optional[Dict[str, Any]],
-        override_configs: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        original_config: Optional[config_utils.Config],
+        override_configs: Optional[config_utils.Config]) -> config_utils.Config:
     """Overrides the user configurations."""
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
-    original_config = config_utils.Config.from_dict(original_config)
+    if original_config is None:
+        original_config = config_utils.Config()
     config = original_config.get_nested(keys=tuple(),
                                         default_value=None,
                                         override_configs=override_configs,
