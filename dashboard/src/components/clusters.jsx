@@ -28,7 +28,7 @@ import {
   getClusters,
 } from '@/data/connectors/clusters';
 import { sortData, isController } from '@/data/utils';
-import { CodeIcon, LogIn, PlayIcon, RotateCwIcon } from 'lucide-react';
+import { SquareCode, Terminal, PlayIcon, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
@@ -472,8 +472,8 @@ export const enabledActions = (status, cluster) => {
 };
 
 const actionIcons = {
-  connect: <LogIn className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
-  VSCode: <CodeIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
+  connect: <Terminal className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
+  VSCode: <SquareCode className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
 };
 
 export function Status2Actions({

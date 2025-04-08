@@ -41,6 +41,7 @@ import {
   MonitorPlay,
   Filter,
   PowerIcon,
+  RefreshCcw,
 } from 'lucide-react';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { handleJobAction } from '@/data/connectors/jobs';
@@ -157,7 +158,7 @@ export function ManagedJobs() {
             className="text-sky-blue hover:text-sky-blue-bright"
             title="Restart Controller"
           >
-            <PowerIcon className="h-5 w-5" />
+            <RefreshCcw className="h-5 w-5" />
           </Button>
         </div>
       </div>
@@ -205,6 +206,11 @@ export function ManagedJobsTable({
   // Add click outside handler to collapse expanded row
   useEffect(() => {
     function handleClickOutside(event) {
+      // Don't close if clicking the show more/less button
+      if (event.target.closest('[data-button-type="show-more-less"]')) {
+        return;
+      }
+
       // If expanded row exists and click is outside of it
       if (
         expandedRowId &&
@@ -369,33 +375,36 @@ export function ManagedJobsTable({
             onClick={() => setSelectedStatus('All')}
             className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
               selectedStatus === 'All'
-                ? 'bg-gray-100 text-gray-800'
-                : 'text-gray-600 hover:bg-gray-50'
+                ? 'bg-sky-50 text-sky-700'
+                : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
             }`}
           >
             <span>ALL</span>
-            <span className="text-xs bg-gray-200 px-1.5 py-0.5 rounded">
+            <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
               {statusCounts.All}
             </span>
           </button>
           {Object.entries(statusCounts)
             .filter(([status]) => status !== 'All')
-            .map(([status, count]) => (
-              <button
-                key={status}
-                onClick={() => setSelectedStatus(status)}
-                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                  selectedStatus === status
-                    ? getStatusStyle(status)
-                    : 'text-gray-600 hover:bg-gray-50'
-                }`}
-              >
-                <span>{status}</span>
-                <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
-                  {count}
-                </span>
-              </button>
-            ))}
+            .map(([status, count]) => {
+              const badgeStyle = getBadgeStyle(status);
+              return (
+                <button
+                  key={status}
+                  onClick={() => setSelectedStatus(status)}
+                  className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                    selectedStatus === status
+                      ? badgeStyle
+                      : `${badgeStyle} opacity-75 hover:opacity-100`
+                  }`}
+                >
+                  <span>{status}</span>
+                  <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
         </div>
       </div>
 
@@ -481,63 +490,63 @@ export function ManagedJobsTable({
                 </TableCell>
               </TableRow>
             ) : paginatedData.length > 0 ? (
-              paginatedData.map((item, index) => (
-                <React.Fragment key={index}>
-                  <TableRow
-                    className={expandedRowId === item.id ? 'selected-row' : ''}
-                  >
-                    <TableCell>
-                      <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                        {item.id}
-                      </Link>
-                    </TableCell>
-                    <TableCell>
-                      <Link href={`/jobs/${item.id}`} className="text-blue-600">
-                        {item.name}
-                      </Link>
-                    </TableCell>
-                    <TableCell>{relativeTime(item.submitted_at)}</TableCell>
-                    <TableCell>{formatDuration(item.job_duration)}</TableCell>
-                    <TableCell>
-                      <Status2Icon status={item.status} />
-                    </TableCell>
-                    <TableCell>{item.resources}</TableCell>
-                    <TableCell>{item.cluster}</TableCell>
-                    <TableCell>{item.region}</TableCell>
-                    <TableCell>{item.recoveries}</TableCell>
-                    <TableCell>{item.user}</TableCell>
-                    <TableCell>
-                      {item.details ? (
-                        <TruncatedDetails
-                          text={item.details}
-                          rowId={item.id}
-                          expandedRowId={expandedRowId}
-                          setExpandedRowId={setExpandedRowId}
+              <>
+                {paginatedData.map((item) => (
+                  <React.Fragment key={item.id}>
+                    <TableRow>
+                      <TableCell>
+                        <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                          {item.id}
+                        </Link>
+                      </TableCell>
+                      <TableCell>
+                        <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                          {item.name}
+                        </Link>
+                      </TableCell>
+                      <TableCell>{relativeTime(item.submitted_at)}</TableCell>
+                      <TableCell>{formatDuration(item.job_duration)}</TableCell>
+                      <TableCell>
+                        <Status2Icon status={item.status} />
+                      </TableCell>
+                      <TableCell>{item.resources}</TableCell>
+                      <TableCell>{item.cluster}</TableCell>
+                      <TableCell>{item.region}</TableCell>
+                      <TableCell>{item.recoveries}</TableCell>
+                      <TableCell>{item.user}</TableCell>
+                      <TableCell>
+                        {item.details ? (
+                          <TruncatedDetails
+                            text={item.details}
+                            rowId={item.id}
+                            expandedRowId={expandedRowId}
+                            setExpandedRowId={setExpandedRowId}
+                          />
+                        ) : (
+                          '-'
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <Status2Actions
+                          jobParent="/jobs"
+                          jobId={item.id}
+                          jobName={item.name}
+                          status={item.status}
+                          managed={true}
+                          cluster="job controller"
                         />
-                      ) : (
-                        '-'
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <Status2Actions
-                        jobParent="/jobs"
-                        jobId={item.id}
-                        jobName={item.name}
-                        status={item.status}
-                        managed={true}
-                        cluster="job controller"
+                      </TableCell>
+                    </TableRow>
+                    {expandedRowId === item.id && (
+                      <ExpandedDetailsRow
+                        text={item.details}
+                        colSpan={12}
+                        innerRef={expandedRowRef}
                       />
-                    </TableCell>
-                  </TableRow>
-                  {expandedRowId === item.id && item.details && (
-                    <ExpandedDetailsRow
-                      text={item.details}
-                      colSpan={11}
-                      innerRef={expandedRowRef}
-                    />
-                  )}
-                </React.Fragment>
-              ))
+                    )}
+                  </React.Fragment>
+                ))}
+              </>
             ) : (
               <TableRow>
                 <TableCell
@@ -1527,13 +1536,17 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
           className="p-4 bg-gray-50 rounded-md border border-gray-200"
           ref={innerRef}
         >
-          <p className="text-sm font-medium text-gray-900">Full Details</p>
-          <p
-            className="mt-1 text-sm text-gray-700"
-            style={{ whiteSpace: 'pre-wrap' }}
-          >
-            {text}
-          </p>
+          <div className="flex justify-between items-start">
+            <div className="flex-1">
+              <p className="text-sm font-medium text-gray-900">Full Details</p>
+              <p
+                className="mt-1 text-sm text-gray-700"
+                style={{ whiteSpace: 'pre-wrap' }}
+              >
+                {text}
+              </p>
+            </div>
+          </div>
         </div>
       </TableCell>
     </TableRow>
@@ -1542,28 +1555,65 @@ function ExpandedDetailsRow({ text, colSpan, innerRef }) {
 
 function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
   const isTruncated = text.length > 50;
+  const isExpanded = expandedRowId === rowId;
+  // Always show truncated text in the table cell
   const displayText = isTruncated ? `${text.substring(0, 50)}` : text;
+  const buttonRef = useRef(null);
 
   const handleClick = (e) => {
+    e.preventDefault();
     e.stopPropagation();
-    if (isTruncated) {
-      setExpandedRowId(expandedRowId === rowId ? null : rowId);
-    }
+    setExpandedRowId(isExpanded ? null : rowId);
   };
 
   return (
-    <div
-      className="truncated-details relative truncate max-w-full"
-      onClick={handleClick}
-    >
-      <span className={`${isTruncated ? 'cursor-pointer' : ''}`}>
-        {displayText}
-        {isTruncated && (
-          <span className="text-blue-600 hover:text-blue-800 font-medium ml-1 whitespace-nowrap">
-            ... show more
-          </span>
-        )}
-      </span>
+    <div className="truncated-details relative max-w-full flex items-center">
+      <span className="truncate">{displayText}</span>
+      {isTruncated && (
+        <button
+          ref={buttonRef}
+          type="button"
+          onClick={handleClick}
+          className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
+          data-button-type="show-more-less"
+        >
+          {isExpanded ? "... show less" : "... show more"}
+        </button>
+      )}
     </div>
   );
+}
+
+// Add this helper function to get the exact same badge styles as status2Icon
+function getBadgeStyle(status) {
+  switch (status) {
+    case 'RUNNING':
+      return 'bg-green-50 text-green-700';
+    case 'PENDING':
+      return 'bg-yellow-50 text-yellow-700';
+    case 'SUCCEEDED':
+      return 'bg-blue-50 text-blue-700';
+    case 'FAILED':
+      return 'bg-red-50 text-red-700';
+    case 'CANCELLED':
+      return 'bg-gray-50 text-gray-700';
+    case 'RECOVERING':
+      return 'bg-orange-50 text-orange-700';
+    case 'SUBMITTED':
+      return 'bg-indigo-50 text-indigo-700';
+    case 'STARTING':
+      return 'bg-cyan-50 text-cyan-700';
+    case 'CANCELLING':
+      return 'bg-rose-50 text-rose-700';
+    case 'FAILED_SETUP':
+      return 'bg-pink-50 text-pink-700';
+    case 'FAILED_PRECHECKS':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_NO_RESOURCE':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_CONTROLLER':
+      return 'bg-red-50 text-red-700';
+    default:
+      return 'bg-gray-100 text-gray-800';
+  }
 }
