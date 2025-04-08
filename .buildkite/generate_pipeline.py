@@ -40,6 +40,13 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
+# We use a separate queue for generic cloud tests on remote servers because:
+# - generic_cloud queue has high concurrency on a single VM
+# - remote-server requires launching a docker container per test
+# - Reusing generic_cloud queue to run remote-server tests would overload the VM
+# Kubernetes has low concurrency on a single VM originally,
+# so remote-server won't drain VM resources, we can reuse the same queue.
+QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
 # We use KUBE_BACKEND to specify the queue for kubernetes tests mark as
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
@@ -56,6 +63,27 @@ CLOUD_QUEUE_MAP = {
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
+
+
+def _get_buildkite_queue(cloud: str, remote_server: bool,
+                         run_on_cloud_kube_backend: bool) -> str:
+    """Get the Buildkite queue for a given cloud.
+
+    We use a separate queue for generic cloud tests on remote servers because:
+    - generic_cloud queue has high concurrency on a single VM
+    - remote-server requires launching a docker container per test
+    - Reusing generic_cloud queue to run remote-server tests would overload the VM
+
+    Kubernetes has low concurrency on a single VM originally,
+    so remote-server won't drain VM resources, we can reuse the same queue.
+    """
+    if run_on_cloud_kube_backend:
+        return QUEUE_KUBE_BACKEND
+
+    queue = CLOUD_QUEUE_MAP[cloud]
+    if queue == QUEUE_GENERIC_CLOUD and remote_server:
+        return QUEUE_GENERIC_CLOUD_REMOTE_SERVER
+    return queue
 
 
 def _parse_args(args: Optional[str] = None):
@@ -82,6 +110,8 @@ def _parse_args(args: Optional[str] = None):
     # -k argument for a test selection pattern
     parser.add_argument("-k")
 
+    parser.add_argument("--remote-server", action="store_true")
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -105,7 +135,11 @@ def _parse_args(args: Optional[str] = None):
     if not default_clouds_to_run:
         default_clouds_to_run = DEFAULT_CLOUDS_TO_RUN
 
-    return default_clouds_to_run, parsed_args.k
+    extra_args = []
+    if parsed_args.remote_server:
+        extra_args.append('--remote-server')
+
+    return default_clouds_to_run, parsed_args.k, extra_args
 
 
 def _extract_marked_tests(
@@ -129,11 +163,12 @@ def _extract_marked_tests(
     matches = re.findall('Collected .+?\.py::(.+?) with marks: \[(.*?)\]',
                          output.stdout)
     print(f'args: {args}')
-    default_clouds_to_run, k_value = _parse_args(args)
+    default_clouds_to_run, k_value, extra_args = _parse_args(args)
 
     print(f'default_clouds_to_run: {default_clouds_to_run}, k_value: {k_value}')
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
+    remote_server = '--remote-server' in extra_args
 
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
@@ -142,7 +177,7 @@ def _extract_marked_tests(
         # conftest.py
         if 'skip' in marks:
             continue
-        if k_value is not None and k_value not in function_name:
+        if k_value is not None and k_value not in function_name and k_value not in file_path:
             # TODO(zpoint): support and/or in k_value
             continue
 
@@ -206,10 +241,12 @@ def _extract_marked_tests(
             param_list += [None
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
-            QUEUE_KUBE_BACKEND
-            if run_on_cloud_kube_backend else CLOUD_QUEUE_MAP[cloud]
+            _get_buildkite_queue(cloud, remote_server,
+                                 run_on_cloud_kube_backend)
             for cloud in final_clouds_to_include
-        ], param_list)
+        ], param_list, [
+            extra_args for _ in range(len(final_clouds_to_include))
+        ])
 
     return function_cloud_map
 
@@ -222,12 +259,14 @@ def _generate_pipeline(test_file: str,
     generated_steps_set = set()
     function_cloud_map = _extract_marked_tests(test_file, args)
     for test_function, clouds_queues_param in function_cloud_map.items():
-        for cloud, queue, param in zip(*clouds_queues_param):
+        for cloud, queue, param, extra_args in zip(*clouds_queues_param):
             label = f'{test_function} on {cloud}'
             command = f'pytest {test_file}::{test_function} --{cloud}'
             if param:
                 label += f' with param {param}'
                 command += f' -k {param}'
+            if extra_args:
+                command += f' {" ".join(extra_args)}'
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue

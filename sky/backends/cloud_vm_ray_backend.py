@@ -61,6 +61,7 @@ from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import registry
@@ -622,15 +623,41 @@ class RayCodeGen:
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
+        # Script to block completion of a job until all storage mounted with
+        # CACHED_MOUNT mode is uploaded to remote.
+        rclone_flush_script = textwrap.dedent(f"""\
+
+        if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ]; then
+            flushed=0
+            # extra second on top of --vfs-cache-poll-interval to
+            # avoid race condition between rclone log line creation and this check.
+            sleep 1
+            while [ $flushed -eq 0 ]; do
+                # sleep for the same interval as --vfs-cache-poll-interval
+                sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
+                flushed=1
+                for file in {constants.RCLONE_LOG_DIR}/*; do
+                    exitcode=0
+                    tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
+                    if [ $exitcode -ne 0 ]; then
+                        echo "skypilot: cached mount is still uploading to remote"
+                        flushed=0
+                        break
+                    fi
+                done
+            done
+            echo "skypilot: cached mount uploaded complete"
+        fi""")
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
         script = {bash_script!r}
+        rclone_flush_script = {rclone_flush_script!r}
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
-
         if script is not None:
+            script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
             # Backward compatibility: Environment starting with `SKY_` is
             # deprecated. Remove it in v0.9.0.
@@ -1090,6 +1117,21 @@ class FailoverCloudErrorHandlerV2:
                 blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
+    def _aws_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'AWS handler error: {error}')
+        # Block AWS if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
                          launchable_resources: 'resources_lib.Resources',
                          region: 'clouds.Region',
@@ -1419,6 +1461,17 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
+            except exceptions.InvalidCloudCredentials as e:
+                # Failed due to invalid cloud credentials.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud for invalid cloud credentials
+                _add_to_blocked_resources(
+                    self._blocked_resources,
+                    to_provision.copy(region=None, zone=None))
+                raise exceptions.ResourcesUnavailableError(
+                    f'Failed to provision on cloud {to_provision.cloud} due to '
+                    f'invalid cloud credentials: '
+                    f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
                 # Failed due to invalid user configs in ~/.sky/config.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
@@ -4864,7 +4917,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4873,10 +4926,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES
         }
 
-        # Handle cases when there aren't any Storages with MOUNT mode.
+        # Handle cases when there aren't any Storages with either MOUNT or
+        # MOUNT_CACHED mode.
         if not storage_mounts:
             return
         start = time.time()
@@ -4906,7 +4960,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
             assert store is not None, storage_obj
-            mount_cmd = store.mount_command(dst)
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+                action_message = 'Mounting'
+            else:
+                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
+                mount_cmd = store.mount_cached_command(dst)
+                action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4918,7 +4978,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=dst,
                     cmd=mount_cmd,
                     run_rsync=False,
-                    action_message='Mounting',
+                    action_message=action_message,
                     log_path=log_path,
                     # Need to source bashrc, as the cloud specific CLI or SDK
                     # may require PATH in bashrc.
@@ -4937,12 +4997,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
                 else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode,
-                        command='to mount',
-                        error_msg=e.error_msg,
-                        detailed_reason=e.detailed_reason) from None
+                    # By default, raising an error caused from mounting_utils
+                    # shows a big heredoc as part of it. Here, we want to
+                    # conditionally show the heredoc only if SKYPILOT_DEBUG
+                    # is set
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason)
+                    else:
+                        # Strip the command (a big heredoc) from the exception
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
@@ -4960,7 +5031,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            if storage_obj.mode != storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode not in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # Skip non-mount storage objects, as there is no need to
                 # reconstruct them during cluster restart.
                 continue

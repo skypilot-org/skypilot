@@ -71,8 +71,14 @@ async def logs(
         request_name='jobs.logs',
         request_body=jobs_logs_body,
         func=core.tail_logs,
-        schedule_type=api_requests.ScheduleType.SHORT
-        if jobs_logs_body.refresh else api_requests.ScheduleType.LONG,
+        # TODO(aylei): We have tail logs scheduled as SHORT request, because it
+        # should be responsive. However, it can be long running if the user's
+        # job keeps running, and we should avoid it taking the SHORT worker
+        # indefinitely.
+        # When refresh is True we schedule it as LONG because a controller
+        # restart might be needed.
+        schedule_type=api_requests.ScheduleType.LONG
+        if jobs_logs_body.refresh else api_requests.ScheduleType.SHORT,
         request_cluster_name=common.JOB_CONTROLLER_NAME,
     )
     request_task = api_requests.get_request(request.state.request_id)
@@ -154,7 +160,7 @@ async def dashboard(request: fastapi.Request,
                 async with httpx.AsyncClient() as client:
                     response = await client.request('GET',
                                                     dashboard_url,
-                                                    timeout=1)
+                                                    timeout=5)
                 break  # Connection successful, proceed with the request
             except Exception as e:  # pylint: disable=broad-except
                 # We catch all exceptions to gracefully handle unknown

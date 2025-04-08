@@ -186,6 +186,11 @@ def get_user(user_id: str) -> models.User:
     return models.User(id=row[0], name=row[1])
 
 
+def get_all_users() -> List[models.User]:
+    rows = _DB.cursor.execute('SELECT id, name FROM users').fetchall()
+    return [models.User(id=row[0], name=row[1]) for row in rows]
+
+
 def add_or_update_cluster(cluster_name: str,
                           cluster_handle: 'backends.ResourceHandle',
                           requested_resources: Optional[Set[Any]],
