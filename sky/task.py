@@ -554,10 +554,15 @@ class Task:
         config_override = config.pop('config', None)
 
         # Handle backward compatibility with experimental.config_overrides
+        # TODO: Remove experimental.config_overrides in 0.11.0.
         if experimental_configs is not None:
             exp_config_override = experimental_configs.pop(
                 'config_overrides', None)
             if exp_config_override is not None:
+                logger.warning(
+                    f'{colorama.Fore.YELLOW}`experimental.config_overrides` '
+                    'field is deprecated in the task YAML. Use the `config` '
+                    f'field to set config overrides.{colorama.Style.RESET_ALL}')
                 if config_override is not None:
                     logger.warning(
                         f'{colorama.Fore.YELLOW}Both top-level `config` and '
