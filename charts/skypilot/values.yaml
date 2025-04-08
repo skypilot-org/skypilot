@@ -33,18 +33,21 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Skip resource check for the API server, not recommended for production deployment
+  skipResourceCheck: false
   # Set resource requests and limits for the API server
+  resources:
+    # Request a moderate amount of resources for an remote API server by default, which meets the
+    # basic requirements for team usage at medium scale.
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      # Additional resource types like ephemeral-storage can be specified here
   # TODO: Setting limits causes issues with the API server. For now we advise
   # not to set limits.
-  resources: null
-  # resources:
-  #   requests:
-  #     cpu: "1"
-  #     memory: "2Gi"
-  #   limits:
-  #     cpu: "2"
-  #     memory: "4Gi"
-  #     # Additional resource types like ephemeral-storage can be specified here
+  # limits:
+  #  cpu: "4"
+  #  memory: "8Gi"
   
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
@@ -124,12 +127,69 @@ ingress-nginx:
 
 rbac:
   # Configure the RBAC permissions for the SkyPilot API server
-  rules:
-    # Default configuration with full access - override for restricted environments
-    - apiGroups: ["*"]
-      resources: ["*"]
-      verbs: ["*"]
-
+  # TODO(aylei): Do not setup rbac policies when rbac.kubernetesCredentials.userKubeconfig=true
+  # Addtional grantedNamespaces other than the release namespace (where API server is deployed).
+  # Different namespaces may need different permissions, but it would be complex and error-prone to manage rules for each namespace.
+  # Instead, we aggregate all the permissions needed across namespaces and grant them to all the namespaces listed.
+  grantedNamespaces:
+  - namespace: "skypilot-system"
+  # Namespace-scoped rules that are granted to the release namespace and rbac.grantedNamespaces.
+  namespaceRules:
+    # Required for managing pods and their lifecycle
+    - apiGroups: [ "" ]
+      resources: [ "pods", "pods/status", "pods/exec", "pods/portforward" ]
+      verbs: [ "*" ]
+    # Required for managing services for SkyPilot Pods
+    - apiGroups: [ "" ]
+      resources: [ "services" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for managing SSH keys
+    - apiGroups: [ "" ]
+      resources: [ "secrets" ]  
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for granting namespaced permissions to SkyPilot Pods and SkyPilot system components.
+    # TODO(aylei): This is too permissive, consider passing existing roles instead.
+    - apiGroups: [ "rbac.authorization.k8s.io" ] 
+      resources: [ "roles", "rolebindings" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ] 
+    # Required for managing SkyPilot system DaemonSets
+    - apiGroups: [ "" ]
+      resources: [ "daemonsets" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for managing configmaps for smarter-device-manager
+    # TODO(aylei): Remove this after we deprecate smarter-device-manager
+    - apiGroups: [ "" ]
+      resources: [ "configmaps" ]
+      verbs: [ "get", "list", "watch", "create" ]
+    # Required for managing service accounts for SkyPilot Pods and SkyPilot system components. 
+    - apiGroups: [ "" ]
+      resources: [ "serviceaccounts" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+  # Cluster-scoped rules for API server.
+  clusterRules:
+    # Required for managing skypilot-system namespace, which hosts skypilot system components like smarter-device-manager.
+    - apiGroups: [ "" ]
+      resources: [ "namespaces" ]  
+      resourceNames: [ "skypilot-system" ]
+      verbs: [ "get", "list", "watch", "create" ]
+    # Required for getting node resources. 
+    - apiGroups: [ "" ]
+      resources: [ "nodes" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for autodetecting runtime classes
+    - apiGroups: [ "node.k8s.io" ]
+      resources: [ "runtimeclasses" ]  
+      verbs: [ "get", "list", "watch" ]
+    # Required for exposing services.
+    - apiGroups: [ "networking.k8s.io" ]
+      resources: [ "ingressclasses" ]
+      verbs: [ "get", "list", "watch" ]
+    # TODO(aylei): This is too permissive, consider passing existing roles instead.
+    # Required for granting cluster permissions to SkyPilot Pods.
+    - apiGroups: [ "rbac.authorization.k8s.io" ]
+      resources: [ "clusterroles", "clusterrolebindings" ]  
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    
 kubernetesCredentials:
   # Enable/disable using the API server's cluster for workloads
   useApiServerCluster: true
@@ -148,15 +208,12 @@ gcpCredentials:
   # TODO(romilb): This can be made optional by using the project in the key json by default.
   projectId: null
 
+
 # Set securityContext for the api pod
-securityContext:
-  capabilities:
-    drop:
-    - ALL  
-  allowPrivilegeEscalation: false
+podSecurityContext: {}
 
 # Set securityContext for the api container inside the api pod
-podSecurityContext: 
+securityContext:
   capabilities:
     drop:
     - ALL  

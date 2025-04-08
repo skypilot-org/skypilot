@@ -289,6 +289,12 @@ def _print_checked_cloud(
         cloud_tuple: The cloud to print the capabilities for.
         cloud_capabilities: The capabilities for the cloud.
     """
+
+    def _yellow_color(str_to_format: str) -> str:
+        return (f'{colorama.Fore.LIGHTYELLOW_EX}'
+                f'{str_to_format}'
+                f'{colorama.Style.RESET_ALL}')
+
     cloud_repr, cloud = cloud_tuple
     # Print the capabilities for the cloud.
     # consider cloud enabled if any capability is enabled.
@@ -319,7 +325,7 @@ def _print_checked_cloud(
     if activated_account is not None:
         echo(f'    Activated account: {activated_account}')
     for reason, caps in hints_to_capabilities.items():
-        echo(f'    Hint [{", ".join(caps)}]: {reason}')
+        echo(f'    Hint [{", ".join(caps)}]: {_yellow_color(reason)}')
     for reason, caps in reasons_to_capabilities.items():
         echo(f'    Reason [{", ".join(caps)}]: {reason}')
 
@@ -359,9 +365,9 @@ def _format_enabled_cloud(cloud_name: str,
                           if i == len(existing_contexts) -
                           1 else ux_utils.INDENT_SYMBOL)
                 contexts_formatted.append(f'\n    {symbol}{context}')
-            context_info = f'Allowed contexts:{"".join(contexts_formatted)}'
+            context_info = f'  Allowed contexts:{"".join(contexts_formatted)}'
         else:
-            context_info = f'Active context: {existing_contexts[0]}'
+            context_info = f'  Active context: {existing_contexts[0]}'
 
         return (f'{_green_color(cloud_and_capabilities)}\n'
                 f'  {colorama.Style.DIM}{context_info}'
