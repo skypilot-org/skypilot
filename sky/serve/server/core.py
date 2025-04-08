@@ -787,11 +787,6 @@ def sync_down_logs(service_name: str,
                    replica_id: Optional[int] = None) -> str:
     """Sync down logs from the controller for the given service.
 
-    This function:
-      1) Gathers logs on the controller, by pulling or merging any needed
-         replica logs into `~/.sky/serve/<service_name>/<timestamp>/`.
-      2) Rsyncs those logs down to the local machine in a timestamped directory.
-
     Args:
         service_name: The name of the service to download logs from.
         targets: Which component(s) to download logs for. If None or empty,
@@ -807,12 +802,6 @@ def sync_down_logs(service_name: str,
 
     Returns:
         The parent directory of the downloaded logs.
-
-    Raises:
-        RuntimeError: If fails to gather logs or fails to rsync from the
-          controller.
-        sky.exceptions.ClusterNotUpError: If the controller is not up.
-        ValueError: Arguments not valid.
     """
     normalized_targets: Set[serve_utils.ServiceComponentTarget]
     if not targets:
@@ -881,25 +870,28 @@ def sync_down_logs(service_name: str,
 
     def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
         component = target.component
+        # We need to set one side of the pipe to a logs stream, and the other
+        # side to a file.
+        stream_logs_code: str
+
         if component == serve_utils.ServiceComponent.CONTROLLER:
-            code = serve_utils.ServeCodeGen.stream_serve_process_logs(
+            stream_logs_code = serve_utils.ServeCodeGen.stream_serve_process_logs(
                 service_name, stream_controller=True, follow=False)
         elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
-            code = serve_utils.ServeCodeGen.stream_serve_process_logs(
+            stream_logs_code = serve_utils.ServeCodeGen.stream_serve_process_logs(
                 service_name, stream_controller=False, follow=False)
         elif component == serve_utils.ServiceComponent.REPLICA:
             replica_id = target.replica_id
             assert replica_id is not None, service_name
-            code = serve_utils.ServeCodeGen.stream_replica_logs(service_name,
-                                                                replica_id,
-                                                                follow=False)
+            stream_logs_code = serve_utils.ServeCodeGen.stream_replica_logs(
+                service_name, replica_id, follow=False)
         else:
             assert False, component
 
         # Refer to the notes in
         # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
         backend.run_on_head(handle,
-                            code,
+                            stream_logs_code,
                             stream_logs=False,
                             process_stream=False,
                             ssh_mode=command_runner.SshMode.INTERACTIVE,

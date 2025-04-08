@@ -411,7 +411,7 @@ def sync_down_logs(service_name: str,
         replica_id=replica_id,
     )
     response = requests.post(
-        f'{server_common.get_server_url()}/serve/download-logs',
+        f'{server_common.get_server_url()}/serve/sync-down-logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
     )

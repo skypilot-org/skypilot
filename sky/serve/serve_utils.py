@@ -1166,17 +1166,6 @@ class ServeCodeGen:
         return cls._build(code)
 
     @classmethod
-    def sync_down_logs(cls, service_name: str, timestamp: str,
-                       target_str_list: List[str],
-                       replica_id: Optional[int]) -> str:
-        code = [
-            f'msg = serve_utils.sync_down_logs('
-            f'{service_name!r}, {timestamp!r}, {target_str_list!r}, '
-            f'{replica_id!r})', 'print(msg, end="", flush=True)'
-        ]
-        return cls._build(code)
-
-    @classmethod
     def _build(cls, code: List[str]) -> str:
         code = cls._PREFIX + code
         generated_code = '; '.join(code)

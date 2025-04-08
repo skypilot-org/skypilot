@@ -4805,15 +4805,6 @@ def serve_logs(
         # Sync down controller logs of the service
         sky serve logs [SERVICE_NAME] --controller --sync-down
     """
-    have_replica_id = replica_id is not None
-    num_flags = controller + load_balancer + have_replica_id
-
-    # For sync-down, no extra flags means all logs.
-    if not sync_down and num_flags == 0:
-        raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified if not '
-                               'using --sync-down.')
-
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
@@ -4823,14 +4814,21 @@ def serve_logs(
         chosen_components.add(serve_lib.ServiceComponent.REPLICA)
 
     if sync_down:
+        # For sync-down, no extra flags means all logs, and multiple targets
+        # is allowed.
         request_id = serve_lib.sync_down_logs(service_name,
-                                              targets=chosen_components,
+                                              targets=list(chosen_components,
                                               replica_id=replica_id)
         local_path = sdk.stream_and_get(request_id)
         click.echo(f'Logs downloaded to {local_path}')
         return
 
-    if num_flags > 1:
+    if len(chosen_components) == 0:
+        raise click.UsageError('One of --controller, --load-balancer, '
+                               '[REPLICA_ID] must be specified if not '
+                               'using --sync-down.')
+
+    if len(chosen_components) > 1:
         raise click.UsageError('Can only tail one target, i.e. '
                                'one of --controller, --load-balancer, or '
                                '[REPLICA_ID] at a time. '
@@ -4838,6 +4836,7 @@ def serve_logs(
 
     assert len(chosen_components) == 1
     target_component = chosen_components.pop()
+
     try:
         serve_lib.tail_logs(service_name,
                             target=target_component,
