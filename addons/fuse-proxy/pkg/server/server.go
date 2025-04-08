@@ -59,7 +59,7 @@ func (s *Server) Start() error {
 			if strings.Contains(err.Error(), "use of closed network connection") {
 				return nil
 			}
-			log.Errorf("Failed to accept connection: %w", err)
+			log.Errorf("Failed to accept connection: %v", err)
 			continue
 		}
 		go s.handleConnection(conn)
@@ -86,11 +86,11 @@ func (s *Server) handleConnection(conn net.Conn) {
 	// Receive the namespace fd and fusermount request
 	nsFd, msg, err := mfcputil.RecvMsg(unixConn)
 	if err != nil {
-		log.Errorf("Failed to receive namespace fd: %w", err)
+		log.Errorf("Failed to receive namespace fd: %v", err)
 		return
 	}
 	if err := json.Unmarshal(msg, req); err != nil {
-		log.Errorf("Failed to unmarshal request: %w", err)
+		log.Errorf("Failed to unmarshal request: %v", err)
 		return
 	}
 	log.Infof("Received ns fd %d, request: %+v, start mount", nsFd, req)
@@ -104,10 +104,10 @@ func (s *Server) handleConnection(conn net.Conn) {
 	}
 	b, err := json.Marshal(resp)
 	if err != nil {
-		log.Errorf("Failed to marshal response: %w", err)
+		log.Errorf("Failed to marshal response: %v", err)
 	}
 	if err := mfcputil.SendMsg(unixConn, fd, b); err != nil {
-		log.Errorf("Failed to send response: %w", err)
+		log.Errorf("Failed to send response: %v", err)
 		return
 	}
 }
