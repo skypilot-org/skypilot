@@ -21,4 +21,4 @@ API_SERVER_REQUEST_DB_PATH = '~/.sky/api_server/requests.db'
 CLUSTER_REFRESH_DAEMON_INTERVAL_SECONDS = 60
 
 # Environment variable for a file path to the API cookie file.
-ENV_VAR_API_COOKIE_FILE = 'SKYPILOT_API_COOKIE_FILE'
+API_COOKIE_FILE_ENV_VAR = 'SKYPILOT_API_COOKIE_FILE'

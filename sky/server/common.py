@@ -83,9 +83,9 @@ class ApiServerInfo:
 
 def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
     """Returns the cookie jar for the API server."""
-    cookie_file = os.environ.get(server_constants.ENV_VAR_API_COOKIE_FILE)
+    cookie_file = os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR)
     cookie_jar = requests.cookies.RequestsCookieJar()
-    if cookie_file:
+    if cookie_file and os.path.exists(cookie_file):
         cookie_path = pathlib.Path(cookie_file).expanduser().resolve()
         file_cookie_jar = MozillaCookieJar(cookie_path)
         file_cookie_jar.load()
