@@ -226,8 +226,7 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
 
     Returns:
         A list of relative paths to files and directories to be excluded from
-        the source directory. For all directories, a tailing '/*' is added to
-        exclude all contents under the directory.
+        the source directory.
     """
     assert os.path.isdir(src_dir_path), src_dir_path
     expand_src_dir_path = os.path.expanduser(src_dir_path)
