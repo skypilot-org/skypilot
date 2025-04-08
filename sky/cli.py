@@ -4817,7 +4817,7 @@ def serve_logs(
         # For sync-down, no extra flags means all logs, and multiple targets
         # is allowed.
         request_id = serve_lib.sync_down_logs(service_name,
-                                              targets=list(chosen_components,
+                                              targets=list(chosen_components),
                                               replica_id=replica_id)
         local_path = sdk.stream_and_get(request_id)
         click.echo(f'Logs downloaded to {local_path}')
