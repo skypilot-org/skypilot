@@ -604,13 +604,6 @@ def get_cluster_schema():
 
 
 _NETWORK_CONFIG_SCHEMA = {
-    'vpc_name': {
-        'oneOf': [{
-            'type': 'string',
-        }, {
-            'type': 'null',
-        }],
-    },
     'use_internal_ips': {
         'type': 'boolean',
     },
@@ -767,6 +760,13 @@ def get_config_schema():
                 },
                 'security_group_name':
                     (_PRORPERTY_NAME_OR_CLUSTER_NAME_TO_PROPERTY),
+                'vpc_name': {
+                    'oneOf': [{
+                        'type': 'string',
+                    }, {
+                        'type': 'null',
+                    }],
+                },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
             },
@@ -804,6 +804,19 @@ def get_config_schema():
                 },
                 'enable_gvnic': {
                     'type': 'boolean'
+                },
+                'vpc_name': {
+                    'oneOf': [
+                        {
+                            'type': 'string',
+                            # vpc-name or project-id/vpc-name
+                            # VPC name and Project ID have -, a-z, and 0-9.
+                            'pattern': '^(?:[-a-z0-9]+/)?[-a-z0-9]+$'
+                        },
+                        {
+                            'type': 'null',
+                        }
+                    ],
                 },
                 **_LABELS_SCHEMA,
                 **_NETWORK_CONFIG_SCHEMA,
