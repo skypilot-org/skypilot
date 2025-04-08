@@ -354,11 +354,12 @@ available_node_types:
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
                 # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
                 # so that both fusemount and fusermount3 can be masked before enabling SSH access.
-                PACKAGES="rsync curl netcat gcc patch pciutils fuse fuse3 openssh-server";
+                PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
-                # so that curl and rsync are available sooner to unblock the following
+                # so that curl, rsync and wget are available sooner to unblock the following
                 # conda installation and rsync.
+                # Also, we install fuse first to avoid confliction with fuse3.
                 set -e
                 INSTALL_FIRST="";
                 MISSING_PACKAGES="";
@@ -368,8 +369,7 @@ available_node_types:
                       INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
                     fi
                   elif ! dpkg -l | grep -q "^ii  $pkg "; then
-                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ]; then
-                      # Install fuse first to avoid confliction with fuse3
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ] || [ "$pkg" == "wget" ]; then
                       INSTALL_FIRST="$INSTALL_FIRST $pkg";
                     else
                       MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
