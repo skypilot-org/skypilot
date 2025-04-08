@@ -764,6 +764,9 @@ def test_skyserve_rolling_update(generic_cloud: str):
                 # TODO(zhwu): we should have a more generalized way for checking the
                 # mixed version of replicas to avoid depending on the specific
                 # round robin load balancing policy.
+                # Note: If there's a timeout waiting in single_new_replica check,
+                # the round robin load balancing state might be affected and we may need
+                # multiple requests to observe both old and new versions of the service.
                 'result=$(curl $endpoint); echo "Result: $result"; '
                 'if echo "$result" | grep -q "Hi, SkyPilot here"; then '
                 '    echo "Found old version output"; '
