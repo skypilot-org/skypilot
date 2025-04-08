@@ -52,9 +52,9 @@ func MustGetWrapperInstallPath() string {
 
 func getSharedDir() string {
 	if os.Getenv(EnvSharedDir) == "" {
+		log.Warningf("Fallback to constant shared dir: %s", HackConstSharedDir)
 		return HackConstSharedDir
 	}
-	log.Warningf("Fallback to constant shared dir: %s", os.Getenv(EnvSharedDir))
 	return os.Getenv(EnvSharedDir)
 }
 

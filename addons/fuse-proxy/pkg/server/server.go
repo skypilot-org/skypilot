@@ -116,12 +116,12 @@ func (s *Server) handleFusermount(req *common.Request, nsFd int) (int, error) {
 	nsPath := fmt.Sprintf("/proc/self/fd/%d", nsFd)
 	// Ensure /dev/fuse exists in the container's mnt namespace
 	if err := s.ensureFuseDevice(nsPath); err != nil {
-		return 0, fmt.Errorf("failed to ensure /dev/fuse exists: %v", err)
+		return 0, fmt.Errorf("failed to ensure /dev/fuse exists: %w", err)
 	}
 	// Create socket pair for FD passing
 	socks, err := createSocketPair()
 	if err != nil {
-		return 0, fmt.Errorf("failed to create socket pair: %v", err)
+		return 0, fmt.Errorf("failed to create socket pair: %w", err)
 	}
 	defer socks[0].Close()
 	defer socks[1].Close()
@@ -129,7 +129,7 @@ func (s *Server) handleFusermount(req *common.Request, nsFd int) (int, error) {
 	// Get the underlying file for the second socket
 	sock1File, err := socks[1].(*net.UnixConn).File()
 	if err != nil {
-		return 0, fmt.Errorf("failed to get socket file: %v", err)
+		return 0, fmt.Errorf("failed to get socket file: %w", err)
 	}
 	defer sock1File.Close()
 	// Prepare nsenter command to run fusermount in container's namespace
@@ -149,13 +149,13 @@ func (s *Server) handleFusermount(req *common.Request, nsFd int) (int, error) {
 	// Capture command output for error reporting
 	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return 0, fmt.Errorf("fusermount failed: %v, output: %s", err, string(output))
+		return 0, fmt.Errorf("fusermount failed: %w, output: %s", err, string(output))
 	}
 	// For mount operations, we need to transfer the fd back to the caller
 	if !strings.Contains(strings.Join(req.Args, " "), "-u") {
 		fd, _, err := mfcputil.RecvMsg(socks[0])
 		if err != nil {
-			return 0, fmt.Errorf("failed to receive FD: %v", err)
+			return 0, fmt.Errorf("failed to receive FD: %w", err)
 		}
 		return fd, nil
 	}
@@ -183,7 +183,7 @@ func (s *Server) ensureFuseDevice(nspath string) error {
 	)
 
 	if output, err := createCmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("failed to create /dev/fuse: %v, output: %s", err, string(output))
+		return fmt.Errorf("failed to create /dev/fuse: %w, output: %s", err, string(output))
 	}
 
 	// Set permissions to allow user access
@@ -211,12 +211,12 @@ func createSocketPair() ([2]net.Conn, error) {
 	// Convert the file descriptors to net.Conn
 	conn1, err1 := net.FileConn(os.NewFile(uintptr(fds[0]), ""))
 	if err1 != nil {
-		return [2]net.Conn{}, fmt.Errorf("failed to create first connection: %v", err1)
+		return [2]net.Conn{}, fmt.Errorf("failed to create first connection: %w", err1)
 	}
 	conn2, err2 := net.FileConn(os.NewFile(uintptr(fds[1]), ""))
 	if err2 != nil {
 		conn1.Close()
-		return [2]net.Conn{}, fmt.Errorf("failed to create second connection: %v", err2)
+		return [2]net.Conn{}, fmt.Errorf("failed to create second connection: %w", err2)
 	}
 	return [2]net.Conn{conn1, conn2}, nil
 }
