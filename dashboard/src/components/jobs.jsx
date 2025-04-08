@@ -34,7 +34,7 @@ import {
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { Layout } from '@/components/elements/layout';
 import { EventTable } from '@/components/elements/events';
-import { CustomTooltip as Tooltip } from '@/components/utils';
+import { CustomTooltip as Tooltip, relativeTime } from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
@@ -68,7 +68,9 @@ export function formatDuration(durationInSeconds) {
   if (minutes > 0 || hours > 0) {
     result += `${minutes}m `;
   }
-  result += `${seconds}s`;
+  if (hours < 1) {
+    result += `${seconds}s`;
+  }
 
   return result.trim();
 }
@@ -354,9 +356,9 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('total_duration')}
+                onClick={() => requestSort('submitted_at')}
               >
-                Total Duration{getSortDirection('total_duration')}
+                Submitted{getSortDirection('submitted_at')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -474,7 +476,7 @@ export function ManagedJobsTable({
                         {item.name}
                       </Link>
                     </TableCell>
-                    <TableCell>{formatDuration(item.total_duration)}</TableCell>
+                    <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
                       <State2Icon state={item.status} />
@@ -1378,9 +1380,9 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('total_duration')}
+                onClick={() => requestSort('submitted_at')}
               >
-                Total Duration{getSortDirection('total_duration')}
+                Submitted{getSortDirection('submitted_at')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -1449,7 +1451,7 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
                         />
                       </Link>
                     </TableCell>
-                    <TableCell>{formatDuration(item.total_duration)}</TableCell>
+                    <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
                       <State2Icon state={item.state} />

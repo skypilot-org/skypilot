@@ -147,7 +147,9 @@ export async function getClusterJobs({ clusterName }) {
         job: job.job_name,
         user: job.username,
         gpus: job.accelerators || {},
-        time: new Date(job.submitted_at * 1000),
+        submitted_at: job.submitted_at
+          ? new Date(job.submitted_at * 1000)
+          : null,
         resources: job.resources,
         cluster: clusterName,
         total_duration: total_duration,

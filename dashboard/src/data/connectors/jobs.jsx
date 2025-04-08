@@ -98,6 +98,9 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         gpus: gpus,
         num_nodes: num_nodes,
         other_resources: other_resources,
+        submitted_at: job.submitted_at
+          ? new Date(job.submitted_at * 1000)
+          : null,
         events: events,
       };
     });

@@ -7,8 +7,11 @@ function capitalizeFirstWord(text) {
 }
 
 export function relativeTime(date) {
-  const now = new Date();
+  if (!date) {
+    return 'N/A';
+  }
 
+  const now = new Date();
   const differenceInDays = (now - date) / (1000 * 3600 * 24);
   if (Math.abs(differenceInDays) < 7) {
     return (
