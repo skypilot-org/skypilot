@@ -1,4 +1,4 @@
-.PHONY: vet fmt tidy reviewable
+.PHONY: vet fmt tidy reviewable gofumpt build-deps
 
 # Default go command
 GO ?= go
@@ -7,7 +7,7 @@ GO ?= go
 clean:
 	rm -rf $(BUILD_DIR)
 
-reviewable: fmt vet tidy
+reviewable: fmt vet tidy gofumpt
 	git diff --exit-code || (echo "Changes detected after static checks. Run 'cd addons/fuse-proxy && make reviewable' and commit the changes." && exit 1)
 
 fmt:
@@ -20,3 +20,10 @@ vet:
 tidy:
 	$(GO) mod tidy
 	$(GO) mod verify
+
+gofumpt:
+	gofumpt -l -w .
+
+build-deps:
+	$(GO) install mvdan.cc/gofumpt@latest
+

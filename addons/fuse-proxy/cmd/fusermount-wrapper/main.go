@@ -23,19 +23,24 @@ import (
 	log "k8s.io/klog/v2"
 )
 
+const (
+	mountPointDescription = "the path to the mount point of the FUSE device"
+	placeholderDescription = "the placeholder to replace the mount point in fuse implementation command"
+	optionsDescription = "mount options"
+)
 var (
-	mountPoint   = flag.StringP("mount-point", "m", "", "the path to themount point of the FUSE device")
-	placeholder  = flag.StringP("placeholder", "p", "{}", "the placeholder to replace the mount point in fuse implementation command")
-	mountOptions = flag.StringP("options", "o", "", "mount options")
+	mountPoint   = flag.StringP("mount-point", "m", "", mountPointDescription)
+	placeholder  = flag.StringP("placeholder", "p", "{}", placeholderDescription)
+	mountOptions = flag.StringP("options", "o", "", optionsDescription)
 )
 
 func usage() {
 	fmt.Printf(`Usage: %s -m /path/to/mount-point -- FUSE_IMPL_CMD [FUSE_IMPL_FLAGS] {}
 Options:
--m              the path to the mount point of the FUSE device
--p              the placeholder to replace the mount point in fuse implementation command
--o opt[,opt...] mount options
-`, os.Args[0])
+-m              %s
+-p              %s
+-o opt[,opt...] %s
+`, os.Args[0], mountPointDescription, placeholderDescription, optionsDescription)
 }
 
 func main() {
@@ -47,7 +52,7 @@ func main() {
 	}
 	if flag.NArg() == 0 {
 		usage()
-		log.Fatalf("fuse implementation commad is required")
+		log.Fatalf("fuse implementation command is required")
 	}
 	socketPath := common.MustGetServerSocketPath()
 	// Forward the fusermount request to the server and receive the mounted fd

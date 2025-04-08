@@ -206,7 +206,7 @@ func createSocketPair() ([2]net.Conn, error) {
 	// Create a pair of socket file descriptors
 	fds, err := syscall.Socketpair(syscall.AF_UNIX, syscall.SOCK_STREAM, 0)
 	if err != nil {
-		return [2]net.Conn{}, fmt.Errorf("socketpair failed: %v", err)
+		return [2]net.Conn{}, fmt.Errorf("socketpair failed: %w", err)
 	}
 	// Convert the file descriptors to net.Conn
 	conn1, err1 := net.FileConn(os.NewFile(uintptr(fds[0]), ""))
