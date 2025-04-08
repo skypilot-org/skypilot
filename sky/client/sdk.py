@@ -471,6 +471,9 @@ def launch(
 
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
+    override_skypilot_config = skypilot_config.compose_sdk_config(
+        dag_str=dag_str, user_provided_overrides=override_skypilot_config)
+
     body = payloads.LaunchBody(
         task=dag_str,
         cluster_name=cluster_name,
