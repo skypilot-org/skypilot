@@ -764,7 +764,15 @@ def test_skyserve_rolling_update(generic_cloud: str):
                 # TODO(zhwu): we should have a more generalized way for checking the
                 # mixed version of replicas to avoid depending on the specific
                 # round robin load balancing policy.
-                'curl $endpoint | grep "Hi, SkyPilot here"',
+                'result=$(curl $endpoint); echo "Result: $result"; '
+                'if echo "$result" | grep -q "Hi, SkyPilot here"; then '
+                '    echo "Found old version output"; '
+                'else '
+                '    echo "$result" | grep "Hi, new SkyPilot here!" || exit 1; '
+                '    echo "Found new version output, trying again for old version"; '
+                '    result2=$(curl $endpoint); echo "Result2: $result2"; '
+                '    echo "$result2" | grep "Hi, SkyPilot here" || exit 1; '
+                'fi',
             ],
             _TEARDOWN_SERVICE.format(name=name),
             timeout=20 * 60,
