@@ -63,7 +63,7 @@ For more details of the fields, see :ref:`config-yaml`.
 Utilizing reservations
 ~~~~~~~~~~~~~~~~~~~~~~
 
-By specifying configurations above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
+By specifying the configuration above, SkyPilot will prioritize using any available capacity in reservation/block (i.e., consider them as zero cost) whenever you launch a cluster/job.
 
 Specifically, SkyPilot's behavior is as follows:
 
