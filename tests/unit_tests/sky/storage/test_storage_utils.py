@@ -645,7 +645,7 @@ def test_get_excluded_files_for_file():
         storage_utils.get_excluded_files(
             'tests/unit_tests/sky/storage/test_storage_utils.py')
 
+
 def test_get_excluded_files_for_non_existent_dir():
     with pytest.raises(ValueError):
-        storage_utils.get_excluded_files(
-            'tests/non_existent_dir')
+        storage_utils.get_excluded_files('tests/non_existent_dir')
