@@ -631,9 +631,19 @@ in any way, except when opening ports (e.g., via ``resources.ports``) in
 which case new firewall rules permitting public traffic to those ports
 will be added.
 
-By default, only VPCs from the current project are used. To use a shared VPC
-from another GCP project, specify the name as ``<project ID>/<vpc name>``,
-e.g. ``my-project-123456/default``.
+By default, only VPCs from the current project are used.
+
+.. code-block:: yaml
+
+  gcp:
+    vpc-name: my-vpc
+
+To use a shared VPC from another GCP project, specify the name as ``<project ID>/<vpc name>``. For example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc-name: my-project-123456/default
 
 .. _config-yaml-gcp-use-internal-ips:
 
