@@ -228,7 +228,6 @@ def get_excluded_files(src_dir_path: str) -> List[str]:
         A list of relative paths to files and directories to be excluded from
         the source directory.
     """
-    assert os.path.isdir(src_dir_path), src_dir_path
     expand_src_dir_path = os.path.expanduser(src_dir_path)
     skyignore_path = os.path.join(expand_src_dir_path,
                                   constants.SKY_IGNORE_FILE)
