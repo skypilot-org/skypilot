@@ -881,7 +881,7 @@ def sync_down_logs(service_name: str,
         elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
             stream_logs_code = (
                 serve_utils.ServeCodeGen.stream_serve_process_logs(
-                service_name, stream_controller=False, follow=False)
+                    service_name, stream_controller=False, follow=False))
         elif component == serve_utils.ServiceComponent.REPLICA:
             replica_id = target.replica_id
             assert replica_id is not None, service_name
