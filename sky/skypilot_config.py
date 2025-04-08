@@ -132,17 +132,6 @@ def set_nested(keys: Tuple[str, ...], value: Any) -> Dict[str, Any]:
     return dict(**copied_dict)
 
 
-def set_nested_dict(original: Dict[str, Any], keys: Tuple[str, ...],
-                    value: Any) -> Dict[str, Any]:
-    """Returns a deep-copied config with the nested key set to value.
-
-    Like get_nested(), if any key is not found, this will not raise an error.
-    """
-    config = config_utils.Config.from_dict(original)
-    config.set_nested(keys, value)
-    return dict(**config)
-
-
 def to_dict() -> config_utils.Config:
     """Returns a deep-copied version of the current config."""
     return copy.deepcopy(_dict)

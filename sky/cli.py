@@ -40,6 +40,7 @@ from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
 import click
 import colorama
 import dotenv
+from omegaconf import OmegaConf
 import requests as requests_lib
 from rich import progress as rich_progress
 import yaml
@@ -1158,33 +1159,32 @@ def launch(
     # a not-so-elegant way to handle project config and config override
     # it works, but not elegant
     # priority: CLI arg > env var > project config > default config
-
-    variables: Dict[str, str] = {}
-    for key, value in os.environ.items():
-        prefix = constants.SKYPILOT_ENV_VAR_PREFIX + 'CONFIG'
-        if key[:len(prefix)] == prefix:
-            variables[key[len(prefix):]] = value
     override_skypilot_config: typing.Dict[str, Any] = {}
-    for key, value in variables.items():
-        split_vars = key.split('__')
-        lowered = tuple([var.lower() for var in split_vars])
-        override_skypilot_config = skypilot_config.set_nested_dict(
-            override_skypilot_config, lowered, value)
-        print('env', override_skypilot_config)
+    # parse and override from project config file
     if project_config:
         project_config_dict = skypilot_config.load_config_from_file(
             project_config)
-        print('project', project_config_dict)
         override_skypilot_config = skypilot_config.overlay_skypilot_config(
             original_config=override_skypilot_config,
             override_configs=project_config_dict)
+    # parse and override from env vars
+    variables: List[str] = []
+    for key, value in os.environ.items():
+        prefix = constants.SKYPILOT_ENV_VAR_PREFIX + 'CONFIG_'
+        if key[:len(prefix)] == prefix:
+            variables.append(key[len(prefix):].lower().replace('__', '.') +
+                             '=' + value)
+        if variables:
+            dot_config = OmegaConf.from_dotlist(variables)
+            override_skypilot_config = skypilot_config.overlay_skypilot_config(
+                original_config=override_skypilot_config,
+                override_configs=OmegaConf.to_object(dot_config))
+    # parse and override from CLI
     if config:
-        configs = config.split(',')
-        for config in configs:
-            key, value = config.split('=')
-            lowered = tuple([var.lower() for var in key.split('.')])
-            override_skypilot_config = skypilot_config.set_nested_dict(
-                override_skypilot_config, lowered, value)
+        dot_config = OmegaConf.from_dotlist(config.split(','))
+        override_skypilot_config = skypilot_config.overlay_skypilot_config(
+            original_config=override_skypilot_config,
+            override_configs=OmegaConf.to_object(dot_config))
 
     print('following overrides are applied:')
     print(override_skypilot_config)
