@@ -112,7 +112,7 @@ async def tail_logs(
     )
 
 
-@router.post('/download-logs')
+@router.post('/sync-down-logs')
 async def download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.ServeDownloadLogsBody,

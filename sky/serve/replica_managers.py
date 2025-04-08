@@ -726,7 +726,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         if left_in_record:
             assert sync_down_logs, (
                 'For the replica left in the record, '
-                'the logs should always be synced down.'
+                'the logs should always be synced down. '
                 'So that the user can see the logs to debug.')
 
         if replica_id in self._launch_process_pool:

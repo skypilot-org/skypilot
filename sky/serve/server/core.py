@@ -824,8 +824,7 @@ def sync_down_logs(service_name: str,
 
     # Step 0) get the controller handle
     with rich_utils.safe_status(
-            ux_utils.spinner_message('Checking '
-                                     'service status...')):
+            ux_utils.spinner_message('Checking service status...')):
         controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
         handle = backend_utils.is_controller_accessible(
             controller=controller_type,
