@@ -330,8 +330,7 @@ def check_cluster_name_not_controller(
 def download_and_stream_latest_job_log(
         backend: 'cloud_vm_ray_backend.CloudVmRayBackend',
         handle: 'cloud_vm_ray_backend.CloudVmRayResourceHandle',
-        local_dir: str,
-        stream_logs: bool = True) -> Optional[str]:
+        local_dir: str) -> Optional[str]:
     """Downloads and streams the latest job log.
 
     This function is only used by jobs controller and sky serve controller.
@@ -368,9 +367,6 @@ def download_and_stream_latest_job_log(
 
     log_dir = list(log_dirs.values())[0]
     log_file = os.path.join(log_dir, 'run.log')
-
-    if not stream_logs:
-        return log_file
 
     # Print the logs to the console.
     # TODO(zhwu): refactor this into log_utils, along with the refactoring for
