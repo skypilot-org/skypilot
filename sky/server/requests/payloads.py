@@ -23,7 +23,6 @@ from sky.usage import usage_lib
 from sky.utils import annotations
 from sky.utils import common as common_lib
 from sky.utils import common_utils
-from sky.utils import config_utils
 from sky.utils import registry
 
 if typing.TYPE_CHECKING:
@@ -51,11 +50,9 @@ def request_body_env_vars() -> dict:
     return env_vars
 
 
-def get_override_skypilot_config_from_client(
-        config: Optional[config_utils.Config] = None) -> Dict[str, Any]:
+def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
-    if config is None:
-        config = skypilot_config.to_dict()
+    config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
     # server endpoint on the server side. This avoids the warning below.
     config.pop_nested(('api_server',), default_value=None)

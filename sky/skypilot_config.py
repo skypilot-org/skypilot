@@ -252,9 +252,7 @@ def override_skypilot_config(
 def overlay_skypilot_config(
         original_config: Optional[config_utils.Config],
         override_configs: Optional[config_utils.Config]) -> config_utils.Config:
-    """Overrides the user configurations."""
-    # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
-    # allowed keys.
+    """Overlays the override configs on the original configs."""
     if original_config is None:
         original_config = config_utils.Config()
     config = original_config.get_nested(keys=tuple(),
