@@ -875,10 +875,12 @@ def sync_down_logs(service_name: str,
         stream_logs_code: str
 
         if component == serve_utils.ServiceComponent.CONTROLLER:
-            stream_logs_code = serve_utils.ServeCodeGen.stream_serve_process_logs(
-                service_name, stream_controller=True, follow=False)
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name, stream_controller=True, follow=False))
         elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
-            stream_logs_code = serve_utils.ServeCodeGen.stream_serve_process_logs(
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
                 service_name, stream_controller=False, follow=False)
         elif component == serve_utils.ServiceComponent.REPLICA:
             replica_id = target.replica_id
