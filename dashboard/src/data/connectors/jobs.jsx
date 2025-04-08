@@ -29,10 +29,19 @@ export async function getManagedJobs({ allUsers = true } = {}) {
     const managedJobs = data.return_value ? JSON.parse(data.return_value) : [];
     const jobData = managedJobs.map((job) => {
       // Create events array correctly
-      const events = [
-        { time: new Date(job.submitted_at * 1000), event: 'Job submitted.' },
-        { time: new Date(job.start_at * 1000), event: 'Job started.' },
-      ];
+      const events = [];
+      if (job.submitted_at) {
+        events.push({
+          time: new Date(job.submitted_at * 1000),
+          event: 'Job submitted.',
+        });
+      }
+      if (job.start_at) {
+        events.push({
+          time: new Date(job.start_at * 1000),
+          event: 'Job started.',
+        });
+      }
 
       // Add completed event if end_at exists
       if (job.end_at) {
@@ -48,7 +57,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
           });
         }
       }
-      if (job.last_recovered_at != job.start_at) {
+      if (job.last_recovered_at && job.last_recovered_at != job.start_at) {
         events.push({
           time: new Date(job.last_recovered_at * 1000),
           event: 'Job recovered.',

@@ -132,8 +132,14 @@ export async function getClusterJobs({ clusterName }) {
     const jobs = JSON.parse(data.return_value);
     const jobData = jobs.map((job) => {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
-      const total_duration = endTime - job.submitted_at;
-      const job_duration = endTime - job.start_at;
+      let total_duration = 0;
+      let job_duration = 0;
+      if (job.submitted_at) {
+        total_duration = endTime - job.submitted_at;
+      }
+      if (job.start_at) {
+        job_duration = endTime - job.start_at;
+      }
 
       return {
         id: job.job_id,
