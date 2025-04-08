@@ -160,7 +160,7 @@ async def dashboard(request: fastapi.Request,
                 async with httpx.AsyncClient() as client:
                     response = await client.request('GET',
                                                     dashboard_url,
-                                                    timeout=1)
+                                                    timeout=5)
                 break  # Connection successful, proceed with the request
             except Exception as e:  # pylint: disable=broad-except
                 # We catch all exceptions to gracefully handle unknown

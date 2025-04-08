@@ -33,18 +33,21 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Skip resource check for the API server, not recommended for production deployment
+  skipResourceCheck: false
   # Set resource requests and limits for the API server
+  resources:
+    # Request a moderate amount of resources for an remote API server by default, which meets the
+    # basic requirements for team usage at medium scale.
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      # Additional resource types like ephemeral-storage can be specified here
   # TODO: Setting limits causes issues with the API server. For now we advise
   # not to set limits.
-  resources: null
-  # resources:
-  #   requests:
-  #     cpu: "1"
-  #     memory: "2Gi"
-  #   limits:
-  #     cpu: "2"
-  #     memory: "4Gi"
-  #     # Additional resource types like ephemeral-storage can be specified here
+  # limits:
+  #  cpu: "4"
+  #  memory: "8Gi"
   
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
