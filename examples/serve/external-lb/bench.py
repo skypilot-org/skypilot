@@ -148,6 +148,7 @@ async def user_task(uid, questions, num_branches):
     print(f"User {uid}: sleep for {time_to_sleep} seconds to start")
     print(f"User {uid}: {len(questions)} questions in total")
     await asyncio.sleep(time_to_sleep)
+    print(f"User {uid}: start sending requests")
     tic = time.time()
     tasks = []
     for question in questions:

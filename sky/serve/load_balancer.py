@@ -27,9 +27,29 @@ logger = sky_logging.init_logger(__name__)
 
 @dataclasses.dataclass
 class RequestEntry:
+    id: int
     request: fastapi.Request
     request_event: asyncio.Event
     response_future: asyncio.Future[fastapi.responses.Response]
+
+
+@dataclasses.dataclass
+class StealEntry:
+    id: int
+    matched_rate: float
+    matched_length: int
+    matched_steal_target: bool
+
+    def __lt__(self, other: 'StealEntry') -> bool:
+        if self.matched_steal_target:
+            if not other.matched_steal_target:
+                return True
+            return self.matched_rate > other.matched_rate
+        if other.matched_steal_target:
+            return False
+        # For non-steal target, we want to keep the high match rate requests
+        # to be stolen.
+        return self.matched_rate < other.matched_rate
 
 
 StealBarrierEntry = str
@@ -62,9 +82,13 @@ class QueueWithLock(Generic[T]):
         del max_queue_size
         self._queue: List[T] = []
         self._lock = asyncio.Lock()
+        self._actual_size = 0
 
     async def put(self, item: T) -> None:
         async with self._lock:
+            if isinstance(item, RequestEntry):
+                if not item.request.headers.get(_IS_FROM_LB_HEADER, False):
+                    self._actual_size += 1
             self._queue.append(item)
 
     async def get(self, index: int = 0) -> T:
@@ -77,7 +101,11 @@ class QueueWithLock(Generic[T]):
 
     async def get_and_remove(self, index: int = 0) -> T:
         async with self._lock:
-            return self._queue.pop(index)
+            item = self._queue.pop(index)
+            if isinstance(item, RequestEntry):
+                if not item.request.headers.get(_IS_FROM_LB_HEADER, False):
+                    self._actual_size -= 1
+            return item
 
     async def empty(self) -> bool:
         async with self._lock:
@@ -85,6 +113,10 @@ class QueueWithLock(Generic[T]):
 
     async def peek(self) -> T:
         return await self.get(0)
+
+    async def actual_size(self) -> int:
+        async with self._lock:
+            return self._actual_size
 
 
 class ClientPool:
@@ -288,6 +320,7 @@ class SkyServeLoadBalancer:
         self._lb_to_last_steal_time: Dict[str, float] = collections.defaultdict(
             float)
         self._steal_requests_lock: asyncio.Lock = asyncio.Lock()
+        self._latest_req_id = 0
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
@@ -509,163 +542,167 @@ class SkyServeLoadBalancer:
             self._lb_pool._load_balancing_policy.config.cache_threshold)
         while True:
             await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
-            try:
-                if await self._request_queue.empty():
-                    continue
-                # logger.info('Length of request queue for '
-                #             f'{self._external_host}: '
-                #             f'{await self._request_queue.qsize()}')
+            async with self._steal_requests_lock:
+                try:
+                    if await self._request_queue.empty():
+                        continue
+                    # logger.info('Length of request queue for '
+                    #             f'{self._external_host}: '
+                    #             f'{await self._request_queue.qsize()}')
 
-                # Peek at the first item in the queue without removing it
-                entry: RequestQueueEntry = await self._request_queue.peek()
+                    # Peek at the first item in the queue without removing it
+                    entry: RequestQueueEntry = await self._request_queue.peek()
 
-                # Barrier Entry
-                if isinstance(entry, StealBarrierEntry):
-                    await self._request_queue.get_and_remove()
-                    lb_url = entry
-                    logger.info(f'Processing barrier for lb {lb_url}. '
-                                f'Current steal requests: '
-                                f'{self._lb_to_steal_requests} (to be popped).')
-                    async with self._steal_requests_lock:
-                        if lb_url in self._lb_to_steal_requests:
-                            if self._lb_to_steal_requests[lb_url]:
-                                self._lb_to_steal_requests[lb_url].pop(0)
-                            if not self._lb_to_steal_requests[lb_url]:
-                                await self._lb_pool.set_replica_unavailable(
-                                    lb_url)
-                                logger.info(f'{lb_url} has no steal '
-                                            'requests. Set it to unavailable.')
-                            # elif self._lb_to_steal_requests[lb_url][0] > 0:
-                            else:
-                                await self._lb_pool.set_replica_available(lb_url
-                                                                         )
-                                logger.info(f'{lb_url} has steal requests. '
-                                            'Set it to available.')
-                    continue
-
-                assert isinstance(entry, RequestEntry)
-
-                # TODO(tian): In this no replica case, if there is any replica
-                # in other LB region, we should let them steal instead of
-                # returning 503.
-                if await self._replica_pool.empty():
-                    await self._request_queue.get_and_remove()
-                    exception = fastapi.HTTPException(
-                        # 503 means that the server is currently
-                        # unable to handle the incoming requests.
-                        status_code=503,
-                        detail=('No ready replicas. '
-                                'Use "sky serve status [SERVICE_NAME]" '
-                                'to check the replica status.'))
-                    entry.response_future.set_exception(exception)
-                    entry.request_event.set()
-
-                # Let other LBs steal requests from this LB.
-                # lbs = await self._lbs_with_steal_requests()
-                # if not lbs:
-                #     continue
-                # TODO(tian): Maybe we can select from the local region LB and
-                # the remote region LB. Not necessarily to let them steal - some
-                # requests with high match rate might worth to wait for a while.
-                # And for low match rate, we can let them steal.
-                # TODO(tian): Disable local region when there is any LB trying
-                # to steal.
-                lb_available_replicas = await self._lb_pool.available_replicas()
-                if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
-                    # It is a request from LB. Skip routing to another LB to
-                    # avoid bouncing back and forth.
-                    lb = None
-                else:
-                    logger.info('LB available replicas: '
-                                f'{lb_available_replicas}')
-                    lb = await self._lb_pool.select_replica(
-                        entry.request,
-                        disabled_url_in_low_match_rate=self._url,
-                        cache_threshold=cache_threshold)
-                # If the selected LB is not the same as the current LB, then
-                # we route it to another LB.
-                if lb is not None and lb != self._url:
-                    await self._request_queue.get_and_remove()
-                    try:
+                    # Barrier Entry
+                    if isinstance(entry, StealBarrierEntry):
+                        await self._request_queue.get_and_remove()
+                        lb_url = entry
                         logger.info(
-                            f'Processing queued request {entry.request.url} '
-                            f'from User to LB {lb}.')
-                        await self._handle_requests(lb, entry, is_from_lb=True)
+                            f'Processing barrier for lb {lb_url}. '
+                            f'Current steal requests: '
+                            f'{self._lb_to_steal_requests} (to be popped).')
                         async with self._steal_requests_lock:
-                            if not self._lb_to_steal_requests[lb]:
-                                logger.error(f'{lb} has no steal entries. '
-                                             'Skip decreasing size.')
-                                continue
-                            self._lb_to_steal_requests[lb][0] -= 1
-                            logger.info(f'{lb} steals one '
-                                        'request. Current steal requests: '
-                                        f'{self._lb_to_steal_requests}')
-                            # if self._lb_to_steal_requests[lb][0] <= 0:
-                            #     await self._lb_pool.set_replica_unavailable(lb)
-                            #     logger.info(f'{lb} has no steal requests. '
-                            #                 'Set it to unavailable.')
-                    except Exception as e:  # pylint: disable=broad-except
-                        logger.error(f'Error when processing queued request '
-                                     f'to LB {lb}: '
-                                     f'{common_utils.format_exception(e)}\n'
-                                     f'  Traceback: {traceback.format_exc()}')
-                        entry.response_future.set_exception(e)
+                            if lb_url in self._lb_to_steal_requests:
+                                if self._lb_to_steal_requests[lb_url]:
+                                    self._lb_to_steal_requests[lb_url].pop(0)
+                                if not self._lb_to_steal_requests[lb_url]:
+                                    await self._lb_pool.set_replica_unavailable(
+                                        lb_url)
+                                    logger.info(
+                                        f'{lb_url} has no steal '
+                                        'requests. Set it to unavailable.')
+                                # elif self._lb_to_steal_requests[lb_url][0] > 0:
+                                else:
+                                    await self._lb_pool.set_replica_available(
+                                        lb_url)
+                                    logger.info(f'{lb_url} has steal requests. '
+                                                'Set it to available.')
+                        continue
+
+                    assert isinstance(entry, RequestEntry)
+
+                    # TODO(tian): In this no replica case, if there is any replica
+                    # in other LB region, we should let them steal instead of
+                    # returning 503.
+                    if await self._replica_pool.empty():
+                        await self._request_queue.get_and_remove()
+                        exception = fastapi.HTTPException(
+                            # 503 means that the server is currently
+                            # unable to handle the incoming requests.
+                            status_code=503,
+                            detail=('No ready replicas. '
+                                    'Use "sky serve status [SERVICE_NAME]" '
+                                    'to check the replica status.'))
+                        entry.response_future.set_exception(exception)
                         entry.request_event.set()
-                    continue
 
-                # Either because of there is no LBs stealing requests, or
-                # because the match rate is high so the local region is
-                # selected, we attempt to find an available replica here.
-                ready_replica_url = await self._replica_pool.select_replica(
-                    entry.request)
+                    # Let other LBs steal requests from this LB.
+                    # lbs = await self._lbs_with_steal_requests()
+                    # if not lbs:
+                    #     continue
+                    # TODO(tian): Maybe we can select from the local region LB and
+                    # the remote region LB. Not necessarily to let them steal - some
+                    # requests with high match rate might worth to wait for a while.
+                    # And for low match rate, we can let them steal.
+                    # TODO(tian): Disable local region when there is any LB trying
+                    # to steal.
+                    # lb_available_replicas = await self._lb_pool.available_replicas()
+                    # if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
+                    #     # It is a request from LB. Skip routing to another LB to
+                    #     # avoid bouncing back and forth.
+                    #     lb = None
+                    # else:
+                    #     logger.info('LB available replicas: '
+                    #                 f'{lb_available_replicas}')
+                    #     lb = await self._lb_pool.select_replica(
+                    #         entry.request,
+                    #         disabled_url_in_low_match_rate=self._url,
+                    #         cache_threshold=cache_threshold)
+                    # # If the selected LB is not the same as the current LB, then
+                    # # we route it to another LB.
+                    # if lb is not None and lb != self._url:
+                    #     await self._request_queue.get_and_remove()
+                    #     try:
+                    #         logger.info(
+                    #             f'Processing queued request {entry.request.url} '
+                    #             f'from User to LB {lb}.')
+                    #         await self._handle_requests(lb, entry, is_from_lb=True)
+                    #         async with self._steal_requests_lock:
+                    #             if not self._lb_to_steal_requests[lb]:
+                    #                 logger.error(f'{lb} has no steal entries. '
+                    #                              'Skip decreasing size.')
+                    #                 continue
+                    #             self._lb_to_steal_requests[lb][0] -= 1
+                    #             logger.info(f'{lb} steals one '
+                    #                         'request. Current steal requests: '
+                    #                         f'{self._lb_to_steal_requests}')
+                    #             # if self._lb_to_steal_requests[lb][0] <= 0:
+                    #             #     await self._lb_pool.set_replica_unavailable(lb)
+                    #             #     logger.info(f'{lb} has no steal requests. '
+                    #             #                 'Set it to unavailable.')
+                    #     except Exception as e:  # pylint: disable=broad-except
+                    #         logger.error(f'Error when processing queued request '
+                    #                      f'to LB {lb}: '
+                    #                      f'{common_utils.format_exception(e)}\n'
+                    #                      f'  Traceback: {traceback.format_exc()}')
+                    #         entry.response_future.set_exception(e)
+                    #         entry.request_event.set()
+                    #     continue
 
-                if ready_replica_url is not None:
-                    # Process the request if a replica is available
-                    # Now we can safely remove it from the queue
-                    await self._request_queue.get_and_remove()
-                    try:
-                        logger.info(
-                            f'Processing queued request {entry.request.url} '
-                            f'from User to Replica {ready_replica_url}.')
-                        await self._handle_requests(ready_replica_url,
-                                                    entry,
-                                                    is_from_lb=False)
-                    except Exception as e:  # pylint: disable=broad-except
-                        logger.error(f'Error when processing queued request '
-                                     f'to Replica {ready_replica_url}: '
-                                     f'{common_utils.format_exception(e)}\n'
-                                     f'  Traceback: {traceback.format_exc()}')
-                        # Set exception to propagate to the waiting handler
-                        entry.response_future.set_exception(e)
-                        entry.request_event.set()
-                    continue
+                    # Either because of there is no LBs stealing requests, or
+                    # because the match rate is high so the local region is
+                    # selected, we attempt to find an available replica here.
+                    ready_replica_url = await self._replica_pool.select_replica(
+                        entry.request)
 
-                # If a request stuck at head of queue for too long (happens
-                # due to we have a cache hit larger than threshold on local
-                # region), we put it to the back of the queue.
-                # if is_cache_hit and lb == self._url:
-                #     cache_hit_delay_times += 1
-                #     if cache_hit_delay_times > _MAX_CACHE_HIT_DELAY_TIMES:
-                #         # Put it to the back of the queue if it is delayed by
-                #         # a cache hit too much times.
-                #         await self._request_queue.get_and_remove()
-                #         await self._request_queue.put(entry)
-                #         logger.info(f'Put request {entry.request.url} to the '
-                #                   'back of the queue due to cache hit delay.')
-                #         cache_hit_delay_times = 0
+                    if ready_replica_url is not None:
+                        # Process the request if a replica is available
+                        # Now we can safely remove it from the queue
+                        await self._request_queue.get_and_remove()
+                        try:
+                            logger.info(
+                                f'Processing queued request {entry.request.url} '
+                                f'from User to Replica {ready_replica_url}.')
+                            await self._handle_requests(ready_replica_url,
+                                                        entry,
+                                                        is_from_lb=False)
+                        except Exception as e:  # pylint: disable=broad-except
+                            logger.error(
+                                f'Error when processing queued request '
+                                f'to Replica {ready_replica_url}: '
+                                f'{common_utils.format_exception(e)}\n'
+                                f'  Traceback: {traceback.format_exc()}')
+                            # Set exception to propagate to the waiting handler
+                            entry.response_future.set_exception(e)
+                            entry.request_event.set()
+                        continue
 
-                # We decrease the cache threshold if it is a cache hit and there
-                # is some replica requesting requests.
-                if lb is not None and lb == self._url and len(
-                        lb_available_replicas) > 1:
-                    logger.info('Decreasing cache threshold from '
-                                f'{cache_threshold} to {cache_threshold / 2}')
-                    cache_threshold /= 2
+                    # If a request stuck at head of queue for too long (happens
+                    # due to we have a cache hit larger than threshold on local
+                    # region), we put it to the back of the queue.
+                    # if is_cache_hit and lb == self._url:
+                    #     cache_hit_delay_times += 1
+                    #     if cache_hit_delay_times > _MAX_CACHE_HIT_DELAY_TIMES:
+                    #         # Put it to the back of the queue if it is delayed by
+                    #         # a cache hit too much times.
+                    #         await self._request_queue.get_and_remove()
+                    #         await self._request_queue.put(entry)
+                    #         logger.info(f'Put request {entry.request.url} to the '
+                    #                   'back of the queue due to cache hit delay.')
+                    #         cache_hit_delay_times = 0
 
-            except Exception as e:  # pylint: disable=broad-except
-                logger.error(f'Error in queue processor: '
-                             f'{common_utils.format_exception(e)}\n'
-                             f'  Traceback: {traceback.format_exc()}')
+                    # We decrease the cache threshold if it is a cache hit and there
+                    # is some replica requesting requests.
+                    # if lb is not None and lb == self._url and len(
+                    #         lb_available_replicas) > 1:
+                    #     logger.info('Decreasing cache threshold from '
+                    #                 f'{cache_threshold} to {cache_threshold / 2}')
+                    #     cache_threshold /= 2
+
+                except Exception as e:  # pylint: disable=broad-except
+                    logger.error(f'Error in queue processor: '
+                                 f'{common_utils.format_exception(e)}\n'
+                                 f'  Traceback: {traceback.format_exc()}')
 
     async def _put_request_to_queue(
             self, request: fastapi.Request) -> fastapi.responses.Response:
@@ -680,7 +717,9 @@ class SkyServeLoadBalancer:
             response_future: asyncio.Future[
                 fastapi.responses.Response] = self._loop.create_future()
             request_event: asyncio.Event = asyncio.Event()
-            entry = RequestEntry(request, request_event, response_future)
+            entry = RequestEntry(self._latest_req_id, request, request_event,
+                                 response_future)
+            self._latest_req_id += 1
 
             # Queue the request for processing
             await self._request_queue.put(entry)
@@ -714,6 +753,9 @@ class SkyServeLoadBalancer:
     async def _queue_size(self) -> fastapi.responses.Response:
         """Return the size of the request queue."""
         assert self._request_queue is not None
+        return fastapi.responses.JSONResponse(
+            status_code=200,
+            content={'queue_size': await self._request_queue.actual_size()})
         num = 0
         lb_to_barrier_idx: Dict[str, int] = collections.defaultdict(int)
         # TODO(tian): Maintain a counter on this.
@@ -781,8 +823,10 @@ class SkyServeLoadBalancer:
             try:
                 if not await self._request_queue.empty():
                     continue
-                # Don't steal if there is no replica.
-                if not self._replica_pool.ready_replicas():
+                # Don't steal if there is no available replica.
+                # if not self._replica_pool.ready_replicas():
+                #     continue
+                if not self._replica_pool.available_replicas():
                     continue
                 steal_targets, self_url = self._steal_targets()
                 if self._url is None:
@@ -847,31 +891,31 @@ class SkyServeLoadBalancer:
         logger.info(f'Received steal request from {source_lb_url} with '
                     f'{num_steal} requests.')
         # Option 1. Return immediately and let the queue processor handle it.
-        async with self._steal_requests_lock:
-            # The last steal time will be initialized to 0.0 if the key does
-            # not exist. This guarantees that the first steal request will be
-            # honored and the remaining_to_steal will be set to 0.
-            interval = time.time() - self._lb_to_last_steal_time[source_lb_url]
-            if interval > _MIN_STEAL_INTERVAL:
-                self._lb_to_steal_requests[source_lb_url].append(num_steal)
-                self._lb_to_last_steal_time[source_lb_url] = time.time()
-                await self._lb_pool.set_replica_available(source_lb_url)
-                remaining_to_steal = 0
-                logger.info(f'{source_lb_url} steals {num_steal} requests. '
-                            f'Current steal requests: '
-                            f'{self._lb_to_steal_requests}, '
-                            f'Last steal time: '
-                            f'{self._lb_to_last_steal_time}')
-                await self._request_queue.put(StealBarrierEntry(source_lb_url))
-            else:
-                # logger.info(f'Not stealing requests from {source_lb_url} '
-                #             f'because of the minimum steal interval '
-                #             f'({interval}/{_MIN_STEAL_INTERVAL}). '
-                #             'Last steal time: '
-                #             f'{self._lb_to_last_steal_time[source_lb_url]}')
-                remaining_to_steal = num_steal
-        return fastapi.responses.JSONResponse(
-            status_code=200, content={'remaining_to_steal': remaining_to_steal})
+        # async with self._steal_requests_lock:
+        #     # The last steal time will be initialized to 0.0 if the key does
+        #     # not exist. This guarantees that the first steal request will be
+        #     # honored and the remaining_to_steal will be set to 0.
+        #     interval = time.time() - self._lb_to_last_steal_time[source_lb_url]
+        #     if interval > _MIN_STEAL_INTERVAL:
+        #         self._lb_to_steal_requests[source_lb_url].append(num_steal)
+        #         self._lb_to_last_steal_time[source_lb_url] = time.time()
+        #         await self._lb_pool.set_replica_available(source_lb_url)
+        #         remaining_to_steal = 0
+        #         logger.info(f'{source_lb_url} steals {num_steal} requests. '
+        #                     f'Current steal requests: '
+        #                     f'{self._lb_to_steal_requests}, '
+        #                     f'Last steal time: '
+        #                     f'{self._lb_to_last_steal_time}')
+        #         await self._request_queue.put(StealBarrierEntry(source_lb_url))
+        #     else:
+        #         # logger.info(f'Not stealing requests from {source_lb_url} '
+        #         #             f'because of the minimum steal interval '
+        #         #             f'({interval}/{_MIN_STEAL_INTERVAL}). '
+        #         #             'Last steal time: '
+        #         #             f'{self._lb_to_last_steal_time[source_lb_url]}')
+        #         remaining_to_steal = num_steal
+        # return fastapi.responses.JSONResponse(
+        #     status_code=200, content={'remaining_to_steal': remaining_to_steal})
         # Option 2 (legacy implementation): Directly steal requests.
         # for i in range(await self._request_queue.qsize()):
         #     # Re-getting the queue size since it is possible the queue changed
@@ -901,6 +945,52 @@ class SkyServeLoadBalancer:
         # #         f'available.')
         # return fastapi.responses.JSONResponse(
         #     status_code=200, content={'remaining_to_steal': num_steal})
+        # Option 3. Steal with lock and sorted based on prefix match rate.
+        start_time = time.perf_counter()
+        async with self._steal_requests_lock:
+            steal_entries: List[StealEntry] = []
+            for i in range(await self._request_queue.qsize()):
+                entry = await self._request_queue.get(i)
+                if isinstance(entry, StealBarrierEntry):
+                    continue
+                result = await self._lb_pool.select_replica(
+                    entry.request, return_matched_rate=True)
+                if isinstance(result, tuple):
+                    lb, matched_rate, matched_length = result
+                else:
+                    lb = result
+                    matched_rate = -1.0
+                    matched_length = -1
+                steal_entry = StealEntry(entry.id, matched_rate, matched_length,
+                                         lb == source_lb_url)
+                steal_entries.append(steal_entry)
+            steal_entries.sort()
+            ids_to_steal = [
+                steal_entry.id for steal_entry in steal_entries[:num_steal]
+            ]
+            remaining_to_steal = num_steal - len(ids_to_steal)
+            idx = 0
+            while idx < await self._request_queue.qsize():
+                entry = await self._request_queue.get(idx)
+                if isinstance(entry, StealBarrierEntry):
+                    continue
+                if entry.id in ids_to_steal:
+                    await self._request_queue.get_and_remove(idx)
+                    await self._handle_requests(source_lb_url,
+                                                entry,
+                                                is_from_lb=True)
+                else:
+                    idx += 1
+            end_time = time.perf_counter()
+            if remaining_to_steal > 0:
+                logger.info(
+                    f'{remaining_to_steal} requests was NOT stolen and remained '
+                    f'from {source_lb_url}.')
+            logger.info(f'Time to sort and steal requests: '
+                        f'{end_time - start_time:.4f}s. {steal_entries}')
+            return fastapi.responses.JSONResponse(
+                status_code=200,
+                content={'remaining_to_steal': remaining_to_steal})
 
     async def _probe_ie_queue_one_replica(
             self, replica: str) -> Tuple[Optional[float], str]:

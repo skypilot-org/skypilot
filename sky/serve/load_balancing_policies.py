@@ -419,12 +419,14 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             return await super()._select_replica(request, **kwargs)
         disabled_url = kwargs.get('disabled_url_in_low_match_rate', None)
         cache_threshold = kwargs.get('cache_threshold', None)
-        replica2load = {r: self.load_map.get(r, 0) for r in self.ready_replicas}
-        if len(text) < 1024:
-            replica2load.pop(disabled_url, None)
-            if not replica2load:
-                return None
-            return min(replica2load, key=replica2load.get)
+        replica2load: Dict[str, int] = {
+            r: self.load_map.get(r, 0) for r in self.ready_replicas
+        }
+        # if len(text) < 1024:
+        #     replica2load.pop(disabled_url, None)
+        #     if not replica2load:
+        #         return None
+        #     return min(replica2load, key=replica2load.get)
         matched_text, replica = await self.tree.prefix_match(text, replica2load)
         matched_rate = len(matched_text) / len(text)
         logger.info(f'Matched rate: {matched_rate} for request '
@@ -433,6 +435,9 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             cache_threshold = self.config.cache_threshold
         if matched_rate > cache_threshold:
             # TODO(tian): Hack. Fix this.
+            return_matched_rate = kwargs.get('return_matched_rate', False)
+            if return_matched_rate:
+                return replica, matched_rate, len(matched_text)
             return replica
         logger.info('Falling back to least char count load. '
                     f'{self.tree.replica_char_count}')
