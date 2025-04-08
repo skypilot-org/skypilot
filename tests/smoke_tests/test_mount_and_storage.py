@@ -376,13 +376,13 @@ def test_kubernetes_context_switch():
 @pytest.mark.parametrize(
     'image_id',
     [
-        #'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
-        #'docker:ubuntu:18.04',
+        'docker:nvidia/cuda:11.8.0-devel-ubuntu18.04',
+        'docker:ubuntu:18.04',
         # Test image with python 3.11 installed by default.
         'docker:continuumio/miniconda3:24.1.2-0',
         # Test python>=3.12 where SkyPilot should automatically create a separate
         # conda env for runtime with python 3.10.
-        #'docker:continuumio/miniconda3:latest',
+        'docker:continuumio/miniconda3:latest',
     ])
 def test_docker_storage_mounts(generic_cloud: str, image_id: str):
     # Tests bucket mounting on docker container
