@@ -473,6 +473,8 @@ def _filter_schema(schema: dict, keys_to_keep: List[Tuple[str, ...]]) -> dict:
 
 
 def _experimental_task_schema() -> dict:
+    # TODO: experimental.config_overrides has been deprecated in favor of the
+    # top-level `config` field. Remove in v0.11.0.
     config_override_schema = _filter_schema(
         get_config_schema(), constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK)
     return {
@@ -555,6 +557,9 @@ def get_task_schema():
             'file_mounts_mapping': {
                 'type': 'object',
             },
+            'config': _filter_schema(
+                get_config_schema(),
+                constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK),
             **_experimental_task_schema(),
         }
     }
