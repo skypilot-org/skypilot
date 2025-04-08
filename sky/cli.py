@@ -870,6 +870,106 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     return task
 
 
+def compose_client_config(
+    cli_config_arg: Optional[str],  # priority 1
+    cli_config_file: Optional[str],  # priority 2
+    # environment variables (priority 3)
+    # are obtained within this function
+    entrypoint: Optional[Tuple[str, ...]],  # priority 4
+    # project config file (priority 5)
+    # is obtained within this function
+    # global client config (lowest priority)
+    # is obtained within this function
+) -> config_utils.Config:
+    """Composes the skypilot client config from various config sources.
+    Current config sources and their priority (from highest to lowest):
+    1. CLI arguments (passed in via --config)
+    2. config file specified in CLI argument (specified by --config-file)
+    3. Environment variables
+    4. Config overrides specified in task YAML
+    5. Project config file obtained from the current directory
+    LOWEST. Global client config
+    """
+    overrides = []
+
+    # parse overrides from CLI argument (priority 1)
+    variables: List[str] = []
+    if cli_config_arg:
+        variables = cli_config_arg.split(',')
+        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
+        logger.info('[priority 1] following overrides '
+                    'are obtained from CLI argument:')
+        logger.info(dot_config)
+        overrides.append(dot_config)
+
+    # parse overrides from CLI config file (priority 2)
+    if cli_config_file:
+        project_override_config = OmegaConf.to_object(
+            OmegaConf.load(cli_config_file))
+        logger.info('[priority 2] following overrides '
+                    'are obtained from CLI config file:')
+        logger.info(project_override_config)
+        overrides.append(project_override_config)
+
+    # parse overrides from env vars (priority 3)
+    variables = []
+    for key, value in os.environ.items():
+        prefix = constants.SKYPILOT_ENV_VAR_PREFIX + 'CONFIG_'
+        if key[:len(prefix)] == prefix:
+            variables.append(
+                f'{key[len(prefix):].lower().replace("__", ".")}={value}')
+    if variables:
+        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
+        logger.info('[priority 3] following overrides '
+                    'are obtained from env vars:')
+        logger.info(dot_config)
+        overrides.append(dot_config)
+
+    # parse overrides from task YAML (priority 4)
+    if entrypoint:
+        joined_entrypoint = ' '.join(entrypoint)
+        is_yaml, _ = _check_yaml(joined_entrypoint)
+        if is_yaml:
+            task_config = OmegaConf.to_object(OmegaConf.load(joined_entrypoint))
+            task_override_config = config_utils.Config(task_config).get_nested(
+                ('experimental', 'config_overrides'), None)
+            if task_override_config is not None:
+                logger.info('[priority 4] following overrides '
+                            'are obtained from task YAML:')
+                logger.info(task_override_config)
+                overrides.append(task_override_config)
+
+    # parse overrides from project config file (priority 5)
+    # TODO(seungjin) this isn't what we actually want to do,
+    # find the project config more intelligently
+    project_config_path = os.path.join(os.getcwd(), 'sky.yaml')
+    if os.path.exists(project_config_path):
+        project_config = OmegaConf.to_object(
+            OmegaConf.load(project_config_path))
+        logger.info('[priority 5] following overrides '
+                    'are obtained from project config file:')
+        logger.info(project_config)
+        overrides.append(project_config)
+
+    # parse overrides from global config (priority 6)
+    global_config = skypilot_config.to_dict()
+    logger.info('[lowest priority] following overrides '
+                'are obtained from global config:')
+    logger.info(global_config)
+    overrides.append(global_config)
+
+    # layer the configs on top of each other based on priority
+    overlaid_client_config: config_utils.Config = config_utils.Config()
+    for override in reversed(overrides):
+        overlaid_client_config = skypilot_config.overlay_skypilot_config(
+            original_config=overlaid_client_config, override_configs=override)
+
+    logger.info('[final] following configs overrides are applied:')
+    logger.info(overlaid_client_config)
+
+    return overlaid_client_config
+
+
 class _NaturalOrderGroup(click.Group):
     """Lists commands in the order defined in this script.
 
@@ -1107,7 +1207,7 @@ def cli():
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
-@click.option('--project-config',
+@click.option('--config-file',
               required=False,
               type=str,
               help='Project config file to use for the status command.')
@@ -1147,7 +1247,7 @@ def launch(
         clone_disk_from: Optional[str],
         fast: bool,
         async_call: bool,
-        project_config: Optional[str],
+        config_file: Optional[str],
         config: Optional[str]):
     """Launch a cluster or task.
 
@@ -1157,39 +1257,6 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
-    # a not-so-elegant way to handle project config and config override
-    # it works, but not elegant
-    # priority: CLI arg > env var > project config > default config
-    # parse and override from project config file
-    overrides = []
-    if project_config:
-        project_override_config = OmegaConf.to_object(
-            OmegaConf.load(project_config))
-        overrides.append(project_override_config)
-    # parse and override from env vars
-    variables: List[str] = []
-    for key, value in os.environ.items():
-        prefix = constants.SKYPILOT_ENV_VAR_PREFIX + 'CONFIG_'
-        if key[:len(prefix)] == prefix:
-            variables.append(
-                f'{key[len(prefix):].lower().replace("__", ".")}={value}')
-    if variables:
-        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
-        overrides.append(dot_config)
-    # parse and override from CLI
-    if config:
-        variables = config.split(',')
-        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
-        overrides.append(dot_config)
-
-    override_skypilot_config: config_utils.Config = config_utils.Config()
-    for override in overrides:
-        override_skypilot_config = skypilot_config.overlay_skypilot_config(
-            original_config=override_skypilot_config, override_configs=override)
-
-    print('following overrides are applied:')
-    print(override_skypilot_config)
-
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
@@ -1263,7 +1330,10 @@ def launch(
         clone_disk_from=clone_disk_from,
         fast=fast,
         _need_confirmation=not yes,
-        override_skypilot_config=override_skypilot_config,
+        override_skypilot_config=compose_client_config(
+            cli_config_arg=config,
+            cli_config_file=config_file,
+            entrypoint=entrypoint),
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:

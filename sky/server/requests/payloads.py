@@ -52,6 +52,7 @@ def request_body_env_vars() -> dict:
 
 def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
+    logger.info('Getting override skypilot config from client')
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
     # server endpoint on the server side. This avoids the warning below.
@@ -80,6 +81,7 @@ class RequestBody(pydantic.BaseModel):
     override_skypilot_config: Optional[Dict[str, Any]] = {}
 
     def __init__(self, **data):
+        print(f'Request body __init__: {data}')
         data['env_vars'] = data.get('env_vars', request_body_env_vars())
         usage_lib_entrypoint = usage_lib.messages.usage.entrypoint
         if usage_lib_entrypoint is None:
@@ -93,6 +95,7 @@ class RequestBody(pydantic.BaseModel):
             'override_skypilot_config',
             get_override_skypilot_config_from_client())
         super().__init__(**data)
+        logger.info(f'Request body: {self}')
 
     def to_kwargs(self) -> Dict[str, Any]:
         """Convert the request body to a kwargs dictionary on API server.
