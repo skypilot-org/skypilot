@@ -567,3 +567,9 @@ src/test_*.py
         is_test_dir_excluded = True
 
     assert is_test_dir_excluded, "Expected src/test directory contents to be excluded"
+
+
+def test_get_excluded_files_from_file():
+    with pytest.raises(ValueError):
+        storage_utils.get_excluded_files(
+            'tests/unit_tests/test_storage_utils.py')
