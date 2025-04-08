@@ -17,6 +17,8 @@ import typing
 from typing import Any, Callable, Dict, List, Optional, Union
 import uuid
 
+import jsonschema
+
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -28,12 +30,10 @@ from sky.utils import validator
 
 if typing.TYPE_CHECKING:
     import jinja2
-    import jsonschema
     import psutil
     import yaml
 else:
     jinja2 = adaptors_common.LazyImport('jinja2')
-    jsonschema = adaptors_common.LazyImport('jsonschema')
     psutil = adaptors_common.LazyImport('psutil')
     yaml = adaptors_common.LazyImport('yaml')
 

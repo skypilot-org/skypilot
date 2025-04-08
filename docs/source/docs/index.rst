@@ -256,7 +256,7 @@ Read the research:
    ../examples/managed-jobs
    Multi-Node Jobs <../running-jobs/distributed-jobs>
    Many Parallel Jobs <../running-jobs/many-jobs>
-
+   Model Training Guide <../reference/training-guide>
 
 .. toctree::
    :hidden:

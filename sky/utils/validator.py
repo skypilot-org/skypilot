@@ -4,14 +4,7 @@ The main motivation behind extending the existing JSON Schema validator is to
 allow for case-insensitive enum matching since this is currently not supported
 by the JSON Schema specification.
 """
-import typing
-
-from sky.adaptors import common as adaptors_common
-
-if typing.TYPE_CHECKING:
-    import jsonschema
-else:
-    jsonschema = adaptors_common.LazyImport('jsonschema')
+import jsonschema
 
 
 def case_insensitive_enum(validator, enums, instance, schema):
