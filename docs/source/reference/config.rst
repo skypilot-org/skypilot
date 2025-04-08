@@ -1,11 +1,11 @@
 .. _config-yaml:
 
-Advanced Configurations
-=======================
+Advanced Configuration
+======================
 
-You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
-Such configurations apply to all new clusters and do not affect existing clusters.
+This configuration applies to all new clusters and does not affect existing clusters.
 
 .. tip::
 
@@ -239,7 +239,7 @@ The following run options are applied by default and cannot be overridden:
 ~~~~~~~~~~~~~~~~~~~~~~
 
 This field can be useful for mounting volumes and other advanced Docker
-configurations. You can specify a list of arguments or a string, where the
+configuration. You can specify a list of arguments or a string, where the
 former will be combined into a single string with spaces. The following is
 an example option for mounting the Docker socket and increasing the size of ``/dev/shm``:
 
@@ -309,7 +309,7 @@ Example:
 ``aws``
 ~~~~~~~
 
-Advanced AWS configurations (optional).
+Advanced AWS configuration (optional).
 
 Apply to all new instances but not existing ones.
 
@@ -583,7 +583,7 @@ Supported values:
 ``gcp``
 ~~~~~~~
 
-Advanced GCP configurations (optional).
+Advanced GCP configuration (optional).
 
 Apply to all new instances but not existing ones.
 
@@ -615,7 +615,7 @@ Example:
 
 VPC to use (optional).
 
-Default: ``null``, which implies the following behavior. First, all existing
+Default: ``null``, which implies the following behavior: All existing
 VPCs in the project are checked against the minimal recommended firewall
 rules for SkyPilot to function. If any VPC satisfies these rules, it is
 used. Otherwise, a new VPC named ``skypilot-vpc`` is automatically created
@@ -794,7 +794,7 @@ Default: ``false``.
 ``azure``
 ~~~~~~~~~~~
 
-Advanced Azure configurations (optional).
+Advanced Azure configuration (optional).
 
 .. _config-yaml-azure-resource-group-vm:
 
@@ -829,7 +829,7 @@ Example:
 ``kubernetes``
 ~~~~~~~~~~~~~~~
 
-Advanced Kubernetes configurations (optional).
+Advanced Kubernetes configuration (optional).
 
 .. _config-yaml-kubernetes-ports:
 
@@ -956,7 +956,7 @@ Example:
 ``oci``
 ~~~~~~~
 
-Advanced OCI configurations (optional).
+Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
@@ -980,7 +980,7 @@ Example:
 .. code-block:: yaml
 
     oci:
-        # Region-specific configurations
+        # Region-specific configuration
         ap-seoul-1:
           # The OCID of the VCN to use for instances (optional).
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
