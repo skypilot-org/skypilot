@@ -5,7 +5,7 @@ import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { EventTable } from '@/components/elements/events';
 import { useManagedJobDetails } from '@/data/connectors/jobs';
-import { State2Actions } from '@/components/jobs';
+import { Status2Actions } from '@/components/jobs';
 import Link from 'next/link';
 import { RotateCwIcon, FileSearchIcon, SquareIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
@@ -50,7 +50,7 @@ function JobDetails() {
   return (
     <Layout highlighted="jobs">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl flex items-center">
+        <div className="text-sm flex items-center">
           <Link href="/jobs" className="text-sky-blue hover:underline">
             Managed Jobs
           </Link>
@@ -61,9 +61,9 @@ function JobDetails() {
           >
             {jobId} {detailJobData?.name ? `(${detailJobData.name})` : ''}
           </Link>
-        </h2>
+        </div>
 
-        <div className="flex items-center">
+        <div className="text-sm flex items-center">
           {(loading ||
             isRefreshing ||
             isLoadingLogs ||
@@ -85,12 +85,12 @@ function JobDetails() {
           </Tooltip>
           <div>
             {detailJobData ? (
-              <State2Actions
+              <Status2Actions
                 withLabel={true}
                 jobParent="/jobs"
                 jobId={detailJobData.id}
                 jobName={detailJobData.name}
-                state={detailJobData.status}
+                status={detailJobData.status}
                 cluster={detailJobData.cluster}
                 managed={true}
               />
@@ -107,15 +107,6 @@ function JobDetails() {
                     <FileSearchIcon className="w-4 h-4 mr-1.5" />
                     Logs
                   </button>
-                </Tooltip>
-                <Tooltip
-                  content="Cancel Job"
-                  className="text-sm text-muted-foreground"
-                >
-                  <span className="opacity-30 mx-2 flex items-center cursor-not-allowed">
-                    <SquareIcon className="w-4 h-4 mr-1.5" />
-                    <span className="font-medium text-gray-500">Cancel</span>
-                  </span>
                 </Tooltip>
               </div>
             )}

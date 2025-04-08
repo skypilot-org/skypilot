@@ -26,10 +26,6 @@ import {
 } from '@/components/ui/table';
 import {
   getClusters,
-  getClusterHistory,
-  handleStop,
-  handleTerminate,
-  handleStart,
 } from '@/data/connectors/clusters';
 import { sortData, isController } from '@/data/utils';
 import { CodeIcon, LogIn, PlayIcon, RotateCwIcon } from 'lucide-react';
@@ -57,25 +53,13 @@ export function Clusters() {
 
   return (
     <Layout highlighted="clusters">
-      <h2 className="text-2xl mb-4">
+      <div className="text-sm mb-4">
         <Link href="/clusters" className="text-sky-blue">
           Sky Clusters
         </Link>
-      </h2>
+      </div>
       <div className="border-b border-gray-200 my-4"></div>
       <div className="flex mb-4">
-        <button
-          className={`p-2 mx-4 ${activeTab === 'active' ? 'text-sky-blue font-semibold border-b-2 border-sky-blue' : 'text-gray-700'}`}
-          onClick={() => setActiveTab('active')}
-        >
-          Active
-        </button>
-        <button
-          className={`p-2 mx-4 ${activeTab === 'history' ? 'text-sky-blue font-semibold border-b-2 border-sky-blue' : 'text-gray-700'}`}
-          onClick={() => setActiveTab('history')}
-        >
-          History
-        </button>
         <div className="ml-auto flex items-center">
           {loading && (
             <div className="flex items-center mr-2">
@@ -146,12 +130,7 @@ export function ClusterTable({
   const fetchData = React.useCallback(async () => {
     setLoading(true);
     setLocalLoading(true);
-    let initialData;
-    if (activeTab === 'active') {
-      initialData = await getClusters();
-    } else {
-      initialData = await getClusterHistory();
-    }
+    const initialData = await getClusters();
     setData(initialData);
     setLoading(false);
     setLocalLoading(false);
@@ -237,9 +216,9 @@ export function ClusterTable({
             <TableRow>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('state')}
+                onClick={() => requestSort('status')}
               >
-                State{getSortDirection('state')}
+                Status{getSortDirection('status')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -252,31 +231,13 @@ export function ClusterTable({
                 onClick={() => requestSort('user')}
               >
                 User{getSortDirection('user')}
-              </TableHead>
+              </TableHead>              
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('infra')}
+                onClick={() => requestSort('resources_str')}
               >
-                Infra{getSortDirection('infra')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('instance_type')}
-              >
-                Instance Type{getSortDirection('instance_type')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('other_resources')}
-              >
-                Resources{getSortDirection('other_resources')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('num_nodes')}
-              >
-                Nodes{getSortDirection('num_nodes')}
-              </TableHead>
+                Resources{getSortDirection('resources_str')}
+              </TableHead>              
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('time')}
@@ -305,31 +266,23 @@ export function ClusterTable({
                 return (
                   <TableRow key={index}>
                     <TableCell>
-                      <State2Icon state={item.state} />
+                      <Status2Icon status={item.status} />
                     </TableCell>
                     <TableCell>
-                      {activeTab === 'history' &&
-                      item.state === 'TERMINATED' ? (
-                        <span className="text-gray-700">{item.cluster}</span>
-                      ) : (
-                        <Link
-                          href={`/clusters/${item.cluster}`}
-                          className="text-blue-600"
-                        >
-                          {item.cluster}
-                        </Link>
-                      )}
+                      <Link
+                        href={`/clusters/${item.cluster}`}
+                        className="text-blue-600"
+                      >
+                        {item.cluster}
+                      </Link>
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
-                    <TableCell>{item.infra}</TableCell>
-                    <TableCell>{item.instance_type}</TableCell>
-                    <TableCell>{item.other_resources}</TableCell>
-                    <TableCell>{item.num_nodes}</TableCell>
+                    <TableCell>{item.resources_str}</TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
-                    <TableCell className="flex content-center items-center">
-                      <State2Actions
+                    <TableCell className="flex content-center items-center text-sm">
+                      <Status2Actions
                         cluster={item.cluster}
-                        state={item.state}
+                        status={item.status}
                         onOpenSSHModal={onOpenSSHModal}
                         onOpenVSCodeModal={onOpenVSCodeModal}
                       />
@@ -443,52 +396,52 @@ export function ClusterTable({
   );
 }
 
-function state2Icon(state) {
+function status2Icon(status) {
   const badgeClasses =
     'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium';
-  switch (state) {
+  switch (status) {
     case 'LAUNCHING':
       return (
         <span className={`${badgeClasses} bg-blue-100 text-sky-blue`}>
           <CircularProgress size={12} className="w-3 h-3 mr-1" />
-          Launching
+          LAUNCHING
         </span>
       );
     case 'RUNNING':
       return (
         <span className={`${badgeClasses} bg-green-100 text-green-800`}>
           <FilledCircleIcon className="w-3 h-3 mr-1" />
-          Running
+          RUNNING
         </span>
       );
     case 'STOPPED':
       return (
         <span className={`${badgeClasses} bg-yellow-100 text-yellow-800`}>
           <PauseIcon className="w-3 h-3 mr-1" />
-          Stopped
+          STOPPED
         </span>
       );
     case 'TERMINATED':
       return (
         <span className={`${badgeClasses} bg-gray-100 text-gray-800`}>
           <SquareIcon className="w-3 h-3 mr-1" />
-          Terminated
+          TERMINATED
         </span>
       );
     default:
       return (
         <span className={`${badgeClasses} bg-gray-100 text-gray-800`}>
           <FilledCircleIcon className="w-3 h-3 mr-1" />
-          {state}
+          {status}
         </span>
       );
   }
 }
 
-export function State2Icon({ state }) {
+export function Status2Icon({ status }) {
   return (
-    <Tooltip content={state}>
-      <span>{state2Icon(state)}</span>
+    <Tooltip content={status}>
+      <span>{status2Icon(status)}</span>
     </Tooltip>
   );
 }
@@ -509,22 +462,10 @@ const handleConnect = (cluster, onOpenSSHModal) => {
 };
 
 // TODO(hailong): The enabled actions are also related to the `cloud` of the cluster
-export const enabledActions = (state, cluster) => {
-  switch (state) {
-    case 'LAUNCHING':
-      if (isController(cluster)) {
-        return ['start', 'terminate'];
-      }
-      return ['start', 'stop', 'terminate'];
+export const enabledActions = (status, cluster) => {
+  switch (status) {
     case 'RUNNING':
-      if (isController(cluster)) {
-        return ['connect', 'VSCode', 'terminate'];
-      }
-      return ['connect', 'VSCode', 'stop', 'terminate'];
-    case 'STOPPED':
-      return ['start', 'terminate'];
-    case 'TERMINATED':
-      return [];
+      return ['connect', 'VSCode'];
     default:
       return [];
   }
@@ -533,24 +474,12 @@ export const enabledActions = (state, cluster) => {
 const actionIcons = {
   connect: <LogIn className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
   VSCode: <CodeIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
-  start: <PlayIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
-  stop: <PauseIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
-  terminate: (
-    <SquareIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />
-  ),
 };
 
-const actionBehaviors = {
-  VSCode: handleVSCodeConnection,
-  start: handleStart,
-  stop: handleStop,
-  terminate: handleTerminate,
-};
-
-export function State2Actions({
+export function Status2Actions({
   withLabel = false,
   cluster,
-  state,
+  status,
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
@@ -561,32 +490,24 @@ export function State2Actions({
     onConfirm: null,
   });
 
-  const actions = enabledActions(state, cluster);
+  const actions = enabledActions(status, cluster);
 
   const handleActionClick = (actionName) => {
-    if (actionName === 'connect') {
-      handleConnect(cluster, onOpenSSHModal);
-    } else if (actionName === 'VSCode') {
-      handleVSCodeConnection(cluster, onOpenVSCodeModal);
-    } else {
-      // Show confirmation modal for destructive actions
-      const actionBehavior = actionBehaviors[actionName];
-      const actionTitle =
-        actionName.charAt(0).toUpperCase() + actionName.slice(1);
-      const actionMessage = `Are you sure you want to ${actionName} cluster "${cluster}"?`;
-
-      setConfirmationModal({
-        isOpen: true,
-        title: `${actionTitle} Cluster`,
-        message: actionMessage,
-        onConfirm: () => actionBehavior(cluster),
-      });
+    switch (actionName) {
+      case 'connect':
+        handleConnect(cluster, onOpenSSHModal);
+        break;
+      case 'VSCode':
+        handleVSCodeConnection(cluster, onOpenVSCodeModal);
+        break;
+      default:
+        return;
     }
   };
 
   return (
     <>
-      <span className="flex content-center items-center">
+      <span className="flex content-center items-center text-sm">
         {Object.entries(actionIcons).map(([actionName, actionIcon]) => {
           let label, tooltipText;
           switch (actionName) {
@@ -597,19 +518,7 @@ export function State2Actions({
             case 'VSCode':
               label = 'VSCode';
               tooltipText = 'Open in VS Code';
-              break;
-            case 'start':
-              label = 'Start';
-              tooltipText = 'Start cluster';
-              break;
-            case 'stop':
-              label = 'Stop';
-              tooltipText = 'Stop cluster';
-              break;
-            case 'terminate':
-              label = 'Terminate';
-              tooltipText = 'Terminate cluster';
-              break;
+              break;            
             default:
               break;
           }
@@ -625,10 +534,12 @@ export function State2Actions({
               >
                 <button
                   onClick={() => handleActionClick(actionName)}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
+                  className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center text-sm"
                 >
-                  {actionIcon}
-                  {label}
+                  <span className="w-4 h-4 inline-block">
+                    {actionIcon}
+                  </span>
+                  {label && <span className="ml-1 text-sm">{label}</span>}
                 </button>
               </Tooltip>
             );
@@ -640,26 +551,18 @@ export function State2Actions({
               className="capitalize text-sm text-muted-foreground"
             >
               <span
-                className="opacity-30 mx-2 flex items-center cursor-not-allowed"
+                className="opacity-30 mx-2 flex items-center cursor-not-allowed text-sm"
                 title={actionName}
               >
-                {actionIcon}
-                {label}
+                <span className="w-4 h-4">
+                  {actionIcon}
+                </span>
+                {label && <span className="ml-1 text-sm">{label}</span>}
               </span>
             </Tooltip>
           );
         })}
       </span>
-
-      <ConfirmationModal
-        isOpen={confirmationModal.isOpen}
-        onClose={() =>
-          setConfirmationModal({ ...confirmationModal, isOpen: false })
-        }
-        onConfirm={confirmationModal.onConfirm}
-        title={confirmationModal.title}
-        message={confirmationModal.message}
-      />
     </>
   );
 }

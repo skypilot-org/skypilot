@@ -5,7 +5,7 @@ import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
 import {
-  State2Actions,
+  Status2Actions,
 } from '@/components/clusters';
 import { Card } from '@/components/ui/card';
 import {
@@ -53,7 +53,7 @@ function ClusterDetails() {
   return (
     <Layout highlighted="clusters">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-2xl flex items-center">
+        <div className="text-sm flex items-center">
           <Link href="/clusters" className="text-sky-blue hover:underline">
             Sky Clusters
           </Link>
@@ -64,14 +64,14 @@ function ClusterDetails() {
           >
             {cluster}
           </Link>
-        </h2>
+        </div>
 
         {clusterData && (
-          <div className="flex items-center">
-            <div className="flex items-center">
+          <div className="text-sm flex items-center">
+            <div className="text-sm flex items-center">
               {(loading || isRefreshing) && (
                 <div className="flex items-center mr-2">
-                  <CircularProgress size={15} className="mt-0" />
+                  <CircularProgress size={10} className="mt-0" />
                   <span className="ml-2 text-gray-500">Loading...</span>
                 </div>
               )}
@@ -89,10 +89,10 @@ function ClusterDetails() {
                 </button>
               </Tooltip>
             </div>
-            <State2Actions
+            <Status2Actions
               withLabel={true}
               cluster={clusterData.cluster}
-              state={clusterData.state}
+              status={clusterData.status}
               onOpenSSHModal={handleConnectClick}
               onOpenVSCodeModal={handleVSCodeClick}
             />
@@ -141,19 +141,11 @@ function ActiveTab({ clusterData, clusterJobData }) {
             </div>
             <div className="flex items-center">
               <span className="font-medium text-gray-600 mr-2">Status:</span>
-              <span>{clusterData.state}</span>
-            </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Infra:</span>
-              <span>{clusterData.infra}</span>
-            </div>
-            <div className="flex items-center">
-              <span className="font-medium text-gray-600 mr-2">Nodes:</span>
-              <span>{clusterData.num_nodes}</span>
-            </div>
+              <span>{clusterData.status}</span>
+            </div>            
             <div className="flex items-center">
               <span className="font-medium text-gray-600 mr-2">Resources:</span>
-              <span>{clusterData.resources || 'N/A'}</span>
+              <span>{clusterData.resources_str || 'N/A'}</span>
             </div>
           </div>
         </Card>

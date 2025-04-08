@@ -203,3 +203,51 @@ export function TopBar() {
     </div>
   );
 }
+
+export function TopNav({ highlighted = 'clusters' }) {
+  return (
+    <div className="fixed top-14 left-0 right-0 bg-white border-b border-gray-200 z-20">
+      <div className="px-4">
+        <div className="flex h-12">
+          <div className="flex space-x-6">
+            <Link
+              href="/clusters"
+              className={`inline-flex items-center space-x-2 px-1 pt-1 border-b-2 text-sm ${
+                highlighted === 'clusters'
+                  ? 'border-sky-blue text-sky-blue'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+              prefetch={false}
+            >
+              <ServerIcon className="w-4 h-4" />
+              <span>Clusters</span>
+            </Link>
+            
+            <Link
+              href="/jobs"
+              className={`inline-flex items-center space-x-2 px-1 pt-1 border-b-2 text-sm ${
+                highlighted === 'jobs'
+                  ? 'border-sky-blue text-sky-blue'
+                  : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+              }`}
+              prefetch={false}
+            >
+              <BriefcaseIcon className="w-4 h-4" />
+              <span>Jobs</span>
+            </Link>
+
+            <div
+              className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400 text-sm"
+            >
+              <ServiceBellIcon className="w-4 h-4" />
+              <span>Services</span>
+              <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">
+                Soon
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

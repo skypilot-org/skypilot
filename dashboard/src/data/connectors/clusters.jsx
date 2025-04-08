@@ -52,7 +52,7 @@ export async function getClusters({ clusterNames = null } = {}) {
         other_resources,
       } = parsed_resources.parsed_resources;
       return {
-        state: clusterStatusMap[cluster.status],
+        status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
         infra: infra,
@@ -143,7 +143,7 @@ export async function getClusterJobs({ clusterName }) {
 
       return {
         id: job.job_id,
-        state: job.status,
+        status: job.status,
         job: job.job_name,
         user: job.username,
         gpus: job.accelerators || {},
@@ -161,41 +161,6 @@ export async function getClusterJobs({ clusterName }) {
     return jobData;
   } catch (error) {
     console.error('Error fetching cluster jobs:', error);
-    return [];
-  }
-}
-
-export async function getClusterHistory() {
-  try {
-    const response = await fetch(`${ENDPOINT}/cost_report`);
-    const id = response.headers.get('x-request-id');
-    const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-    const data = await fetchedData.json();
-    const history = JSON.parse(data.return_value);
-    const clusterHistory = history.map((cluster) => {
-      // Only include clusters that have a null status
-      // which means they are terminated
-      if (cluster.status != null) {
-        return null;
-      }
-      return {
-        state: clusterStatusMap[cluster.status],
-        cluster: cluster.name,
-        user: cluster.user_hash,
-        infra: cluster.cloud,
-        instance_type: '-',
-        other_resources: '-',
-        gpus: cluster.accelerators || {},
-        time: new Date(cluster.launched_at * 1000),
-        num_nodes: cluster.num_nodes,
-        jobs: [],
-        events: [],
-      };
-    });
-    // filter out nulls
-    return clusterHistory.filter((cluster) => cluster !== null);
-  } catch (error) {
-    console.error('Error fetching cluster history:', error);
     return [];
   }
 }
@@ -255,193 +220,4 @@ export function useClusterDetails({ cluster, job = null }) {
   }, [cluster, job, fetchClusterData, fetchClusterJobData]);
 
   return { clusterData, clusterJobData, loading, refreshData };
-}
-
-export async function handleClusterAction(action, cluster, state) {
-  let logStarter = '';
-  let logMiddle = '';
-  let apiPath = '';
-  switch (action) {
-    case 'stop':
-      logStarter = 'Stopping';
-      logMiddle = 'stopped';
-      apiPath = 'stop';
-      break;
-    case 'terminate':
-      logStarter = 'Terminating';
-      logMiddle = 'terminated';
-      apiPath = 'down';
-      break;
-    case 'start':
-      logStarter = 'Starting';
-      logMiddle = 'started';
-      apiPath = 'start';
-      break;
-    default:
-      throw new Error(`Invalid action: ${action}`);
-  }
-
-  let checkAPIPath = '';
-  let checkRequestBody = {};
-  if (state == 'RUNNING' && (action == 'stop' || action == 'terminate')) {
-    if (isJobController(cluster)) {
-      checkAPIPath = 'jobs/queue';
-      checkRequestBody = {
-        refresh: false,
-        skip_finished: true,
-        all_users: true,
-      };
-    } else if (isSkyServeController(cluster)) {
-      // TODO(hailong): pre-check for serve controllers
-    } else {
-      checkAPIPath = 'queue';
-      checkRequestBody = {
-        cluster_name: cluster,
-        skip_finished: true,
-        all_users: true,
-      };
-    }
-  }
-
-  if (checkAPIPath) {
-    try {
-      const response = await fetch(`${ENDPOINT}/${checkAPIPath}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(checkRequestBody),
-      });
-      const id = response.headers.get('x-request-id');
-      const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-      const data = await fetchedData.json();
-      if (fetchedData.status !== 200) {
-        showToast(
-          `${logStarter} cluster ${cluster} failed: ${data.detail.error}`,
-          'error'
-        );
-        return;
-      }
-      if (data.return_value) {
-        const jobs = JSON.parse(data.return_value);
-        if (jobs.length > 0) {
-          if (jobs.length > 1) {
-            showToast(
-              `${logStarter} cluster ${cluster}, it has ${jobs.length} jobs running, please cancel them first.`,
-              'warning'
-            );
-          } else {
-            showToast(
-              `${logStarter} cluster ${cluster}, it has 1 job running, please cancel it first.`,
-              'warning'
-            );
-          }
-          return;
-        }
-      }
-    } catch (error) {
-      console.error('Error in handleClusterAction:', error);
-      showToast(
-        `${logStarter} cluster ${cluster} error: ${error.message}`,
-        'error'
-      );
-    }
-  }
-
-  // Show initial notification
-  showToast(`${logStarter} cluster ${cluster}...`, 'info');
-
-  try {
-    try {
-      const response = await fetch(`${ENDPOINT}/${apiPath}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          cluster_name: cluster,
-        }),
-      });
-
-      const id = response.headers.get('x-request-id');
-      const finalResponse = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-
-      // Check the status code of the final response
-      if (finalResponse.status === 200) {
-        showToast(`Cluster ${cluster} ${logMiddle} successfully.`, 'success');
-      } else {
-        if (finalResponse.status === 500) {
-          try {
-            const data = await finalResponse.json();
-
-            if (data.detail && data.detail.error) {
-              try {
-                const error = JSON.parse(data.detail.error);
-
-                // Handle specific error types
-                if (error.type && error.type === NotSupportedError) {
-                  showToast(
-                    `${logStarter} cluster ${cluster} is not supported!`,
-                    'error',
-                    10000
-                  );
-                } else if (error.type && error.type === ClusterDoesNotExist) {
-                  showToast(`Cluster ${cluster} does not exist.`, 'error');
-                } else {
-                  showToast(
-                    `${logStarter} cluster ${cluster} failed: ${error.type}`,
-                    'error'
-                  );
-                }
-              } catch (jsonError) {
-                showToast(
-                  `${logStarter} cluster ${cluster} failed: ${data.detail.error}`,
-                  'error'
-                );
-              }
-            } else {
-              showToast(
-                `${logStarter} cluster ${cluster} failed with no details.`,
-                'error'
-              );
-            }
-          } catch (parseError) {
-            showToast(
-              `${logStarter} cluster ${cluster} failed with parse error.`,
-              'error'
-            );
-          }
-        } else {
-          showToast(
-            `${logStarter} cluster ${cluster} failed with status ${finalResponse.status}.`,
-            'error'
-          );
-        }
-      }
-    } catch (fetchError) {
-      console.error('Fetch error:', fetchError);
-      showToast(
-        `Network error ${logStarter} cluster ${cluster}: ${fetchError.message}`,
-        'error'
-      );
-    }
-  } catch (outerError) {
-    console.error('Error in handleStop:', outerError);
-    showToast(
-      `Critical error ${logStarter} cluster ${cluster}: ${outerError.message}`,
-      'error'
-    );
-  }
-}
-
-export async function handleStop(cluster, state) {
-  await handleClusterAction('stop', cluster, state);
-}
-
-export async function handleTerminate(cluster, state) {
-  await handleClusterAction('terminate', cluster, state);
-}
-
-export async function handleStart(cluster, state) {
-  await handleClusterAction('start', cluster, state);
 }

@@ -113,11 +113,11 @@ export function ManagedJobs() {
 
   return (
     <Layout highlighted="jobs">
-      <h2 className="text-2xl mb-4">
+      <div className="text-sm mb-4">
         <Link href="/jobs" className="text-sky-blue hover:underline">
           Managed Jobs
         </Link>
-      </h2>
+      </div>
       <div className="border-b border-gray-200 my-4"></div>
       <div className="flex mb-4">
         <button
@@ -127,10 +127,10 @@ export function ManagedJobs() {
           Active
         </button>
         <button
-          className={`p-2 mx-4 ${activeTab === 'history' ? 'text-sky-blue font-semibold border-b-2 border-sky-blue' : 'text-gray-700'}`}
-          onClick={() => setActiveTab('history')}
+          className={`p-2 mx-4 ${activeTab === 'finished' ? 'text-sky-blue font-semibold border-b-2 border-sky-blue' : 'text-gray-700'}`}
+          onClick={() => setActiveTab('finished')}
         >
-          History
+          Finished
         </button>
         <div className="ml-auto flex items-center">
           {loading && (
@@ -194,8 +194,13 @@ export function ManagedJobsTable({
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [expandedRowId, setExpandedRowId] = useState(null);
-  const [statusFilter, setStatusFilter] = useState('all');
   const expandedRowRef = useRef(null);
+  const [selectedStatus, setSelectedStatus] = useState('All');
+
+  // Add this useEffect
+  useEffect(() => {
+    setSelectedStatus('All');
+  }, [activeTab]);
 
   // Add click outside handler to collapse expanded row
   useEffect(() => {
@@ -290,6 +295,7 @@ export function ManagedJobsTable({
     return '';
   };
 
+  // First, keep the activeTab filter
   const filteredData = sortedData
     .filter((item) => {
       if (activeTab === 'active') {
@@ -312,14 +318,29 @@ export function ManagedJobsTable({
           'FAILED_CONTROLLER',
         ].includes(item.status);
       }
-    })
-    .filter((item) => statusFilter === 'all' || item.status === statusFilter);
+    });
+
+  // Calculate status counts from the filtered data
+  const statusCounts = React.useMemo(() => {
+    const counts = {
+      All: filteredData.length,
+    };
+    filteredData.forEach(item => {
+      counts[item.status] = (counts[item.status] || 0) + 1;
+    });
+    return counts;
+  }, [filteredData]);
+
+  // Apply status filter
+  const statusFilteredData = React.useMemo(() => {
+    if (selectedStatus === 'All') return filteredData;
+    return filteredData.filter(item => item.status === selectedStatus);
+  }, [filteredData, selectedStatus]);
 
   // Calculate pagination
-  const totalPages = Math.ceil(filteredData.length / pageSize);
+  const totalPages = Math.ceil(statusFilteredData.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
-  const paginatedData = filteredData.slice(startIndex, endIndex);
 
   // Page navigation handlers
   const goToPreviousPage = () => {
@@ -336,8 +357,48 @@ export function ManagedJobsTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
+  const paginatedData = statusFilteredData.slice(startIndex, endIndex);
+
   return (
-    <div>
+    <div className="relative">
+      {/* Status Filter Bar */}
+      <div className="flex items-center mb-4 text-sm">
+        <span className="mr-2 text-gray-600">Filter by status:</span>
+        <div className="flex space-x-2">
+          <button
+            onClick={() => setSelectedStatus('All')}
+            className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+              selectedStatus === 'All'
+                ? 'bg-gray-100 text-gray-800'
+                : 'text-gray-600 hover:bg-gray-50'
+            }`}
+          >
+            <span>ALL</span>
+            <span className="text-xs bg-gray-200 px-1.5 py-0.5 rounded">
+              {statusCounts.All}
+            </span>
+          </button>
+          {Object.entries(statusCounts)
+            .filter(([status]) => status !== 'All')
+            .map(([status, count]) => (
+              <button
+                key={status}
+                onClick={() => setSelectedStatus(status)}
+                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                  selectedStatus === status
+                    ? getStatusStyle(status)
+                    : 'text-gray-600 hover:bg-gray-50'
+                }`}
+              >
+                <span>{status}</span>
+                <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                  {count}
+                </span>
+              </button>
+            ))}
+        </div>
+      </div>
+
       <Card>
         <Table>
           <TableHeader>
@@ -366,51 +427,11 @@ export function ManagedJobsTable({
               >
                 Job Duration{getSortDirection('job_duration')}
               </TableHead>
-              <TableHead>
-                <div className="flex items-center gap-2">
-                  <span
-                    className="sortable whitespace-nowrap"
-                    onClick={() => requestSort('status')}
-                  >
-                    Status{getSortDirection('status')}
-                  </span>
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="h-8 w-8 p-0 border-0">
-                      <Filter className="w-4 h-4" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Statuses</SelectItem>
-                      {activeTab === 'active' ? (
-                        <>
-                          <SelectItem value="RUNNING">Running</SelectItem>
-                          <SelectItem value="RECOVERING">Recovering</SelectItem>
-                          <SelectItem value="PENDING">Pending</SelectItem>
-                          <SelectItem value="SUBMITTED">Submitted</SelectItem>
-                          <SelectItem value="STARTING">Starting</SelectItem>
-                          <SelectItem value="CANCELLING">Cancelling</SelectItem>
-                        </>
-                      ) : (
-                        <>
-                          <SelectItem value="SUCCEEDED">Succeeded</SelectItem>
-                          <SelectItem value="FAILED">Failed</SelectItem>
-                          <SelectItem value="CANCELLED">Cancelled</SelectItem>
-                          <SelectItem value="FAILED_SETUP">
-                            Failed Setup
-                          </SelectItem>
-                          <SelectItem value="FAILED_PRECHECKS">
-                            Failed Prechecks
-                          </SelectItem>
-                          <SelectItem value="FAILED_NO_RESOURCE">
-                            Failed No Resource
-                          </SelectItem>
-                          <SelectItem value="FAILED_CONTROLLER">
-                            Failed Controller
-                          </SelectItem>
-                        </>
-                      )}
-                    </SelectContent>
-                  </Select>
-                </div>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('status')}
+              >
+                Status{getSortDirection('status')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -446,7 +467,6 @@ export function ManagedJobsTable({
               <TableHead>Actions</TableHead>
             </TableRow>
           </TableHeader>
-
           <TableBody>
             {loading && isInitialLoad ? (
               <TableRow>
@@ -479,7 +499,7 @@ export function ManagedJobsTable({
                     <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
-                      <State2Icon state={item.status} />
+                      <Status2Icon status={item.status} />
                     </TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell>{item.cluster}</TableCell>
@@ -499,11 +519,11 @@ export function ManagedJobsTable({
                       )}
                     </TableCell>
                     <TableCell>
-                      <State2Actions
+                      <Status2Actions
                         jobParent="/jobs"
                         jobId={item.id}
                         jobName={item.name}
-                        state={item.status}
+                        status={item.status}
                         managed={true}
                         cluster="job controller"
                       />
@@ -533,7 +553,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls */}
-      {filteredData.length > 0 && (
+      {statusFilteredData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -568,8 +588,8 @@ export function ManagedJobsTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, filteredData.length)} of{' '}
-              {filteredData.length}
+              {startIndex + 1} – {Math.min(endIndex, statusFilteredData.length)} of{' '}
+              {statusFilteredData.length}
             </div>
             <div className="flex items-center space-x-2">
               <Button
@@ -622,6 +642,32 @@ export function ManagedJobsTable({
       )}
     </div>
   );
+}
+
+// Helper function to get status-specific styling
+function getStatusStyle(status) {
+  switch (status) {
+    case 'RUNNING':
+      return 'bg-green-50 text-green-700';
+    case 'PENDING':
+      return 'bg-yellow-50 text-yellow-700';
+    case 'SUCCEEDED':
+      return 'bg-blue-50 text-blue-700';
+    case 'FAILED':
+      return 'bg-red-50 text-red-700';
+    case 'CANCELED':
+      return 'bg-gray-50 text-gray-700';
+    case 'RECOVERING':
+      return 'bg-orange-50 text-orange-700';
+    case 'SUBMITTED':
+      return 'bg-indigo-50 text-indigo-700';
+    case 'STARTING':
+      return 'bg-cyan-50 text-cyan-700';
+    case 'CANCELLING':
+      return 'bg-rose-50 text-rose-700';
+    default:
+      return 'bg-gray-100 text-gray-800';
+  }
 }
 
 export function JobDetails({
@@ -721,11 +767,11 @@ export function JobDetails({
           {!customHeader && (
             <div>
               {actionButtons || (
-                <State2Actions
+                <Status2Actions
                   jobParent={parentLink}
                   jobId={jobData.id}
                   jobName={jobData.job}
-                  state={jobData.state || jobData.status || 'UNKNOWN'}
+                  status={jobData.status || 'UNKNOWN'}
                   managed={false}
                   cluster={clusterName}
                 />
@@ -915,7 +961,7 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
             </div>
             <div className="flex items-center">
               <span className="font-medium text-gray-600 mr-2">Status:</span>
-              <span>{jobData.state}</span>
+              <span>{jobData.status}</span>
             </div>
             {jobData.resources && (
               <div className="flex items-center">
@@ -957,50 +1003,46 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
       return (
         <div className="items-center mb-6">
           <Card className="p-3">
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">Job ID:</span>
-                <span>{jobData.id}</span>
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <div className="text-gray-600 font-medium">Job ID</div>
+                <div>{jobData.id}</div>
               </div>
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">User:</span>
-                <span>{jobData.user}</span>
+              <div>
+                <div className="text-gray-600 font-medium">User</div>
+                <div>{jobData.user}</div>
               </div>
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">Status:</span>
-                <span>{jobData.state}</span>
+              <div>
+                <div className="text-gray-600 font-medium">Status</div>
+                <div>{jobData.status}</div>
               </div>
               {jobData.resources && (
-                <div className="flex items-center">
-                  <span className="font-medium text-gray-600 mr-2">
-                    Resources:
-                  </span>
-                  <span>{jobData.resources || 'N/A'}</span>
+                <div>
+                  <div className="text-gray-600 font-medium">Resources</div>
+                  <div>{jobData.resources || 'N/A'}</div>
                 </div>
               )}
-              <div className="flex items-center">
-                <span className="font-medium text-gray-600 mr-2">
-                  Job Name:
-                </span>
-                <span>{jobData.job}</span>
+              <div>
+                <div className="text-gray-600 font-medium">Job Name</div>
+                <div>{jobData.job}</div>
               </div>
               {jobData.cluster && (
-                <div className="flex items-center">
-                  <span className="font-medium text-gray-600 mr-2">
-                    Cluster:
-                  </span>
-                  <Link
-                    href={`/clusters/${jobData.cluster}`}
-                    className="text-sky-blue hover:underline"
-                  >
-                    {jobData.cluster}
-                  </Link>
+                <div>
+                  <div className="text-gray-600 font-medium">Cluster</div>
+                  <div>
+                    <Link
+                      href={`/clusters/${jobData.cluster}`}
+                      className="text-sky-blue hover:underline"
+                    >
+                      {jobData.cluster}
+                    </Link>
+                  </div>
                 </div>
               )}
               {jobData.infra && (
-                <div className="flex items-center">
-                  <span className="font-medium text-gray-600 mr-2">Infra:</span>
-                  <span>{jobData.infra}</span>
+                <div>
+                  <div className="text-gray-600 font-medium">Infra</div>
+                  <div>{jobData.infra}</div>
                 </div>
               )}
             </div>
@@ -1020,133 +1062,130 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
   }
 }
 
-function state2Icon(state) {
+function status2Icon(status) {
   const badgeClasses =
     'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium';
-  switch (state) {
+  switch (status) {
     case 'RUNNING':
       return (
         <span className={`${badgeClasses} bg-green-50 text-green-700`}>
           <FilledCircleIcon className="w-2 h-2 mr-2" />
-          Running
+          RUNNING
         </span>
       );
     case 'PENDING':
       return (
         <span className={`${badgeClasses} bg-yellow-50 text-yellow-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Pending
+          PENDING
         </span>
       );
     case 'SUCCEEDED':
       return (
         <span className={`${badgeClasses} bg-blue-50 text-blue-700`}>
           <TickIcon className="w-2 h-2 mr-2" />
-          Succeeded
+          SUCCEEDED
         </span>
       );
     case 'FAILED':
       return (
         <span className={`${badgeClasses} bg-red-50 text-red-700`}>
           <SquareIcon className="w-2 h-2 mr-2" />
-          Failed
+          FAILED
         </span>
       );
     case 'CANCELED':
       return (
         <span className={`${badgeClasses} bg-gray-50 text-gray-700`}>
           <SquareIcon className="w-2 h-2 mr-2" />
-          Canceled
+          CANCELLED
         </span>
       );
     case 'RECOVERING':
       return (
         <span className={`${badgeClasses} bg-orange-50 text-orange-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Recovering
+          RECOVERING
         </span>
       );
     case 'SUBMITTED':
       return (
         <span className={`${badgeClasses} bg-indigo-50 text-indigo-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Submitted
+          SUBMITTED
         </span>
       );
     case 'STARTING':
       return (
         <span className={`${badgeClasses} bg-cyan-50 text-cyan-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Starting
+          STARTING
         </span>
       );
     case 'CANCELLING':
       return (
         <span className={`${badgeClasses} bg-rose-50 text-rose-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Cancelling
+          CANCELLING
         </span>
       );
     case 'FAILED_SETUP':
       return (
         <span className={`${badgeClasses} bg-pink-50 text-pink-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Failed Setup
+          FAILED_SETUP
         </span>
       );
     case 'FAILED_PRECHECKS':
       return (
         <span className={`${badgeClasses} bg-red-50 text-red-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Failed Prechecks
+          FAILED_PRECHECKS
         </span>
       );
     case 'FAILED_NO_RESOURCE':
       return (
         <span className={`${badgeClasses} bg-red-50 text-red-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Failed No Resource
+          FAILED_NO_RESOURCE
         </span>
       );
     case 'FAILED_CONTROLLER':
       return (
         <span className={`${badgeClasses} bg-red-50 text-red-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
-          Failed Controller
+          FAILED_CONTROLLER
         </span>
       );
     default:
       return (
         <span className={`${badgeClasses} bg-gray-100 text-gray-800`}>
           <FilledCircleIcon className="w-3 h-3 mr-1" />
-          {state}
+          {status}
         </span>
       );
   }
 }
 
-export function State2Icon({ state }) {
+export function Status2Icon({ status }) {
   return (
-    <Tooltip content={state} className="text-muted-foreground text-sm">
-      <span>{state2Icon(state)}</span>
+    <Tooltip content={status} className="text-muted-foreground text-sm">
+      <span>{status2Icon(status)}</span>
     </Tooltip>
   );
 }
 
-export function State2Actions({
+export function Status2Actions({
   withLabel = false,
   jobParent,
   jobId,
   jobName,
-  state,
+  status,
   managed,
   cluster,
 }) {
   const router = useRouter();
   const actions = ['logs'];
-  if (['RUNNING', 'PENDING'].includes(state)) {
-    actions.push('cancel');
-  }
   if (managed) {
     actions.push('controllerlogs');
   }
@@ -1180,21 +1219,9 @@ export function State2Actions({
     }
   };
 
-  const handleCancelClick = () => {
-    setConfirmationModal({
-      isOpen: true,
-      title: 'Cancel Job',
-      message: `Are you sure you want to cancel job "${jobName}" (${jobId})?`,
-      onConfirm: () => {
-        handleJobAction('cancel', jobId, cluster, managed);
-        setConfirmationModal({ ...confirmationModal, isOpen: false });
-      },
-    });
-  };
-
   return (
     <>
-      <span className="flex content-center items-center">
+      <span className="flex content-center items-center text-sm">
         <Tooltip
           key="logs"
           content="View Job Logs"
@@ -1204,7 +1231,7 @@ export function State2Actions({
             onClick={(e) => handleLogsClick(e, 'logs')}
             className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
           >
-            <FileSearchIcon className="w-4 h-4 text-gray-500 inline-block" />
+            <FileSearchIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />
             {withLabel && 'Logs'}
           </button>
         </Tooltip>
@@ -1218,45 +1245,12 @@ export function State2Actions({
               onClick={(e) => handleLogsClick(e, 'controllerlogs')}
               className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
             >
-              <MonitorPlay className="w-4 h-4 text-gray-500 inline-block" />
+              <MonitorPlay className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />
               {withLabel && 'Controller Logs'}
             </button>
           </Tooltip>
         )}
-        <Tooltip
-          key="cancel"
-          content="Cancel Job"
-          className="capitalize ml-2 text-sm text-muted-foreground"
-        >
-          {actions.includes('cancel') ? (
-            <button
-              onClick={handleCancelClick}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
-            >
-              <SquareIcon className="w-4 h-4 text-gray-500 inline-block" />
-              {withLabel && 'Cancel'}
-            </button>
-          ) : (
-            <span className="opacity-20 ml-2" title="Cancel">
-              <SquareIcon className="w-4 h-4 text-gray-500 inline-block" />
-              {withLabel && 'Cancel'}
-            </span>
-          )}
-        </Tooltip>
       </span>
-
-      <ConfirmationModal
-        isOpen={confirmationModal.isOpen}
-        onClose={() => {
-          setConfirmationModal({ ...confirmationModal, isOpen: false });
-        }}
-        onConfirm={() => {
-          confirmationModal.onConfirm();
-          setConfirmationModal({ ...confirmationModal, isOpen: false });
-        }}
-        title={confirmationModal.title}
-        message={confirmationModal.message}
-      />
     </>
   );
 }
@@ -1290,7 +1284,6 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
     };
   }, [expandedRowId]);
 
-  // Filter out terminated jobs if on active tab
   const jobData = React.useMemo(() => {
     return clusterJobData || [];
   }, [clusterJobData]);
@@ -1392,9 +1385,9 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
-                onClick={() => requestSort('state')}
+                onClick={() => requestSort('status')}
               >
-                Status{getSortDirection('state')}
+                Status{getSortDirection('status')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -1454,16 +1447,16 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
                     <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
-                      <State2Icon state={item.state} />
+                      <Status2Icon status={item.status} />
                     </TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell>{item.user}</TableCell>
                     <TableCell className="flex content-center items-center">
-                      <State2Actions
+                      <Status2Actions
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
                         jobName={item.job}
-                        state={item.state}
+                        status={item.status}
                         managed={false}
                         cluster={clusterName}
                       />

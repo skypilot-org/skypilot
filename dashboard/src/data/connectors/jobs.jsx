@@ -209,17 +209,6 @@ export async function handleJobAction(action, jobId, cluster, managed) {
   let apiPath = '';
   let requestBody = {};
   switch (action) {
-    case 'cancel':
-      logStarter = 'Cancelling';
-      logMiddle = 'cancelled';
-      if (managed) {
-        apiPath = 'jobs/cancel';
-        requestBody = { job_ids: [jobId] };
-      } else {
-        apiPath = 'cancel';
-        requestBody = { job_ids: [jobId], cluster_name: cluster };
-      }
-      break;
     case 'restartcontroller':
       logStarter = 'Restarting';
       logMiddle = 'restarted';

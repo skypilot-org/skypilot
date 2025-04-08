@@ -6,7 +6,7 @@ import { useClusterDetails } from '@/data/connectors/clusters';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
-import { State2Actions } from '@/components/jobs';
+import { Status2Actions } from '@/components/jobs';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -58,12 +58,12 @@ function JobHeader({
               Refresh
             </button>
           </Tooltip>
-          <State2Actions
+          <Status2Actions
             withLabel={true}
             jobParent={`/clusters/${cluster}`}
             jobId={job}
             jobName={jobData.job || job}
-            state={jobData.state || jobData.status || 'UNKNOWN'}
+            status={jobData.status || 'UNKNOWN'}
             cluster={cluster}
             managed={false}
           />

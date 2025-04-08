@@ -74,74 +74,26 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
 }
 
 export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
-  const [copied, setCopied] = React.useState(false);
-
-  const handleCopy = (text) => {
-    navigator.clipboard.writeText(text);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const vscodeSteps = [
-    '1. Install VSCode and Remote-SSH extension:',
-    '   • Open VSCode',
-    '   • Go to Extensions (Cmd+Shift+X or Ctrl+Shift+X)',
-    "   • Search for 'Remote - SSH'",
-    '   • Install if not already installed',
-    '',
-    '2. Connect to the cluster:',
-    '   Method 1 - Using VSCode UI:',
-    '   • Press Cmd+Shift+P (Mac) or Ctrl+Shift+P (Windows/Linux)',
-    "   • Type 'Remote-SSH: Connect to Host'",
-    `   • Enter "${cluster}"`,
-    '',
-    '   Method 2 - Using Command Line:',
-    `   • Open terminal and run: code --remote ssh-remote+${cluster} /home/sky`,
-  ].join('\n');
-
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Connect to {cluster} with VSCode</DialogTitle>
+          <DialogTitle>Connect to {cluster}</DialogTitle>
           <DialogDescription>
-            Follow these instructions to connect to your cluster using VSCode
+            Refer to the short video below to connect to your cluster using
             Remote-SSH.
+            <div className="mt-4 relative" style={{ paddingBottom: '56.25%' /* 16:9 aspect ratio */ }}>
+              <video
+                className="absolute top-0 left-0 w-full h-full rounded-lg"
+                controls
+                preload="metadata"
+              >
+                <source src="/videos/cursor-small.mp4" type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+            </div>
           </DialogDescription>
         </DialogHeader>
-        <div className="flex flex-col space-y-4">
-          <div>
-            <h3 className="text-sm font-medium mb-2">Setup Instructions</h3>
-            <Card className="p-3 bg-gray-50">
-              <div className="flex items-center justify-between">
-                <pre className="text-sm w-full whitespace-pre-wrap">
-                  {vscodeSteps}
-                </pre>
-                <Tooltip content={copied ? 'Copied!' : 'Copy instructions'}>
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    onClick={() => handleCopy(vscodeSteps)}
-                    className="h-8 w-8 rounded-full"
-                  >
-                    <CopyIcon className="h-4 w-4" />
-                  </Button>
-                </Tooltip>
-              </div>
-            </Card>
-          </div>
-
-          <div>
-            <h3 className="text-sm font-medium mb-2">Troubleshooting</h3>
-            <p className="text-sm text-muted-foreground">
-              If you have issues connecting:
-              <br />• Make sure VSCode is up to date
-              <br />• Try restarting VSCode after installing Remote-SSH
-              <br />• Enable &quot;Remote.SSH: Enable Dynamic Forwarding&quot;
-              in VSCode settings
-            </p>
-          </div>
-        </div>
       </DialogContent>
     </Dialog>
   );
