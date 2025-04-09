@@ -34,7 +34,6 @@ SSH_KEY_NAME_ON_DO = f'sky-key-{common_utils.get_user_hash()}'
 
 _client = None
 _ssh_key_id = None
-_credentials_path = None
 
 
 class DigitalOceanError(Exception):
