@@ -9,7 +9,7 @@ import sys
 from typing import Dict, List
 
 install_requires = [
-    'wheel',
+    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',

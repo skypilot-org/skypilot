@@ -237,6 +237,43 @@ def test_invalid_enum_config(monkeypatch, tmp_path) -> None:
     assert 'Invalid config YAML' in e.value.args[0]
 
 
+def test_gcp_vpc_name_validation(monkeypatch, tmp_path) -> None:
+    """Test GCP vpc_name validation with valid and invalid pattern.
+
+    This tests the schema changes where vpc_name was moved from _NETWORK_CONFIG_SCHEMA
+    to provider-specific schemas and pattern validation was added for GCP vpc_name.
+    """
+    # Test valid vpc_name format
+    for valid_vpc in ['my-vpc', 'project-id/my-vpc', 'project-123/vpc-456']:
+        config_path = tmp_path / f'valid_{valid_vpc.replace("/", "_")}.yaml'
+        config_path.open('w', encoding='utf-8').write(
+            textwrap.dedent(f"""\
+            gcp:
+                vpc_name: {valid_vpc}
+            """))
+        monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+        # Should not raise an exception
+        skypilot_config._reload_config()
+        assert skypilot_config.get_nested(('gcp', 'vpc_name'),
+                                          None) == valid_vpc
+
+    # Test invalid vpc_name format with multiple slashes
+    for invalid_vpc in [
+            'UPPERCASE-VPC', 'project_id/my-vpc', 'invalid/path/format',
+            '/missing-project', 'project-id/', 'project/vpc/extra'
+    ]:
+        config_path = tmp_path / f'invalid_{invalid_vpc.replace("/", "_")}.yaml'
+        config_path.open('w', encoding='utf-8').write(
+            textwrap.dedent(f"""\
+            gcp:
+                vpc_name: {invalid_vpc}
+            """))
+        monkeypatch.setattr(skypilot_config, 'CONFIG_PATH', config_path)
+        with pytest.raises(ValueError) as e:
+            skypilot_config._reload_config()
+        assert 'Invalid config YAML' in e.value.args[0]
+
+
 def test_valid_num_items_config(monkeypatch, tmp_path) -> None:
     """Test that the config is not loaded if the config file contains an invalid number of array items."""
     config_path = tmp_path / 'valid.yaml'
