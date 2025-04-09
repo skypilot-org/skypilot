@@ -9,7 +9,7 @@ import pathlib
 import shutil
 import time
 import traceback
-from typing import Dict, List
+from typing import Dict
 
 import filelock
 
