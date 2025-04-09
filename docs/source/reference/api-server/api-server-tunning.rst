@@ -5,6 +5,13 @@ SkyPilot API Server Performance Best Practices
 
 This page describes performance best practices for centralized SkyPilot API server in team deployment.
 
+Tuning API server resources
+--------------------------------
+
+The concurrent requests that the API server can handle is proportional to the resources (CPU cores and memory) allocated to it. Requests will be queued on the server when it is busy.
+
+- 
+
 This guide assumes you have already deployed the API server following the :ref:`sky-api-server-deploy` guide using helm. Similar tuning strategies also apply to VM deployment, refer to :ref:`sky-api-server-cloud-deploy` for details.
 
 Customizing API server resources
