@@ -499,7 +499,6 @@ def test_nebius_storage_mounts(generic_cloud: str):
         'tests/test_yamls/test_nebius_storage_mounting.yaml').read_text()
     template = jinja2.Template(template_str)
     content = template.render(storage_name=storage_name)
-    endpoint_url = nebius.create_endpoint()
     with tempfile.NamedTemporaryFile(suffix='.yaml', mode='w') as f:
         f.write(content)
         f.flush()
@@ -508,7 +507,7 @@ def test_nebius_storage_mounts(generic_cloud: str):
             *smoke_tests_utils.STORAGE_SETUP_COMMANDS,
             f'sky launch -y -c {name} --cloud {generic_cloud} {file_path}',
             f'sky logs {name} 1 --status',  # Ensure job succeeded.
-            f'aws s3 ls s3://{storage_name}/hello.txt --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+            f'aws s3 ls s3://{storage_name}/hello.txt --profile={nebius.NEBIUS_PROFILE_NAME}'
         ]
 
         test = smoke_tests_utils.Test(
@@ -840,9 +839,8 @@ class TestStorageWithCredentials:
             url = f's3://{bucket_name}'
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 rb {url} --force --endpoint {endpoint_url} --profile=r2'
         if store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
             url = f's3://{bucket_name}'
-            return f'aws s3 rb {url} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+            return f'aws s3 rb {url} --force --profile={nebius.NEBIUS_PROFILE_NAME}'
 
         if store_type == storage_lib.StoreType.IBM:
             rclone_profile_name = (data_utils.Rclone.RcloneStores.IBM.
@@ -932,13 +930,12 @@ class TestStorageWithCredentials:
             recursive_flag = '--recursive' if recursive else ''
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls {url} --endpoint {endpoint_url} --profile=r2 {recursive_flag}'
         if store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
             if suffix:
                 url = f's3://{bucket_name}/{suffix}'
             else:
                 url = f's3://{bucket_name}'
             recursive_flag = '--recursive' if recursive else ''
-            return f'aws s3 ls {url} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
+            return f'aws s3 ls {url} --profile={nebius.NEBIUS_PROFILE_NAME} {recursive_flag}'
 
         if store_type == storage_lib.StoreType.IBM:
             # rclone ls is recursive by default
@@ -1004,11 +1001,10 @@ class TestStorageWithCredentials:
             else:
                 return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile=r2'
         elif store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
             if suffix:
-                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+                return f'aws s3api list-objects --bucket "{bucket_name}" --prefix {suffix} --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
             else:
-                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+                return f'aws s3api list-objects --bucket "{bucket_name}" --query "length(Contents[?contains(Key,\'{file_name}\')].Key)" --profile={nebius.NEBIUS_PROFILE_NAME}'
 
     @staticmethod
     def cli_count_file_in_bucket(store_type, bucket_name):
@@ -1031,8 +1027,7 @@ class TestStorageWithCredentials:
             endpoint_url = cloudflare.create_endpoint()
             return f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile=r2 | wc -l'
         elif store_type == storage_lib.StoreType.NEBIUS:
-            endpoint_url = nebius.create_endpoint()
-            return f'aws s3 ls s3://{bucket_name} --recursive --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
+            return f'aws s3 ls s3://{bucket_name} --recursive --profile={nebius.NEBIUS_PROFILE_NAME} | wc -l'
 
     @pytest.fixture
     def tmp_source(self, tmp_path):
@@ -1284,14 +1279,13 @@ class TestStorageWithCredentials:
     @pytest.fixture
     def tmp_awscli_bucket_nebius(self, tmp_bucket_name):
         # Creates a temporary bucket using awscli
-        endpoint_url = nebius.create_endpoint()
         bucket_uri = f's3://{tmp_bucket_name}'
         subprocess.check_call(
-            f'aws s3 mb {bucket_uri} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
+            f'aws s3 mb {bucket_uri} --profile={nebius.NEBIUS_PROFILE_NAME}',
             shell=True)
         yield tmp_bucket_name, f'nebius://{tmp_bucket_name}'
         subprocess.check_call(
-            f'aws s3 rb {bucket_uri} --force --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}',
+            f'aws s3 rb {bucket_uri} --force --profile={nebius.NEBIUS_PROFILE_NAME}',
             shell=True)
 
     @pytest.fixture
@@ -1584,8 +1578,7 @@ class TestStorageWithCredentials:
                 command = f'AWS_SHARED_CREDENTIALS_FILE={cloudflare.R2_CREDENTIALS_PATH} aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile=r2'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('nebius'):
-                endpoint_url = nebius.create_endpoint()
-                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --endpoint {endpoint_url} --profile={nebius.NEBIUS_PROFILE_NAME}'
+                command = f'aws s3api head-bucket --bucket {nonexist_bucket_name} --profile={nebius.NEBIUS_PROFILE_NAME}'
                 expected_output = '404'
             elif nonexist_bucket_url.startswith('cos'):
                 # Using API calls, since using rclone requires a profile's name
