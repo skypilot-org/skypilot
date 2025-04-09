@@ -1,11 +1,15 @@
 GCP
 =============
 
+.. note::
+
+    By default, SkyPilot will pick up the credentials you have set up. For most cases, the :ref:`getting started instructions <installation-gcp>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
+
 
 .. _gcp-service-account:
 
-GCP service account
--------------------
+Service account
+---------------
 
 `GCP service accounts
 <https://cloud.google.com/iam/docs/service-account-overview>`__ are supported.
@@ -212,8 +216,8 @@ The :ref:`Medium Permissions <gcp-medium-permissions>` assigns admin permissions
 
 .. _gcp-service-account-creation:
 
-Service account
-~~~~~~~~~~~~~~~~~~~
+Service account for SkyPilot system
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 .. note::
 
     If you already have an service account under "Service Accounts" tab with the email starting with ``skypilot-v1@``, it is likely created by SkyPilot automatically, and you can skip this section.

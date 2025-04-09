@@ -250,7 +250,7 @@ Now configure your credentials.
 
 To use AWS IAM Identity Center (AWS SSO), see :ref:`here<aws-sso>` for instructions.
 
-**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`AWS User Creation <cloud-permissions-aws>`.
+**Optional**: To create a new AWS user with minimal permissions for SkyPilot, see :ref:`dedicated-aws-user`.
 
 .. _installation-gcp:
 

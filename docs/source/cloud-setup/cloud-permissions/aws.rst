@@ -1,8 +1,10 @@
-
-.. _cloud-permissions-aws:
-
 AWS
 =====
+
+.. note::
+
+    By default, SkyPilot will use the credentials you have set up locally. For most cases, the :ref:`getting started instructions <aws-installation>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
+
 
 .. _aws-sso:
 
@@ -14,7 +16,7 @@ Using AWS SSO
 .. warning::
   SSO login *will not work across multiple clouds*. If you use multiple clouds, you should :ref:`set up a dedicated user and credentials <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
-To use it, ensure that your machine `has AWS CLI V2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_ (by default, ``pip install skypilot[aws]`` installs V1; V2 cannot be installed via pip).
+To use it, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. If you install v2, you may need to ``deactivate`` (for venv) or ``conda deactivate`` to avoid the v1 CLI taking precedence.
 
 You can use the following to check version:
 
@@ -47,6 +49,12 @@ Log in and approve the request in your web browser. Then back in the CLI, comple
 
 If everything is set up correctly, :code:`sky check aws` should succeed!
 
+
+..
+    These two aren't currently used, but keep them so that old links like
+    /aws.html#cloud-permissions-aws will still jump to here.
+.. _cloud-permissions-aws:
+.. _cloud-permissions-aws-user-creation:
 
 .. _dedicated-aws-user:
 
@@ -183,9 +191,10 @@ If your credentials are not being picked up, or you're seeing the wrong credenti
 
    .. code-block:: console
 
-       $ sky check aws
+       $ sky check aws -v
        Checking credentials to enable clouds for SkyPilot.
          AWS: enabled [compute, storage]
+           Activated account: VRSC9IFFYQI7THCKR5UVC [account=190763068689]
        ...
 
 **Common issues:**
@@ -195,34 +204,49 @@ If your credentials are not being picked up, or you're seeing the wrong credenti
   You may have previously set ``AWS_PROFILE`` in your ``.bashrc`` file or similar. Try to double-check the value:
 
   .. code-block:: console
-      :emphasize-lines: 5
+      :emphasize-lines: 13
+
+      $ # Check the account being used by skypilot
+      $ sky check aws -v
+      Checking credentials to enable clouds for SkyPilot.
+        AWS: enabled [compute, storage]
+          Activated account: XXXXXXXXXXXXXXXXXXXXX:user [account=123456789012]
+        ...
+      $ # AWS account 1234-5678-9012 is enabled via @user SSO login.
 
       $ # See the currently enabled profile.
       $ aws configure list
             Name                    Value             Type    Location
             ----                    -----             ----    --------
-         profile     AWSPowerUserAccess-xxxxxxx        env    ['AWS_DEFAULT_PROFILE', 'AWS_PROFILE']
-      access_key     ****************xxxx shared-credentials-file
-      secret_key     ****************xxxx shared-credentials-file
+         profile AWSPowerUserAccess-123456789012              env    ['AWS_DEFAULT_PROFILE', 'AWS_PROFILE']
+      access_key     ****************xxxx              sso
+      secret_key     ****************xxxx              sso
           region                <not set>             None    None
-      $ # See the currently enabled AWS account and user/role.
+      $ # SSO profile AWSPowerUserAccess-123456789012 is enabled
+      $ #   via environment variable.
+
+      $ # See details of the currently enabled AWS account and user/role.
       $ aws sts get-caller-identity
 
       $ # See if the environment variable has been set.
       $ echo $AWS_PROFILE
-      AWSPowerUserAccess-xxxxxxx
-      $ # This profile will be used.
-      $ sky check aws
+      AWSPowerUserAccess-123456789012
 
       $ unset AWS_PROFILE
+      $ # Delete from .bashrc/.zshrc to make the change permanent.
       $ # Now, default profile will be used.
       $ aws configure list
             Name                    Value             Type    Location
             ----                    -----             ----    --------
          profile                <not set>             None    None
          ...
-      $ sky check aws
-      $ # Delete from .bashrc/.zshrc to make the change permanent.
+      $ sky check aws -v
+      Checking credentials to enable clouds for SkyPilot.
+        AWS: enabled [compute, storage]
+          Activated account: XXXXXXXXXXXXXXXXXXXXX [account=987654321098]
+        ...
+      $ # Now AWS account 9876-5432-1098 is enabled via default profile.
+
 
 - **Profile is not set**. If ``sky check aws`` and ``aws configure list`` cannot find credentials, you may not have a default profile set.
 
@@ -269,10 +293,9 @@ If your credentials are not being picked up, or you're seeing the wrong credenti
   .. code-block:: shell
 
       # .bashrc / .zshrc
-      export AWS_PROFILE='AWSPowerUserAccess-xxxxxxx'
+      # Enable AWS profile named "AWSPowerUserAccess-123456789012"
+      export AWS_PROFILE='AWSPowerUserAccess-123456789012'
 
-
-.. _cloud-permissions-aws-user-creation:
 
 Minimal permissions
 -----------------------
@@ -291,8 +314,8 @@ Follow the instructions above for :ref:`dedicated-aws-user`. When setting permis
 
 .. _iam-role-creation:
 
-Create an IAM role with minimal permissions
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Create the internal IAM role for SkyPilot
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. note::
     In most cases, the IAM role will be automatically created. You only need to manually create the IAM role if you have exlucded the optional role creation permissions from your minimal skypilot policy.
