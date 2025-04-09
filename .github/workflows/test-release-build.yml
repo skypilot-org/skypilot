@@ -14,7 +14,7 @@ jobs:
     outputs:
       test_branch: ${{ steps.commit_changes.outputs.test_branch }}
       smoke_test_build_number: ${{ steps.mock_smoke_tests.outputs.smoke_test_build_number }}
-      quicktest_core_build_number: ${{ steps.trigger_quicktest_core.outputs.build_number }}
+      quicktest_core_build_number: ${{ steps.extract_build_number.outputs.build_number }}
       release_test_build_number: ${{ steps.mock_release_tests.outputs.release_test_build_number }}
       release_version: ${{ steps.determine_version.outputs.release_version }}
     steps:
@@ -126,10 +126,24 @@ jobs:
 
       # Extract build number from response JSON
       - name: Extract quicktest core build number
+        id: extract_build_number
         run: |
+          echo "Raw JSON response: ${{ steps.trigger_quicktest_core.outputs.json }}"
+          if [[ -z "${{ steps.trigger_quicktest_core.outputs.json }}" ]]; then
+            echo "ERROR: Empty JSON response from Buildkite trigger"
+            exit 1
+          fi
+
           build_number=$(echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq -r '.number')
+          if [[ -z "$build_number" || "$build_number" == "null" ]]; then
+            echo "ERROR: Failed to extract build number from response"
+            echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq '.'
+            exit 1
+          fi
+
+          echo "Build number extracted: $build_number"
+          echo "build_number=$build_number" >> $GITHUB_OUTPUT
           echo "build_number=$build_number" >> $GITHUB_STEP_SUMMARY
-          echo "quicktest_core_build_number=$build_number" >> $GITHUB_OUTPUT
 
       # Mock Release Tests
       - name: Mock Release Tests
