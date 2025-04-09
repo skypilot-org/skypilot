@@ -109,16 +109,6 @@ jobs:
           git push -f origin ${TEST_BRANCH}
           echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
 
-      # Build should happen after commit to include version changes
-      - name: Build a binary wheel and a source tarball
-        run: python -m build --sdist --wheel --outdir dist/ .
-
-      - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
       # Trigger Buildkite smoke tests
       - name: Trigger Full Smoke Tests
         id: trigger_smoke_tests

@@ -13,6 +13,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_branch: ${{ steps.commit_changes.outputs.test_branch }}
+      smoke_test_build_number: ${{ steps.mock_smoke_tests.outputs.smoke_test_build_number }}
+      quicktest_core_build_number: ${{ steps.trigger_quicktest_core.outputs.build_number }}
+      release_test_build_number: ${{ steps.mock_release_tests.outputs.release_test_build_number }}
       release_version: ${{ steps.determine_version.outputs.release_version }}
     steps:
       - name: Clone repository
@@ -104,35 +107,55 @@ jobs:
           git push -f origin ${TEST_BRANCH}
           echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
 
-      # Build should happen after commit to include version changes
-      - name: Build a binary wheel and a source tarball
-        run: python -m build --sdist --wheel --outdir dist/ .
-
-      - name: Upload distribution artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: python-package-distributions
-          path: dist/
-
-      # Mock Buildkite steps for testing
-      - name: Mock Smoke Tests
+      # Mock Full Smoke Tests
+      - name: Mock Full Smoke Tests
+        id: mock_smoke_tests
         run: |
           echo "Mocking smoke tests for version ${{ steps.determine_version.outputs.release_version }}"
           echo "smoke_test_build_number=12345" >> $GITHUB_OUTPUT
 
-      - name: Mock Quicktest Core
-        run: |
-          echo "Mocking quicktest core for version ${{ steps.determine_version.outputs.release_version }}"
-          echo "quicktest_core_build_number=67890" >> $GITHUB_OUTPUT
+      # Trigger Buildkite quicktest-core (real)
+      - name: Trigger Quicktest Core
+        id: trigger_quicktest_core
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/quicktest-core"
+          branch: "${{ steps.commit_changes.outputs.test_branch }}"
+          commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
+          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          ignore_pipeline_branch_filter: true
+          build_env_vars: '{"ARGS": "--base-branch ${{ steps.find_release_branch.outputs.base_branch }}"}'
 
+      # Extract build number from response JSON
+      - name: Extract quicktest core build number
+        run: |
+          build_number=$(echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq -r '.number')
+          echo "build_number=$build_number" >> $GITHUB_STEP_SUMMARY
+          echo "quicktest_core_build_number=$build_number" >> $GITHUB_OUTPUT
+
+      # Mock Release Tests
       - name: Mock Release Tests
+        id: mock_release_tests
         if: endsWith(steps.determine_version.outputs.release_version, '.0')
         run: |
           echo "Mocking release tests for version ${{ steps.determine_version.outputs.release_version }}"
           echo "release_test_build_number=13579" >> $GITHUB_OUTPUT
 
-  create-pr:
+  wait-for-quicktest-core:
     needs: release-build
+    uses: ./.github/workflows/wait-for-buildkite.yml
+    with:
+      organization: "skypilot-1"
+      pipeline: "quicktest-core"
+      build_number: ${{ needs.release-build.outputs.quicktest_core_build_number }}
+      timeout_minutes: 180
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  create-pr:
+    needs: [release-build, wait-for-quicktest-core]
+    if: needs.wait-for-quicktest-core.outputs.build_status == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -145,9 +168,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
           RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
-          SMOKE_TEST_BUILD: "12345"
-          QUICKTEST_BUILD: "67890"
-          RELEASE_TEST_BUILD: "13579"
+          SMOKE_TEST_BUILD: ${{ needs.release-build.outputs.smoke_test_build_number }}
+          QUICKTEST_BUILD: ${{ needs.release-build.outputs.quicktest_core_build_number }}
+          RELEASE_TEST_BUILD: ${{ needs.release-build.outputs.release_test_build_number }}
         run: |
           RELEASE_BRANCH="releases/${RELEASE_VERSION}"
 
@@ -169,7 +192,7 @@ jobs:
             PR_BODY="Release ${RELEASE_VERSION}
 
           Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - ✅ Success
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - ✅ Success (MOCKED)
           - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - ✅ Success
           - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
 
@@ -179,7 +202,7 @@ jobs:
             PR_BODY="Release ${RELEASE_VERSION}
 
           Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - ✅ Success
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - ✅ Success (MOCKED)
           - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - ✅ Success
 
           *Patch release - Release Tests not triggered.*"
