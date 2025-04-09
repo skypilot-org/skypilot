@@ -4,16 +4,22 @@ import collections
 import copy
 import dataclasses
 import json
+import os
 import threading
 import time
 import traceback
-from typing import Optional
+from typing import List, Optional
 
+import colorama
 import numpy as np
 import openai  # 1.68.0
 from openai.types.chat import ChatCompletionStreamOptionsParam
 import requests
-from rich import print
+from rich import print as rp
+
+import sky
+from sky.utils import rich_utils
+from sky.utils import ux_utils
 
 
 @dataclasses.dataclass
@@ -89,8 +95,8 @@ async def oai_call_chat_completion_async(messages,
             output += delta
     except Exception as e:
         exception = e
-        print(f"Error: {e}\n"
-              f"  Traceback: {traceback.format_exc()}")
+        rp(f"Error: {e}\n"
+           f"  Traceback: {traceback.format_exc()}")
         metric.failed = str(e)
     with lock:
         global_metrics.append(metric)
@@ -145,10 +151,10 @@ async def tree_search(uid, question, num_branches):
 
 async def user_task(uid, questions, num_branches):
     time_to_sleep = uid * 10
-    print(f"User {uid}: sleep for {time_to_sleep} seconds to start")
-    print(f"User {uid}: {len(questions)} questions in total")
+    rp(f"User {uid}: sleep for {time_to_sleep} seconds to start")
+    rp(f"User {uid}: {len(questions)} questions in total")
     await asyncio.sleep(time_to_sleep)
-    print(f"User {uid}: start sending requests")
+    rp(f"User {uid}: start sending requests")
     tic = time.time()
     tasks = []
     for question in questions:
@@ -159,8 +165,8 @@ async def user_task(uid, questions, num_branches):
         result = await task
         results.append(result)
         progress = f"({i+1}/{len(questions)})"
-        print(f"User {uid}: {progress:^8} questions completed. "
-              f"Latency: {time.time() - tic:.3f}")
+        rp(f"User {uid}: {progress:^8} questions completed. "
+           f"Latency: {time.time() - tic:.3f}")
     return results
 
 
@@ -194,9 +200,11 @@ async def main(args):
         for uid, questions in uid2questions.items()
     ])
     latency = time.time() - tic
-    print(f"All E2E Latency: {latency:.3f}")
+    rp(f"All E2E Latency: {latency:.3f}")
 
-    with open(args.result_file, "w") as fout:
+    result_file = f"@temp/result/metric_{args.exp_name}.json"
+
+    with open(result_file, "w") as fout:
         value = {
             "task": "tree_of_thought_gsm8k",
             "latency": round(latency, 3),
@@ -220,30 +228,80 @@ async def main(args):
         total_times += m.e2e_latency
         ttfts.append(m.ttft)
         e2e_latencies.append(m.e2e_latency)
-    print(f"{'TPT':=^50}")
-    print(f"Per request: {total_tpt_tokens / total_times:.3f}")
-    print(f"Per second: {total_tpt_tokens / latency:.3f}")
-    print(f"{'TTFT':=^50}")
-    print(f"Mean: {np.mean(ttfts):.3f}")
-    print(f"P50: {np.percentile(ttfts, 50):.3f}")
-    print(f"P90: {np.percentile(ttfts, 90):.3f}")
-    print(f"P99: {np.percentile(ttfts, 99):.3f}")
-    print(f"{'E2E Latency':=^50}")
-    print(f"Mean: {np.mean(e2e_latencies):.3f}")
-    print(f"P50: {np.percentile(e2e_latencies, 50):.3f}")
-    print(f"P90: {np.percentile(e2e_latencies, 90):.3f}")
-    print(f"P99: {np.percentile(e2e_latencies, 99):.3f}")
+    rp(f"{'TPT':=^50}")
+    rp(f"Per request: {total_tpt_tokens / total_times:.3f}")
+    rp(f"Per second: {total_tpt_tokens / latency:.3f}")
+    rp(f"{'TTFT':=^50}")
+    rp(f"Mean: {np.mean(ttfts):.3f}")
+    rp(f"P50: {np.percentile(ttfts, 50):.3f}")
+    rp(f"P90: {np.percentile(ttfts, 90):.3f}")
+    rp(f"P99: {np.percentile(ttfts, 99):.3f}")
+    rp(f"{'E2E Latency':=^50}")
+    rp(f"Mean: {np.mean(e2e_latencies):.3f}")
+    rp(f"P50: {np.percentile(e2e_latencies, 50):.3f}")
+    rp(f"P90: {np.percentile(e2e_latencies, 90):.3f}")
+    rp(f"P99: {np.percentile(e2e_latencies, 99):.3f}")
+
+
+def prepare_lb_endpoints_and_confirm():
+    with rich_utils.client_status(
+            ux_utils.spinner_message(
+                '[bold cyan]Checking External LB Endpoints[/]')) as spinner:
+        req = sky.serve.status(None)
+        st = sky.client.sdk.get(req)
+        # rp('Service status:')
+        print(sky.serve.format_service_table(st, show_all=False))
+        if len(st) != 1:
+            raise ValueError('More than one service found. '
+                             'Please specify the service name.')
+        endpoints = [r['endpoint'] for r in st[0]['external_lb_info']]
+        print(f'External Load Balancer Endpoints: {colorama.Fore.GREEN}'
+              f'{endpoints}{colorama.Style.RESET_ALL}')
+        spinner.update('Press Enter to confirm the endpoints are correct...')
+        input()
+        return endpoints
+
+
+async def pull_queue_status(exp_name: str, endpoints: List[str],
+                            event: asyncio.Event):
+    tmp_name = f'@temp/result_queue_size_{exp_name}.txt'
+    dest_name = f'@temp/result/queue_size_{exp_name}.txt'
+    print(f'Pulling queue status:      tail -f {tmp_name} | jq')
+    with open(tmp_name, 'w') as f:
+        while not event.is_set():
+            lb2confs = {'time': time.time()}
+            for endpoint in endpoints:
+                resp = requests.get(endpoint + '/conf')
+                conf = resp.json()
+                raw_queue_size = requests.get(
+                    endpoint + '/raw-queue-size').json()['queue_size']
+                conf['raw_queue_size'] = raw_queue_size
+                lb2confs[endpoint] = conf
+            rp(json.dumps(lb2confs), file=f)
+            await asyncio.sleep(1)
+    os.rename(tmp_name, dest_name)
 
 
 if __name__ == "__main__":
     # wget https://raw.githubusercontent.com/openai/grade-school-math/master/grade_school_math/data/test.jsonl
-    # py examples/serve/external-lb/bench.py --data-path @temp/test.jsonl --result-file @temp/result.jsonl --num-branches 2 --num-users 5 --num-questions 1 --backend-url vllmtest.aws.cblmemo.net:8000
+    # py examples/serve/external-lb/bench.py --data-path @temp/test.jsonl --exp-name sky-exp --num-branches 2 --num-users 5 --num-questions 1 --backend-url vllmtest.aws.cblmemo.net:8000
     parser = argparse.ArgumentParser()
-    parser.add_argument("--data-path", type=str, default="test.jsonl")
-    parser.add_argument("--result-file", type=str, default="result.json")
+    parser.add_argument("--data-path", type=str, default="@temp/test.jsonl")
+    parser.add_argument("--exp-name", type=str, default="sky-exp")
     parser.add_argument("--num-questions", type=int, default=200)
     parser.add_argument("--num-branches", type=int, default=2)
     parser.add_argument("--num-users", type=int, default=5)
     parser.add_argument("--backend-url", type=str, default=None)
     args = parser.parse_args()
-    asyncio.run(main(args))
+
+    endpoints = prepare_lb_endpoints_and_confirm()
+
+    async def run_all():
+        event = asyncio.Event()
+        queue_status_task = asyncio.create_task(
+            pull_queue_status(args.exp_name, endpoints, event))
+        await main(args)
+        event.set()
+        await queue_status_task
+
+    asyncio.run(run_all())

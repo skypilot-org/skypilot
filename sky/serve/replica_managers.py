@@ -1233,6 +1233,7 @@ class SkyPilotReplicaManager(ReplicaManager):
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
+        new_task = sky.Task.from_yaml_config(new_config)
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
         if new_config.get('file_mounts', None) != {}:
@@ -1262,6 +1263,22 @@ class SkyPilotReplicaManager(ReplicaManager):
                         f'{old_config} is the same as '
                         f'latest version\'s {new_config}.')
                     info.version = version
+                    logger.info(f'[{time.time()}] '
+                                f'Cancelling job for {info.cluster_name}')
+                    sky.core.cancel(info.cluster_name, all_users=True)
+                    logger.info(f'[{time.time()}] '
+                                f'Cancelling job for {info.cluster_name} done')
+                    sp = info.status_property
+                    sp.service_ready_now = False
+                    sp.first_ready_time = None
+                    info.consecutive_failure_times.clear()
+                    logger.info(f'[{time.time()}] '
+                                f'Launching job for {info.cluster_name}')
+                    execution.exec(new_task,
+                                   info.cluster_name,
+                                   stream_logs=False)
+                    logger.info(f'[{time.time()}] '
+                                f'Launching job for {info.cluster_name} done')
                     serve_state.add_or_update_replica(self._service_name,
                                                       info.replica_id, info)
                 else:
