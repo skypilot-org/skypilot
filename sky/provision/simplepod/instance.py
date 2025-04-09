@@ -22,6 +22,7 @@ def _filter_instances(cluster_name_on_cloud: str,
                       status_filters: Optional[List[str]],
                       head_only: bool = False) -> Dict[str, Any]:
     instances = client.list_instances()
+    instances: Dict[str, List[common.InstanceInfo]] = {}
     possible_names = [f'{cluster_name_on_cloud}-head']
     if not head_only:
         possible_names.append(f'{cluster_name_on_cloud}-worker')
@@ -31,7 +32,7 @@ def _filter_instances(cluster_name_on_cloud: str,
         if (status_filters is not None and
                 instance['status'] not in status_filters):
             continue
-        if instance.get('name') in possible_names:
+        if instance['name'] in possible_names:
             filtered_instances[instance_id] = instance
     return filtered_instances
 
