@@ -3,12 +3,22 @@
 Upgrading SkyPilot API Server
 =============================
 
-This page provides an overview of the steps you should follow to upgrade a remote SkyPilot API server deployed by Helm with the :ref:`sky-api-server-deploy` guide. For API server deployed with :ref:`sky-api-server-cloud-deploy`, refer to :ref:`sky-api-server-vm-upgrade`.
+This page provides an overview of the steps you should follow to upgrade a remote SkyPilot API server:
+
+* :ref:`sky-api-server-helm-upgrade`
+* :ref:`sky-api-server-vm-upgrade`
+
+
+.. _sky-api-server-helm-upgrade:
+
+Upgrade API server deployed with Helm
+-----------------------------------------
+
+Here we introduce the steps for upgrading a remote API server deployed with :ref:`Helm deployement <sky-api-server-deploy>`.
 
 .. note::
 
-    Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a maintenance window. If you have a staging environment, you can upgrade the staging environment first to make sure the upgrade is successful before upgrading the production environment.
-
+    Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: drain the old API server and upgrade.
 Prerequisites
 -------------
 
@@ -38,7 +48,7 @@ Step 2: Cordon the API server
 
 To minimize the impact of the downtime introduced by the upgrade, we recommend condon the API server before upgrading the API server. The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
 
-1. Patch the API server to remove it from the Ingress backend:
+1. Cordon SkyPilot API server to avoid new request:
 
 .. note::
 
@@ -65,7 +75,8 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
     
     After the patch, verify the API server is cordoned again.
 
-3. For requests that have been sent to the API server, check the status of the requests and wait for the critical ones to finish:
+3. Drain the old API server by waiting or canceling current requests:
+
 
 .. code-block:: console
 
@@ -76,7 +87,10 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
     8c5f19ca-513c-4068-b9c9-d4b7728f46fb  <USER>           sky.logs    26 secs ago     RUNNING
     skypilot-status-refresh-daemon        skypilot-system  sky.status  25 mins ago     RUNNING
 
-The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted. For other requests, you can either wait for a request to finish or cancel a request by running:
+
+.. note::
+
+  The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted.
 
 .. code-block:: console
 
@@ -104,7 +118,7 @@ Currently, compatibility between SkyPilot clients and server is only guaranteed 
 .. code-block:: bash
 
     # For nightly release. Keep the CLOUD_LIST in sync with the previous installation.
-    pip install -U "skypilot-nightly[${CLOUD_LIST}]"==${IMAGE_TAG}
+    pip install -U skypilot-nightly==${IMAGE_TAG}
 
 For clients used by developers, it is okay to upgrade to the same version as the API server either before or after the upgrade. Because if there is a compatibility issue, an error will raised to the developer with the upgrade command prompted.
 
