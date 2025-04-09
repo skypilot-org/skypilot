@@ -688,9 +688,11 @@ class GCP(clouds.Cloud):
         cls,
         instance_type: str,
     ) -> Optional[Dict[str, Union[int, float]]]:
-        # GCP handles accelerators separately from regular instance types,
-        # hence return none here.
-        return None
+        # GCP handles accelerators separately from regular instance types.
+        # This method supports automatically inferring the GPU type for
+        # the instance type that come with GPUs pre-attached.
+        return service_catalog.get_accelerators_from_instance_type(
+            instance_type, clouds='gcp')
 
     @classmethod
     def get_vcpus_mem_from_instance_type(
