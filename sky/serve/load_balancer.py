@@ -431,6 +431,11 @@ class SkyServeLoadBalancer:
             if not is_from_lb and self._url is not None:
                 await self._lb_pool.post_execute_hook(self._url, request)
 
+        decision_id = len(proxy_response.headers)
+        extra_header = {
+            f'{k}-{decision_id}': v for k, v in extra_header.items()
+        }
+
         proxy_response.headers.update(extra_header)
         return fastapi.responses.StreamingResponse(
             content=proxy_response.aiter_raw(),
@@ -595,6 +600,7 @@ class SkyServeLoadBalancer:
                                     'to check the replica status.'))
                         entry.response_future.set_exception(exception)
                         entry.request_event.set()
+                        continue
 
                     # Let other LBs steal requests from this LB.
                     # lbs = await self._lbs_with_steal_requests()
@@ -916,42 +922,50 @@ class SkyServeLoadBalancer:
         #         remaining_to_steal = num_steal
         # return fastapi.responses.JSONResponse(
         #     status_code=200, content={'remaining_to_steal': remaining_to_steal})
-        # Option 2 (legacy implementation): Directly steal requests.
-        # for i in range(await self._request_queue.qsize()):
-        #     # Re-getting the queue size since it is possible the queue changed
-        #     # during the loop, e.g. a request from head is popped out.
-        #     idx = await self._request_queue.qsize() - 1 - i
-        #     if idx < 0:
-        #         break
-        #     entry = await self._request_queue.get(idx)
-        #     request, _, _ = entry
-        #     # Check if the request is from the source LB.
-        #     if request.headers.get(_IS_FROM_LB_HEADER, False):
-        #         continue
-        #     await self._request_queue.get_and_remove(idx)
-        #     await self._handle_requests(source_lb_url, entry, is_from_lb=True)
-        #     num_steal -= 1
-        #     if not num_steal:
-        #         break
-        # if num_steal != 0:
-        #     logger.info(f'{num_steal} requests was NOT stolen and remained '
-        #                 f'from {source_lb_url}.')
 
-        # # if num_steal:
-        # #     raise fastapi.HTTPException(
-        # #         status_code=429,
-        # #         detail=f'Not enough requests to steal. '
-        # #         f'Requested {num_steal}, but only {num_steal} requests '
-        # #         f'available.')
-        # return fastapi.responses.JSONResponse(
-        #     status_code=200, content={'remaining_to_steal': num_steal})
+        # Option 2 (legacy implementation): Directly steal requests.
+        # async with self._steal_requests_lock:
+        #     for i in range(await self._request_queue.qsize()):
+        #         # Re-getting the queue size since it is possible the queue changed
+        #         # during the loop, e.g. a request from head is popped out.
+        #         idx = await self._request_queue.qsize() - 1 - i
+        #         if idx < 0:
+        #             break
+        #         entry = await self._request_queue.get(idx)
+        #         request, _, _ = entry
+        #         # Check if the request is from the source LB.
+        #         if request.headers.get(_IS_FROM_LB_HEADER, False):
+        #             continue
+        #         await self._request_queue.get_and_remove(idx)
+        #         await self._handle_requests(source_lb_url, entry, is_from_lb=True)
+        #         num_steal -= 1
+        #         if not num_steal:
+        #             break
+        #     if num_steal != 0:
+        #         logger.info(f'{num_steal} requests was NOT stolen and remained '
+        #                     f'from {source_lb_url}.')
+
+        #     # if num_steal:
+        #     #     raise fastapi.HTTPException(
+        #     #         status_code=429,
+        #     #         detail=f'Not enough requests to steal. '
+        #     #         f'Requested {num_steal}, but only {num_steal} requests '
+        #     #         f'available.')
+        #     return fastapi.responses.JSONResponse(
+        #         status_code=200, content={'remaining_to_steal': num_steal})
+
         # Option 3. Steal with lock and sorted based on prefix match rate.
         start_time = time.perf_counter()
         async with self._steal_requests_lock:
             steal_entries: List[StealEntry] = []
+            # First part: select LB replica and calculate match rates
+            select_lb_start_time = time.perf_counter()
             for i in range(await self._request_queue.qsize()):
                 entry = await self._request_queue.get(i)
                 if isinstance(entry, StealBarrierEntry):
+                    continue
+                # Check if the request is from the source LB.
+                if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
                     continue
                 result = await self._lb_pool.select_replica(
                     entry.request, return_matched_rate=True)
@@ -964,10 +978,20 @@ class SkyServeLoadBalancer:
                 steal_entry = StealEntry(entry.id, matched_rate, matched_length,
                                          lb == source_lb_url)
                 steal_entries.append(steal_entry)
+
+            logger.info(
+                f'num steal entries: {len(steal_entries)}, '
+                f'num_steal: {num_steal}, '
+                f'actual_size: {await self._request_queue.actual_size()}')
+
+            select_lb_end_time = time.perf_counter()
+
+            # Second part: sort entries and process stealing
+            sort_start_time = time.perf_counter()
             steal_entries.sort()
-            ids_to_steal = [
+            ids_to_steal = {
                 steal_entry.id for steal_entry in steal_entries[:num_steal]
-            ]
+            }
             remaining_to_steal = num_steal - len(ids_to_steal)
             idx = 0
             while idx < await self._request_queue.qsize():
@@ -981,13 +1005,19 @@ class SkyServeLoadBalancer:
                                                 is_from_lb=True)
                 else:
                     idx += 1
+            sort_end_time = time.perf_counter()
+
             end_time = time.perf_counter()
             if remaining_to_steal > 0:
                 logger.info(
                     f'{remaining_to_steal} requests was NOT stolen and remained '
                     f'from {source_lb_url}.')
-            logger.info(f'Time to sort and steal requests: '
-                        f'{end_time - start_time:.4f}s. {steal_entries}')
+            t_select_lb = select_lb_end_time - select_lb_start_time
+            t_sort = sort_end_time - sort_start_time
+            logger.info(f'Time to select LB: {t_select_lb:.4f}s, '
+                        f'Time to sort (len={len(steal_entries)}) '
+                        f'and process: {t_sort:.4f}s, '
+                        f'Total time: {end_time - start_time:.4f}s.')
             return fastapi.responses.JSONResponse(
                 status_code=200,
                 content={'remaining_to_steal': remaining_to_steal})
@@ -1139,7 +1169,7 @@ class SkyServeLoadBalancer:
 
         logger.info('SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}')
-        logger.info('Started lb in version 2.')
+        logger.info('Started lb in version lock-queue-fixed.')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',

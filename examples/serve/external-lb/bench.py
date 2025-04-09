@@ -8,8 +8,9 @@ import os
 import threading
 import time
 import traceback
-from typing import List, Optional
+from typing import Dict, List, Optional
 
+import aiohttp
 import colorama
 import numpy as np
 import openai  # 1.68.0
@@ -20,6 +21,8 @@ from rich import print as rp
 import sky
 from sky.utils import rich_utils
 from sky.utils import ux_utils
+
+SGL_ROUTER_IDENTIFIER = 'sglang-router'
 
 
 @dataclasses.dataclass
@@ -32,6 +35,7 @@ class Metric:
     failed: Optional[str] = None
     input_tokens: Optional[int] = None
     output_tokens: int = 0
+    headers: Optional[Dict[str, str]] = None
 
 
 def _get_one_round(role, content):
@@ -63,7 +67,9 @@ async def oai_call_chat_completion_async(messages,
             stream=True,
             stream_options=ChatCompletionStreamOptionsParam(include_usage=True),
             extra_headers={"x-hash-key": str(uid)},
+            timeout=100,
         )
+        metric.headers = dict(res.response.headers)
         st = time.perf_counter()
         metric.start = st
         fetch_metric_at_end = False
@@ -202,23 +208,6 @@ async def main(args):
     latency = time.time() - tic
     rp(f"All E2E Latency: {latency:.3f}")
 
-    result_file = f"@temp/result/metric_{args.exp_name}.json"
-
-    with open(result_file, "w") as fout:
-        value = {
-            "task": "tree_of_thought_gsm8k",
-            "latency": round(latency, 3),
-            "metrics": [dataclasses.asdict(m) for m in global_metrics],
-            "num_requests": args.num_questions,
-            "other": {
-                "num_questions": args.num_questions,
-                "num_branches": args.num_branches,
-                # "parallel": args.parallel,
-                "backend_url": args.backend_url,
-            },
-        }
-        fout.write(json.dumps(value) + "\n")
-
     total_tpt_tokens = 0
     total_times = 0
     ttfts = []
@@ -242,19 +231,49 @@ async def main(args):
     rp(f"P90: {np.percentile(e2e_latencies, 90):.3f}")
     rp(f"P99: {np.percentile(e2e_latencies, 99):.3f}")
 
+    input('Press Enter to save results...')
 
-def prepare_lb_endpoints_and_confirm():
+    result_file = f"@temp/result/metric_{args.exp_name}.json"
+
+    with open(result_file, "w") as fout:
+        value = {
+            "task": "tree_of_thought_gsm8k",
+            "latency": round(latency, 3),
+            "metrics": [dataclasses.asdict(m) for m in global_metrics],
+            "num_requests": args.num_questions,
+            "other": {
+                "num_questions": args.num_questions,
+                "num_branches": args.num_branches,
+                # "parallel": args.parallel,
+                "backend_url": args.backend_url,
+            },
+        }
+        fout.write(json.dumps(value) + "\n")
+
+
+def prepare_lb_endpoints_and_confirm(backend_url: str):
     with rich_utils.client_status(
             ux_utils.spinner_message(
                 '[bold cyan]Checking External LB Endpoints[/]')) as spinner:
-        req = sky.serve.status(None)
-        st = sky.client.sdk.get(req)
-        # rp('Service status:')
-        print(sky.serve.format_service_table(st, show_all=False))
-        if len(st) != 1:
-            raise ValueError('More than one service found. '
-                             'Please specify the service name.')
-        endpoints = [r['endpoint'] for r in st[0]['external_lb_info']]
+        if 'aws.cblmemo.net' in backend_url:
+            service_name = backend_url.split('.')[0]
+            req = sky.serve.status(service_name)
+            st = sky.client.sdk.get(req)
+            # rp('Service status:')
+            print(sky.serve.format_service_table(st, show_all=False))
+            if len(st) != 1:
+                raise ValueError('More than one service found. '
+                                 'Please specify the service name.')
+            endpoints = [r['endpoint'] for r in st[0]['external_lb_info']]
+        elif '9002' in backend_url:  # Single Global Sky LB
+            url = backend_url
+            if not url.startswith("http://"):
+                url = "http://" + url
+            endpoints = [url]
+        elif '9001' in backend_url:  # SGLang Router
+            endpoints = [SGL_ROUTER_IDENTIFIER]
+        else:
+            raise ValueError(f'Unknown backend URL: {backend_url}')
         print(f'External Load Balancer Endpoints: {colorama.Fore.GREEN}'
               f'{endpoints}{colorama.Style.RESET_ALL}')
         spinner.update('Press Enter to confirm the endpoints are correct...')
@@ -267,19 +286,26 @@ async def pull_queue_status(exp_name: str, endpoints: List[str],
     tmp_name = f'@temp/result_queue_size_{exp_name}.txt'
     dest_name = f'@temp/result/queue_size_{exp_name}.txt'
     print(f'Pulling queue status:      tail -f {tmp_name} | jq')
-    with open(tmp_name, 'w') as f:
+    if SGL_ROUTER_IDENTIFIER in endpoints:
         while not event.is_set():
-            lb2confs = {'time': time.time()}
-            for endpoint in endpoints:
-                resp = requests.get(endpoint + '/conf')
-                conf = resp.json()
-                raw_queue_size = requests.get(
-                    endpoint + '/raw-queue-size').json()['queue_size']
-                conf['raw_queue_size'] = raw_queue_size
-                lb2confs[endpoint] = conf
-            rp(json.dumps(lb2confs), file=f)
             await asyncio.sleep(1)
-    os.rename(tmp_name, dest_name)
+        os.system(f'sky logs router --no-follow > {dest_name} 2>&1')
+    else:
+        async with aiohttp.ClientSession() as session:
+            with open(tmp_name, 'w') as f:
+                while not event.is_set():
+                    lb2confs = {'time': time.time()}
+                    for endpoint in endpoints:
+                        async with session.get(endpoint + '/conf') as resp:
+                            conf = await resp.json()
+                        async with session.get(endpoint +
+                                               '/raw-queue-size') as resp:
+                            raw_queue_size = (await resp.json())['queue_size']
+                        conf['raw_queue_size'] = raw_queue_size
+                        lb2confs[endpoint] = conf
+                    print(json.dumps(lb2confs), file=f, flush=True)
+                    await asyncio.sleep(1)
+        os.rename(tmp_name, dest_name)
 
 
 if __name__ == "__main__":
@@ -294,7 +320,7 @@ if __name__ == "__main__":
     parser.add_argument("--backend-url", type=str, default=None)
     args = parser.parse_args()
 
-    endpoints = prepare_lb_endpoints_and_confirm()
+    endpoints = prepare_lb_endpoints_and_confirm(args.backend_url)
 
     async def run_all():
         event = asyncio.Event()

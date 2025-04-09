@@ -6,7 +6,7 @@ from rich import print as rp
 
 import sky
 
-# st = sky.serve.status('skysgl2')
+# st = sky.serve.status('skyupd4')
 # st = sky.client.sdk.get(st)[0]
 # rp('Replicas:')
 # for r in st['replica_info']:

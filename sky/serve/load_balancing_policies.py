@@ -429,8 +429,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         #     return min(replica2load, key=replica2load.get)
         matched_text, replica = await self.tree.prefix_match(text, replica2load)
         matched_rate = len(matched_text) / len(text)
-        logger.info(f'Matched rate: {matched_rate} for request '
-                    f'{_request_repr(request)}.')
+        logger.info(f'Matched rate: {matched_rate} for request {text[:100]}.')
         if cache_threshold is None:
             cache_threshold = self.config.cache_threshold
         if matched_rate > cache_threshold:
@@ -439,8 +438,10 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             if return_matched_rate:
                 return replica, matched_rate, len(matched_text)
             return replica
-        logger.info('Falling back to least char count load. '
-                    f'{self.tree.replica_char_count}')
+        # logger.info('Falling back to least char count load. '
+        #             f'{self.tree.replica_char_count}')
+        logger.info('Falling back to least replica load. '
+                    f'{replica2load}')
         replica2load.pop(disabled_url, None)
         if not replica2load:
             return None

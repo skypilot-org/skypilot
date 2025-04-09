@@ -656,6 +656,7 @@ class SkyPilotReplicaManager(ReplicaManager):
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
         self._down_process_pool: serve_utils.ThreadSafeDict[
             int, multiprocessing.Process] = serve_utils.ThreadSafeDict()
+        self._replica_prober_lock = threading.Lock()
 
         threading.Thread(target=self._process_pool_refresher).start()
         threading.Thread(target=self._job_status_fetcher).start()
@@ -1122,6 +1123,8 @@ class SkyPilotReplicaManager(ReplicaManager):
                         continue
 
                     if info.first_not_ready_time is None:
+                        logger.info(f'[{time.time()}] set first_not_ready_time '
+                                    f'for {info.replica_id} to {probe_time}')
                         info.first_not_ready_time = probe_time
                     if info.status_property.first_ready_time is not None:
                         info.consecutive_failure_times.append(probe_time)
@@ -1173,14 +1176,15 @@ class SkyPilotReplicaManager(ReplicaManager):
         while True:
             logger.debug('Running replica prober.')
             try:
-                self._probe_all_replicas()
-                replica_infos = serve_state.get_replica_infos(
-                    self._service_name)
-                # TODO(zhwu): when there are multiple load balancers, we need
-                # to make sure the active_versions are the union of all
-                # versions of all load balancers.
-                serve_utils.set_service_status_and_active_versions_from_replica(
-                    self._service_name, replica_infos, self._update_mode)
+                with self._replica_prober_lock:
+                    self._probe_all_replicas()
+                    replica_infos = serve_state.get_replica_infos(
+                        self._service_name)
+                    # TODO(zhwu): when there are multiple load balancers, we need
+                    # to make sure the active_versions are the union of all
+                    # versions of all load balancers.
+                    serve_utils.set_service_status_and_active_versions_from_replica(
+                        self._service_name, replica_infos, self._update_mode)
 
             except Exception as e:  # pylint: disable=broad-except
                 # No matter what error happens, we should keep the
@@ -1233,16 +1237,23 @@ class SkyPilotReplicaManager(ReplicaManager):
         # for updating an existing service with only config changes to the
         # service specs, e.g. scale down the service.
         new_config = common_utils.read_yaml(os.path.expanduser(task_yaml_path))
-        new_task = sky.Task.from_yaml_config(new_config)
+        new_task = sky.Task.from_yaml(task_yaml_path)
         # Always create new replicas and scale down old ones when file_mounts
         # are not empty.
         if new_config.get('file_mounts', None) != {}:
             return
         for key in ['service']:
             new_config.pop(key)
-        replica_infos = serve_state.get_replica_infos(self._service_name)
-        for info in replica_infos:
-            if info.version < version and not info.is_terminal:
+        # We disable the prober here to avoid it probes the replica during
+        # cancellation of the jobs and mark it as failed.
+        with self._replica_prober_lock:
+            replica_infos = serve_state.get_replica_infos(self._service_name)
+            for info in replica_infos:
+                logger.info(f'Replica {info.replica_id}: '
+                            f'bump version {info.version} -> {version}, '
+                            f'is_terminal={info.is_terminal}')
+                if not (info.version < version and not info.is_terminal):
+                    continue
                 # Assume user does not change the yaml file on the controller.
                 old_task_yaml_path = serve_utils.generate_task_yaml_file_name(
                     self._service_name, info.version)
@@ -1271,6 +1282,7 @@ class SkyPilotReplicaManager(ReplicaManager):
                     sp = info.status_property
                     sp.service_ready_now = False
                     sp.first_ready_time = None
+                    info.first_not_ready_time = None
                     info.consecutive_failure_times.clear()
                     logger.info(f'[{time.time()}] '
                                 f'Launching job for {info.cluster_name}')
