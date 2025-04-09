@@ -115,8 +115,7 @@ _INSTANCE_TYPE_TO_ACC = {
     for acc_count, instance_types in acc_count_to_instance_type.items()
     for instance_type in instance_types
 }
-_ACC_INSTANCE_TYPES = list(_INSTANCE_TYPE_TO_ACC.keys())
-GCP_ACC_INSTANCE_TYPES = _ACC_INSTANCE_TYPES
+GCP_ACC_INSTANCE_TYPES = list(_INSTANCE_TYPE_TO_ACC.keys())
 
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
@@ -294,7 +293,7 @@ def get_accelerators_from_instance_type(
     Returns:
         A dictionary mapping from the accelerator name to the accelerator count.
     """
-    if instance_type in _ACC_INSTANCE_TYPES:
+    if instance_type in GCP_ACC_INSTANCE_TYPES:
         return _INSTANCE_TYPE_TO_ACC[instance_type]
     else:
         # General CPU instance types don't come with pre-attached accelerators.
@@ -559,7 +558,7 @@ def check_accelerator_attachable_to_host(instance_type: str,
             attached to the host.
     """
     if accelerators is None:
-        if instance_type in _ACC_INSTANCE_TYPES:
+        if instance_type in GCP_ACC_INSTANCE_TYPES:
             # Infer the GPU type from the instance type
             accelerators = _INSTANCE_TYPE_TO_ACC[instance_type]
         else:
