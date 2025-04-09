@@ -24,6 +24,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: check-date
     if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    outputs:
+      build_number: ${{ steps.trigger_buildkite.outputs.build_number }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
@@ -52,12 +54,61 @@ jobs:
           --wheel
           --outdir dist/
           .
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
+      # Trigger Buildkite smoke tests
+      - name: Trigger Buildkite Smoke Tests
+        id: trigger_buildkite
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/smoke-tests"
+          branch: "master"
+          commit: "${{ github.sha }}"
+          message: "nightly-build-pypi"
+          ignore_pipeline_branch_filter: true
+          build_env_vars: '{"ARGS": "--aws"}'
+
+      # Extract build number from response JSON
+      - name: Extract build number
+        id: extract_build_number
+        run: |
+          build_number=$(echo '${{ steps.trigger_buildkite.outputs.json }}' | jq -r '.number')
+          echo "build_number=$build_number" >> $GITHUB_OUTPUT
+
+  wait-for-buildkite:
+    needs: nightly-build-pypi
+    uses: ./.github/workflows/wait-for-buildkite.yml
+    with:
+      organization: "skypilot-1"
+      pipeline: "smoke-tests"
+      build_number: ${{ needs.nightly-build-pypi.outputs.build_number }}
+      timeout_minutes: 120
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  publish-to-pypi:
+    needs: wait-for-buildkite
+    if: needs.wait-for-buildkite.outputs.build_status == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
       - name: Publish distribution to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:
           password: ${{ secrets.TEST_PYPI_API_TOKEN }}
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
+
       - name: Publish distribution to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
         with:

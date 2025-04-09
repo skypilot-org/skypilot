@@ -35,4 +35,7 @@ pytest-env>=0.6
 memory_profiler==0.61.0
 
 # For testing SkyServe
-aiohttp==3.9.1
+aiohttp==3.9.3
+
+# For mocking AWS
+moto==5.1.2

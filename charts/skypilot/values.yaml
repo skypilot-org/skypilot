@@ -33,18 +33,21 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Skip resource check for the API server, not recommended for production deployment
+  skipResourceCheck: false
   # Set resource requests and limits for the API server
+  resources:
+    # Request a moderate amount of resources for an remote API server by default, which meets the
+    # basic requirements for team usage at medium scale.
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      # Additional resource types like ephemeral-storage can be specified here
   # TODO: Setting limits causes issues with the API server. For now we advise
   # not to set limits.
-  resources: null
-  # resources:
-  #   requests:
-  #     cpu: "1"
-  #     memory: "2Gi"
-  #   limits:
-  #     cpu: "2"
-  #     memory: "4Gi"
-  #     # Additional resource types like ephemeral-storage can be specified here
+  # limits:
+  #  cpu: "4"
+  #  memory: "8Gi"
   
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
@@ -150,7 +153,7 @@ rbac:
       resources: [ "roles", "rolebindings" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ] 
     # Required for managing SkyPilot system DaemonSets
-    - apiGroups: [ "" ]
+    - apiGroups: [ "apps" ]
       resources: [ "daemonsets" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
     # Required for managing configmaps for smarter-device-manager
@@ -162,6 +165,10 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "serviceaccounts" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for getting reason when Pod scheduling fails.
+    - apiGroups: [ "" ]
+      resources: [ "events" ]
+      verbs: [ "get", "list", "watch" ]
   # Cluster-scoped rules for API server.
   clusterRules:
     # Required for managing skypilot-system namespace, which hosts skypilot system components like smarter-device-manager.
@@ -172,6 +179,10 @@ rbac:
     # Required for getting node resources. 
     - apiGroups: [ "" ]
       resources: [ "nodes" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for querying GPUs.
+    - apiGroups: [ "" ]
+      resources: [ "pods" ]
       verbs: [ "get", "list", "watch" ]
     # Required for autodetecting runtime classes
     - apiGroups: [ "node.k8s.io" ]

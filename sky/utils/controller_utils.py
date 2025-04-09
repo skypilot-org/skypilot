@@ -916,7 +916,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 name=bucket_name,
                 source=local_fm_path,
                 persistent=False,
-                mode=storage_lib.StorageMode.MOUNT,
+                mode=storage_lib.DEFAULT_STORAGE_MODE,
                 stores=stores,
                 _is_sky_managed=not bucket_wth_prefix,
                 _bucket_sub_path=file_mounts_tmp_subpath)
@@ -1025,7 +1025,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # it was handled in step 6.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
-        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+        if (storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES and
                 not storage_obj.source):
             # Construct source URL with first store type and storage name
             # E.g., s3://my-storage-name
@@ -1043,7 +1043,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
-                'mode': storage_lib.StorageMode.MOUNT.value,
+                'mode': storage_obj.mode.value,
                 # We enable force delete to allow the controller to delete
                 # the object store in case persistent is set to False.
                 '_force_delete': True
