@@ -139,8 +139,6 @@ class SimplePodClient:
         # 2. A100:1
         # 3. A100 1
         parts = instance_type.split()
-        print('Nazwa instancji:', name), print('Typ instancji:', instance_type, template_id, env_variables)
-        sys.exit("DUPA")
 
         if len(parts) == 2 and parts[0].startswith('gpu_'):
             # Format: gpu_1x_rtx a2000
@@ -168,15 +166,17 @@ class SimplePodClient:
 
         # Use first matching instance
         market_instance = matching[0]
-
+        print(f'Found available instance: {market_instance}')
         payload = {
             'gpuCount': gpu_count,
             'instanceMarket': f"/instances/market/{market_instance['id']}",
-            'name': name,
+            'name': 'testHead',
         }
 
         if template_id:
             payload['instanceTemplate'] = f'/instances/templates/{template_id}'
+        else:
+            payload['instanceTemplate'] = f'/instances/templates/29'
 
         if env_variables:
             payload['envVariables'] = env_variables
@@ -240,7 +240,7 @@ class SimplePodClient:
         if auto_renew_max_price is not None:
             payload['priceAutoRenewMax'] = auto_renew_max_price
         if name is not None:
-            payload['name'] = name
+            payload['name'] = 'test-Head'
         if notes is not None:
             payload['notes'] = notes
         if template_id is not None:

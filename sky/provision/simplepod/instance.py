@@ -1,51 +1,45 @@
 """SimplePod instance provisioning implementation."""
-import copy
+
 import time
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from venv import logger
 
-from sky import exceptions
-from sky.provision import common, wait_instances
-from sky.provision.aws.instance import _filter_instances
-from sky.provision.nebius.instance import _wait_until_no_pending
+from sky import exceptions, sky_logging
+from sky.provision import common
 from sky.provision.simplepod import utils
-from sky.utils import command_runner
 from sky.utils import common_utils
-from sky.utils import subprocess_utils
 from sky.utils import resources_utils
-from sky.utils import status_lib  # Changed from sky import status_lib
+from sky.utils import status_lib
+from sky.utils import ux_utils
 
 _TIMEOUT_SECONDS = 600
 
 
 client = utils.SimplePodClient()
 
-def wait_instance(self,
-                      cluster_name: str,
-                      instances_to_wait: List[str],
-                      num_nodes: int,
-                      task_id: str,
-                      timeout: int = _TIMEOUT_SECONDS) -> None:
-        """Wait for instances to be ready."""
-        start = time.time()
-        while time.time() - start < timeout:
-            try:
-                ready = 0
-                for instance_id in instances_to_wait:
-                    instance = client.get_instance(instance_id)
-                    # Update to match API status values
-                    if instance['status'] in ['running', 'active']:
-                        ready += 1
-                if ready == num_nodes:
-                    return
-                time.sleep(5)
-            except Exception as e:
-                if hasattr(e, 'detail'):
-                    raise exceptions.ResourcesUnavailableError(e.detail) from e
-                raise exceptions.ResourcesUnavailableError(
-                    'Failed to wait for instances to be ready.') from e
-        raise exceptions.ResourcesUnavailableError(
-            f'Timeout while waiting for instances after {timeout} seconds.')
+
+def _filter_instances(cluster_name_on_cloud: str,
+                      status_filters: Optional[List[str]],
+                      head_only: bool = False) -> Dict[str, Any]:
+    instances = client.list_instances()
+    possible_names = [f'{cluster_name_on_cloud}-head']
+    if not head_only:
+        possible_names.append(f'{cluster_name_on_cloud}-worker')
+
+    filtered_instances = {}
+    for instance_id, instance in instances.items():
+        if (status_filters is not None and
+                instance['status'] not in status_filters):
+            continue
+        if instance.get('name') in possible_names:
+            filtered_instances[instance_id] = instance
+    return filtered_instances
+
+
+def wait_instances(region: str, cluster_name_on_cloud: str,
+                   state: Optional[status_lib.ClusterStatus]) -> None:
+    del region, cluster_name_on_cloud, state
+
 
 def run_instances(region: str, cluster_name_on_cloud: str,
                   config: common.ProvisionConfig) -> common.ProvisionRecord:
@@ -192,7 +186,6 @@ def query_instances(
 
     status_map = {
         'running': status_lib.ClusterStatus.UP,
-        'stopped': status_lib.ClusterStatus.STOPPED,
         'terminated': None,
     }
 
@@ -213,7 +206,7 @@ def open_ports(
     provider_config: Optional[Dict[str, Any]] = None,
 ) -> None:
     """See sky/provision/__init__.py"""
-    logger.debug(f'Skip opening ports {ports} for Nebius instances, as all '
+    logger.debug(f'Skip opening ports {ports} for SimplePod instances, as all '
                  'ports are open by default.')
     del cluster_name_on_cloud, provider_config, ports
 
@@ -229,9 +222,8 @@ def get_cluster_info(
         region: str,
         cluster_name_on_cloud: str,
         provider_config: Optional[Dict[str, Any]] = None) -> common.ClusterInfo:
-    _wait_until_no_pending(region, cluster_name_on_cloud)
-    running_instances = _filter_instances(region, cluster_name_on_cloud,
-                                          ['RUNNING'])
+    del region  # unused
+    running_instances = _filter_instances(cluster_name_on_cloud, ['RUNNING'])
     instances: Dict[str, List[common.InstanceInfo]] = {}
     head_instance_id = None
     for instance_id, instance_info in running_instances.items():
@@ -239,16 +231,16 @@ def get_cluster_info(
             common.InstanceInfo(
                 instance_id=instance_id,
                 internal_ip=instance_info['internal_ip'],
-                external_ip=instance_info['external_ip'],
+                ssh_port=instance_info['ssh_port'],
                 tags={},
             )
         ]
         if instance_info['name'].endswith('-head'):
             head_instance_id = instance_id
-    assert head_instance_id is not None
+
     return common.ClusterInfo(
         instances=instances,
         head_instance_id=head_instance_id,
-        provider_name='nebius',
+        provider_name='simplepod',
         provider_config=provider_config,
     )
