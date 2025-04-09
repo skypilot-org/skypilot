@@ -54,6 +54,11 @@ jobs:
           --wheel
           --outdir dist/
           .
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
 
       # Trigger Buildkite smoke tests
       - name: Trigger Buildkite Smoke Tests
@@ -90,11 +95,20 @@ jobs:
     needs: wait-for-buildkite
     runs-on: ubuntu-latest
     steps:
+      - name: Download distribution artifacts
+        if: needs.wait-for-buildkite.outputs.build_status == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
+
       # Test PyPI publishing based on Buildkite result
       - name: Test PyPI Publish (Mock)
         if: needs.wait-for-buildkite.outputs.build_status == 'success'
         run: |
-          echo success
+          echo "Would publish artifacts from dist/ to PyPI"
+          ls -la dist/ || echo "No artifacts found"
+          echo "Test publishing successful"
           exit 0
 
       - name: Test PyPI Publish Failure (Mock)

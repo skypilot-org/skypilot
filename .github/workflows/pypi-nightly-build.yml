@@ -54,6 +54,11 @@ jobs:
           --wheel
           --outdir dist/
           .
+      - name: Upload distribution artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-package-distributions
+          path: dist/
 
       # Trigger Buildkite smoke tests
       - name: Trigger Buildkite Smoke Tests
@@ -91,22 +96,11 @@ jobs:
     if: needs.wait-for-buildkite.outputs.build_status == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Clone repository
-        uses: actions/checkout@v3
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v4
+      - name: Download distribution artifacts
+        uses: actions/download-artifact@v4
         with:
-          python-version: '3.10'
-      - name: Set release version
-        run: |
-          RELEASE_VERSION=$(date +%Y%m%d)
-          sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
-          sed -i "s/__version__ = '.*'/__version__ = '1.0.0.dev${RELEASE_VERSION}'/g" sky/__init__.py
-          sed -i "s/name='skypilot',/name='skypilot-nightly',/g" sky/setup_files/setup.py
-      - name: Build a binary wheel and a source tarball
-        run: |
-          python -m pip install build --user
-          python -m build --sdist --wheel --outdir dist/ .
+          name: python-package-distributions
+          path: dist/
 
       - name: Publish distribution to Test PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -120,4 +114,3 @@ jobs:
         with:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
-
