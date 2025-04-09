@@ -8,7 +8,6 @@ This page provides an overview of the steps you should follow to upgrade a remot
 * :ref:`sky-api-server-helm-upgrade`
 * :ref:`sky-api-server-vm-upgrade`
 
-
 .. _sky-api-server-helm-upgrade:
 
 Upgrade API server deployed with Helm
@@ -19,15 +18,11 @@ Here we introduce the steps for upgrading a remote API server deployed with :ref
 .. note::
 
     Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: drain the old API server and upgrade.
-Prerequisites
--------------
-
-* Complete :ref:`sky-api-server-deploy` to deploy the API server.
 
 Step 1: Prepare an upgrade
 --------------------------
 
-1. Get the image you want to upgrade to from SkyPilot dockerhub repository: `nightly release <https://hub.docker.com/r/berkeleyskypilot/skypilot-nightly/tags>`_. A specific tag other than ``latest`` is required to make the upgrade process predictable.
+1. Find the version to use in SkyPilot `nightly channel <https://pypi.org/project/skypilot-nightly/#history>`_.
 2. Update SkyPilot helm repository to the latest version:
 
 .. code-block:: bash
@@ -38,25 +33,24 @@ Step 1: Prepare an upgrade
 
 .. code-block:: bash
 
-    NAMESPACE=<installed-namespace>
-    RELEASE_NAME=<installed-release-name>
-    # e.g. IMAGE=berkeleyskypilot/skypilot-nightly:1.0.0-dev.20250406
-    IMAGE=<image-from-dockerhub>
+    NAMESPACE=skypilot # TODO: change to your installed namespace
+    RELEASE_NAME=skypilot # TODO: change to your installed release name
+    VERSION=1.0.0-dev20250408 # TODO: change to the version you want to upgrade to
+    IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
 Step 2: Cordon the API server
-------------------------------------------
+-----------------------------
 
 To minimize the impact of the downtime introduced by the upgrade, we recommend condon the API server before upgrading the API server. The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
 
 1. Cordon SkyPilot API server to avoid new request:
 
-.. note::
-
-    All new requests will be rejected by the Ingress after this step. Make sure there is no critical service depending on the API server before proceeding.
-
 .. code-block:: bash
 
     kubectl get pod -l app=${RELEASE_NAME}-api -oname | xargs kubectl patch --type merge -p '{"metadata": {"labels": {"skypilot.co/ready": null}}}'
+    
+.. note::
+    All new requests will be rejected by the Ingress after this step. Make sure there is no critical service depending on the API server before proceeding.
 
 2. Verify the API server is cordoned, you should see the following error:
 
@@ -77,50 +71,57 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
 
 3. Drain the old API server by waiting or canceling current requests:
 
+.. tab-set::
 
-.. code-block:: console
+    .. tab-item:: Inspecting requests
 
-    $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl exec {} -c skypilot-api -- sky api status
-    sky api status
-    ID                                    User             Name        Created         Status
-    942f6ab3-f5b6-4a50-acd6-0e8ad64a3ec2  <USER>           sky.launch  a few secs ago  PENDING
-    8c5f19ca-513c-4068-b9c9-d4b7728f46fb  <USER>           sky.logs    26 secs ago     RUNNING
-    skypilot-status-refresh-daemon        skypilot-system  sky.status  25 mins ago     RUNNING
+        You can inspect the status of requests by running:
 
+        .. code-block:: console
 
-.. note::
+            $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl exec {} -c skypilot-api -- sky api status
+            sky api status
+            ID                                    User             Name        Created         Status
+            942f6ab3-f5b6-4a50-acd6-0e8ad64a3ec2  <USER>           sky.launch  a few secs ago  PENDING
+            8c5f19ca-513c-4068-b9c9-d4b7728f46fb  <USER>           sky.logs    26 secs ago     RUNNING
+            skypilot-status-refresh-daemon        skypilot-system  sky.status  25 mins ago     RUNNING
 
-  The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted.
+        .. note::
 
-.. code-block:: console
+        The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted.
+    
+    .. tab-item:: Canceling requests
 
-    $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl exec {} -c skypilot-api -- sky api cancel ${ID}
+        You can cancel less critical requests by running:
 
-If you do not have `exec` access to the API server Pod, you can also use `port-forward` to access the api status:
+        .. code-block:: console
 
-.. code-block:: console
+            $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl exec {} -c skypilot-api -- sky api cancel ${ID}
 
-    $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl port-forward {} 46580:46580 > /tmp/port-forward.log 2>&1 &
-    $ PORT_FORWARD_PID=$!
-    $ sky api login -e http://127.0.0.1:46580
-    # Polling the status
-    $ sky api status
-    # Cancel less critical requests if needed
-    $ sky api cancel ${ID}
-    # Stop the port-forward after you are satisfied with the status
-    $ kill $PORT_FORWARD_PID
+.. dropdown:: Using port-forward to access the API server
+
+    If you do not have `exec` access to the API server Pod, you can also use `port-forward` to access the api status:
+
+    .. code-block:: console
+
+        $ kubectl get po -l app=${RELEASE_NAME}-api -oname | xargs -I {} kubectl port-forward {} 46580:46580 > /tmp/port-forward.log 2>&1 &
+        $ PORT_FORWARD_PID=$!
+        $ sky api login -e http://127.0.0.1:46580
+        # Polling the status
+        $ sky api status
+        # Cancel less critical requests if needed
+        $ sky api cancel ${ID}
+        # Stop the port-forward after you are satisfied with the status
+        $ kill $PORT_FORWARD_PID
 
 Step 3: Upgrade SkyPilot clients
 --------------------------------
 
-Currently, compatibility between SkyPilot clients and server is only guaranteed when both sides are running the same version. We recommend upgrading the clients in autonomous pipelines to the same version as the API server before upgrading the API server to avoid breaking the pipeline after the upgrade. The image tag of API server is consistent with the pip package version, so you can upgrade the clients to the same version as the API server by running:
+Currently, compatibility between SkyPilot clients and server is only guaranteed when both sides are running on **the same version**. We recommend upgrading all the clients to the same version during the maintainence window to avoid breaking the pipeline after the upgrade:
 
 .. code-block:: bash
 
-    # For nightly release. Keep the CLOUD_LIST in sync with the previous installation.
-    pip install -U skypilot-nightly==${IMAGE_TAG}
-
-For clients used by developers, it is okay to upgrade to the same version as the API server either before or after the upgrade. Because if there is a compatibility issue, an error will raised to the developer with the upgrade command prompted.
+    pip install -U skypilot-nightly==${VERSION}
 
 Step 4: Upgrade the API server
 ------------------------------
@@ -131,7 +132,7 @@ Once all the critical requests have been finished and the clients in autonomous 
 
     # --reuse-values is critical to keep the values set in the previous installation steps.
     helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-      --set apiService.image=${IMAGE}
+      --set apiService.image=${IMAGE_REPO}:${VERSION}
 
 Optionally, you can watch the upgrade progress with:
 
@@ -140,8 +141,6 @@ Optionally, you can watch the upgrade progress with:
     $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
     NAME                                       READY   STATUS     RESTARTS   AGE
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2   0          7s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2   0          21s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2   0          23s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2   0          24s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     PodInitializing   0          26s
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
@@ -200,7 +199,7 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
     sky exec api-server "pip install -U skypilot-nightly[all] && sky api stop && sky api start --deploy"
     # Alternatively, you can also upgrade to a specific version with:
-    sky exec api-server "pip install -U skypilot-nightly[all]==<target-version> && sky api stop && sky api start --deploy"
+    sky exec api-server "pip install -U skypilot-nightly[all]==${VERSION} && sky api stop && sky api start --deploy"
 
 4. Switch back to the remote API server:
 
