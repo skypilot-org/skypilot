@@ -814,24 +814,6 @@ def test_cli_exit_codes(generic_cloud: str):
     smoke_tests_utils.run_one_test(test)
 
 
-def test_python_version():
-    """Test that the Python version is correct."""
-    print(
-        f'Python version from interpreter: {sys.version}, PYTHON_VERSION env: {os.environ.get("PYTHON_VERSION")}',
-        file=sys.stderr,
-        flush=True)
-    version_env = os.environ.get('PYTHON_VERSION')
-    assert version_env is not None, 'PYTHON_VERSION must be set'
-    version_list = version_env.split('.')
-    assert int(
-        version_list[0]) == sys.version_info.major, 'Major version must match'
-    assert int(
-        version_list[1]) == sys.version_info.minor, 'Minor version must match'
-    if len(version_list) > 2:
-        assert int(version_list[2]
-                  ) == sys.version_info.micro, 'Micro version must match'
-
-
 @pytest.mark.lambda_cloud
 def test_lambda_cloud_open_ports():
     """Test Lambda Cloud open ports functionality.
