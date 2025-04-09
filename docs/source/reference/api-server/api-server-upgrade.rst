@@ -88,7 +88,7 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
 
         .. note::
 
-        The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted.
+            The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted.
     
     .. tab-item:: Canceling requests
 
