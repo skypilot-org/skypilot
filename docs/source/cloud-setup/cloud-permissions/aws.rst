@@ -61,14 +61,13 @@ You can create a dedicated IAM user for SkyPilot, if you can't or don't want to 
 
 Follow these steps to create a new AWS user:
 
-1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_ in the AWS console and click on the **Users** tab. Then, click **Create User** and enter the user's name. Click **Next**.
-
-   **TODO: fix screenshots**
+1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_ in the AWS console and click on the **Users** tab.
 
    .. image:: ../../images/screenshots/aws/aws-add-user.png
-       :width: 80%
-       :align: center
        :alt: AWS Add User
+
+
+   Then, click **Create User** and enter the user's name. Click **Next**.
 
 2. In the **Permissions options** section, select "Attach existing policies directly". Depending on whether you want simplified or minimal permissions, follow the instructions below:
 
@@ -83,8 +82,6 @@ Follow these steps to create a new AWS user:
            Click on **Create Policy**.
 
            .. image:: ../../images/screenshots/aws/aws-create-policy.png
-               :width: 80%
-               :align: center
                :alt: AWS Create Policy
 
            This will open a new window to define the minimal policy.
@@ -92,22 +89,23 @@ Follow these steps to create a new AWS user:
            Choose "JSON" tab and copy the needed minimal policy rules.
            **See** :ref:`aws-minimal-policy` **for all the policy rules.**
 
-           Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+           Click **Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
            Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
            .. image:: ../../images/screenshots/aws/aws-add-policy.png
-               :width: 80%
-               :align: center
                :alt: AWS Add Policy
 
            Check the box to add the policy, and click **Next** to proceed.
 
 3. Click on **Next** and follow the instructions to create the user.
 
-4. Select the newly created user from the dashboard, and go to the **Security credentials** tab.
+4. Select the newly created user from the dashboard, and go to the **Security credentials** tab. Click on **Create access key**
 
-5. Click on **Create access key**, and for "Use case", select **Other**. Click **Next** , then click **Create access key**.
+   .. image:: ../../images/screenshots/aws/aws-create-access-key.png
+       :alt: AWS Create access key
+
+5. For "Use case", select **Other**. Click **Next**, then click **Create access key**.
 
 6. Use the newly created access key to configure your credentials with the AWS CLI:
 
@@ -137,7 +135,7 @@ Using several profiles or accounts
 
 You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
 
-Example of mixing a default profile and an SSO profile:
+Example of mixing the default profile and another profile:
 
 .. code-block:: console
 
@@ -145,7 +143,7 @@ Example of mixing a default profile and an SSO profile:
     $ sky launch --cloud aws -c default
 
     $ # A cluster launched under a different profile.
-    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c my-sso-cluster
+    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
 
 
 .. _aws-troubleshooting:
@@ -301,22 +299,20 @@ Create an IAM role with minimal permissions
 
     If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. Click the "Roles" tab in the IAM console, and click on **Create role**.
+1. In the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_, go to the "Roles" tab, and click on **Create role**.
 
-.. image:: ../../images/screenshots/aws/aws-add-role.png
-    :width: 80%
-    :align: center
-    :alt: AWS Add Role
+   .. image:: ../../images/screenshots/aws/aws-add-role.png
+       :alt: AWS Add Role
 
-2. Select the following entity and common use cases and click **Next**.
+2. Select **Trusted entity type**: AWS service, and **Use case**: EC2, as seen in the image below.
 
-.. image:: ../../images/screenshots/aws/aws-add-role-entity.png
-    :width: 80%
-    :align: center
-    :alt: AWS Role Entity
+   .. image:: ../../images/screenshots/aws/aws-add-role-entity.png
+       :alt: AWS Role Entity, with Trusted entity type set to AWS service, Service or use case set to EC2, and Use case set to EC2.
 
-3. Select the policy you created in :ref:`User Creation <dedicated-aws-user>` click on **Next: Tags**.
-4. Click **Next**, and name your role "skypilot-v1". Click **Create role**.
+   Click **Next**.
+
+3. Search for and select the policy you created in :ref:`User Creation <dedicated-aws-user>`.
+4. Click **Next**, and name your role exactly ``skypilot-v1``. Click **Create role**.
 
 
 .. _aws-minimal-policy:
@@ -328,6 +324,9 @@ To avoid giving SkyPilot administrator access, you can create a policy that limi
 
 .. note::
     **Replace the** ``<account-ID-without-hyphens>`` **with your AWS account ID**. You can find your AWS account ID by clicking on the upper right corner of the console.
+
+.. note::
+    There are **additional optional rules** below. It's likely that you will want to use some of these, so please take a look.
 
 .. code-block:: json
     :name: aws-policy-json
@@ -473,7 +472,7 @@ To avoid giving SkyPilot administrator access, you can create a policy that limi
            {
                 "Effect": "Allow",
                 "Action": [
-                    "s3:*",
+                    "s3:*"
                 ],
                 "Resource": "*"
             }
