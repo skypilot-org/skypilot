@@ -179,6 +179,9 @@ _RAY_YAML_KEYS_TO_RESTORE_EXCEPTIONS = [
     ('available_node_types', 'ray.head.default', 'node_config', 'UserData'),
     ('available_node_types', 'ray.head.default', 'node_config',
      'azure_arm_parameters', 'cloudInitSetupCommands'),
+    ('available_node_types', 'ray_head_default', 'node_config', 'pvc_spec'),
+    ('available_node_types', 'ray_head_default', 'node_config',
+     'deployment_spec'),
 ]
 # These keys are expected to change when provisioning on an existing cluster,
 # but they don't actually represent a change that requires re-provisioning the
