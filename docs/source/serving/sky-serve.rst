@@ -221,7 +221,7 @@ This example will spin up two replicas of the service,
 each listening on port 8080. A replica is considered ready when it responds to
 :code:`GET /` with a 200 status code. You can customize the readiness
 probe by specifying a different path in the :code:`readiness_probe` field.
-You can find more configurations at :ref:`Service YAML Specification
+You can find more configuration options at :ref:`Service YAML Specification
 <service-yaml-spec>`.
 
 Use ``sky serve up`` to spin up the service:

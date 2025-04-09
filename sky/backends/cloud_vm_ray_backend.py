@@ -655,12 +655,9 @@ class RayCodeGen:
         rclone_flush_script = {rclone_flush_script!r}
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
-        if script is not None:
-            script += rclone_flush_script
-        else:
-            script = rclone_flush_script
 
         if script is not None:
+            script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
             # Backward compatibility: Environment starting with `SKY_` is
             # deprecated. Remove it in v0.9.0.

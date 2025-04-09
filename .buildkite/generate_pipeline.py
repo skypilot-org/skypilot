@@ -40,6 +40,13 @@ QUEUE_GENERIC_CLOUD = 'generic_cloud'
 QUEUE_KUBERNETES = 'kubernetes'
 QUEUE_EKS = 'eks'
 QUEUE_GKE = 'gke'
+# We use a separate queue for generic cloud tests on remote servers because:
+# - generic_cloud queue has high concurrency on a single VM
+# - remote-server requires launching a docker container per test
+# - Reusing generic_cloud queue to run remote-server tests would overload the VM
+# Kubernetes has low concurrency on a single VM originally,
+# so remote-server won't drain VM resources, we can reuse the same queue.
+QUEUE_GENERIC_CLOUD_REMOTE_SERVER = 'generic_cloud_remote_server'
 # We use KUBE_BACKEND to specify the queue for kubernetes tests mark as
 # resource_heavy. It can be either EKS or GKE.
 QUEUE_KUBE_BACKEND = os.getenv('KUBE_BACKEND', QUEUE_EKS).lower()
@@ -56,6 +63,27 @@ CLOUD_QUEUE_MAP = {
 GENERATED_FILE_HEAD = ('# This is an auto-generated Buildkite pipeline by '
                        '.buildkite/generate_pipeline.py, Please do not '
                        'edit directly.\n')
+
+
+def _get_buildkite_queue(cloud: str, remote_server: bool,
+                         run_on_cloud_kube_backend: bool) -> str:
+    """Get the Buildkite queue for a given cloud.
+
+    We use a separate queue for generic cloud tests on remote servers because:
+    - generic_cloud queue has high concurrency on a single VM
+    - remote-server requires launching a docker container per test
+    - Reusing generic_cloud queue to run remote-server tests would overload the VM
+
+    Kubernetes has low concurrency on a single VM originally,
+    so remote-server won't drain VM resources, we can reuse the same queue.
+    """
+    if run_on_cloud_kube_backend:
+        return QUEUE_KUBE_BACKEND
+
+    queue = CLOUD_QUEUE_MAP[cloud]
+    if queue == QUEUE_GENERIC_CLOUD and remote_server:
+        return QUEUE_GENERIC_CLOUD_REMOTE_SERVER
+    return queue
 
 
 def _parse_args(args: Optional[str] = None):
@@ -140,6 +168,7 @@ def _extract_marked_tests(
     print(f'default_clouds_to_run: {default_clouds_to_run}, k_value: {k_value}')
     function_name_marks_map = collections.defaultdict(set)
     function_name_param_map = collections.defaultdict(list)
+    remote_server = '--remote-server' in extra_args
 
     for function_name, marks in matches:
         clean_function_name = re.sub(r'\[.*?\]', '', function_name)
@@ -212,8 +241,8 @@ def _extract_marked_tests(
             param_list += [None
                           ] * (len(final_clouds_to_include) - len(param_list))
         function_cloud_map[function_name] = (final_clouds_to_include, [
-            QUEUE_KUBE_BACKEND
-            if run_on_cloud_kube_backend else CLOUD_QUEUE_MAP[cloud]
+            _get_buildkite_queue(cloud, remote_server,
+                                 run_on_cloud_kube_backend)
             for cloud in final_clouds_to_include
         ], param_list, [
             extra_args for _ in range(len(final_clouds_to_include))
@@ -241,6 +270,8 @@ def _generate_pipeline(test_file: str,
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue
+            if 'PYTHON_VERSION' in os.environ:
+                command = f'PYTHONPATH="$PWD:$PYTHONPATH" {command}'
             step = {
                 'label': label,
                 'command': command,

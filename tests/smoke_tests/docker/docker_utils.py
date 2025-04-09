@@ -1,6 +1,6 @@
+import hashlib
 import logging
 import os
-import socket
 import subprocess
 
 IMAGE_NAME = 'sky-remote-test-image'
@@ -27,10 +27,20 @@ def get_container_name() -> str:
     return container_name
 
 
+def get_host_port() -> int:
+    """Get the host port that will be listened by the test container."""
+    container_name = get_container_name()
+    # Create a deterministic hash using MD5
+    md5_hash = hashlib.md5(container_name.encode('utf-8')).hexdigest()
+    # Convert first 8 chars of hash to integer and map to port range 40000-50000
+    port = 40000 + (int(md5_hash[:8], 16) % 10000)
+    return port
+
+
 def get_api_server_endpoint_inside_docker() -> str:
     """Get the API server endpoint inside a Docker container."""
     host = 'host.docker.internal' if is_inside_docker() else '0.0.0.0'
-    return f'http://{host}:46581'
+    return f'http://{host}:{get_host_port()}'
 
 
 def create_and_setup_new_container(target_container_name: str, host_port: int,

@@ -19,6 +19,7 @@ logger = sky_logging.init_logger(__name__)
 # tests can access them.
 from common_test_fixtures import aws_config_region
 from common_test_fixtures import enable_all_clouds
+from common_test_fixtures import mock_aws_backend
 from common_test_fixtures import mock_client_requests
 from common_test_fixtures import mock_controller_accessible
 from common_test_fixtures import mock_job_table_no_job
@@ -363,7 +364,7 @@ def setup_docker_container(request):
         # Use create_and_setup_new_container to create and start the container
         docker_utils.create_and_setup_new_container(
             target_container_name=docker_utils.get_container_name(),
-            host_port=46581,
+            host_port=docker_utils.get_host_port(),
             container_port=46580,
             username=default_user)
 
@@ -373,7 +374,7 @@ def setup_docker_container(request):
         logger.info('Waiting for container to be ready...')
         url = docker_utils.get_api_server_endpoint_inside_docker()
         health_endpoint = f'{url}/api/health'
-        max_retries = 20
+        max_retries = 40
         retry_count = 0
 
         while retry_count < max_retries:

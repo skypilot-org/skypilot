@@ -161,7 +161,11 @@ async def dashboard(request: fastapi.Request,
                     response = await client.request('GET',
                                                     dashboard_url,
                                                     timeout=5)
-                break  # Connection successful, proceed with the request
+                if response.is_success:
+                    break  # Connection successful, proceed with the request
+                # Raise an HTTPException here which will be caught by the
+                # following except block to retry with new connection
+                response.raise_for_status()
             except Exception as e:  # pylint: disable=broad-except
                 # We catch all exceptions to gracefully handle unknown
                 # errors and retry or raise an HTTPException to the client.

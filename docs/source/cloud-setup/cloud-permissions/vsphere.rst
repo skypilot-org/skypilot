@@ -3,7 +3,7 @@
 vSphere
 =======
 
-This document is provided for users who use VMware vSphere provider and helps them set up basic configurations on VMware vSphere to meet the needs of running SkyPilot tasks.
+This document is provided for users who use VMware vSphere provider and helps them set up basic configuration on VMware vSphere to meet the needs of running SkyPilot tasks.
 
 .. _cloud-prepare-vsphere-tags:
 

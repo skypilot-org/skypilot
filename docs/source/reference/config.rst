@@ -1,11 +1,11 @@
 .. _config-yaml:
 
-Advanced Configurations
-=======================
+Advanced Configuration
+======================
 
-You can pass **optional configurations** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
 
-Such configurations apply to all new clusters and do not affect existing clusters.
+This configuration applies to all new clusters and does not affect existing clusters.
 
 .. tip::
 
@@ -239,7 +239,7 @@ The following run options are applied by default and cannot be overridden:
 ~~~~~~~~~~~~~~~~~~~~~~
 
 This field can be useful for mounting volumes and other advanced Docker
-configurations. You can specify a list of arguments or a string, where the
+configuration. You can specify a list of arguments or a string, where the
 former will be combined into a single string with spaces. The following is
 an example option for mounting the Docker socket and increasing the size of ``/dev/shm``:
 
@@ -309,7 +309,7 @@ Example:
 ``aws``
 ~~~~~~~
 
-Advanced AWS configurations (optional).
+Advanced AWS configuration (optional).
 
 Apply to all new instances but not existing ones.
 
@@ -583,7 +583,7 @@ Supported values:
 ``gcp``
 ~~~~~~~
 
-Advanced GCP configurations (optional).
+Advanced GCP configuration (optional).
 
 Apply to all new instances but not existing ones.
 
@@ -615,20 +615,35 @@ Example:
 
 VPC to use (optional).
 
-Default: ``null``, which implies the following behavior. First, all existing
+Default: ``null``, which implies the following behavior: All existing
 VPCs in the project are checked against the minimal recommended firewall
 rules for SkyPilot to function. If any VPC satisfies these rules, it is
 used. Otherwise, a new VPC named ``skypilot-vpc`` is automatically created
 with the minimal recommended firewall rules and will be used.
 
-If this field is set, SkyPilot will use the VPC with this name. Useful for
-when users want to manually set up a VPC and precisely control its
+If this field is set, SkyPilot will use the VPC with this name. The VPC must
+have the :ref:`necessary firewall rules <gcp-minimum-firewall-rules>`. Useful
+for when users want to manually set up a VPC and precisely control its
 firewall rules. If no region restrictions are given, SkyPilot only
 provisions in regions for which a subnet of this VPC exists. Errors are
 thrown if VPC with this name is not found. The VPC does not get modified
 in any way, except when opening ports (e.g., via ``resources.ports``) in
 which case new firewall rules permitting public traffic to those ports
 will be added.
+
+By default, only VPCs from the current project are used.
+
+.. code-block:: yaml
+
+  gcp:
+    vpc-name: my-vpc
+
+To use a shared VPC from another GCP project, specify the name as ``<project ID>/<vpc name>``. For example:
+
+.. code-block:: yaml
+
+  gcp:
+    vpc-name: my-project-123456/default
 
 .. _config-yaml-gcp-use-internal-ips:
 
@@ -794,7 +809,7 @@ Default: ``false``.
 ``azure``
 ~~~~~~~~~~~
 
-Advanced Azure configurations (optional).
+Advanced Azure configuration (optional).
 
 .. _config-yaml-azure-resource-group-vm:
 
@@ -829,7 +844,7 @@ Example:
 ``kubernetes``
 ~~~~~~~~~~~~~~~
 
-Advanced Kubernetes configurations (optional).
+Advanced Kubernetes configuration (optional).
 
 .. _config-yaml-kubernetes-ports:
 
@@ -956,7 +971,7 @@ Example:
 ``oci``
 ~~~~~~~
 
-Advanced OCI configurations (optional).
+Advanced OCI configuration (optional).
 
 ``oci_config_profile``
     The profile name in ``~/.oci/config`` to use for launching instances.
@@ -980,7 +995,7 @@ Example:
 .. code-block:: yaml
 
     oci:
-        # Region-specific configurations
+        # Region-specific configuration
         ap-seoul-1:
           # The OCID of the VCN to use for instances (optional).
           vcn_ocid: ocid1.vcn.oc1.ap-seoul-1.amaaaaaaak7gbriarkfs2ssus5mh347ktmi3xa72tadajep6asio3ubqgarq
