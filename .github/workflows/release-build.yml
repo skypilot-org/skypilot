@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_branch: ${{ steps.commit_changes.outputs.test_branch }}
-      smoke_test_build_number: ${{ steps.trigger_smoke_tests.outputs.build_number }}
-      quicktest_core_build_number: ${{ steps.trigger_quicktest_core.outputs.build_number }}
-      release_test_build_number: ${{ steps.trigger_release_tests.outputs.build_number }}
+      smoke_test_build_number: ${{ steps.extract_smoke_test.outputs.smoke_test_build_number }}
+      quicktest_core_build_number: ${{ steps.extract_quicktest.outputs.quicktest_core_build_number }}
+      release_test_build_number: ${{ steps.extract_release_test.outputs.release_test_build_number }}
       release_version: ${{ steps.determine_version.outputs.release_version }}
     steps:
       - name: Clone repository
@@ -120,9 +120,9 @@ jobs:
 
       # Extract build number from response JSON
       - name: Extract smoke tests build number
+        id: extract_smoke_test
         run: |
           build_number=$(echo '${{ steps.trigger_smoke_tests.outputs.json }}' | jq -r '.number')
-          echo "build_number=$build_number" >> $GITHUB_STEP_SUMMARY
           echo "smoke_test_build_number=$build_number" >> $GITHUB_OUTPUT
 
       # Trigger Buildkite quicktest-core
@@ -140,9 +140,9 @@ jobs:
 
       # Extract build number from response JSON
       - name: Extract quicktest core build number
+        id: extract_quicktest
         run: |
           build_number=$(echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq -r '.number')
-          echo "build_number=$build_number" >> $GITHUB_STEP_SUMMARY
           echo "quicktest_core_build_number=$build_number" >> $GITHUB_OUTPUT
 
       # Trigger Buildkite release tests
@@ -160,10 +160,10 @@ jobs:
 
       # Extract build number from response JSON
       - name: Extract release tests build number
+        id: extract_release_test
         if: endsWith(steps.determine_version.outputs.release_version, '.0')
         run: |
           build_number=$(echo '${{ steps.trigger_release_tests.outputs.json }}' | jq -r '.number')
-          echo "build_number=$build_number" >> $GITHUB_STEP_SUMMARY
           echo "release_test_build_number=$build_number" >> $GITHUB_OUTPUT
 
   wait-for-smoke-tests:
@@ -187,6 +187,32 @@ jobs:
       timeout_minutes: 180
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  cleanup-on-failure:
+    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core]
+    if: |
+      failure() ||
+      needs.wait-for-smoke-tests.outputs.build_status != 'success' ||
+      needs.wait-for-quicktest-core.outputs.build_status != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Delete test branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          if git ls-remote --heads origin ${TEST_BRANCH} | grep ${TEST_BRANCH}; then
+            echo "Deleting test branch ${TEST_BRANCH} due to build failure"
+            git push origin --delete ${TEST_BRANCH}
+          fi
 
   create-pr:
     needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core]
