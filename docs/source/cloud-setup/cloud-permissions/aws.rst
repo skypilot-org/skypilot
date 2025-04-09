@@ -58,7 +58,7 @@ If everything is set up correctly, :code:`sky check aws` should succeed!
 
 .. _dedicated-aws-user:
 
-Setting up a dedicated SkyPilot IAM user
+Dedicated SkyPilot IAM user
 ----------------------------------------
 
 You can create a dedicated IAM user for SkyPilot, if you can't or don't want to use your normal credentials, or if you want to restrict SkyPilot's permissions.
@@ -138,7 +138,7 @@ Follow these steps to create a new AWS user:
 
 .. _several-aws-profiles:
 
-Using several profiles or accounts
+Switch profiles or accounts
 ----------------------------------
 
 You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
@@ -156,7 +156,7 @@ Example of mixing the default profile and another profile:
 
 .. _aws-troubleshooting:
 
-Troubleshooting issues
+Troubleshooting
 ----------------------
 
 If your credentials are not being picked up, or you're seeing the wrong credentials in SkyPilot, here are some steps you can take to troubleshoot:
@@ -197,7 +197,8 @@ If your credentials are not being picked up, or you're seeing the wrong credenti
            Activated account: VRSC9IFFYQI7THCKR5UVC [account=190763068689]
        ...
 
-**Common issues:**
+Common issues
+~~~~~~~~~~~~~~~~~
 
 - **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set - see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
 
