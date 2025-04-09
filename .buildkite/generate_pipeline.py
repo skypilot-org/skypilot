@@ -270,6 +270,8 @@ def _generate_pipeline(test_file: str,
             if label in generated_steps_set:
                 # Skip duplicate nested function tests under the same class
                 continue
+            if 'PYTHON_VERSION' in os.environ:
+                command = f'PYTHONPATH="$PWD:$PYTHONPATH" {command}'
             step = {
                 'label': label,
                 'command': command,
