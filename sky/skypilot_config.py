@@ -64,7 +64,6 @@ from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
 from sky.utils import common_utils
 from sky.utils import config_utils
-from sky.utils import dag_utils
 from sky.utils import schemas
 from sky.utils import ux_utils
 
@@ -299,8 +298,7 @@ def compose_sdk_config(
     user_provided_overrides: Optional[Dict[str, Any]],
     # environment variables (priority 2)
     # are obtained within this function
-    dag_str: Optional[str],  # priority 3
-    # project config file (priority 4)
+    # project config file (priority 3)
     # is obtained within this function
     # global client config (lowest priority)
     # is obtained within this function
@@ -309,12 +307,12 @@ def compose_sdk_config(
     Current config sources and their priority (from highest to lowest):
     1. user provided overrides
     2. Environment variables
-    3. Config overrides specified in task YAML
-    4. Project config file obtained from the current directory
+    3. Project config file obtained from the current directory
     LOWEST. Global client config
     """
     overrides = []
 
+    # parse overrides from user provided overrides (priority 1)
     if user_provided_overrides:
         overrides.append(config_utils.Config(user_provided_overrides))
         logger.info('[priority 1] following overrides '
@@ -330,29 +328,19 @@ def compose_sdk_config(
                 f'{key[len(prefix):].lower().replace("__", ".")}={value}')
     if variables:
         dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
-        logger.info('[priority 3] following overrides '
+        logger.info('[priority 2] following overrides '
                     'are obtained from env vars:')
         logger.info(dot_config)
         overrides.append(dot_config)
 
-    # parse overrides from task YAML (priority 3)
-    if dag_str:
-        dag = dag_utils.load_chain_dag_from_yaml_str(dag_str)
-        for task in dag.tasks:
-            for resource in task.resources:
-                overrides.append(resource.cluster_config_overrides)
-                logger.info('[priority 4] following overrides '
-                            'are obtained from task YAML:')
-                print(resource.cluster_config_overrides)
-
-    # parse overrides from project config file (priority 4)
+    # parse overrides from project config file (priority 3)
     # TODO(seungjin) this isn't what we actually want to do,
     # find the project config more intelligently
     project_config_path = os.path.join(os.getcwd(), 'sky.yaml')
     if os.path.exists(project_config_path):
         project_config = OmegaConf.to_object(
             OmegaConf.load(project_config_path))
-        logger.info('[priority 5] following overrides '
+        logger.info('[priority 3] following overrides '
                     'are obtained from project config file:')
         logger.info(project_config)
         overrides.append(project_config)
