@@ -583,10 +583,7 @@ class GCP(clouds.Cloud):
                                         resources.disk_tier)
             if not ok:
                 return resources_utils.FeasibleResources([], [], None)
-
-            if resources.instance_type not in service_catalog.gcp_catalog.GCP_ACC_INSTANCE_TYPES:
-                # General CPU instance types without accelerators
-                return resources_utils.FeasibleResources([resources], [], None)
+            return resources_utils.FeasibleResources([resources], [], None)
 
         if resources.accelerators is None:
             # Return a default instance type with the given number of vCPUs.
