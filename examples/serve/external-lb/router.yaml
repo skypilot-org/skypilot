@@ -5,4 +5,4 @@ resources:
 
 setup: pip install sglang-router
 
-run: python -m sglang_router.launch_router --host 0.0.0.0 --port 9001 --worker-urls http://3.128.198.27:8081 http://176.32.76.190:8081 http://18.222.22.172:8081 http://57.180.243.72:8081
+run: python -m sglang_router.launch_router --host 0.0.0.0 --port 9001 --worker-urls http://3.144.31.118:8081 http://54.238.179.40:8081 http://3.145.74.129:8081 http://13.231.41.122:8081 

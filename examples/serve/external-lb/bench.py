@@ -15,6 +15,7 @@ import colorama
 import numpy as np
 import openai  # 1.68.0
 from openai.types.chat import ChatCompletionStreamOptionsParam
+from openai.types.chat.chat_completion_chunk import ChatCompletionChunk
 import requests
 from rich import print as rp
 
@@ -36,6 +37,7 @@ class Metric:
     input_tokens: Optional[int] = None
     output_tokens: int = 0
     headers: Optional[Dict[str, str]] = None
+    cached_tokens: Optional[int] = None
 
 
 def _get_one_round(role, content):
@@ -91,14 +93,24 @@ async def oai_call_chat_completion_async(messages,
                 metric.e2e_latency = t_this_round - st
                 metric.end = t_this_round
                 if fetch_metric_at_end:
-                    # For SGLang, the usage is only included in the last chunk.
-                    async for chunk in res:
+
+                    def _record_metric(chunk: ChatCompletionChunk) -> None:
                         metric.input_tokens = chunk.usage.prompt_tokens
                         metric.output_tokens += chunk.usage.completion_tokens
-                        break
+                        metric.cached_tokens = (
+                            chunk.usage.prompt_tokens_details.cached_tokens)
+
+                    # For SGLang, the usage is only included in the last chunk.
+                    # v0.4.3.post2, usage in next chunk
+                    # async for chunk in res:
+                    #     _record_metric(chunk)
+                    #     break
+                    # v0.4.5, usage in current chunk
+                    _record_metric(chunk)
                 break
             delta = choice.delta.content
-            output += delta
+            if delta is not None:
+                output += delta
     except Exception as e:
         exception = e
         rp(f"Error: {e}\n"
@@ -212,11 +224,15 @@ async def main(args):
     total_times = 0
     ttfts = []
     e2e_latencies = []
+    total_input_tokens = 0
+    total_cached_tokens = 0
     for m in global_metrics:
         total_tpt_tokens += m.input_tokens + 2 * m.output_tokens
         total_times += m.e2e_latency
         ttfts.append(m.ttft)
         e2e_latencies.append(m.e2e_latency)
+        total_input_tokens += m.input_tokens
+        total_cached_tokens += m.cached_tokens
     rp(f"{'TPT':=^50}")
     rp(f"Per request: {total_tpt_tokens / total_times:.3f}")
     rp(f"Per second: {total_tpt_tokens / latency:.3f}")
@@ -230,6 +246,8 @@ async def main(args):
     rp(f"P50: {np.percentile(e2e_latencies, 50):.3f}")
     rp(f"P90: {np.percentile(e2e_latencies, 90):.3f}")
     rp(f"P99: {np.percentile(e2e_latencies, 99):.3f}")
+    rp(f"{'KV Cache Hit Rate':=^50}")
+    rp(f"Mean: {total_cached_tokens / total_input_tokens:.3f}")
 
     input('Press Enter to save results...')
 
@@ -273,6 +291,7 @@ def prepare_lb_endpoints_and_confirm(backend_url: str):
         elif '9001' in backend_url:  # SGLang Router
             endpoints = [SGL_ROUTER_IDENTIFIER]
         else:
+            return []
             raise ValueError(f'Unknown backend URL: {backend_url}')
         print(f'External Load Balancer Endpoints: {colorama.Fore.GREEN}'
               f'{endpoints}{colorama.Style.RESET_ALL}')

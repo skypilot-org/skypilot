@@ -18,7 +18,6 @@ import uvicorn
 from sky import sky_logging
 from sky.serve import constants
 from sky.serve import load_balancing_policies as lb_policies
-from sky.serve import prefix_tree
 from sky.serve import serve_utils
 from sky.utils import common_utils
 
@@ -28,6 +27,8 @@ logger = sky_logging.init_logger(__name__)
 @dataclasses.dataclass
 class RequestEntry:
     id: int
+    time_arrive: float
+    time_scheduled: Optional[float]
     request: fastapi.Request
     request_event: asyncio.Event
     response_future: asyncio.Future[fastapi.responses.Response]
@@ -432,9 +433,8 @@ class SkyServeLoadBalancer:
                 await self._lb_pool.post_execute_hook(self._url, request)
 
         decision_id = len(proxy_response.headers)
-        extra_header = {
-            f'{k}-{decision_id}': v for k, v in extra_header.items()
-        }
+        extra_header = {(f'{k}-{decision_id}' if 'decision' in k else k): v
+                        for k, v in extra_header.items()}
 
         proxy_response.headers.update(extra_header)
         return fastapi.responses.StreamingResponse(
@@ -467,6 +467,7 @@ class SkyServeLoadBalancer:
         """Handle the request."""
         assert self._loop is not None
         try:
+            entry.time_scheduled = time.time()
             pool_to_use = self._lb_pool if is_from_lb else self._replica_pool
             await pool_to_use.pre_execute_hook(url, entry.request)
             # Record the cache for self LB here.
@@ -497,7 +498,10 @@ class SkyServeLoadBalancer:
                 headers=headers.raw,
                 content=await entry.request.body(),
                 timeout=constants.LB_STREAM_TIMEOUT)
-            extra_header = {}
+            extra_header = {
+                'sky-time-arrive': str(entry.time_arrive),
+                'sky-time-scheduled': str(entry.time_scheduled),
+            }
             if not is_from_lb:
                 replica_id = self._replica2id.get(url, 'N/A')
                 extra_header['replica-decision'] = (
@@ -723,8 +727,8 @@ class SkyServeLoadBalancer:
             response_future: asyncio.Future[
                 fastapi.responses.Response] = self._loop.create_future()
             request_event: asyncio.Event = asyncio.Event()
-            entry = RequestEntry(self._latest_req_id, request, request_event,
-                                 response_future)
+            entry = RequestEntry(self._latest_req_id, time.time(), None,
+                                 request, request_event, response_future)
             self._latest_req_id += 1
 
             # Queue the request for processing
@@ -804,6 +808,7 @@ class SkyServeLoadBalancer:
             status_code=200,
             content={
                 'queue_size': await self._request_queue.qsize(),
+                'queue_size_actual': await self._request_queue.actual_size(),
                 'replica_queue': await self._replica_pool.active_requests(),
                 'max_queue_size': self._max_queue_size,
                 'max_concurrent_requests': self._max_concurrent_requests,
@@ -854,17 +859,21 @@ class SkyServeLoadBalancer:
                     # TODO(tian): Use urlparse for robustness.
                     # TODO(tian): Investigate this pylint warning.
                     async with self._workload_steal_session.get(  # pylint: disable=not-async-context-manager
-                            steal_target + '/queue-size') as response:
-                        queue_size = (await response.json())['queue_size']
+                            steal_target + '/conf') as response:
+                        conf = await response.json()
+                        queue_size = conf['queue_size']
+                        queue_size_actual = conf['queue_size_actual']
                     # logger.info(f'Queue size of {steal_target}: '
                     #             f'{queue_size}')
-                    if queue_size <= 0:
+                    if queue_size_actual <= 0:
                         continue
-                    num_steal = queue_size // 2
+                    num_steal = min(queue_size // 2, queue_size_actual)
                     if num_steal <= 0:
                         continue
                     logger.info(f'Steal from {steal_target} with '
-                                f'{num_steal}/{queue_size} requests.')
+                                f'{num_steal} requests; '
+                                f'queue_size: {queue_size}, '
+                                f'queue_size_actual: {queue_size_actual}.')
                     async with self._workload_steal_session.post(  # pylint: disable=not-async-context-manager
                             steal_target + '/steal-request',
                             json={
@@ -1169,7 +1178,7 @@ class SkyServeLoadBalancer:
 
         logger.info('SkyServe Load Balancer started on '
                     f'{protocol}://0.0.0.0:{self._load_balancer_port}')
-        logger.info('Started lb in version lock-queue-fixed.')
+        logger.info('Started lb in version lock-queue-fixed-queue-size.')
 
         uvicorn.run(self._app,
                     host='0.0.0.0',

@@ -4,6 +4,7 @@ name: load-balancer
 
 envs:
   IP:
+  PORT:
 
 resources:
   # TODO(tian): Hack. We should figure out the optimal resources.
@@ -23,7 +24,7 @@ setup: |
 run: |
   source ~/skypilot-runtime/bin/activate
   python -u -m sky.serve.load_balancer \
-    --controller-addr http://$IP:20001 \
+    --controller-addr http://$IP:$PORT \
     --load-balancer-port 9002 \
     --load-balancing-policy prefix_tree \
     --meta-load-balancing-policy prefix_tree \
