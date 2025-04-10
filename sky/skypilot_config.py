@@ -79,8 +79,8 @@ logger = sky_logging.init_logger(__name__)
 #     path as the config file. Do not use any other config files.
 #     This behavior is subject to change and should not be relied on by users.
 # Else,
-# (1) If env var {ENV_VAR_GLOBAL_CONFIG} exists, use its path as the global
-#     config file. Else, use the default path {GLOBAL_CONFIG_PATH}.
+# (1) If env var {ENV_VAR_USER_CONFIG} exists, use its path as the user
+#     config file. Else, use the default path {USER_CONFIG_PATH}.
 # (2) If env var {ENV_VAR_PROJECT_CONFIG} exists, use its path as the project
 #     config file. Else, use the default path {PROJECT_CONFIG_PATH}.
 # (3) Override any config keys in (1) with the ones in (2).
@@ -88,7 +88,7 @@ logger = sky_logging.init_logger(__name__)
 #
 # (*) is used internally to implement the behavior of the jobs controller.
 #     It is not intended to be used by end users.
-# (1) and (2) are used by end users to set non-default global and project config
+# (1) and (2) are used by end users to set non-default user and project config
 #     files on clients.
 
 # (Used internally) An env var holding the path to the local config file. This
@@ -96,13 +96,13 @@ logger = sky_logging.init_logger(__name__)
 # use the same config file.
 ENV_VAR_SKYPILOT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}CONFIG'
 
-# (Used by users) Environment variables for setting non-default global and
+# (Used by users) Environment variables for setting non-default user and
 # project config files on clients.
-ENV_VAR_GLOBAL_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}GLOBAL_CONFIG'
+ENV_VAR_USER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}USER_CONFIG'
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the local config files.
-GLOBAL_CONFIG_PATH = '~/.sky/config.yaml'
+USER_CONFIG_PATH = '~/.sky/config.yaml'
 PROJECT_CONFIG_PATH = 'skyconfig.yaml'
 
 # The loaded config.
@@ -217,7 +217,7 @@ def _reload_config_from_internal_file() -> None:
                     'exist. Please double check the path or unset the env var: '
                     f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     else:
-        config_path = GLOBAL_CONFIG_PATH
+        config_path = USER_CONFIG_PATH
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
@@ -245,23 +245,23 @@ def _reload_config_hierarchical() -> None:
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
 
-    # find the global config file
-    global_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
-    if global_config_path and os.path.exists(global_config_path):
-        logger.info('using global config file specified by '
-                    f'{ENV_VAR_GLOBAL_CONFIG}: {global_config_path}')
-        global_config_path = os.path.expanduser(global_config_path)
-        if not os.path.exists(global_config_path):
+    # find the user config file
+    user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
+    if user_config_path and os.path.exists(user_config_path):
+        logger.info('using user config file specified by '
+                    f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
+        user_config_path = os.path.expanduser(user_config_path)
+        if not os.path.exists(user_config_path):
             with ux_utils.print_exception_no_traceback():
                 raise FileNotFoundError(
                     'Config file specified by env var '
-                    f'{ENV_VAR_GLOBAL_CONFIG} ({global_config_path!r}) '
+                    f'{ENV_VAR_USER_CONFIG} ({user_config_path!r}) '
                     'does not exist. Please double check the path or unset the '
-                    f'env var: unset {ENV_VAR_GLOBAL_CONFIG}')
+                    f'env var: unset {ENV_VAR_USER_CONFIG}')
     else:
-        logger.info(f'using default global config file: {GLOBAL_CONFIG_PATH}')
-        global_config_path = GLOBAL_CONFIG_PATH
-        global_config_path = os.path.expanduser(global_config_path)
+        logger.info(f'using default user config file: {USER_CONFIG_PATH}')
+        user_config_path = USER_CONFIG_PATH
+        user_config_path = os.path.expanduser(user_config_path)
 
     overrides = []
 
@@ -283,15 +283,15 @@ def _reload_config_hierarchical() -> None:
         project_config_path = PROJECT_CONFIG_PATH
         project_config_path = os.path.expanduser(project_config_path)
 
-    # load the global config file
-    if os.path.exists(global_config_path):
-        logger.info(f'Using global config path: {global_config_path}')
-        global_config = OmegaConf.to_object(OmegaConf.load(global_config_path))
+    # load the user config file
+    if os.path.exists(user_config_path):
+        logger.info(f'Using user config path: {user_config_path}')
+        user_config = OmegaConf.to_object(OmegaConf.load(user_config_path))
         logger.info('following overrides '
-                    'are obtained from global config file:')
-        logger.info(global_config)
-        _validate_config(global_config, 'global')
-        overrides.append(global_config)
+                    'are obtained from user config file:')
+        logger.info(user_config)
+        _validate_config(user_config, 'user')
+        overrides.append(user_config)
 
     if os.path.exists(project_config_path):
         logger.info(f'Using project config path: {project_config_path}')
