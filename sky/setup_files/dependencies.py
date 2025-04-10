@@ -53,7 +53,6 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'omegaconf',
 ]
 
 local_ray = [

@@ -55,8 +55,6 @@ import pprint
 import typing
 from typing import Any, Dict, Iterator, Optional, Tuple
 
-from omegaconf import OmegaConf
-
 from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
@@ -200,6 +198,21 @@ def _reload_config() -> None:
     _reload_config_hierarchical()
 
 
+def _parse_config_file(config_path: str) -> config_utils.Config:
+    config = config_utils.Config()
+    try:
+        config_dict = common_utils.read_yaml(config_path)
+        config = config_utils.Config.from_dict(config_dict)
+        logger.debug(f'Config loaded:\n{pprint.pformat(config)}')
+    except yaml.YAMLError as e:
+        logger.error(f'Error in loading config file ({config_path}):', e)
+    if config:
+        _validate_config(config, config_path)
+
+    logger.debug(f'Config syntax check passed for path: {config_path}')
+    return config
+
+
 def _reload_config_from_internal_file() -> None:
     global _dict, _loaded_config_path
     # Reset the global variables, to avoid using stale values.
@@ -221,23 +234,8 @@ def _reload_config_from_internal_file() -> None:
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
-        try:
-            config = common_utils.read_yaml(config_path)
-            _dict = config_utils.Config.from_dict(config)
-            _loaded_config_path = config_path
-            logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
-        except yaml.YAMLError as e:
-            logger.error(f'Error in loading config file ({config_path}):', e)
-        if _dict:
-            common_utils.validate_schema(
-                _dict,
-                schemas.get_config_schema(),
-                f'Invalid config YAML ({config_path}). See: '
-                'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
-                'Error: ',
-                skip_none=False)
-
-        logger.debug('Config syntax check passed.')
+        _dict = _parse_config_file(config_path)
+        _loaded_config_path = config_path
 
 
 def _reload_config_hierarchical() -> None:
@@ -286,7 +284,7 @@ def _reload_config_hierarchical() -> None:
     # load the user config file
     if os.path.exists(user_config_path):
         logger.info(f'Using user config path: {user_config_path}')
-        user_config = OmegaConf.to_object(OmegaConf.load(user_config_path))
+        user_config = _parse_config_file(user_config_path)
         logger.info('following overrides '
                     'are obtained from user config file:')
         logger.info(user_config)
@@ -295,8 +293,7 @@ def _reload_config_hierarchical() -> None:
 
     if os.path.exists(project_config_path):
         logger.info(f'Using project config path: {project_config_path}')
-        project_config = OmegaConf.to_object(
-            OmegaConf.load(project_config_path))
+        project_config = _parse_config_file(project_config_path)
         logger.info('following overrides '
                     'are obtained from project config file:')
         logger.info(project_config)
