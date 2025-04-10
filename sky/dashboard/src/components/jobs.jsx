@@ -54,26 +54,27 @@ export function formatDuration(durationInSeconds) {
   // Convert to a whole number if it's a float
   durationInSeconds = Math.floor(durationInSeconds);
 
-  if (durationInSeconds < 60) {
-    return `${durationInSeconds}s`;
-  }
+  const units = [
+    { value: 86400, label: 'd' }, // days
+    { value: 3600, label: 'h' },  // hours
+    { value: 60, label: 'm' },    // minutes
+    { value: 1, label: 's' }      // seconds
+  ];
 
-  const hours = Math.floor(durationInSeconds / 3600);
-  const minutes = Math.floor((durationInSeconds % 3600) / 60);
-  const seconds = durationInSeconds % 60;
-
+  let remaining = durationInSeconds;
   let result = '';
-  if (hours > 0) {
-    result += `${hours}h `;
-  }
-  if (minutes > 0 || hours > 0) {
-    result += `${minutes}m `;
-  }
-  if (hours < 1) {
-    result += `${seconds}s`;
+  let count = 0;
+
+  for (const unit of units) {
+    if (remaining >= unit.value && count < 2) {
+      const value = Math.floor(remaining / unit.value);
+      result += `${value}${unit.label} `;
+      remaining %= unit.value;
+      count++;
+    }
   }
 
-  return result.trim();
+  return result.trim() || '0s';
 }
 
 export function ManagedJobs() {
@@ -92,25 +93,6 @@ export function ManagedJobs() {
     if (refreshDataRef.current) {
       refreshDataRef.current();
     }
-  };
-
-  const handleRestartController = () => {
-    setConfirmationModal({
-      isOpen: true,
-      title: 'Restart Controller',
-      message: `Are you sure you want to restart the job controller?`,
-      onConfirm: async () => {
-        try {
-          await handleJobAction('restartcontroller', null, null, true);
-          // Only refresh after handleJobAction succeeds
-          if (refreshDataRef.current) {
-            refreshDataRef.current();
-          }
-        } finally {
-          setConfirmationModal({ ...confirmationModal, isOpen: false });
-        }
-      },
-    });
   };
 
   return (
@@ -138,17 +120,6 @@ export function ManagedJobs() {
           >
             <RotateCwIcon className="h-4 w-4 mr-2" />
             Refresh
-          </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleRestartController}
-            disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright"
-            title="Restart Controller"
-          >
-            <RefreshCcw className="h-4 w-4 mr-2" />
-            Restart Controller
           </Button>
         </div>
       </div>
@@ -224,49 +195,48 @@ export function ManagedJobsTable({
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
   const [selectedStatus, setSelectedStatus] = useState('All');
+  const [controllerStopped, setControllerStopped] = useState(false);
+  const [confirmationModal, setConfirmationModal] = useState({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: null,
+  });
 
-  // Add this useEffect
-  useEffect(() => {
-    setSelectedStatus('All');
-  }, [activeTab]);
-
-  // Add click outside handler to collapse expanded row
-  useEffect(() => {
-    function handleClickOutside(event) {
-      // Don't close if clicking the show more/less button
-      if (event.target.closest('[data-button-type="show-more-less"]')) {
-        return;
-      }
-
-      // If expanded row exists and click is outside of it
-      if (
-        expandedRowId &&
-        expandedRowRef.current &&
-        !expandedRowRef.current.contains(event.target)
-      ) {
-        setExpandedRowId(null);
-      }
-    }
-
-    // Add event listener
-    document.addEventListener('mousedown', handleClickOutside);
-
-    // Clean up the event listener
-    return () => {
-      document.removeEventListener('mousedown', handleClickOutside);
-    };
-  }, [expandedRowId]);
+  const handleRestartController = async () => {
+    setConfirmationModal({
+      isOpen: true,
+      title: 'Restart Controller',
+      message: 'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
+      onConfirm: async () => {
+        try {
+          setLocalLoading(true);
+          await handleJobAction('restartcontroller', null, null, true);
+          // Refresh data after restarting the controller
+          await fetchData();
+        } catch (err) {
+          console.error('Error restarting controller:', err);
+        } finally {
+          setLocalLoading(false);
+        }
+      },
+    });
+  };
 
   const fetchData = React.useCallback(async () => {
-    setLoading(true);
     setLocalLoading(true);
-    let initialData;
-    initialData = await getManagedJobs();
-    setData(initialData); // Store raw data without sorting
-    setLoading(false); // Stop loading for parent component
-    setLocalLoading(false); // Stop loading locally
-    setIsInitialLoad(false); // No longer initial load after first data fetch
-  }, [setLoading]);
+    try {
+      const { jobs, controllerStopped } = await getManagedJobs();
+      setData(jobs);
+      setControllerStopped(controllerStopped);
+    } catch (err) {
+      console.error('Error fetching managed jobs:', err);
+      setData([]);
+    } finally {
+      setLocalLoading(false);
+      setIsInitialLoad(false);
+    }
+  }, []);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -412,7 +382,7 @@ export function ManagedJobsTable({
       <div className="flex items-center mb-4 text-sm">
         <span className="text-sm font-medium text-gray-700">Status:</span>
         <div className="flex flex-wrap gap-2">
-          <button
+          {/* <button
             onClick={() => setSelectedStatus('All')}
             className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
               selectedStatus === 'All'
@@ -424,7 +394,7 @@ export function ManagedJobsTable({
             <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
               {statusCounts.All}
             </span>
-          </button>
+          </button> */}
           {Object.entries(statusCounts)
             .filter(([status]) => status !== 'All')
             .map(([status, count]) => {
@@ -514,7 +484,7 @@ export function ManagedJobsTable({
                 Recoveries{getSortDirection('recoveries')}
               </TableHead>
               <TableHead>Details</TableHead>
-              <TableHead>Actions</TableHead>
+              <TableHead>Logs</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -592,9 +562,26 @@ export function ManagedJobsTable({
               <TableRow>
                 <TableCell
                   colSpan={11}
-                  className="text-center py-6 text-gray-500"
+                  className="text-center py-6"
                 >
-                  No active jobs
+                  <div className="flex flex-col items-center space-y-4">
+                    <p className="text-gray-500">No active jobs</p>
+                    {controllerStopped && (
+                      <div className="flex flex-col items-center space-y-2">
+                        <p className="text-gray-700">The managed job controller has been stopped. Please restart it to check the latest job status.</p>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={handleRestartController}
+                          className="text-sky-blue hover:text-sky-blue-bright"
+                          disabled={loading}
+                        >
+                          <RefreshCcw className="h-4 w-4 mr-2" />
+                          Restart Controller
+                        </Button>
+                      </div>
+                    )}
+                  </div>
                 </TableCell>
               </TableRow>
             )}
@@ -690,6 +677,14 @@ export function ManagedJobsTable({
           </div>
         </div>
       )}
+
+      <ConfirmationModal
+        isOpen={confirmationModal.isOpen}
+        onClose={() => setConfirmationModal({ ...confirmationModal, isOpen: false })}
+        onConfirm={confirmationModal.onConfirm}
+        title={confirmationModal.title}
+        message={confirmationModal.message}
+      />
     </div>
   );
 }

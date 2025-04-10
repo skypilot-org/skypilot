@@ -24,6 +24,25 @@ export async function getManagedJobs({ allUsers = true } = {}) {
     });
     const id = response.headers.get('x-request-id');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
+    if (fetchedData.status === 500) {
+      try {
+        const data = await fetchedData.json();
+        if (data.detail && data.detail.error) {
+          try {
+            const error = JSON.parse(data.detail.error);
+            // Handle specific error types
+            if (error.type && error.type === ClusterNotUpError) {
+              return { jobs: [], controllerStopped: true }; 
+            }
+          } catch (jsonError) {
+            console.error('Error parsing JSON:', jsonError);
+          }
+        }
+      } catch (parseError) {
+        console.error('Error parsing JSON:', parseError);
+      }
+      return { jobs: [], controllerStopped: false };
+    }
     // print out the response for debugging
     const data = await fetchedData.json();
     const managedJobs = data.return_value ? JSON.parse(data.return_value) : [];
@@ -104,10 +123,10 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         events: events,
       };
     });
-    return jobData;
+    return { jobs: jobData, controllerStopped: false };
   } catch (error) {
     console.error('Error fetching managed job data:', error);
-    return [];
+    return { jobs: [], controllerStopped: false };
   }
 }
 

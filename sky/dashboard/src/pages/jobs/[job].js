@@ -43,7 +43,7 @@ function JobDetails() {
   }
 
   // Convert both to strings to ensure proper comparison
-  const detailJobData = jobData?.find(
+  const detailJobData = jobData?.jobs?.find(
     (item) => String(item.id) === String(jobId)
   );
 

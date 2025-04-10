@@ -1715,6 +1715,8 @@ def api_start(
         logger.info('API server is already running:')
     logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
                 f'{server_common.get_server_url(host)}\n'
+                f'{ux_utils.INDENT_SYMBOL}SkyPilot Dashboard: '
+                f'{server_common.get_server_url(host)}/dashboard\n'
                 f'{ux_utils.INDENT_LAST_SYMBOL}'
                 f'View API server logs at: {constants.API_SERVER_LOGS}')
 
