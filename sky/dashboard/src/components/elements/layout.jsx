@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { TopNav, TopBar, SidebarProvider } from './sidebar';
+import { TopBar, SidebarProvider } from './sidebar';
 
 function LayoutContent({ children, highlighted }) {
   const [isMobile, setIsMobile] = useState(false);
@@ -24,13 +24,12 @@ function LayoutContent({ children, highlighted }) {
       {/* Fixed top bar with navigation */}
       <div className="fixed top-0 left-0 right-0 z-50 shadow-sm">
         <TopBar />
-        <TopNav highlighted={highlighted} />
       </div>
 
       {/* Main content */}
       <div
         className="transition-all duration-200 ease-in-out min-h-screen"
-        style={{ paddingTop: '112px' }}
+        style={{ paddingTop: '56px' }}
       >
         <main className="p-6">{children}</main>
       </div>

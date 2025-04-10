@@ -11,6 +11,7 @@ import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { CopyIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
+import { BASE_PATH } from '@/data/connectors/constants';
 
 export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
   const [copied, setCopied] = React.useState(false);
@@ -28,7 +29,7 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Connect to {cluster}</DialogTitle>
+          <DialogTitle>Connect to <span className="font-light">"{cluster}"</span></DialogTitle>
           <DialogDescription>
             Use these instructions to connect to your cluster via SSH.
           </DialogDescription>
@@ -62,7 +63,7 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
           <div>
             <h3 className="text-sm font-medium mb-2">Additional Information</h3>
             <p className="text-sm text-muted-foreground">
-              Make sure run{' '}
+              Make sure to run{' '}
               <code className="text-sm">sky status {cluster}</code> first to
               have SkyPilot set up the SSH access.
             </p>
@@ -76,21 +77,34 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
 export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Connect to {cluster}</DialogTitle>
+          <DialogTitle>Connect to <span className="font-light">"{cluster}"</span></DialogTitle>
           <DialogDescription>
-            Refer to the short video below to connect to your cluster using
-            Remote-SSH.
-            <div className="mt-4 relative" style={{ paddingBottom: '56.25%' /* 16:9 aspect ratio */ }}>
-              <video
-                className="absolute top-0 left-0 w-full h-full rounded-lg"
-                controls
-                preload="metadata"
-              >
-                <source src="/videos/cursor-small.mp4" type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
+            <div className="flex flex-col space-y-4">
+              <div>
+                <h3 className="text-sm font-medium mb-2 my-2">Setup SSH access</h3>
+                <Card className="p-3 bg-gray-50">
+                  <pre className="text-sm">
+                    <code>sky status {cluster}</code>
+                  </pre>
+                </Card>
+              </div>
+              <div>
+                <h3 className="text-sm font-medium">Connect with VSCode/Cursor</h3>
+                <div className="relative -mt-10" style={{ paddingBottom: '75%' }}>
+                  <video
+                    className="absolute top-0 left-0 w-full h-full rounded-lg"
+                    controls
+                    autoPlay
+                    muted
+                    preload="metadata"
+                  >
+                    <source src={`${BASE_PATH}/videos/cursor-small.mp4`} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
+              </div>
             </div>
           </DialogDescription>
         </DialogHeader>

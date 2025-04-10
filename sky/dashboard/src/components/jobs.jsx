@@ -426,6 +426,12 @@ export function ManagedJobsTable({
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('user')}
+              >
+                User{getSortDirection('user')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('submitted_at')}
               >
                 Submitted{getSortDirection('submitted_at')}
@@ -434,7 +440,7 @@ export function ManagedJobsTable({
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('job_duration')}
               >
-                Job Duration{getSortDirection('job_duration')}
+                Duration{getSortDirection('job_duration')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -465,12 +471,6 @@ export function ManagedJobsTable({
                 onClick={() => requestSort('recoveries')}
               >
                 Recoveries{getSortDirection('recoveries')}
-              </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
               </TableHead>
               <TableHead>Details</TableHead>
               <TableHead>Actions</TableHead>
@@ -504,6 +504,7 @@ export function ManagedJobsTable({
                           {item.name}
                         </Link>
                       </TableCell>
+                      <TableCell>{item.user}</TableCell>
                       <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                       <TableCell>{formatDuration(item.job_duration)}</TableCell>
                       <TableCell>
@@ -513,7 +514,6 @@ export function ManagedJobsTable({
                       <TableCell>{item.cluster}</TableCell>
                       <TableCell>{item.region}</TableCell>
                       <TableCell>{item.recoveries}</TableCell>
-                      <TableCell>{item.user}</TableCell>
                       <TableCell>
                         {item.details ? (
                           <TruncatedDetails
@@ -961,31 +961,33 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
         <Card className="p-3">
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <div className="text-gray-600 font-medium text-lg">Job ID</div>
-              <div className="text-sm mt-1">{jobData.id}</div>
+              <div className="text-gray-600 font-medium text-base">Job ID</div>
+              <div className="text-base mt-1">{jobData.id}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">User</div>
-              <div className="text-sm mt-1">{jobData.user}</div>
+              <div className="text-gray-600 font-medium text-base">User</div>
+              <div className="text-base mt-1">{jobData.user}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">Status</div>
-              <div className="text-sm mt-1">{jobData.status}</div>
+              <div className="text-gray-600 font-medium text-base">Status</div>
+              <div className="text-base mt-1">
+                <Status2Icon status={jobData.status} />
+              </div>
             </div>
             {jobData.resources && (
               <div>
-                <div className="text-gray-600 font-medium text-lg">Resources</div>
-                <div className="text-sm mt-1">{jobData.resources || 'N/A'}</div>
+                <div className="text-gray-600 font-medium text-base">Resources</div>
+                <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
               </div>
             )}
             <div>
-              <div className="text-gray-600 font-medium text-lg">Job Name</div>
-              <div className="text-sm mt-1">{jobData.job}</div>
+              <div className="text-gray-600 font-medium text-base">Job Name</div>
+              <div className="text-base mt-1">{jobData.job}</div>
             </div>
             {jobData.cluster && (
               <div>
-                <div className="text-gray-600 font-medium text-lg">Cluster</div>
-                <div className="text-sm mt-1">
+                <div className="text-gray-600 font-medium text-base">Cluster</div>
+                <div className="text-base mt-1">
                   <Link
                     href={`/clusters/${jobData.cluster}`}
                     className="text-sky-blue hover:underline"
@@ -997,8 +999,8 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
             )}
             {jobData.infra && (
               <div>
-                <div className="text-gray-600 font-medium text-lg">Infra</div>
-                <div className="text-sm mt-1">{jobData.infra}</div>
+                <div className="text-gray-600 font-medium text-base">Infra</div>
+                <div className="text-base mt-1">{jobData.infra}</div>
               </div>
             )}
           </div>
@@ -1175,10 +1177,10 @@ export function Status2Actions({
         >
           <button
             onClick={(e) => handleLogsClick(e, 'logs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
+            className="text-sky-blue hover:text-sky-blue-bright font-medium flex items-center"
           >
-            <FileSearchIcon className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />
-            {withLabel && 'Logs'}
+            <FileSearchIcon className="w-4 h-4 text-gray-500 inline-block" />
+            {withLabel && <span className="ml-1.5 leading-none">Logs</span>}
           </button>
         </Tooltip>
         {managed && (
@@ -1319,6 +1321,12 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
+                onClick={() => requestSort('user')}
+              >
+                User{getSortDirection('user')}
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
                 onClick={() => requestSort('submitted_at')}
               >
                 Submitted{getSortDirection('submitted_at')}
@@ -1327,7 +1335,7 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('job_duration')}
               >
-                Job Duration{getSortDirection('job_duration')}
+                Duration{getSortDirection('job_duration')}
               </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
@@ -1341,13 +1349,7 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
               >
                 Resources{getSortDirection('resources')}
               </TableHead>
-              <TableHead
-                className="sortable whitespace-nowrap"
-                onClick={() => requestSort('user')}
-              >
-                User{getSortDirection('user')}
-              </TableHead>
-              <TableHead>Actions</TableHead>
+              <TableHead className="whitespace-nowrap">Logs</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -1390,13 +1392,13 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
                         />
                       </Link>
                     </TableCell>
+                    <TableCell>{item.user}</TableCell>
                     <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
                       <Status2Icon status={item.status} />
                     </TableCell>
                     <TableCell>{item.resources}</TableCell>
-                    <TableCell>{item.user}</TableCell>
                     <TableCell className="flex content-center items-center">
                       <Status2Actions
                         jobParent={`/clusters/${clusterName}`}

@@ -20,7 +20,7 @@ function JobHeader({
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <div className="text-sm flex items-center">
+        <div className="text-base flex items-center">
           <Link href="/clusters" className="text-sky-blue hover:underline">
             Sky Clusters
           </Link>

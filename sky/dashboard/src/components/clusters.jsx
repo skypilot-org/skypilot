@@ -53,14 +53,13 @@ export function Clusters() {
 
   return (
     <Layout highlighted="clusters">
-      <div className="text-sm mb-4">
-        <Link href="/clusters" className="text-sky-blue">
-          Sky Clusters
-        </Link>
-      </div>
-      <div className="border-b border-gray-200 my-4"></div>
-      <div className="flex mb-4">
-        <div className="ml-auto flex items-center">
+      <div className="flex items-center justify-between mb-4 h-5">
+        <div className="text-base">
+          <Link href="/clusters" className="text-sky-blue leading-none">
+            Sky Clusters
+          </Link>
+        </div>
+        <div className="flex items-center">
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
@@ -69,15 +68,18 @@ export function Clusters() {
           )}
           <Button
             variant="ghost"
+            title="Refresh"
             size="icon"
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright"
+            className="text-sky-blue hover:text-sky-blue-bright h-8 w-8 p-0"
           >
-            <RotateCwIcon className="h-5 w-5" />
+            <RotateCwIcon className="h-4 w-4" />
           </Button>
-        </div>
+          Refresh
+          </div>
       </div>
+      <div className="border-b border-gray-200 my-4"></div>
       <ClusterTable
         activeTab={activeTab}
         refreshInterval={10000}
@@ -279,7 +281,7 @@ export function ClusterTable({
                     <TableCell>{item.user}</TableCell>
                     <TableCell>{item.resources_str}</TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
-                    <TableCell className="flex content-center items-center text-sm">
+                    <TableCell className="text-left">
                       <Status2Actions
                         cluster={item.cluster}
                         status={item.status}
@@ -472,8 +474,8 @@ export const enabledActions = (status, cluster) => {
 };
 
 const actionIcons = {
-  connect: <Terminal className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
-  VSCode: <SquareCode className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />,
+  connect: <Terminal className="w-5 h-5 text-gray-500 inline-block" />,
+  VSCode: <SquareCode className="w-5 h-5 text-gray-500 inline-block" />,
 };
 
 export function Status2Actions({
@@ -507,7 +509,7 @@ export function Status2Actions({
 
   return (
     <>
-      <span className="flex content-center items-center text-sm">
+      <span className="flex justify-start items-center text-sm">
         {Object.entries(actionIcons).map(([actionName, actionIcon]) => {
           let label, tooltipText;
           switch (actionName) {
@@ -534,12 +536,12 @@ export function Status2Actions({
               >
                 <button
                   onClick={() => handleActionClick(actionName)}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center text-sm"
+                  className="text-sky-blue hover:text-sky-blue-bright font-medium mr-2 inline-flex items-center text-sm"
                 >
-                  <span className="w-4 h-4 inline-block">
+                  <span className="flex items-center justify-center w-5 h-5">
                     {actionIcon}
                   </span>
-                  {label && <span className="ml-1 text-sm">{label}</span>}
+                  {label && <span className="ml-1.5 leading-none">{label}</span>}
                 </button>
               </Tooltip>
             );
@@ -551,13 +553,13 @@ export function Status2Actions({
               className="capitalize text-sm text-muted-foreground"
             >
               <span
-                className="opacity-30 mx-2 flex items-center cursor-not-allowed text-sm"
+                className="opacity-30 mr-2 flex items-center cursor-not-allowed text-sm"
                 title={actionName}
               >
-                <span className="w-4 h-4">
+                <span className="w-5 h-5">
                   {actionIcon}
                 </span>
-                {label && <span className="ml-1 text-sm">{label}</span>}
+                {label && <span className="ml-1.5 text-sm">{label}</span>}
               </span>
             </Tooltip>
           );

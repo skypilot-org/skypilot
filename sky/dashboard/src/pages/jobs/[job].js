@@ -5,7 +5,7 @@ import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { EventTable } from '@/components/elements/events';
 import { useManagedJobDetails } from '@/data/connectors/jobs';
-import { Status2Actions } from '@/components/jobs';
+import { Status2Actions, Status2Icon } from '@/components/jobs';
 import Link from 'next/link';
 import { RotateCwIcon, FileSearchIcon, SquareIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
@@ -299,29 +299,31 @@ useEffect(() => {
         <Card className="p-3">
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <div className="text-gray-600 font-medium text-lg">Job ID</div>
-              <div className="text-sm mt-1">{jobData.id}</div>
+              <div className="text-gray-600 font-medium text-base">Job ID</div>
+              <div className="text-base mt-1">{jobData.id}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">User</div>
-              <div className="text-sm mt-1">{jobData.user}</div>
+              <div className="text-gray-600 font-medium text-base">User</div>
+              <div className="text-base mt-1">{jobData.user}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">Status</div>
-              <div className="text-sm mt-1">{jobData.status}</div>
+              <div className="text-gray-600 font-medium text-base">Status</div>
+              <div className="text-base mt-1">
+                <Status2Icon status={jobData.status} />
+              </div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">Resources</div>
-              <div className="text-sm mt-1">{jobData.resources || 'N/A'}</div>
+              <div className="text-gray-600 font-medium text-base">Resources</div>
+              <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">Job Name</div>
-              <div className="text-sm mt-1">{jobData.name}</div>
+              <div className="text-gray-600 font-medium text-base">Job Name</div>
+              <div className="text-base mt-1">{jobData.name}</div>
             </div>
             {jobData.cluster && (
               <div>
-                <div className="text-gray-600 font-medium text-lg">Cluster</div>
-                <div className="text-sm mt-1">
+                <div className="text-gray-600 font-medium text-base">Cluster</div>
+                <div className="text-base mt-1">
                   <Link
                     href={`/clusters/${jobData.cluster}`}
                     className="text-sky-blue hover:underline"
@@ -334,10 +336,6 @@ useEffect(() => {
           </div>
         </Card>
       </div>
-
-      {/* Events Section */}
-      <h3 className="text-lg font-semibold my-4">Events</h3>
-      <EventTable events={jobData.events || []} />
     </div>
   );
 }

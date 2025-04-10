@@ -6,6 +6,7 @@ import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
 import {
   Status2Actions,
+  Status2Icon,
 } from '@/components/clusters';
 import { Card } from '@/components/ui/card';
 import {
@@ -53,7 +54,7 @@ function ClusterDetails() {
   return (
     <Layout highlighted="clusters">
       <div className="flex items-center justify-between mb-4">
-        <div className="text-sm flex items-center">
+        <div className="text-base flex items-center">
           <Link href="/clusters" className="text-sky-blue hover:underline">
             Sky Clusters
           </Link>
@@ -132,20 +133,22 @@ function ActiveTab({ clusterData, clusterJobData }) {
         <Card className="p-3">
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <div className="text-gray-600 font-medium text-lg">Cluster</div>
-              <div className="text-sm mt-1">{clusterData.cluster}</div>
+              <div className="text-gray-600 font-medium text-base">Cluster</div>
+              <div className="text-base mt-1">{clusterData.cluster}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">User</div>
-              <div className="text-sm mt-1">{clusterData.user}</div>
+              <div className="text-gray-600 font-medium text-base">User</div>
+              <div className="text-base mt-1">{clusterData.user}</div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">Status</div>
-              <div className="text-sm mt-1">{clusterData.status}</div>
+              <div className="text-gray-600 font-medium text-base">Status</div>
+              <div className="text-base mt-1">
+                <Status2Icon status={clusterData.status} />
+              </div>
             </div>
             <div>
-              <div className="text-gray-600 font-medium text-lg">Resources</div>
-              <div className="text-sm mt-1">{clusterData.resources_str || 'N/A'}</div>
+              <div className="text-gray-600 font-medium text-base">Resources</div>
+              <div className="text-base mt-1">{clusterData.resources_str || 'N/A'}</div>
             </div>
           </div>
         </Card>
