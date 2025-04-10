@@ -1,4 +1,5 @@
 """LoadBalancer: Distribute any incoming request to all ready replicas."""
+# pylint: disable=line-too-long
 import asyncio
 import collections
 import copy
@@ -26,6 +27,7 @@ logger = sky_logging.init_logger(__name__)
 
 @dataclasses.dataclass
 class RequestEntry:
+    """Single entry in the request queue."""
     id: int
     time_arrive: float
     time_scheduled: Optional[float]
@@ -36,6 +38,7 @@ class RequestEntry:
 
 @dataclasses.dataclass
 class StealEntry:
+    """Entry to store metrics used when sorting the requests to be stolen."""
     id: int
     matched_rate: float
     matched_length: int
@@ -544,11 +547,11 @@ class SkyServeLoadBalancer:
         assert self._loop is not None
         assert self._request_queue is not None
         logger.info('Starting request queue processor')
-        assert isinstance(self._lb_pool._load_balancing_policy,
-                          lb_policies.ProximateTreePolicy)
+        # assert isinstance(self._lb_pool._load_balancing_policy,
+        #                   lb_policies.ProximateTreePolicy)
         # cache_hit_delay_times = 0
-        cache_threshold = (
-            self._lb_pool._load_balancing_policy.config.cache_threshold)
+        # cache_threshold = (
+        #     self._lb_pool._load_balancing_policy.config.cache_threshold)
         while True:
             await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
             async with self._steal_requests_lock:
@@ -766,25 +769,25 @@ class SkyServeLoadBalancer:
         return fastapi.responses.JSONResponse(
             status_code=200,
             content={'queue_size': await self._request_queue.actual_size()})
-        num = 0
-        lb_to_barrier_idx: Dict[str, int] = collections.defaultdict(int)
-        # TODO(tian): Maintain a counter on this.
-        async with self._steal_requests_lock:
-            for i in range(await self._request_queue.qsize()):
-                entry: RequestQueueEntry = await self._request_queue.get(i)
-                # Barrier entry for steal requests.
-                if isinstance(entry, StealBarrierEntry):
-                    lb_url = entry
-                    num -= max(
-                        0, self._lb_to_steal_requests[lb_url][
-                            lb_to_barrier_idx[lb_url]])
-                    lb_to_barrier_idx[lb_url] += 1
-                    continue
-                assert isinstance(entry, RequestEntry)
-                if not entry.request.headers.get(_IS_FROM_LB_HEADER, False):
-                    num += 1
-        return fastapi.responses.JSONResponse(status_code=200,
-                                              content={'queue_size': num})
+        # num = 0
+        # lb_to_barrier_idx: Dict[str, int] = collections.defaultdict(int)
+        # # TODO(tian): Maintain a counter on this.
+        # async with self._steal_requests_lock:
+        #     for i in range(await self._request_queue.qsize()):
+        #         entry: RequestQueueEntry = await self._request_queue.get(i)
+        #         # Barrier entry for steal requests.
+        #         if isinstance(entry, StealBarrierEntry):
+        #             lb_url = entry
+        #             num -= max(
+        #                 0, self._lb_to_steal_requests[lb_url][
+        #                     lb_to_barrier_idx[lb_url]])
+        #             lb_to_barrier_idx[lb_url] += 1
+        #             continue
+        #         assert isinstance(entry, RequestEntry)
+        #         if not entry.request.headers.get(_IS_FROM_LB_HEADER, False):
+        #             num += 1
+        # return fastapi.responses.JSONResponse(status_code=200,
+        #                                       content={'queue_size': num})
 
     async def _raw_queue_size(self) -> fastapi.responses.Response:
         """Return the size of the request queue."""

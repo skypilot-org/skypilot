@@ -1180,10 +1180,11 @@ class SkyPilotReplicaManager(ReplicaManager):
                     self._probe_all_replicas()
                     replica_infos = serve_state.get_replica_infos(
                         self._service_name)
-                    # TODO(zhwu): when there are multiple load balancers, we need
-                    # to make sure the active_versions are the union of all
+                    # TODO(zhwu): when there are multiple load balancers, we
+                    # need to make sure the active_versions are the union of all
                     # versions of all load balancers.
-                    serve_utils.set_service_status_and_active_versions_from_replica(
+                    serve_utils.\
+                        set_service_status_and_active_versions_from_replica(
                         self._service_name, replica_infos, self._update_mode)
 
             except Exception as e:  # pylint: disable=broad-except

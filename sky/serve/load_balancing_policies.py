@@ -436,7 +436,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             # TODO(tian): Hack. Fix this.
             return_matched_rate = kwargs.get('return_matched_rate', False)
             if return_matched_rate:
-                return replica, matched_rate, len(matched_text)
+                return replica, matched_rate, len(matched_text)  # type: ignore
             return replica
         # logger.info('Falling back to least char count load. '
         #             f'{self.tree.replica_char_count}')
@@ -445,9 +445,9 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         replica2load.pop(disabled_url, None)
         if not replica2load:
             return None
-        return min(replica2load, key=replica2load.get)
-        return await self.tree.get_smallest_replica(self.ready_replicas,
-                                                    disabled_url)
+        return min(replica2load, key=lambda r: replica2load[r])
+        # return await self.tree.get_smallest_replica(self.ready_replicas,
+        #                                             disabled_url)
 
     async def pre_execute_hook(self, replica_url: str,
                                request: 'fastapi.Request') -> None:
