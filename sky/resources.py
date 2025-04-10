@@ -1291,16 +1291,21 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
+
         current_override_configs = self._cluster_config_overrides
         if self._cluster_config_overrides is None:
             current_override_configs = {}
         new_override_configs = override.pop('_cluster_config_overrides', {})
-        override_configs = skypilot_config.overlay_skypilot_config(
+        overlaid_configs = skypilot_config.overlay_skypilot_config(
             original_config=config_utils.Config(current_override_configs),
             override_configs=new_override_configs,
         )
-        if not override_configs:
-            override_configs = None
+        override_configs = config_utils.Config()
+        for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+            elem = overlaid_configs.get_nested(key, None)
+            if elem:
+                override_configs.set_nested(key, elem)
+
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
