@@ -251,9 +251,10 @@ if __name__ == '__main__':
                         choices=all_apis + ['all'],
                         default=[],
                         help='List of APIs to test')
-    parser.add_argument('--run-async',
-                       action='store_true',
-                       help='Whether to run requests asynchronously (if possible)')
+    parser.add_argument(
+        '--run-async',
+        action='store_true',
+        help='Whether to run requests asynchronously (if possible)')
 
     args = parser.parse_args()
 

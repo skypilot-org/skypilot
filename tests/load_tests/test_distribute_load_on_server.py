@@ -11,8 +11,9 @@ import argparse
 import os
 
 import sky
-from sky.utils import subprocess_utils
 from sky import clouds
+from sky.utils import subprocess_utils
+
 
 def stream_log(req_id):
     # wait for cluster to be up
@@ -46,10 +47,13 @@ if __name__ == '__main__':
                         type=str,
                         default='',
                         help='The path to local skypilot repo')
-    parser.add_argument('--branch',
-                        type=str,
-                        default='',
-                        help='The git branch used for benchmark client, skip file_mounts and use the branch as the workdir')
+    parser.add_argument(
+        '--branch',
+        type=str,
+        default='',
+        help=
+        'The git branch used for benchmark client, skip file_mounts and use the branch as the workdir'
+    )
     args, remaining = parser.parse_known_args()
 
     if not args.url:
@@ -72,15 +76,16 @@ if __name__ == '__main__':
             sky api login -e {args.url} && \
             python tests/load_tests/test_load_on_server.py {remaining_args}'
 
-        task = sky.Task(setup=setup,
-                        run=run)
+        task = sky.Task(setup=setup, run=run)
         task.set_file_mounts(file_mounts)
-        task.set_resources(sky.Resources(clouds.Kubernetes(), cpus=args.cpus, memory=args.memory))
+        task.set_resources(
+            sky.Resources(clouds.Kubernetes(),
+                          cpus=args.cpus,
+                          memory=args.memory))
         # Use launch instead of jobs launch for predictable client parallelism
         resps.append(sky.launch(task, f'benchmark-{i}'))
     try:
-        subprocess_utils.run_in_parallel(stream_log,
-                                         resps)
+        subprocess_utils.run_in_parallel(stream_log, resps)
     finally:
         for i in range(args.t):
             sky.down(f'benchmark-{i}')
