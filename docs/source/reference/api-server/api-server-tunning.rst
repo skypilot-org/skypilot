@@ -25,11 +25,22 @@ It is recommended to tune the resources allocated to the API server based on the
             helm upgrade -n ${NAMESPACE} ${RELEASE_NAME} skypilot/skypilot-nightly \
                 --reuse-values \
                 --set apiService.resources.requests.cpu=8 \
-                --set apiService.resources.requests.memory=16Gi
+                --set apiService.resources.requests.memory=16Gi \
+                --set apiService.resources.limits.cpu=8 \
+                --set apiService.resources.limits.memory=16Gi
             
         .. note:: 
 
             If you specify a resources that is lower than the minimum recommended resources for team usage, an error will be raised on ``helm upgrade``. You can specify ``--set apiService.skipResourcesCheck=true`` to skip the check if performance and stability is not an issue for you scenario.
+
+        .. dropdown:: Kubernetes QoS
+
+            We recommend setting the resources limits to the same value as the requests for the following reasons:
+            
+            * API server depends on the resources limit to detect the available resources and decide the maximum concurrency. Setting limits larger than the requests or omitting the limits will cause the API server make aggressive concurrency decisions and may cause high resource contention on the Kubernetes node.
+            * Setting the same value for the limits and requests ensures the QoS class of the API server pod being set to ``Guaranteed`` and reduce the chance of the pod being killed by the Kubernetes node when the node is under resource pressure.
+
+            In short, setting the same value for the limits and requests sacrifices the resources utilization for stability and predictability.
 
     .. tab-item:: VM Deployment
 
@@ -112,3 +123,22 @@ If the request is stuck according to the log, e.g. retrying to launch VMs that i
 .. code-block:: bash
 
     sky api cancel <requst_id>
+
+Avoid concurrent logs requests
+------------------------------
+
+Though a job can run for any length of time, concurrent jobs does not occupy the concurrency. Because once a job is submitted to the cluster, it will be detached and no longer takes any resources off the API server.
+
+However, if you run ``sky logs`` to tail the logs of a job, the log tailing will keep taking off the resources of the API server as long as the job is running. So concurrent log requests will occupy the concurrency and make other requests to be delayed.
+
+To avoid this, it is recommended to run ``sky logs`` and ``sky jobs logs`` with ``--no-follow`` flag if there is a large number of concurrent log requests:
+
+.. code-block:: bash
+
+    sky logs --no-follow my_cluster
+
+Commands that execute jobs like ``sky jobs launch`` and ``sky exec`` will also tail the logs of the job after the job is started by default. You can add ``--async`` flag to submit the job without tailing the logs:
+
+.. code-block:: bash
+
+    sky jobs launch --async job.yaml
