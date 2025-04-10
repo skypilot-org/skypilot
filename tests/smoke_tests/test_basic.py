@@ -31,10 +31,10 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.clouds import Lambda
 from sky.skylet import constants
 from sky.skylet import events
-import sky.skypilot_config
 from sky.utils import common_utils
 
 
@@ -186,11 +186,11 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
-            f'cp ${{SKYPILOT_CONFIG:-~/.sky/config.yaml}} {tmp_config_path} && '
+            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
             # Set config override. This should change the cluster yaml, forcing reprovision/setup
             f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
             # Launch and do full output validation. Setup/provisioning should be run.
-            f's=$(SKYPILOT_DEBUG=0 SKYPILOT_CONFIG={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
+            f's=$(SKYPILOT_DEBUG=0 {skypilot_config.ENV_VAR_SKYPILOT_CONFIG}={tmp_config_path} sky launch -y -c {name} --fast tests/test_yamls/minimal.yaml) && {smoke_tests_utils.VALIDATE_LAUNCH_OUTPUT}',
             f'sky logs {name} 3 --status',
             f'sky status -r {name} | grep UP',
         ],
@@ -431,7 +431,7 @@ def test_core_api_sky_launch_fast(generic_cloud: str):
 
 def test_jobs_launch_and_logs(generic_cloud: str):
     # Use the context manager
-    with sky.skypilot_config.override_skypilot_config(
+    with skypilot_config.override_skypilot_config(
             smoke_tests_utils.LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG):
         name = smoke_tests_utils.get_cluster_name()
         task = sky.Task(run="echo start job; sleep 30; echo end job")
@@ -755,7 +755,7 @@ def test_kubernetes_context_failover(unreachable_context):
             ],
             f'sky down -y {name}-1 {name}-3 {name}-5',
             env={
-                'SKYPILOT_CONFIG': f.name,
+                skypilot_config.ENV_VAR_SKYPILOT_CONFIG: f.name,
                 constants.SKY_API_SERVER_URL_ENV_VAR:
                     sky.server.common.get_server_url()
             },
