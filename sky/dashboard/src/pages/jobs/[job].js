@@ -50,7 +50,7 @@ function JobDetails() {
   return (
     <Layout highlighted="jobs">
       <div className="flex items-center justify-between mb-4">
-        <div className="text-sm flex items-center">
+        <div className="text-base flex items-center">
           <Link href="/jobs" className="text-sky-blue hover:underline">
             Managed Jobs
           </Link>

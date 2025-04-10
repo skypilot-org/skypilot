@@ -86,6 +86,7 @@ export function ManagedJobs() {
     message: '',
     onConfirm: null,
   });
+  const [counts, setCounts] = useState({ active: 0, finished: 0 });
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
@@ -114,26 +115,13 @@ export function ManagedJobs() {
 
   return (
     <Layout highlighted="jobs">
-      <div className="text-sm mb-4">
-        <Link href="/jobs" className="text-sky-blue hover:underline">
-          Managed Jobs
-        </Link>
-      </div>
-      <div className="border-b border-gray-200 my-4"></div>
-      <div className="flex mb-4">
-        <button
-          className={`p-2 mx-4 ${activeTab === 'active' ? 'text-sky-blue font-semibold border-b-2 border-sky-blue' : 'text-gray-700'}`}
-          onClick={() => setActiveTab('active')}
-        >
-          Active
-        </button>
-        <button
-          className={`p-2 mx-4 ${activeTab === 'finished' ? 'text-sky-blue font-semibold border-b-2 border-sky-blue' : 'text-gray-700'}`}
-          onClick={() => setActiveTab('finished')}
-        >
-          Finished
-        </button>
-        <div className="ml-auto flex items-center">
+      <div className="flex items-center justify-between mb-4">
+        <div className="text-base">
+          <Link href="/jobs" className="text-sky-blue hover:underline">
+            Managed Jobs
+          </Link>
+        </div>
+        <div className="flex items-center space-x-2">
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
@@ -142,24 +130,61 @@ export function ManagedJobs() {
           )}
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright mr-2"
+            className="text-sky-blue hover:text-sky-blue-bright"
             title="Refresh"
           >
-            <RotateCwIcon className="h-5 w-5" />
+            <RotateCwIcon className="h-4 w-4 mr-2" />
+            Refresh
           </Button>
           <Button
             variant="ghost"
-            size="icon"
+            size="sm"
             onClick={handleRestartController}
             disabled={loading}
             className="text-sky-blue hover:text-sky-blue-bright"
             title="Restart Controller"
           >
-            <RefreshCcw className="h-5 w-5" />
+            <RefreshCcw className="h-4 w-4 mr-2" />
+            Restart Controller
           </Button>
+        </div>
+      </div>
+      <div className="border-b border-gray-200 my-4"></div>
+      <div className="flex flex-col space-y-4">
+        {/* Activeness Filter */}
+        <div className="flex items-center text-sm">
+          <span className="mr-2 text-gray-600">Activeness:</span>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                activeTab === 'active'
+                  ? 'bg-green-50 text-green-700'
+                  : 'bg-gray-50 text-gray-600 hover:bg-green-50 hover:text-green-700'
+              }`}
+            >
+              <span>ACTIVE</span>
+              <span className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                {counts.active}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('finished')}
+              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                activeTab === 'finished'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-700'
+              }`}
+            >
+              <span>FINISHED</span>
+              <span className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                {counts.finished}
+              </span>
+            </button>
+          </div>
         </div>
       </div>
       <ManagedJobsTable
@@ -167,6 +192,7 @@ export function ManagedJobs() {
         refreshInterval={20000}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
+        onCountsChange={setCounts}
       />
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -184,6 +210,7 @@ export function ManagedJobsTable({
   refreshInterval,
   setLoading,
   refreshDataRef,
+  onCountsChange,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -264,7 +291,7 @@ export function ManagedJobsTable({
       isCurrent = false;
       clearInterval(interval);
     };
-  }, [activeTab, refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData]);
 
   // Sort the data if sortConfig is present
   const sortedData = React.useMemo(() => {
@@ -300,6 +327,20 @@ export function ManagedJobsTable({
     }
     return '';
   };
+
+  // Calculate active and finished counts
+  const activeCount = data.filter(item =>
+    ['RUNNING', 'RECOVERING', 'PENDING', 'SUBMITTED', 'STARTING', 'CANCELLING'].includes(item.status)
+  ).length;
+
+  const finishedCount = data.filter(item =>
+    ['SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER'].includes(item.status)
+  ).length;
+
+  // Update counts in parent component
+  useEffect(() => {
+    onCountsChange({ active: activeCount, finished: finishedCount });
+  }, [activeCount, finishedCount, onCountsChange]);
 
   // First, keep the activeTab filter
   const filteredData = sortedData
@@ -369,8 +410,8 @@ export function ManagedJobsTable({
     <div className="relative">
       {/* Status Filter Bar */}
       <div className="flex items-center mb-4 text-sm">
-        <span className="mr-2 text-gray-600">Filter by status:</span>
-        <div className="flex space-x-2">
+        <span className="text-sm font-medium text-gray-700">Status:</span>
+        <div className="flex flex-wrap gap-2">
           <button
             onClick={() => setSelectedStatus('All')}
             className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
@@ -379,7 +420,7 @@ export function ManagedJobsTable({
                 : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
             }`}
           >
-            <span>ALL</span>
+            <span>All</span>
             <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
               {statusCounts.All}
             </span>
@@ -391,15 +432,15 @@ export function ManagedJobsTable({
               return (
                 <button
                   key={status}
-                  onClick={() => setSelectedStatus(status)}
+                  onClick={() => setSelectedStatus(selectedStatus === status ? 'All' : status)}
                   className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
                     selectedStatus === status
-                      ? badgeStyle
-                      : `${badgeStyle} opacity-75 hover:opacity-100`
+                      ? `${badgeStyle}`
+                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                   }`}
                 >
                   <span>{status}</span>
-                  <span className="text-xs bg-white/50 px-1.5 py-0.5 rounded">
+                  <span className={`text-xs ${selectedStatus === status ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
                     {count}
                   </span>
                 </button>
@@ -654,7 +695,7 @@ export function ManagedJobsTable({
 }
 
 // Helper function to get status-specific styling
-function getStatusStyle(status) {
+function getBadgeStyle(status) {
   switch (status) {
     case 'RUNNING':
       return 'bg-green-50 text-green-700';
@@ -664,8 +705,8 @@ function getStatusStyle(status) {
       return 'bg-blue-50 text-blue-700';
     case 'FAILED':
       return 'bg-red-50 text-red-700';
-    case 'CANCELED':
-      return 'bg-gray-50 text-gray-700';
+    case 'CANCELLED':
+      return 'bg-rose-50 text-rose-700';
     case 'RECOVERING':
       return 'bg-orange-50 text-orange-700';
     case 'SUBMITTED':
@@ -674,6 +715,14 @@ function getStatusStyle(status) {
       return 'bg-cyan-50 text-cyan-700';
     case 'CANCELLING':
       return 'bg-rose-50 text-rose-700';
+    case 'FAILED_SETUP':
+      return 'bg-pink-50 text-pink-700';
+    case 'FAILED_PRECHECKS':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_NO_RESOURCE':
+      return 'bg-red-50 text-red-700';
+    case 'FAILED_CONTROLLER':
+      return 'bg-red-50 text-red-700';
     default:
       return 'bg-gray-100 text-gray-800';
   }
@@ -1042,9 +1091,9 @@ function status2Icon(status) {
           FAILED
         </span>
       );
-    case 'CANCELED':
+    case 'CANCELLED':
       return (
-        <span className={`${badgeClasses} bg-gray-50 text-gray-700`}>
+        <span className={`${badgeClasses} bg-rose-50 text-rose-700`}>
           <SquareIcon className="w-2 h-2 mr-2" />
           CANCELLED
         </span>
@@ -1584,38 +1633,4 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
       )}
     </div>
   );
-}
-
-// Add this helper function to get the exact same badge styles as status2Icon
-function getBadgeStyle(status) {
-  switch (status) {
-    case 'RUNNING':
-      return 'bg-green-50 text-green-700';
-    case 'PENDING':
-      return 'bg-yellow-50 text-yellow-700';
-    case 'SUCCEEDED':
-      return 'bg-blue-50 text-blue-700';
-    case 'FAILED':
-      return 'bg-red-50 text-red-700';
-    case 'CANCELLED':
-      return 'bg-gray-50 text-gray-700';
-    case 'RECOVERING':
-      return 'bg-orange-50 text-orange-700';
-    case 'SUBMITTED':
-      return 'bg-indigo-50 text-indigo-700';
-    case 'STARTING':
-      return 'bg-cyan-50 text-cyan-700';
-    case 'CANCELLING':
-      return 'bg-rose-50 text-rose-700';
-    case 'FAILED_SETUP':
-      return 'bg-pink-50 text-pink-700';
-    case 'FAILED_PRECHECKS':
-      return 'bg-red-50 text-red-700';
-    case 'FAILED_NO_RESOURCE':
-      return 'bg-red-50 text-red-700';
-    case 'FAILED_CONTROLLER':
-      return 'bg-red-50 text-red-700';
-    default:
-      return 'bg-gray-100 text-gray-800';
-  }
 }
