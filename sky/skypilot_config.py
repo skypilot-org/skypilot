@@ -1,6 +1,6 @@
 """Immutable user configurations (EXPERIMENTAL).
 
-On module import, we attempt to parse the config located at CONFIG_PATH
+On module import, we attempt to parse the config located at USER_CONFIG_PATH
 (default: ~/.sky/config.yaml). Caller can then use
 
   >> skypilot_config.loaded()
@@ -161,12 +161,12 @@ def _get_config_file_path(envvar: str) -> Optional[str]:
     return None
 
 
-def _validate_config(config: Dict[str, Any], source: str) -> None:
+def _validate_config(config: Dict[str, Any], config_path: str) -> None:
     """Validates the config."""
     common_utils.validate_schema(
         config,
         schemas.get_config_schema(),
-        f'Invalid {source} configuration. See: '
+        f'Invalid config YAML ({config_path}). See: '
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
@@ -290,7 +290,7 @@ def _reload_config_hierarchical() -> None:
         logger.info('following overrides '
                     'are obtained from user config file:')
         logger.info(user_config)
-        _validate_config(user_config, 'user')
+        _validate_config(user_config, user_config_path)
         overrides.append(user_config)
 
     if os.path.exists(project_config_path):
@@ -300,7 +300,7 @@ def _reload_config_hierarchical() -> None:
         logger.info('following overrides '
                     'are obtained from project config file:')
         logger.info(project_config)
-        _validate_config(project_config, 'project')
+        _validate_config(project_config, project_config_path)
         overrides.append(project_config)
 
     # layer the configs on top of each other based on priority
@@ -350,7 +350,7 @@ def override_skypilot_config(
         common_utils.validate_schema(
             config,
             schemas.get_config_schema(),
-            f'Invalid config {config}. See: '
+            'Invalid config. See: '
             'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
             'Error: ',
             skip_none=False)
