@@ -322,14 +322,9 @@ def create_r2_client(region: str = 'auto') -> Client:
     return cloudflare.client('s3', region)
 
 
-def create_nebius_client(region: Optional[str]) -> Client:
-    """Helper method that connects to Boto3 client for Nebius Object Storage
-
-    Args:
-      region: str; Region for Nebius Object Storage
-    """
-    region = region if region is not None else nebius.DEFAULT_REGION
-    return nebius.client('s3', region)
+def create_nebius_client() -> Client:
+    """Helper method that connects to Boto3 client for Nebius Object Storage"""
+    return nebius.client('s3')
 
 
 def verify_r2_bucket(name: str) -> bool:
@@ -566,7 +561,8 @@ def run_upload_cli(command: str, access_denied_message: str, bucket_name: str,
         require_outputs=True,
         # We need to use bash as some of the cloud commands uses bash syntax,
         # such as [[ ... ]]
-        executable='/bin/bash')
+        executable='/bin/bash',
+        log_cmd=True)
     if access_denied_message in stderr:
         with ux_utils.print_exception_no_traceback():
             raise PermissionError('Failed to upload files to '

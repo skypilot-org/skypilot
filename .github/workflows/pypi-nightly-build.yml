@@ -23,9 +23,9 @@ jobs:
   nightly-build-pypi:
     runs-on: ubuntu-latest
     needs: check-date
-    if: ${{ needs.check_date.outputs.should_run != 'false' }}
+    if: ${{ needs.check-date.outputs.should_run != 'false' }}
     outputs:
-      build_number: ${{ steps.trigger_buildkite.outputs.build_number }}
+      build_number: ${{ steps.extract_build_number.outputs.build_number }}
     steps:
       - name: Clone repository
         uses: actions/checkout@v3
