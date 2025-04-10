@@ -275,6 +275,15 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     return list(env_dict.items())
 
 
+_CONFIG_OPTIONS = [
+    click.option(
+        '--config',
+        required=False,
+        type=str,
+        help=
+        'Path to a config file or a comma-separated list of key-value pairs.')
+]
+
 _COMMON_OPTIONS = [
     click.option('--async/--no-async',
                  'async_call',
@@ -1038,7 +1047,7 @@ def cli():
                     'To run locally, create a local Kubernetes cluster with '
                     '``sky local up``.'))
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
-                    _COMMON_OPTIONS)
+                    _COMMON_OPTIONS + _CONFIG_OPTIONS)
 @click.option(
     '--idle-minutes-to-autostop',
     '-i',
@@ -1105,14 +1114,6 @@ def cli():
     required=False,
     help=('[Experimental] If the cluster is already up and available, skip '
           'provisioning and setup steps.'))
-@click.option('--config-file',
-              required=False,
-              type=str,
-              help='Project config file to use for the status command.')
-@click.option('--config',
-              required=False,
-              type=str,
-              help='Comma-separated list of individual config overrides.')
 @usage_lib.entrypoint
 def launch(
         entrypoint: Tuple[str, ...],
@@ -1145,7 +1146,6 @@ def launch(
         clone_disk_from: Optional[str],
         fast: bool,
         async_call: bool,
-        config_file: Optional[str],
         config: Optional[str]):
     """Launch a cluster or task.
 
@@ -1155,6 +1155,7 @@ def launch(
     In both cases, the commands are run under the task's workdir (if specified)
     and they undergo job queue scheduling.
     """
+    skypilot_config.apply_cli_config(config)
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     # TODO(zhwu): the current --async is a bit inconsistent with the direct
     # sky launch, as `sky api logs` does not contain the logs for the actual job
@@ -1228,10 +1229,6 @@ def launch(
         clone_disk_from=clone_disk_from,
         fast=fast,
         _need_confirmation=not yes,
-        override_skypilot_config=skypilot_config.compose_cli_config(
-            cli_config_arg=config,
-            cli_config_file=config_file,
-        ),
     )
     job_id_handle = _async_call_or_wait(request_id, async_call, 'sky.launch')
     if not async_call:
@@ -1281,7 +1278,7 @@ def launch(
     help=('If True, as soon as a job is submitted, return from this call '
           'and do not stream execution logs.'))
 @_add_click_options(_TASK_OPTIONS_WITH_NAME + _EXTRA_RESOURCES_OPTIONS +
-                    _COMMON_OPTIONS)
+                    _COMMON_OPTIONS + _CONFIG_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def exec(cluster: Optional[str], cluster_option: Optional[str],
@@ -1292,7 +1289,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
          use_spot: Optional[bool], image_id: Optional[str],
          env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
          cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-         disk_tier: Optional[str], async_call: bool):
+         disk_tier: Optional[str], async_call: bool, config: Optional[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1351,6 +1348,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
       sky exec mycluster --env WANDB_API_KEY python train_gpu.py
 
     """
+    skypilot_config.apply_cli_config(config)
     if cluster_option is None and cluster is None:
         raise click.UsageError('Missing argument \'[CLUSTER]\' and '
                                '\'[ENTRYPOINT]...\'')
@@ -1732,12 +1730,13 @@ def _show_endpoint(query_clusters: Optional[List[str]],
               required=False,
               help='Show all clusters, including those not owned by the '
               'current user.')
+@_add_click_options(_CONFIG_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
 def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
            endpoint: Optional[int], show_managed_jobs: bool,
            show_services: bool, kubernetes: bool, clusters: List[str],
-           all_users: bool):
+           all_users: bool, config: Optional[str]):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Show clusters.
 
@@ -1800,6 +1799,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
       or for autostop-enabled clusters, use ``--refresh`` to query the latest
       cluster statuses from the cloud providers.
     """
+    skypilot_config.apply_cli_config(config)
     if kubernetes:
         _status_kubernetes(verbose)
         return

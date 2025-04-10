@@ -93,6 +93,7 @@ class RequestBody(pydantic.BaseModel):
             'override_skypilot_config',
             get_override_skypilot_config_from_client())
         super().__init__(**data)
+        print(f'RequestBody overrides: {self.override_skypilot_config}')
 
     def to_kwargs(self) -> Dict[str, Any]:
         """Convert the request body to a kwargs dictionary on API server.

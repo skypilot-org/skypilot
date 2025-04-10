@@ -52,13 +52,11 @@ import contextlib
 import copy
 import os
 import pprint
-import tempfile
 import typing
 from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from omegaconf import OmegaConf
 
-from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -86,7 +84,14 @@ logger = sky_logging.init_logger(__name__)
 # (Used internally) An env var holding the path to the local config file. This
 # is only used by jobs controller tasks to ensure recoveries of the same job
 # use the same config file.
+# If this value is specified, ENV_VAR_GLOBAL_CONFIG and ENV_VAR_PROJECT_CONFIG
+# are ignored and ONLY the config file specified by this env var is used.
 ENV_VAR_SKYPILOT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}CONFIG'
+
+# (Used by users) Environment variables for setting non-default global and
+# project config files on clients.
+ENV_VAR_GLOBAL_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}GLOBAL_CONFIG'
+ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the local config file.
 CONFIG_PATH = '~/.sky/config.yaml'
@@ -139,7 +144,47 @@ def to_dict() -> config_utils.Config:
     return copy.deepcopy(_dict)
 
 
+def _get_config_file_path(envvar: str) -> Optional[str]:
+    config_path_via_env_var = os.environ.get(envvar)
+    if config_path_via_env_var is not None:
+        return os.path.expanduser(config_path_via_env_var)
+    return None
+
+
+def _validate_config(config: Dict[str, Any], source: str) -> None:
+    """Validates the config."""
+    common_utils.validate_schema(
+        config,
+        schemas.get_config_schema(),
+        f'Invalid {source} configuration. See: '
+        'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+        'Error: ',
+        skip_none=False)
+
+
+def _overlay_skypilot_config(
+        original_config: Optional[config_utils.Config],
+        override_configs: Optional[config_utils.Config]) -> config_utils.Config:
+    """Overlays the override configs on the original configs."""
+    if original_config is None:
+        original_config = config_utils.Config()
+    config = original_config.get_nested(keys=tuple(),
+                                        default_value=None,
+                                        override_configs=override_configs,
+                                        allowed_override_keys=None,
+                                        disallowed_override_keys=None)
+    return config
+
+
 def _reload_config() -> None:
+    internal_config_path = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
+    if internal_config_path is not None:
+        _reload_config_legacy()
+    else:
+        _reload_config_hierarchical()
+
+
+def _reload_config_legacy() -> None:
     global _dict, _loaded_config_path
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
@@ -163,7 +208,8 @@ def _reload_config() -> None:
         try:
             config = common_utils.read_yaml(config_path)
             _dict = config_utils.Config.from_dict(config)
-            _loaded_config_path = config_path
+            if config_path_via_env_var is not None:
+                _loaded_config_path = config_path
             logger.debug(f'Config loaded:\n{pprint.pformat(_dict)}')
         except yaml.YAMLError as e:
             logger.error(f'Error in loading config file ({config_path}):', e)
@@ -177,6 +223,76 @@ def _reload_config() -> None:
                 skip_none=False)
 
         logger.debug('Config syntax check passed.')
+
+
+def _reload_config_hierarchical() -> None:
+    global _dict
+    # Reset the global variables, to avoid using stale values.
+    _dict = config_utils.Config()
+
+    # find the global config file
+    global_config_path = _get_config_file_path(ENV_VAR_GLOBAL_CONFIG)
+    if global_config_path and os.path.exists(global_config_path):
+        logger.info('using global config file specified by '
+                    f'{ENV_VAR_GLOBAL_CONFIG}: {global_config_path}')
+        global_config_path = os.path.expanduser(global_config_path)
+        if not os.path.exists(global_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_GLOBAL_CONFIG} ({global_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_GLOBAL_CONFIG}')
+    else:
+        logger.info(f'using default global config file: {CONFIG_PATH}')
+        global_config_path = CONFIG_PATH
+        global_config_path = os.path.expanduser(global_config_path)
+
+    overrides = []
+
+    # find the project config file
+    project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
+    if project_config_path and os.path.exists(project_config_path):
+        logger.info('using project config file specified by '
+                    f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
+        project_config_path = os.path.expanduser(project_config_path)
+        if not os.path.exists(project_config_path):
+            with ux_utils.print_exception_no_traceback():
+                raise FileNotFoundError(
+                    'Config file specified by env var '
+                    f'{ENV_VAR_PROJECT_CONFIG} ({project_config_path!r}) '
+                    'does not exist. Please double check the path or unset the '
+                    f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
+    else:
+        logger.info(f'using default project config file: {project_config_path}')
+        project_config_path = os.path.join(os.getcwd(), 'sky.yaml')
+
+    # load the global config file
+    if os.path.exists(global_config_path):
+        logger.info(f'Using global config path: {global_config_path}')
+        global_config = OmegaConf.to_object(OmegaConf.load(global_config_path))
+        logger.info('following overrides '
+                    'are obtained from global config file:')
+        logger.info(global_config)
+        _validate_config(global_config, 'global')
+        overrides.append(global_config)
+
+    if os.path.exists(project_config_path):
+        logger.info(f'Using project config path: {project_config_path}')
+        project_config = OmegaConf.to_object(
+            OmegaConf.load(project_config_path))
+        logger.info('following overrides '
+                    'are obtained from project config file:')
+        logger.info(project_config)
+        _validate_config(project_config, 'project')
+        overrides.append(project_config)
+
+    # layer the configs on top of each other based on priority
+    overlaid_client_config: config_utils.Config = config_utils.Config()
+    for override in reversed(overrides):
+        overlaid_client_config = _overlay_skypilot_config(
+            original_config=overlaid_client_config, override_configs=override)
+    _dict = overlaid_client_config
 
 
 def loaded_config_path() -> Optional[str]:
@@ -197,182 +313,72 @@ def loaded() -> bool:
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
+    global _dict
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
         # If no override configs (None or empty dict), do nothing.
         yield
         return
-    original_env_config_path = _loaded_config_path
-    original_config = dict(_dict)
+    original_config = copy.deepcopy(_dict)
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
         override_configs=override_configs,
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    with tempfile.NamedTemporaryFile(
-            mode='w',
-            prefix='skypilot_config',
-            # Have to avoid deleting the file as the underlying function needs
-            # to read the config file, and we need to close the file mode='w'
-            # to enable reading.
-            delete=False) as f:
-        common_utils.dump_yaml(f.name, dict(config))
-        os.environ[ENV_VAR_SKYPILOT_CONFIG] = f.name
     try:
-        _reload_config()
+        _dict = config
         yield
-    except exceptions.InvalidSkyPilotConfigError as e:
-        with ux_utils.print_exception_no_traceback():
-            raise exceptions.InvalidSkyPilotConfigError(
-                'Failed to override the SkyPilot config on API '
-                'server with your local SkyPilot config:\n'
-                '=== SkyPilot config on API server ===\n'
-                f'{common_utils.dump_yaml_str(original_config)}\n'
-                '=== Your local SkyPilot config ===\n'
-                f'{common_utils.dump_yaml_str(override_configs)}\n'
-                f'Details: {e}') from e
-
     finally:
-        if original_env_config_path is not None:
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_config_path
-        else:
-            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
-        # Reload the config to restore the original config to avoid the next
-        # request reusing the same process to use the config for the current
-        # request.
-        _reload_config()
-
-        try:
-            os.remove(f.name)
-        except Exception:  # pylint: disable=broad-except
-            # Failing to delete the file is not critical.
-            pass
+        _dict = original_config
 
 
-def compose_cli_config(
-        cli_config_arg: Optional[str],  # priority 1
-        cli_config_file: Optional[str],  # priority 2
-) -> config_utils.Config:
-    """Composes the skypilot client config from various config sources.
-    Current config sources and their priority (from highest to lowest):
-    1. CLI arguments (passed in via --config)
-    2. config file specified in CLI argument (specified by --config-file)
+def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+    """Composes the skypilot CLI config.
+    CLI config can either be:
+    - A path to a config file
+    - A comma-separated list of key-value pairs
     """
-    overrides = []
 
-    # parse overrides from CLI argument (priority 1)
-    variables: List[str] = []
-    if cli_config_arg:
-        variables = cli_config_arg.split(',')
-        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
-        logger.info('[priority 1] following overrides '
-                    'are obtained from CLI argument:')
-        logger.info(dot_config)
-        overrides.append(dot_config)
+    if not cli_config:
+        return config_utils.Config()
 
-    # parse overrides from CLI config file (priority 2)
-    if cli_config_file:
-        project_override_config = OmegaConf.to_object(
-            OmegaConf.load(cli_config_file))
-        logger.info('[priority 2] following overrides '
-                    'are obtained from CLI config file:')
-        logger.info(project_override_config)
-        overrides.append(project_override_config)
+    if os.path.isfile(cli_config):
+        # cli_config is a path to a config file
+        logger.info(f'Parsing CLI provided config file: {cli_config}')
+        parsed_config = OmegaConf.to_object(OmegaConf.load(cli_config))
+    else:
+        # cli_config is a comma-separated list of key-value pairs
+        logger.info(f'Parsing CLI provided config: {cli_config}')
+        variables: List[str] = []
+        variables = cli_config.split(',')
+        parsed_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
+    logger.info(f'Parsed CLI config: {parsed_config}')
 
-    # layer the configs on top of each other based on priority
-    overlaid_client_config: config_utils.Config = config_utils.Config()
-    for override in reversed(overrides):
-        overlaid_client_config = _overlay_skypilot_config(
-            original_config=overlaid_client_config, override_configs=override)
+    _validate_config(parsed_config, 'cli')
+    logger.debug('Config syntax check passed.')
 
-    logger.info('[final] following configs overrides are applied:')
-    logger.info(overlaid_client_config)
-
-    return overlaid_client_config
+    return parsed_config
 
 
-def compose_sdk_config(
-    # user provided overrides (priority 1)
-    user_provided_overrides: Optional[Dict[str, Any]],
-    # environment variables (priority 2)
-    # are obtained within this function
-    # project config file (priority 3)
-    # is obtained within this function
-    # global client config (lowest priority)
-    # is obtained within this function
-) -> config_utils.Config:
-    """Composes the skypilot client config from various config sources.
-    Current config sources and their priority (from highest to lowest):
-    1. user provided overrides
-    2. Environment variables
-    3. Project config file obtained from the current directory
-    LOWEST. Global client config
+def apply_cli_config(cli_config: Optional[str]) -> None:
+    """Applies the skypilot CLI config.
+
+    SAFETY:
+    This function directly modifies the global _dict variable.
+    This is considered fine in CLI context because the program will exit after
+    a single CLI command is executed.
+
+    Args:
+        cli_config: A path to a config file or a comma-separated
+        list of key-value pairs.
     """
-    overrides = []
-
-    # parse overrides from user provided overrides (priority 1)
-    if user_provided_overrides:
-        overrides.append(config_utils.Config(user_provided_overrides))
-        logger.info('[priority 1] following overrides '
-                    'are obtained from user provided overrides:')
-        logger.info(user_provided_overrides)
-
-    # parse overrides from env vars (priority 2)
-    variables: List[str] = []
-    for key, value in os.environ.items():
-        prefix = constants.SKYPILOT_ENV_VAR_PREFIX + 'CONFIG_'
-        if key[:len(prefix)] == prefix:
-            variables.append(
-                f'{key[len(prefix):].lower().replace("__", ".")}={value}')
-    if variables:
-        dot_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
-        logger.info('[priority 2] following overrides '
-                    'are obtained from env vars:')
-        logger.info(dot_config)
-        overrides.append(dot_config)
-
-    # parse overrides from project config file (priority 3)
-    # TODO(seungjin) this isn't what we actually want to do,
-    # find the project config more intelligently
-    project_config_path = os.path.join(os.getcwd(), 'sky.yaml')
-    if os.path.exists(project_config_path):
-        project_config = OmegaConf.to_object(
-            OmegaConf.load(project_config_path))
-        logger.info('[priority 3] following overrides '
-                    'are obtained from project config file:')
-        logger.info(project_config)
-        overrides.append(project_config)
-
-    # parse overrides from global config (lowest priority)
-    global_config = to_dict()
-    logger.info('[lowest priority] following overrides '
-                'are obtained from global config:')
-    logger.info(global_config)
-    overrides.append(global_config)
-
-    # layer the configs on top of each other based on priority
-    overlaid_client_config: config_utils.Config = config_utils.Config()
-    for override in reversed(overrides):
-        overlaid_client_config = _overlay_skypilot_config(
-            original_config=overlaid_client_config, override_configs=override)
-
-    logger.info('[final] following configs overrides are applied:')
-    logger.info(overlaid_client_config)
-
-    return overlaid_client_config
-
-
-def _overlay_skypilot_config(
-        original_config: Optional[config_utils.Config],
-        override_configs: Optional[config_utils.Config]) -> config_utils.Config:
-    """Overlays the override configs on the original configs."""
-    if original_config is None:
-        original_config = config_utils.Config()
-    config = original_config.get_nested(keys=tuple(),
-                                        default_value=None,
-                                        override_configs=override_configs,
-                                        allowed_override_keys=None,
-                                        disallowed_override_keys=None)
-    return config
+    global _dict
+    parsed_config = _compose_cli_config(cli_config)
+    logger.info(
+        f'applying following overrides from CLI config: {parsed_config}')
+    print(f'original _dict: {_dict}')
+    _dict = _overlay_skypilot_config(original_config=_dict,
+                                     override_configs=parsed_config)
+    print(f'new _dict: {_dict}')

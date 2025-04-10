@@ -303,7 +303,6 @@ def launch(
     no_setup: bool = False,
     clone_disk_from: Optional[str] = None,
     fast: bool = False,
-    override_skypilot_config: Optional[Dict[str, Any]] = None,
     # Internal only:
     # pylint: disable=invalid-name
     _need_confirmation: bool = False,
@@ -471,9 +470,6 @@ def launch(
 
     dag_str = dag_utils.dump_chain_dag_to_yaml_str(dag)
 
-    override_skypilot_config = skypilot_config.compose_sdk_config(
-        user_provided_overrides=override_skypilot_config)
-
     body = payloads.LaunchBody(
         task=dag_str,
         cluster_name=cluster_name,
@@ -492,7 +488,6 @@ def launch(
         is_launched_by_sky_serve_controller=(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
-        override_skypilot_config=override_skypilot_config,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/launch',
