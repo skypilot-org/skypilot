@@ -13,13 +13,13 @@ app
 
     // Proxy API requests
     server.use(
-      '/sky',
+      '/internal/dashboard',
       createProxyMiddleware({
         target:
           process.env.SKYPILOT_API_SERVER_ENDPOINT || 'http://localhost:46580',
         changeOrigin: true,
         pathRewrite: {
-          '^/sky': '', // remove /sky prefix when forwarding to the target
+          '^/internal/dashboard': '', // remove /internal/dashboard prefix when forwarding to the target
         },
       })
     );

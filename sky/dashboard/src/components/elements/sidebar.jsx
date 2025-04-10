@@ -152,7 +152,7 @@ export function TopBar() {
             prefetch={false}
           >
             <Image
-              src="/skypilot.svg"
+              src="/dashboard/skypilot.svg"
               alt="SkyPilot Logo"
               width={32}
               height={32}

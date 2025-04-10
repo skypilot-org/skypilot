@@ -138,6 +138,31 @@ def parse_readme(readme: str) -> str:
     readme = mode_re.sub(r'<img\1>', readme)
     return readme
 
+def build_dashboard():
+    dashboard_dir = os.path.join("sky", "dashboard")
+    try:
+        if os.path.exists(dashboard_dir):
+            # Install npm dependencies
+            subprocess.check_call(["npm", "install"], cwd=dashboard_dir)
+            # Build the dashboard
+            subprocess.check_call(["npm", "run", "build"], cwd=dashboard_dir)
+        else:
+            raise RuntimeError(f"Dashboard directory {dashboard_dir} does not exist")
+    except Exception as e:
+        raise RuntimeError(f"Error building dashboard: {e}")
+
+class BuildDashboardCommand(setuptools.Command):
+    description = "Build the dashboard"
+    user_options = []
+
+    def initialize_options(self):
+        pass
+
+    def finalize_options(self):
+        pass
+
+    def run(self):
+        build_dashboard()
 
 long_description = ''
 readme_filepath = 'README.md'
@@ -170,6 +195,11 @@ setuptools.setup(
     entry_points={
         'console_scripts': ['sky = sky.cli:cli'],
     },
+    package_data={
+        'dashboard': [
+            "sky/dashboard/out/**/*",
+        ],
+    },
     include_package_data=True,
     classifiers=[
         'Programming Language :: Python :: 3.7',
@@ -187,5 +217,8 @@ setuptools.setup(
         'Issues': 'https://github.com/skypilot-org/skypilot/issues',
         'Discussion': 'https://github.com/skypilot-org/skypilot/discussions',
         'Documentation': 'https://docs.skypilot.co/',
+    },
+    cmdclass={
+        "build_dashboard": BuildDashboardCommand,
     },
 )

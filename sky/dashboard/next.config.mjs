@@ -1,5 +1,10 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  basePath: '/dashboard',
+  output: 'export',
+  images: {
+    unoptimized: true,
+  },
   env: {
     SKYPILOT_API_SERVER_ENDPOINT: process.env.SKYPILOT_API_SERVER_ENDPOINT,
     INFRA_CACHE_DURATION_MINUTES:
