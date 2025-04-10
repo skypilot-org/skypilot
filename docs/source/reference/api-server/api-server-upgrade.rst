@@ -20,7 +20,7 @@ Here we introduce the steps for upgrading a remote API server deployed with :ref
     Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: drain the old API server and upgrade.
 
 Step 1: Prepare an upgrade
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Find the version to use in SkyPilot `nightly channel <https://pypi.org/project/skypilot-nightly/#history>`_.
 2. Update SkyPilot helm repository to the latest version:
@@ -38,7 +38,7 @@ Step 1: Prepare an upgrade
     VERSION=1.0.0-dev20250408 # TODO: change to the version you want to upgrade to
     IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
-Step 2: Cordon the API server
+Step 2: (Optional) Cordon and drain the API server
 -----------------------------
 
 To minimize the impact of the downtime introduced by the upgrade, we recommend condon the API server before upgrading the API server. The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
@@ -169,11 +169,11 @@ Upgrade the API server deployed on VM
 
 .. note::
 
-    VM deployment does not offer graceful upgrading support. We recommend to use Helm deployment :ref:`sky-api-server-deploy` in production environments.
+    VM deployment does not offer graceful upgrading support. We recommend to use Helm deployment :ref:`sky-api-server-deploy` in production environments. The following is a workaround for upgrading SkyPilot API server on VM deployment.
 
 Suppose the cluster name of the API server is ``api-server`` (which is used in the :ref:`sky-api-server-cloud-deploy` guide), you can upgrade the API server with the following steps:
 
-1. Switch to the original API server that is used to launch the API server VM instance. It is usually the local API server that was launched automatically when you ran ``sky launch`` to launch the API server VM instance in the :ref:`sky-api-server-cloud-deploy` guide:
+1. Switch to the original API server endpoint used to launch the cloud VM for API server. It is usually locally started when you ran ``sky launch -c api-server skypilot-api-server.yaml` in :ref:`sky-api-server-cloud-deploy` guide:
 
 .. code-block:: bash
 
@@ -184,7 +184,7 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
 .. code-block:: console
 
-    $ sky status --no-show-managed-jobs --no-show-services
+    $ sky status api-server
     Clusters
     NAME        LAUNCHED     RESOURCES                                                                  STATUS  AUTOSTOP  COMMAND
     api-server  41 mins ago  1x AWS(c6i.2xlarge, image_id={'us-east-1': 'docker:berkeleyskypilot/sk...  UP      -         sky exec api-server pip i...
