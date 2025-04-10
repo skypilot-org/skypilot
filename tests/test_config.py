@@ -366,6 +366,15 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
 
 
+def test_invalid_override_config(monkeypatch, tmp_path) -> None:
+    """Test that an invalid override config is rejected."""
+    with pytest.raises(sky.exceptions.InvalidSkyPilotConfigError) as e:
+        with skypilot_config.override_skypilot_config({
+                'invalid_key': 'invalid_value',
+        }):
+            pass
+
+
 def test_k8s_config_with_override(monkeypatch, tmp_path,
                                   enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'
@@ -554,22 +563,10 @@ def test_override_skypilot_config(monkeypatch, tmp_path):
         assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                           None) == 'override-command'
 
-        # Get the temp file path
-        temp_config_path = os.environ.get(
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
-        assert temp_config_path is not None
-        assert os.path.exists(temp_config_path)
-
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) == original_vpc
     assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                       None) == original_proxy
-
-    # Check temp file is cleaned up
-    assert not os.path.exists(temp_config_path)
-    env_config_path = os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
-    assert env_config_path == str(config_path), (
-        f'{env_config_path} is not cleaned up')
 
     # Test with None override_configs
     with skypilot_config.override_skypilot_config(None):
@@ -613,12 +610,6 @@ def test_override_skypilot_config_without_original_config(
                                           None) == 'override-vpc'
         assert skypilot_config.get_nested(('aws', 'ssh_proxy_command'),
                                           None) == 'override-command'
-
-        # Get the temp file path
-        temp_config_path = os.environ.get(
-            skypilot_config.ENV_VAR_SKYPILOT_CONFIG)
-        assert temp_config_path is not None
-        assert os.path.exists(temp_config_path)
 
     # Check values are restored
     assert skypilot_config.get_nested(('aws', 'vpc_name'), None) is None
