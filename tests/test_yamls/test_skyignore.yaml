@@ -1,0 +1,11 @@
+name: skyignore-test
+
+file_mounts:
+  /script.py: ./tests/test_yamls/test_skyignore_verification.py
+
+setup: |
+  echo "Setting up skyignore test environment"
+
+run: |
+  set -e
+  python /script.py ~/sky_workdir

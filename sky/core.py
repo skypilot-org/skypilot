@@ -372,12 +372,12 @@ def _start(
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name,
-                               retry_until_up=retry_until_up)
+    (handle, _) = backend.provision(dummy_task,
+                                    to_provision=handle.launched_resources,
+                                    dryrun=False,
+                                    stream_logs=True,
+                                    cluster_name=cluster_name,
+                                    retry_until_up=retry_until_up)
     storage_mounts = backend.get_storage_mounts_metadata(handle.cluster_name)
     # Passing all_file_mounts as None ensures the local source set in Storage
     # to not redundantly sync source to the bucket.

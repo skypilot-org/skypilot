@@ -62,9 +62,8 @@ spec:
           {{- if .Values.apiService.config }}
           mkdir -p /root/.sky
           echo "Copying config.yaml from ConfigMap \`skypilot-config\` to /root/.sky/config.yaml"
-          # The configmap serves as the ground truth for the config.yaml file.
-          # Any local changes to the config.yaml file will be overwritten by the contents of the configmap.
-          cp /tmp/config.yaml /root/.sky/config.yaml
+          # The configmap serves as the ground truth for the config.yaml file, read-only
+          ln -sf /var/skypilot/config/config.yaml /root/.sky/config.yaml
           {{- end }}
 
           if sky api start -h | grep -q -- "--foreground"; then
@@ -101,8 +100,7 @@ spec:
         {{- end }}
         {{- if .Values.apiService.config }}
         - name: skypilot-config
-          mountPath: /tmp/config.yaml
-          subPath: config.yaml
+          mountPath: /var/skypilot/config
         {{- end }}
         {{- if .Values.awsCredentials.enabled }}
         - name: aws-config

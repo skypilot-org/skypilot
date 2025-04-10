@@ -1,8 +1,8 @@
 import io
 import os
-import shlex
 import subprocess
 import tempfile
+import textwrap
 from unittest import mock
 import zipfile
 
@@ -14,10 +14,13 @@ from sky.skylet import constants
 
 
 @pytest.fixture
-def skyignore_dir():
+def tmp_dir_with_files_to_ignore():
     with tempfile.TemporaryDirectory() as temp_dir:
         # Create workdir
-        dirs = ['remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir']
+        dirs = [
+            'remove_dir', 'dir', 'dir/subdir', 'dir/subdir/remove_dir',
+            'remove_dir_pattern'
+        ]
         files = [
             'remove.py',
             'remove.sh',
@@ -31,12 +34,14 @@ def skyignore_dir():
             'dir/remove.a',
             'dir/subdir/keep.b',
             'dir/subdir/remove.py',
+            'remove_dir_pattern/remove.txt',
+            'remove_dir_pattern/remove.a',
         ]
         for dir_name in dirs:
             os.makedirs(os.path.join(temp_dir, dir_name), exist_ok=True)
         for file_path in files:
             full_path = os.path.join(temp_dir, file_path)
-            with open(full_path, 'w') as f:
+            with open(full_path, 'w', encoding='utf-8') as f:
                 f.write('test content')
 
         # Create symlinks
@@ -54,22 +59,44 @@ def skyignore_dir():
         # Create empty directories
         os.makedirs(os.path.join(temp_dir, 'empty-folder'))
 
-        # Create skyignore file
-        skyignore_content = """
-        # Current directory
-        /remove.py
-        /remove_dir
-        /*.a
-        /dir/*.b
-        # Pattern match for all subdirectories
-        *.sh
-        remove.a
-        """
-        skyignore_path = os.path.join(temp_dir, constants.SKY_IGNORE_FILE)
-        with open(skyignore_path, 'w', encoding='utf-8') as f:
-            f.write(skyignore_content)
-
         yield temp_dir
+
+
+def ignore_file_content():
+    return textwrap.dedent("""\
+    # Current directory
+    /remove.py
+    /remove_dir
+    **/remove_dir_pattern/**
+    /*.a
+    /dir/*.b
+    # Pattern match for all subdirectories
+    *.sh
+    remove.a
+    """)
+
+
+@pytest.fixture
+def skyignore_dir(tmp_dir_with_files_to_ignore):
+    skyignore_path = os.path.join(tmp_dir_with_files_to_ignore,
+                                  constants.SKY_IGNORE_FILE)
+    with open(skyignore_path, 'w', encoding='utf-8') as f:
+        f.write(ignore_file_content())
+
+    yield tmp_dir_with_files_to_ignore
+
+
+@pytest.fixture
+def gitignore_dir(tmp_dir_with_files_to_ignore):
+    gitignore_path = os.path.join(tmp_dir_with_files_to_ignore, '.gitignore')
+    with open(gitignore_path, 'w', encoding='utf-8') as f:
+        f.write(ignore_file_content())
+    # gitignore file is only picked up if the directory is a git repository
+    subprocess.run(['git', 'init'],
+                   cwd=tmp_dir_with_files_to_ignore,
+                   check=True)
+
+    yield tmp_dir_with_files_to_ignore
 
 
 @pytest.fixture
@@ -91,20 +118,44 @@ def test_get_excluded_files_from_skyignore(skyignore_dir):
     excluded_files = storage_utils.get_excluded_files_from_skyignore(
         skyignore_dir)
 
+    print(excluded_files)
     # Validate results
     expected_excluded_files = [
-        'remove.py', 'remove_dir', 'remove.sh', 'remove.a', 'dir/remove.sh',
-        'dir/remove.b', 'remove.a', 'dir/remove.a'
+        'remove.py', 'remove_dir', 'remove.sh', 'dir/remove.sh', 'dir/remove.b',
+        'remove.a', 'dir/remove.a', 'remove_dir_pattern',
+        'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a'
     ]
     for file_path in expected_excluded_files:
         assert file_path in excluded_files
     assert len(excluded_files) == len(expected_excluded_files)
 
 
-def test_zip_files_and_folders(skyignore_dir):
+def test_get_excluded_files_from_gitignore(gitignore_dir):
+    # Test function
+    excluded_files = storage_utils.get_excluded_files_from_gitignore(
+        gitignore_dir)
+
+    # Validate results
+    expected_excluded_files = [
+        'remove.py', 'remove_dir/', 'remove.sh', 'dir/remove.sh',
+        'dir/remove.b', 'remove.a', 'dir/remove.a',
+        'remove_dir_pattern/remove.txt', 'remove_dir_pattern/remove.a',
+        'remove_dir_pattern/'
+    ]
+    print(sorted(excluded_files))
+    print(sorted(expected_excluded_files))
+
+    for file_path in expected_excluded_files:
+        assert file_path in excluded_files
+    assert len(excluded_files) == len(expected_excluded_files)
+
+
+@pytest.mark.parametrize('ignore_dir_name', ['skyignore_dir', 'gitignore_dir'])
+def test_zip_files_and_folders(ignore_dir_name, request):
+    ignore_dir = request.getfixturevalue(ignore_dir_name)
     log_file = io.StringIO()
     with tempfile.NamedTemporaryFile('wb+', suffix='.zip') as f:
-        storage_utils.zip_files_and_folders([skyignore_dir], f, log_file)
+        storage_utils.zip_files_and_folders([ignore_dir], f, log_file)
         # Print out all files in the zip
         f.seek(0)
         with zipfile.ZipFile(f, 'r') as zipf:
@@ -112,26 +163,46 @@ def test_zip_files_and_folders(skyignore_dir):
 
         expected_zipped_files = [
             'ln-keep.py', 'ln-dir-keep.py', 'dir/subdir/ln-keep.py',
-            constants.SKY_IGNORE_FILE, 'dir/subdir/remove.py', 'keep.py',
-            'dir/keep.txt', 'dir/keep.a', 'dir/subdir/keep.b', 'ln-folder',
-            'empty-folder/', 'dir/', 'dir/subdir/', 'dir/subdir/remove_dir/'
+            'dir/subdir/remove.py', 'keep.py', 'dir/keep.txt', 'dir/keep.a',
+            'dir/subdir/keep.b', 'ln-folder', 'empty-folder/', 'dir/',
+            'dir/subdir/', 'dir/subdir/remove_dir/'
         ]
+        if ignore_dir_name == 'gitignore_dir':
+            expected_zipped_files.append(constants.GIT_IGNORE_FILE)
+        else:
+            expected_zipped_files.append(constants.SKY_IGNORE_FILE)
 
         expected_zipped_file_paths = []
         for filename in expected_zipped_files:
-            file_path = os.path.join(skyignore_dir, filename)
+            file_path = os.path.join(ignore_dir, filename)
             if 'ln' not in filename:
                 file_path = file_path.lstrip('/')
             expected_zipped_file_paths.append(file_path)
 
-        for file in actual_zipped_files:
-            assert file in expected_zipped_file_paths, (
-                file, expected_zipped_file_paths)
-        assert len(actual_zipped_files) == len(expected_zipped_file_paths)
+        processed_actual_zipped_files = []
+        for file_path in actual_zipped_files:
+            if '.git/' in file_path:
+                # Ignore git files
+                continue
+            processed_actual_zipped_files.append(file_path)
+
+        print(
+            set(processed_actual_zipped_files) -
+            set(expected_zipped_file_paths))
+        print(
+            set(expected_zipped_file_paths) -
+            set(processed_actual_zipped_files))
+
+        assert not (set(processed_actual_zipped_files) -
+                    set(expected_zipped_file_paths))
+        assert not (set(expected_zipped_file_paths) -
+                    set(processed_actual_zipped_files))
+        assert len(processed_actual_zipped_files) == len(
+            expected_zipped_file_paths)
         # Check the log file correctly logs the zipped files
         log_file.seek(0)
         log_file_content = log_file.read()
-        assert f'Zipped {skyignore_dir}' in log_file_content
+        assert f'Zipped {ignore_dir}' in log_file_content
 
 
 def test_zip_files_and_folders_excluded_directories():
@@ -569,7 +640,12 @@ src/test_*.py
     assert is_test_dir_excluded, "Expected src/test directory contents to be excluded"
 
 
-def test_get_excluded_files_from_file():
+def test_get_excluded_files_for_file():
     with pytest.raises(ValueError):
         storage_utils.get_excluded_files(
-            'tests/unit_tests/test_storage_utils.py')
+            'tests/unit_tests/sky/storage/test_storage_utils.py')
+
+
+def test_get_excluded_files_for_non_existent_dir():
+    with pytest.raises(ValueError):
+        storage_utils.get_excluded_files('tests/non_existent_dir')

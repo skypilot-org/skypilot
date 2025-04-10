@@ -1,4 +1,4 @@
-"""A script that generates the Lambda Cloud catalog.
+"""A script that generates the IBM Cloud catalog.
 
 Usage:
     python fetch_ibm.py [-h] [--api-key API_KEY]
@@ -19,7 +19,6 @@ import yaml
 
 TOKEN_ENDPOINT = 'https://iam.cloud.ibm.com/identity/token'
 REGIONS_ENDPOINT = f'https://us-south.iaas.cloud.ibm.com/v1/regions?version={datetime.today().strftime("%Y-%m-%d")}&generation=2'  # pylint: disable=line-too-long
-ENDPOINT = 'https://cloud.lambdalabs.com/api/v1/instance-types'
 DEFAULT_IBM_CREDENTIALS_PATH = os.path.expanduser('~/.ibm/credentials.yaml')
 
 

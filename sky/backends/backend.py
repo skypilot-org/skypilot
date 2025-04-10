@@ -1,6 +1,6 @@
 """Sky backend interface."""
 import typing
-from typing import Dict, Generic, Optional
+from typing import Dict, Generic, Optional, Tuple
 
 from sky.usage import usage_lib
 from sky.utils import cluster_utils
@@ -53,7 +53,7 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: Optional[str] = None,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[_ResourceHandleType]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool]:
         """Provisions resources for the given task.
 
         Args:
@@ -68,13 +68,15 @@ class Backend(Generic[_ResourceHandleType]):
                 the existing cluster will be reused and re-provisioned.
             retry_until_up: If True, retry provisioning until resources are
                 successfully launched.
-            skip_if_no_cluster_updates: If True, compare the cluster config to
-                the existing cluster_name's config. Skip provisioning if no
+            skip_unnecessary_provisioning: If True, compare the cluster config
+                to the existing cluster_name's config. Skip provisioning if no
                 updates are needed for the existing cluster.
 
         Returns:
-            A ResourceHandle object for the provisioned resources, or None if
-            dryrun is True.
+            - A ResourceHandle object for the provisioned resources, or None if
+              dryrun is True.
+            - A boolean that is True if the provisioning was skipped, and False
+              if provisioning actually happened. Dryrun always gives False.
         """
         if cluster_name is None:
             cluster_name = cluster_utils.generate_cluster_name()
@@ -159,7 +161,7 @@ class Backend(Generic[_ResourceHandleType]):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[_ResourceHandleType]:
+    ) -> Tuple[Optional[_ResourceHandleType], bool]:
         raise NotImplementedError
 
     def _sync_workdir(self, handle: _ResourceHandleType, workdir: Path) -> None:

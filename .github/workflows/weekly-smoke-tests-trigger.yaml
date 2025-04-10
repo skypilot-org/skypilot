@@ -18,43 +18,24 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Smoke Tests
-        env:
-          BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
-          BUILDKITE_API_URL: ${{ github.event_name == 'workflow_dispatch'
-            && 'https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/smoke-tests/builds'
-            || 'https://api.buildkite.com/v2/organizations/skypilot-1/pipelines/full-smoke-tests-run/builds' }}
-        run: |
-          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
-            data='{
-              "commit": "HEAD",
-              "branch": "master",
-              "message": "Manual Smoke Tests: ${{ github.event.inputs.param }}",
-              "ignore_pipeline_branch_filters": true,
-              "env": {
-                "ARGS": "${{ github.event.inputs.param }}"
-              }
-            }'
-          else
-            data='{
-              "commit": "HEAD",
-              "branch": "master",
-              "message": "Biweekly Smoke Tests",
-              "ignore_pipeline_branch_filters": true
-            }'
-          fi
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        if: github.event_name == 'workflow_dispatch'
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/smoke-tests"
+          branch: "master"
+          commit: "HEAD"
+          message: "Manual Smoke Tests: ${{ github.event.inputs.param }}"
+          ignore_pipeline_branch_filter: true
+          build_env_vars: '{"ARGS": "${{ github.event.inputs.param }}"}'
 
-          response=$(curl -w "%{http_code}" -H "Authorization: Bearer $BUILDKITE_TOKEN" \
-            -X POST "$BUILDKITE_API_URL" \
-            -d "$data")
-
-          http_code=$(echo "$response" | tail -n 1)
-          response_body=$(echo "$response" | head -n -1)
-
-          if [ "$http_code" != "201" ]; then
-            echo "Error: Buildkite API returned HTTP status code $http_code"
-            echo "Response body:"
-            echo "$response_body"
-            exit 1
-          fi
-
-          echo "Build triggered successfully (HTTP status code: $http_code)"
+      - name: Trigger Full Smoke Tests
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/full-smoke-tests-run"
+          branch: "master"
+          commit: "HEAD"
+          message: "Biweekly Smoke Tests"
+          ignore_pipeline_branch_filter: true

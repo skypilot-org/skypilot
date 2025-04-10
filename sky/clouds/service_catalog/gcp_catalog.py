@@ -106,6 +106,16 @@ _ACC_INSTANCE_TYPE_DICTS = {
         8: ['a3-megagpu-8g'],
     }
 }
+# Enable GPU type inference from instance types
+_INSTANCE_TYPE_TO_ACC = {
+    instance_type: {
+        acc_name: acc_count
+    } for acc_name, acc_count_to_instance_type in
+    _ACC_INSTANCE_TYPE_DICTS.items()
+    for acc_count, instance_types in acc_count_to_instance_type.items()
+    for instance_type in instance_types
+}
+GCP_ACC_INSTANCE_TYPES = list(_INSTANCE_TYPE_TO_ACC.keys())
 
 # Number of CPU cores per GPU based on the AWS setting.
 # GCP A100 has its own instance type mapping.
@@ -268,6 +278,26 @@ def get_default_instance_type(
     df = df.loc[df['InstanceType'].apply(_filter_disk_type)]
     return common.get_instance_type_for_cpus_mem_impl(df, cpus,
                                                       memory_gb_or_ratio)
+
+
+def get_accelerators_from_instance_type(
+        instance_type: str) -> Optional[Dict[str, int]]:
+    """Infer the GPU type from the instance type.
+
+    This inference logic is GCP-specific. Unlike other clouds, we don't call
+    the internal implementation defined in common.py.
+
+    Args:
+        instance_type: the instance type to use.
+
+    Returns:
+        A dictionary mapping from the accelerator name to the accelerator count.
+    """
+    if instance_type in GCP_ACC_INSTANCE_TYPES:
+        return _INSTANCE_TYPE_TO_ACC[instance_type]
+    else:
+        # General CPU instance types don't come with pre-attached accelerators.
+        return None
 
 
 def get_instance_type_for_accelerator(
@@ -528,16 +558,13 @@ def check_accelerator_attachable_to_host(instance_type: str,
             attached to the host.
     """
     if accelerators is None:
-        for acc_name, val in _ACC_INSTANCE_TYPE_DICTS.items():
-            if instance_type in sum(val.values(), []):
-                # NOTE: While it is allowed to use A2/G2 VMs as CPU-only nodes,
-                # we exclude this case as it is uncommon and undesirable.
-                with ux_utils.print_exception_no_traceback():
-                    raise exceptions.ResourcesMismatchError(
-                        f'{instance_type} instance types should be used with '
-                        f'{acc_name} GPUs. Either use other instance types or '
-                        f'specify the accelerators as {acc_name}.')
-        return
+        if instance_type in GCP_ACC_INSTANCE_TYPES:
+            # Infer the GPU type from the instance type
+            accelerators = _INSTANCE_TYPE_TO_ACC[instance_type]
+        else:
+            # Skip the following checks if instance_type is a general CPU
+            # instance without accelerators
+            return
 
     acc = list(accelerators.items())
     assert len(acc) == 1, acc
