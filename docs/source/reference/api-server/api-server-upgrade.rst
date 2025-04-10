@@ -20,7 +20,7 @@ Here we introduce the steps for upgrading a remote API server deployed with :ref
     Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: drain the old API server and upgrade.
 
 Step 1: Prepare an upgrade
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 1. Find the version to use in SkyPilot `nightly channel <https://pypi.org/project/skypilot-nightly/#history>`_.
 2. Update SkyPilot helm repository to the latest version:
@@ -39,9 +39,9 @@ Step 1: Prepare an upgrade
     IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
 Step 2: (Optional) Cordon and drain the API server
------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To minimize the impact of the downtime introduced by the upgrade, we recommend condon the API server before upgrading the API server. The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
+To minimize the impact of the downtime introduced by the upgrade, we recommend cordon and drain the API server before upgrading the API server. The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
 
 1. Cordon SkyPilot API server to avoid new request:
 
@@ -115,7 +115,7 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
         $ kill $PORT_FORWARD_PID
 
 Step 3: Upgrade SkyPilot clients
---------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Currently, compatibility between SkyPilot clients and server is only guaranteed when both sides are running on **the same version**. We recommend upgrading all the clients to the same version during the maintainence window to avoid breaking the pipeline after the upgrade:
 
@@ -124,7 +124,7 @@ Currently, compatibility between SkyPilot clients and server is only guaranteed 
     pip install -U skypilot-nightly==${VERSION}
 
 Step 4: Upgrade the API server
-------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Once all the critical requests have been finished and the clients in autonomous pipelines have been upgraded, you can upgrade the API server with the following command:
 
@@ -149,7 +149,7 @@ Optionally, you can watch the upgrade progress with:
 The upgraded API server is ready to serve requests after the pod is running and the ``READY`` column shows ``1/1``. The cordon will be removed automatically after the upgrade.
 
 Step 5: Verify the upgrade
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Verify the API server is able to serve requests and the version is consistent with the version you upgraded to:
 
@@ -157,8 +157,8 @@ Verify the API server is able to serve requests and the version is consistent wi
 
     $ sky api info
     Using SkyPilot API server: <URL>
-    ├── Status: healthy, commit: <COMMIT>, version: <VERSION>
-    └── User: <USER> (<USER_ID>)
+    ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
+    └── User: aclice (abcd1234)
 
 If possible, you can also trigger your pipelines that depend on the API server to verify there is no compatibility issue after the upgrade.
 
@@ -173,7 +173,7 @@ Upgrade the API server deployed on VM
 
 Suppose the cluster name of the API server is ``api-server`` (which is used in the :ref:`sky-api-server-cloud-deploy` guide), you can upgrade the API server with the following steps:
 
-1. Switch to the original API server endpoint used to launch the cloud VM for API server. It is usually locally started when you ran ``sky launch -c api-server skypilot-api-server.yaml` in :ref:`sky-api-server-cloud-deploy` guide:
+1. Switch to the original API server endpoint used to launch the cloud VM for API server. It is usually locally started when you ran ``sky launch -c api-server skypilot-api-server.yaml`` in :ref:`sky-api-server-cloud-deploy` guide:
 
 .. code-block:: bash
 
@@ -214,5 +214,5 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
     $ sky api info
     Using SkyPilot API server: <URL>
-    ├── Status: healthy, commit: <COMMIT>, version: <VERSION>
-    └── User: <USER> (<USER_ID>)
+    ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
+    └── User: aclice (abcd1234)
