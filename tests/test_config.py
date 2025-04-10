@@ -366,6 +366,15 @@ def test_config_with_env(monkeypatch, tmp_path) -> None:
     assert skypilot_config.get_nested(('gcp', 'use_internal_ips'), None)
 
 
+def test_invalid_override_config(monkeypatch, tmp_path) -> None:
+    """Test that an invalid override config is rejected."""
+    with pytest.raises(sky.exceptions.InvalidSkyPilotConfigError) as e:
+        with skypilot_config.override_skypilot_config({
+                'invalid_key': 'invalid_value',
+        }):
+            pass
+
+
 def test_k8s_config_with_override(monkeypatch, tmp_path,
                                   enable_all_clouds) -> None:
     config_path = tmp_path / 'config.yaml'

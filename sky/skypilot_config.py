@@ -55,6 +55,7 @@ import pprint
 import typing
 from typing import Any, Dict, Iterator, Optional, Tuple
 
+from sky import exceptions
 from sky import sky_logging
 from sky.adaptors import common as adaptors_common
 from sky.skylet import constants
@@ -205,23 +206,33 @@ def override_skypilot_config(
         yield
         return
     original_config = _dict
+    config = _dict.get_nested(
+        keys=tuple(),
+        default_value=None,
+        override_configs=override_configs,
+        allowed_override_keys=None,
+        disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     try:
         common_utils.validate_schema(
-            override_configs,
+            config,
             schemas.get_config_schema(),
-            f'Invalid override config {override_configs}. See: '
+            f'Invalid config {config}. See: '
             'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
             'Error: ',
             skip_none=False)
-        config = _dict.get_nested(
-            keys=tuple(),
-            default_value=None,
-            override_configs=override_configs,
-            allowed_override_keys=None,
-            disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
         _config_overridden = True
         _dict = config
         yield
+    except exceptions.InvalidSkyPilotConfigError as e:
+        with ux_utils.print_exception_no_traceback():
+            raise exceptions.InvalidSkyPilotConfigError(
+                'Failed to override the SkyPilot config on API '
+                'server with your local SkyPilot config:\n'
+                '=== SkyPilot config on API server ===\n'
+                f'{common_utils.dump_yaml_str(dict(original_config))}\n'
+                '=== Your local SkyPilot config ===\n'
+                f'{common_utils.dump_yaml_str(override_configs)}\n'
+                f'Details: {e}') from e
     finally:
         _dict = original_config
         _config_overridden = False
