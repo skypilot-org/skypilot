@@ -205,7 +205,8 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
 .. code-block:: bash
 
-    sky api login -e http://$(sky status --endpoint 46580 api-server)
+    URL=$(sky status --endpoint api-server)
+    sky api login -e $URL
 
 5. Verify the API server is running and the version is consistent with the version you upgraded to:
 
