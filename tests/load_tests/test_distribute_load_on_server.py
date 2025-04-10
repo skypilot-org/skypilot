@@ -11,9 +11,18 @@ import argparse
 import os
 
 import sky
-from sky import jobs as managed_jobs
 from sky.utils import subprocess_utils
 from sky import clouds
+
+def stream_log(req_id):
+    # wait for cluster to be up
+    job_id_handle = sky.stream_and_get(req_id)
+    job_id, handle = job_id_handle
+    if job_id is None:
+        return
+    # tail the logs
+    sky.tail_logs(handle.get_cluster_name(), job_id, follow=True)
+
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
@@ -23,8 +32,12 @@ if __name__ == '__main__':
                         help='Number of distributed clients to run')
     parser.add_argument('--cpus',
                         type=str,
-                        default='4+',
+                        default='2+',
                         help='Number of CPU cores to use for each client')
+    parser.add_argument('--memory',
+                        type=str,
+                        default='4+',
+                        help='GB of memory to use for each client')
     parser.add_argument('--url',
                         type=str,
                         default='',
@@ -62,7 +75,12 @@ if __name__ == '__main__':
         task = sky.Task(setup=setup,
                         run=run)
         task.set_file_mounts(file_mounts)
-        task.set_resources(sky.Resources(clouds.Kubernetes(), cpus=args.cpus))
+        task.set_resources(sky.Resources(clouds.Kubernetes(), cpus=args.cpus, memory=args.memory))
+        # Use launch instead of jobs launch for predictable client parallelism
         resps.append(sky.launch(task, f'benchmark-{i}'))
-    subprocess_utils.run_in_parallel(sky.stream_and_get,
-                                     resps)
+    try:
+        subprocess_utils.run_in_parallel(stream_log,
+                                         resps)
+    finally:
+        for i in range(args.t):
+            sky.down(f'benchmark-{i}')
