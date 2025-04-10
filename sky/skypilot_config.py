@@ -200,7 +200,7 @@ def override_skypilot_config(
         # If no override configs (None or empty dict), do nothing.
         yield
         return
-    original_config = copy.deepcopy(_dict)
+    original_config = _dict
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
