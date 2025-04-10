@@ -75,22 +75,34 @@ def test_mp_queue_memory_footprint():
                                             timeout=1)[0]
 
     memory_before = get_memory_usage()
-    count = 1000_000
+    # Tested 1M items takes 160MB memory, use 10K here to accelerate the test
+    count = 10_000
+    mem_threshold_mb = 18
     q = mp_queue.get_queue(q_names[0], port)
     for _ in range(count):
         # Mock (request_id, ignore_return_value) tuple
         input_tuple = (uuid.uuid4(), True)
         q.put(input_tuple)
-    memory_peak = get_memory_usage()
+    memory_after_put = get_memory_usage()
     for _ in range(count):
+        input_tuple = (uuid.uuid4(), True)
+        q.put(input_tuple)
+    memory_after_put_again = get_memory_usage()
+    for _ in range(count * 2):
         q.get()
+    # Wait GC in the server process
+    time.sleep(1)
     memory_after = get_memory_usage()
     server.terminate()
     server.join()
-    print(f'memory usage: {memory_peak - memory_before}')
-    assert memory_peak - memory_before < 180, (
-        f'Queuing {count} items increased memory usage by {memory_peak - memory_before}MB, '
-        'which is more than the allowed 180MB')
+    print(f'memory usage: {memory_after_put - memory_before}')
+    assert memory_after_put - memory_before < mem_threshold_mb, (
+        f'Queuing {count} items increased memory usage by {memory_after_put - memory_before}MB, '
+        'which is more than the allowed 18MB')
+    # Test if the memory usage is proportional to the number of items
+    assert memory_after_put_again - memory_after_put < mem_threshold_mb, (
+        f'Queuing {count} items increased memory usage by {memory_after_put_again - memory_after_put}MB, '
+        'memory usage should be proportional to the number of items')
     print(
         f'memory usage after processing all the items: {memory_after - memory_before}'
     )
