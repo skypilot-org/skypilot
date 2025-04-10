@@ -90,6 +90,7 @@ CONFIG_PATH = '~/.sky/config.yaml'
 # The loaded config.
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
+_config_overridden: bool = False
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -176,7 +177,10 @@ def _reload_config() -> None:
 
 
 def loaded_config_path() -> Optional[str]:
-    """Returns the path to the loaded config file."""
+    """Returns the path to the loaded config file, or
+    '<overridden>' if the config is overridden."""
+    if _config_overridden:
+        return '<overridden>'
     return _loaded_config_path
 
 
@@ -193,7 +197,7 @@ def loaded() -> bool:
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
-    global _dict
+    global _dict, _config_overridden
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
@@ -201,14 +205,23 @@ def override_skypilot_config(
         yield
         return
     original_config = _dict
-    config = _dict.get_nested(
-        keys=tuple(),
-        default_value=None,
-        override_configs=override_configs,
-        allowed_override_keys=None,
-        disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     try:
+        common_utils.validate_schema(
+            override_configs,
+            schemas.get_config_schema(),
+            f'Invalid override config {override_configs}. See: '
+            'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+            'Error: ',
+            skip_none=False)
+        config = _dict.get_nested(
+            keys=tuple(),
+            default_value=None,
+            override_configs=override_configs,
+            allowed_override_keys=None,
+            disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
+        _config_overridden = True
         _dict = config
         yield
     finally:
         _dict = original_config
+        _config_overridden = False
