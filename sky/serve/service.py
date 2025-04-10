@@ -184,6 +184,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
         # Add initial version information to the service state.
         serve_state.add_or_update_version(service_name, version, service_spec)
 
+    service_dir = os.path.expanduser(
+        serve_utils.generate_remote_service_dir_name(service_name))
     task_yaml = serve_utils.generate_task_yaml_file_name(service_name, version)
 
     if not is_recovery:
@@ -208,8 +210,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 raise ValueError(f'Service {service_name} already exists.')
 
         # Create the service working directory.
-        service_dir = os.path.expanduser(
-            serve_utils.generate_remote_service_dir_name(service_name))
         os.makedirs(service_dir, exist_ok=True)
 
         # Copy the tmp task yaml file to the final task yaml file.
@@ -298,7 +298,8 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
             if proc is not None
         ]
         subprocess_utils.kill_children_processes(
-            [process.pid for process in process_to_kill], force=True)
+            parent_pids=[process.pid for process in process_to_kill],
+            force=True)
         for process in process_to_kill:
             process.join()
 
@@ -308,8 +309,6 @@ def _start(service_name: str, tmp_task_yaml: str, job_id: int):
                 service_name, serve_state.ServiceStatus.FAILED_CLEANUP)
             logger.error(f'Service {service_name} failed to clean up.')
         else:
-            service_dir = os.path.expanduser(
-                serve_utils.generate_remote_service_dir_name(service_name))
             shutil.rmtree(service_dir)
             serve_state.remove_service(service_name)
             serve_state.delete_all_versions(service_name)
