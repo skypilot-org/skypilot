@@ -203,7 +203,8 @@ def _parse_config_file(config_path: str) -> config_utils.Config:
     try:
         config_dict = common_utils.read_yaml(config_path)
         config = config_utils.Config.from_dict(config_dict)
-        logger.debug(f'Config loaded:\n{pprint.pformat(config)}')
+        logger.debug(
+            f'Config loaded from {config_path}:\n{pprint.pformat(config)}')
     except yaml.YAMLError as e:
         logger.error(f'Error in loading config file ({config_path}):', e)
     if config:
@@ -246,8 +247,8 @@ def _reload_config_hierarchical() -> None:
     # find the user config file
     user_config_path = _get_config_file_path(ENV_VAR_USER_CONFIG)
     if user_config_path:
-        logger.info('using user config file specified by '
-                    f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
+        logger.debug('using user config file specified by '
+                     f'{ENV_VAR_USER_CONFIG}: {user_config_path}')
         user_config_path = os.path.expanduser(user_config_path)
         if not os.path.exists(user_config_path):
             with ux_utils.print_exception_no_traceback():
@@ -257,7 +258,7 @@ def _reload_config_hierarchical() -> None:
                     'does not exist. Please double check the path or unset the '
                     f'env var: unset {ENV_VAR_USER_CONFIG}')
     else:
-        logger.info(f'using default user config file: {USER_CONFIG_PATH}')
+        logger.debug(f'using default user config file: {USER_CONFIG_PATH}')
         user_config_path = USER_CONFIG_PATH
         user_config_path = os.path.expanduser(user_config_path)
 
@@ -266,8 +267,8 @@ def _reload_config_hierarchical() -> None:
     # find the project config file
     project_config_path = _get_config_file_path(ENV_VAR_PROJECT_CONFIG)
     if project_config_path:
-        logger.info('using project config file specified by '
-                    f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
+        logger.debug('using project config file specified by '
+                     f'{ENV_VAR_PROJECT_CONFIG}: {project_config_path}')
         project_config_path = os.path.expanduser(project_config_path)
         if not os.path.exists(project_config_path):
             with ux_utils.print_exception_no_traceback():
@@ -277,31 +278,28 @@ def _reload_config_hierarchical() -> None:
                     'does not exist. Please double check the path or unset the '
                     f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
     else:
-        logger.info(f'using default project config file: {PROJECT_CONFIG_PATH}')
+        logger.debug(
+            f'using default project config file: {PROJECT_CONFIG_PATH}')
         project_config_path = PROJECT_CONFIG_PATH
         project_config_path = os.path.expanduser(project_config_path)
 
     # load the user config file
     if os.path.exists(user_config_path):
         user_config = _parse_config_file(user_config_path)
-        logger.info('following overrides are obtained '
-                    f'from user config: {user_config}')
         _validate_config(user_config, user_config_path)
         overrides.append(user_config)
 
     if os.path.exists(project_config_path):
         project_config = _parse_config_file(project_config_path)
-        logger.info('following overrides are obtained '
-                    f'from project config: {project_config}')
         _validate_config(project_config, project_config_path)
         overrides.append(project_config)
 
     # layer the configs on top of each other based on priority
     overlaid_client_config: config_utils.Config = config_utils.Config()
-    for override in reversed(overrides):
+    for override in overrides:
         overlaid_client_config = _overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
-    logger.info(f'final config: {overlaid_client_config}')
+    logger.debug(f'final config: {overlaid_client_config}')
     _dict = overlaid_client_config
 
 

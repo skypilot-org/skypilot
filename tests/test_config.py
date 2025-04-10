@@ -147,6 +147,8 @@ def test_no_config(monkeypatch) -> None:
     """Test that the config is not loaded if the config file does not exist."""
     monkeypatch.setattr(skypilot_config, 'USER_CONFIG_PATH',
                         '/tmp/does_not_exist')
+    monkeypatch.setattr(skypilot_config, 'PROJECT_CONFIG_PATH',
+                        '/tmp/does_not_exist')
     skypilot_config._reload_config()
     _check_empty_config()
 
@@ -156,6 +158,8 @@ def test_empty_config(monkeypatch, tmp_path) -> None:
     with open(tmp_path / 'empty.yaml', 'w', encoding='utf-8') as f:
         f.write('')
     monkeypatch.setattr(skypilot_config, 'USER_CONFIG_PATH',
+                        tmp_path / 'empty.yaml')
+    monkeypatch.setattr(skypilot_config, 'PROJECT_CONFIG_PATH',
                         tmp_path / 'empty.yaml')
     skypilot_config._reload_config()
     _check_empty_config()
@@ -587,6 +591,7 @@ def test_override_skypilot_config_without_original_config(
     # Create original config file
     config_path = tmp_path / 'non_existent.yaml'
     monkeypatch.setattr(skypilot_config, 'USER_CONFIG_PATH', config_path)
+    monkeypatch.setattr(skypilot_config, 'PROJECT_CONFIG_PATH', config_path)
     skypilot_config._reload_config()
     assert not skypilot_config._dict
     assert skypilot_config._loaded_config_path is None
@@ -622,3 +627,98 @@ def test_override_skypilot_config_without_original_config(
     assert os.environ.get(skypilot_config.ENV_VAR_SKYPILOT_CONFIG) is None
     assert skypilot_config._loaded_config_path is None
     assert not skypilot_config._dict
+
+
+def test_hierarchical_config(monkeypatch, tmp_path):
+    """Test that hierarchical config is loaded correctly."""
+    # test with default config files
+    default_user_config_path = tmp_path / 'user_config.yaml'
+    monkeypatch.setattr(skypilot_config, 'USER_CONFIG_PATH',
+                        default_user_config_path)
+    default_user_config_path.write_text(
+        textwrap.dedent(f"""\
+            gcp:
+                labels:
+                    default-user-config: present
+                    source: default-user-config
+            """))
+    project_config_path = tmp_path / 'project_config.yaml'
+    monkeypatch.setattr(skypilot_config, 'PROJECT_CONFIG_PATH',
+                        project_config_path)
+    project_config_path.write_text(
+        textwrap.dedent(f"""\
+            gcp:
+                labels:
+                    default-project-config: present
+                    source: default-project-config
+            """))
+
+    skypilot_config._reload_config()
+    # Check the two configs are merged correctly with
+    # project config overriding user config
+    assert skypilot_config.get_nested(('gcp', 'labels', 'default-user-config'),
+                                      None) == 'present'
+    assert skypilot_config.get_nested(
+        ('gcp', 'labels', 'default-project-config'), None) == 'present'
+    assert skypilot_config.get_nested(('gcp', 'labels', 'source'),
+                                      None) == 'default-project-config'
+
+    # Test with env vars
+    env_user_config_path = tmp_path / 'env_user_config.yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+                       str(env_user_config_path))
+    env_user_config_path.write_text(
+        textwrap.dedent(f"""\
+            gcp:
+                labels:
+                    env-user-config: present
+                    source: env-user-config
+            """))
+    env_project_config_path = tmp_path / 'env_project_config.yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
+                       str(env_project_config_path))
+    env_project_config_path.write_text(
+        textwrap.dedent(f"""\
+            gcp:
+                labels:
+                    env-project-config: present
+                    source: env-project-config
+            """))
+    skypilot_config._reload_config()
+    assert skypilot_config.get_nested(('gcp', 'labels', 'env-user-config'),
+                                      None) == 'present'
+    assert skypilot_config.get_nested(('gcp', 'labels', 'env-project-config'),
+                                      None) == 'present'
+    assert skypilot_config.get_nested(('gcp', 'labels', 'source'),
+                                      None) == 'env-project-config'
+    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG)
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
+
+    skypilot_config._reload_config()
+    assert skypilot_config.get_nested(('gcp', 'labels', 'source'),
+                                      None) == 'default-project-config'
+
+    # test with missing default config files
+    non_existent_config_path = tmp_path / 'non_existent.yaml'
+    monkeypatch.setattr(skypilot_config, 'USER_CONFIG_PATH',
+                        non_existent_config_path)
+    monkeypatch.setattr(skypilot_config, 'PROJECT_CONFIG_PATH',
+                        non_existent_config_path)
+    skypilot_config._reload_config()
+    assert not skypilot_config._dict
+
+    # if config files specified by env vars are missing,
+    # error out
+    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+                       str(non_existent_config_path))
+    with pytest.raises(FileNotFoundError):
+        skypilot_config._reload_config()
+    monkeypatch.delenv(skypilot_config.ENV_VAR_USER_CONFIG)
+    skypilot_config._reload_config()
+
+    monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
+                       str(non_existent_config_path))
+    with pytest.raises(FileNotFoundError):
+        skypilot_config._reload_config()
+    monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
+    skypilot_config._reload_config()
