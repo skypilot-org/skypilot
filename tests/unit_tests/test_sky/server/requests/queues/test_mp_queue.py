@@ -1,9 +1,9 @@
-import uuid
-import memory_profiler
 import multiprocessing
 import time
 from typing import List
+import uuid
 
+import memory_profiler
 
 from sky.server.requests.queues import mp_queue
 from sky.utils import common_utils
@@ -61,18 +61,17 @@ def test_mp_queue():
     server.terminate()
     server.join()
 
+
 def test_mp_queue_memory_footprint():
     q_names = ['test_queue']
     port = common_utils.find_free_port(50015)
     server = multiprocessing.Process(target=mp_queue.start_queue_manager,
                                      args=(q_names, port))
     server.start()
-    mp_queue.wait_for_queues_to_be_ready(
-        q_names.copy(), server, port=port)
+    mp_queue.wait_for_queues_to_be_ready(q_names.copy(), server, port=port)
 
     def get_memory_usage():
-        return memory_profiler.memory_usage(server.pid,
-                                            interval=0.1,
+        return memory_profiler.memory_usage(server.pid, interval=0.1,
                                             timeout=1)[0]
 
     memory_before = get_memory_usage()
@@ -91,10 +90,10 @@ def test_mp_queue_memory_footprint():
     print(f'memory usage: {memory_peak - memory_before}')
     assert memory_peak - memory_before < 180, (
         f'Queuing {count} items increased memory usage by {memory_peak - memory_before}MB, '
-        'which is more than the allowed 180MB'
+        'which is more than the allowed 180MB')
+    print(
+        f'memory usage after processing all the items: {memory_after - memory_before}'
     )
-    print(f'memory usage after processing all the items: {memory_after - memory_before}')
     assert memory_after - memory_before < 1, (
         f'Memory usage increased by {memory_after - memory_before}MB after processing all the items,'
-        'potential memory leak'
-    )
+        'potential memory leak')
