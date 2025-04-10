@@ -189,11 +189,11 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
     NAME        LAUNCHED     RESOURCES                                                                  STATUS  AUTOSTOP  COMMAND
     api-server  41 mins ago  1x AWS(c6i.2xlarge, image_id={'us-east-1': 'docker:berkeleyskypilot/sk...  UP      -         sky exec api-server pip i...
 
-3. Upgrade the SkyPilot pip package on the VM and restart the API server:
+3. Upgrade the SkyPilot on the VM and restart the API server:
 
 .. note::
 
-    Upgrade and restart the API server will interrupt all running requests and may cause compatibility issue that requires upgrading the clients to resolve.
+    Upgrade and restart the API server will interrupt all running requests.
 
 .. code-block:: bash
 
