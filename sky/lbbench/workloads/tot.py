@@ -6,6 +6,7 @@ import collections
 import copy
 import json
 import time
+import traceback
 from typing import Any, Awaitable, Dict, List, Union
 
 from rich import print as rp
@@ -95,6 +96,8 @@ async def _user_task(uid: int, questions: List[str],
     for i, task in enumerate(asyncio.as_completed(tasks)):
         result = await task
         if isinstance(result, Exception):
+            rp(f'User {uid} FAILED: {result}.'
+               f'  Traceback: {traceback.format_exc()}')
             continue
         results.extend(result)
         progress = f'({i+1}/{len(questions)})'
