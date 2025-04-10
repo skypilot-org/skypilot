@@ -162,7 +162,7 @@ def _validate_config(config: Dict[str, Any], source: str) -> None:
         skip_none=False)
 
 
-def _overlay_skypilot_config(
+def overlay_skypilot_config(
         original_config: Optional[config_utils.Config],
         override_configs: Optional[config_utils.Config]) -> config_utils.Config:
     """Overlays the override configs on the original configs."""
@@ -290,7 +290,7 @@ def _reload_config_hierarchical() -> None:
     # layer the configs on top of each other based on priority
     overlaid_client_config: config_utils.Config = config_utils.Config()
     for override in reversed(overrides):
-        overlaid_client_config = _overlay_skypilot_config(
+        overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
     _dict = overlaid_client_config
 
@@ -362,7 +362,7 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     return parsed_config
 
 
-def apply_cli_config(cli_config: Optional[str]) -> None:
+def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
     """Applies the skypilot CLI config.
 
     SAFETY:
@@ -379,6 +379,7 @@ def apply_cli_config(cli_config: Optional[str]) -> None:
     logger.info(
         f'applying following overrides from CLI config: {parsed_config}')
     print(f'original _dict: {_dict}')
-    _dict = _overlay_skypilot_config(original_config=_dict,
-                                     override_configs=parsed_config)
+    _dict = overlay_skypilot_config(original_config=_dict,
+                                    override_configs=parsed_config)
     print(f'new _dict: {_dict}')
+    return parsed_config
