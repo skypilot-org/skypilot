@@ -299,11 +299,6 @@ FILE_MOUNTS_WORKDIR_SUBPATH = 'job-{run_id}/workdir'
 FILE_MOUNTS_SUBPATH = 'job-{run_id}/local-file-mounts/{i}'
 FILE_MOUNTS_TMP_SUBPATH = 'job-{run_id}/tmp-files'
 
-# The default idle timeout for SkyPilot controllers. This include jobs
-# controller and sky serve controller.
-# TODO(tian): Refactor to controller_utils. Current blocker: circular import.
-CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP = 10
-
 # Due to the CPU/memory usage of the controller process launched with sky jobs (
 # use ray job under the hood), we need to reserve some CPU/memory for each jobs/
 # serve controller process.

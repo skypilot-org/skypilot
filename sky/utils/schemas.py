@@ -724,7 +724,38 @@ def get_config_schema():
         # Validation may fail if $schema is included.
         if k != '$schema'
     }
-    resources_schema['properties'].pop('ports')
+    autostop_schema = {
+        'type': 'object',
+        'required': [],
+        'anyOf': [
+            # If enabled is False, don't allow down_when_idle or idle_minutes.
+            {
+                'additionalProperties': False,
+                'properties': {
+                    'enabled': {
+                        'const': False,
+                    },
+                },
+            },
+            # If enabled is True, allow down_when_idle and idle_minutes.
+            {
+                'additionalProperties': False,
+                'properties': {
+                    'enabled': {
+                        'const': True,
+                    },
+                    'down_when_idle': {
+                        'type': 'boolean',
+                    },
+                    'idle_minutes': {
+                        'type': 'integer',
+                        'minimum': 0,
+                    },
+                },
+            },
+            # If enabled is unset, either schema can match.
+        ],
+    }
     controller_resources_schema = {
         'type': 'object',
         'required': [],
@@ -736,13 +767,14 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'autostop': autostop_schema,
                 }
             },
             'bucket': {
                 'type': 'string',
                 'pattern': '^(https|s3|gs|r2|cos)://.+',
                 'required': [],
-            }
+            },
         }
     }
     cloud_configs = {
