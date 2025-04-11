@@ -82,7 +82,7 @@ class ApiServerInfo:
 
 
 def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
-    """Returns the cookie jar for the API server."""
+    """Returns the cookie jar used by the client to access the API server."""
     cookie_file = os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR)
     cookie_jar = requests.cookies.RequestsCookieJar()
     if cookie_file and os.path.exists(cookie_file):

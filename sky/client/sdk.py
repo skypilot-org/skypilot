@@ -60,8 +60,6 @@ else:
 logger = sky_logging.init_logger(__name__)
 logging.getLogger('httpx').setLevel(logging.CRITICAL)
 
-get_api_cookie_jar = server_common.get_api_cookie_jar
-
 
 def stream_response(request_id: Optional[str],
                     response: 'requests.Response',
@@ -105,7 +103,7 @@ def check(clouds: Optional[Tuple[str]],
     body = payloads.CheckBody(clouds=clouds, verbose=verbose)
     response = requests.post(f'{server_common.get_server_url()}/check',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -122,7 +120,7 @@ def enabled_clouds() -> server_common.RequestId:
         A list of enabled clouds in string format.
     """
     response = requests.get(f'{server_common.get_server_url()}/enabled_clouds',
-                            cookies=get_api_cookie_jar())
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -173,7 +171,7 @@ def list_accelerators(gpus_only: bool = True,
     response = requests.post(
         f'{server_common.get_server_url()}/list_accelerators',
         json=json.loads(body.model_dump_json()),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -214,7 +212,7 @@ def list_accelerator_counts(
     response = requests.post(
         f'{server_common.get_server_url()}/list_accelerator_counts',
         json=json.loads(body.model_dump_json()),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -253,7 +251,7 @@ def optimize(
                                  request_options=admin_policy_request_options)
     response = requests.post(f'{server_common.get_server_url()}/optimize',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -289,7 +287,7 @@ def validate(
                                  request_options=admin_policy_request_options)
     response = requests.post(f'{server_common.get_server_url()}/validate',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     if response.status_code == 400:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.deserialize_exception(
@@ -497,10 +495,12 @@ def launch(
             _is_launched_by_sky_serve_controller),
         disable_controller_check=_disable_controller_check,
     )
-    response = requests.post(f'{server_common.get_server_url()}/launch',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=get_api_cookie_jar())
+    response = requests.post(
+        f'{server_common.get_server_url()}/launch',
+        json=json.loads(body.model_dump_json()),
+        timeout=5,
+        cookies=server_common.get_api_cookie_jar(),
+    )
     return server_common.get_request_id(response)
 
 
@@ -579,10 +579,12 @@ def exec(  # pylint: disable=redefined-builtin
         backend=backend.NAME if backend else None,
     )
 
-    response = requests.post(f'{server_common.get_server_url()}/exec',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=get_api_cookie_jar())
+    response = requests.post(
+        f'{server_common.get_server_url()}/exec',
+        json=json.loads(body.model_dump_json()),
+        timeout=5,
+        cookies=server_common.get_api_cookie_jar(),
+    )
     return server_common.get_request_id(response)
 
 
@@ -633,7 +635,7 @@ def tail_logs(cluster_name: str,
         stream=True,
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     request_id = server_common.get_request_id(response)
     return stream_response(request_id, response, output_stream)
 
@@ -671,7 +673,7 @@ def download_logs(cluster_name: str,
     )
     response = requests.post(f'{server_common.get_server_url()}/download_logs',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     job_id_remote_path_dict = stream_and_get(
         server_common.get_request_id(response))
     remote2local_path_dict = client_common.download_logs_from_api_server(
@@ -749,10 +751,12 @@ def start(
         down=down,
         force=force,
     )
-    response = requests.post(f'{server_common.get_server_url()}/start',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=get_api_cookie_jar())
+    response = requests.post(
+        f'{server_common.get_server_url()}/start',
+        json=json.loads(body.model_dump_json()),
+        timeout=5,
+        cookies=server_common.get_api_cookie_jar(),
+    )
     return server_common.get_request_id(response)
 
 
@@ -793,10 +797,12 @@ def down(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(f'{server_common.get_server_url()}/down',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=get_api_cookie_jar())
+    response = requests.post(
+        f'{server_common.get_server_url()}/down',
+        json=json.loads(body.model_dump_json()),
+        timeout=5,
+        cookies=server_common.get_api_cookie_jar(),
+    )
     return server_common.get_request_id(response)
 
 
@@ -840,10 +846,12 @@ def stop(cluster_name: str, purge: bool = False) -> server_common.RequestId:
         cluster_name=cluster_name,
         purge=purge,
     )
-    response = requests.post(f'{server_common.get_server_url()}/stop',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=get_api_cookie_jar())
+    response = requests.post(
+        f'{server_common.get_server_url()}/stop',
+        json=json.loads(body.model_dump_json()),
+        timeout=5,
+        cookies=server_common.get_api_cookie_jar(),
+    )
     return server_common.get_request_id(response)
 
 
@@ -908,10 +916,12 @@ def autostop(
         idle_minutes=idle_minutes,
         down=down,
     )
-    response = requests.post(f'{server_common.get_server_url()}/autostop',
-                             json=json.loads(body.model_dump_json()),
-                             timeout=5,
-                             cookies=get_api_cookie_jar())
+    response = requests.post(
+        f'{server_common.get_server_url()}/autostop',
+        json=json.loads(body.model_dump_json()),
+        timeout=5,
+        cookies=server_common.get_api_cookie_jar(),
+    )
     return server_common.get_request_id(response)
 
 
@@ -971,7 +981,7 @@ def queue(cluster_name: str,
     )
     response = requests.post(f'{server_common.get_server_url()}/queue',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1013,7 +1023,7 @@ def job_status(cluster_name: str,
     )
     response = requests.post(f'{server_common.get_server_url()}/job_status',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1067,7 +1077,7 @@ def cancel(
     )
     response = requests.post(f'{server_common.get_server_url()}/cancel',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1163,7 +1173,7 @@ def status(
     )
     response = requests.post(f'{server_common.get_server_url()}/status',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1198,7 +1208,7 @@ def endpoints(
     )
     response = requests.post(f'{server_common.get_server_url()}/endpoints',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1237,7 +1247,7 @@ def cost_report() -> server_common.RequestId:  # pylint: disable=redefined-built
             }
     """
     response = requests.get(f'{server_common.get_server_url()}/cost_report',
-                            cookies=get_api_cookie_jar())
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1267,7 +1277,7 @@ def storage_ls() -> server_common.RequestId:
         ]
     """
     response = requests.get(f'{server_common.get_server_url()}/storage/ls',
-                            cookies=get_api_cookie_jar())
+                            cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1292,7 +1302,7 @@ def storage_delete(name: str) -> server_common.RequestId:
     body = payloads.StorageBody(name=name)
     response = requests.post(f'{server_common.get_server_url()}/storage/delete',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1331,7 +1341,7 @@ def local_up(gpus: bool,
                                 password=password)
     response = requests.post(f'{server_common.get_server_url()}/local_up',
                              json=json.loads(body.model_dump_json()),
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1348,7 +1358,7 @@ def local_down() -> server_common.RequestId:
             raise ValueError('sky local down is only supported when running '
                              'SkyPilot locally.')
     response = requests.post(f'{server_common.get_server_url()}/local_down',
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1373,7 +1383,7 @@ def realtime_kubernetes_gpu_availability(
         f'{server_common.get_server_url()}/'
         'realtime_kubernetes_gpu_availability',
         json=json.loads(body.model_dump_json()),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1405,7 +1415,7 @@ def kubernetes_node_info(
     response = requests.post(
         f'{server_common.get_server_url()}/kubernetes_node_info',
         json=json.loads(body.model_dump_json()),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1435,7 +1445,7 @@ def status_kubernetes() -> server_common.RequestId:
     """
     response = requests.get(
         f'{server_common.get_server_url()}/status_kubernetes',
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1462,7 +1472,7 @@ def get(request_id: str) -> Any:
         f'{server_common.get_server_url()}/api/get?request_id={request_id}',
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     request_task = None
     if response.status_code == 200:
         request_task = requests_lib.Request.decode(
@@ -1542,7 +1552,7 @@ def stream_and_get(
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
         stream=True,
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     if response.status_code in [404, 400]:
         detail = response.json().get('detail')
         with ux_utils.print_exception_no_traceback():
@@ -1599,7 +1609,7 @@ def api_cancel(request_ids: Optional[Union[str, List[str]]] = None,
     response = requests.post(f'{server_common.get_server_url()}/api/cancel',
                              json=json.loads(body.model_dump_json()),
                              timeout=5,
-                             cookies=get_api_cookie_jar())
+                             cookies=server_common.get_api_cookie_jar())
     return server_common.get_request_id(response)
 
 
@@ -1628,7 +1638,7 @@ def api_status(
         params=server_common.request_body_to_params(body),
         timeout=(client_common.API_SERVER_REQUEST_CONNECTION_TIMEOUT_SECONDS,
                  None),
-        cookies=get_api_cookie_jar())
+        cookies=server_common.get_api_cookie_jar())
     server_common.handle_request_error(response)
     return [
         requests_lib.RequestPayload(**request) for request in response.json()
@@ -1656,7 +1666,7 @@ def api_info() -> Dict[str, str]:
 
     """
     response = requests.get(f'{server_common.get_server_url()}/api/health',
-                            cookies=get_api_cookie_jar())
+                            cookies=server_common.get_api_cookie_jar())
     response.raise_for_status()
     return response.json()
 
