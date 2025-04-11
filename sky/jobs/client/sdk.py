@@ -82,6 +82,7 @@ def launch(
         f'{server_common.get_server_url()}/jobs/launch',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -138,6 +139,7 @@ def queue(refresh: bool,
         f'{server_common.get_server_url()}/jobs/queue',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response=response)
 
@@ -177,6 +179,7 @@ def cancel(
         f'{server_common.get_server_url()}/jobs/cancel',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response=response)
 
@@ -224,6 +227,7 @@ def tail_logs(name: Optional[str] = None,
         json=json.loads(body.model_dump_json()),
         stream=True,
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     request_id = server_common.get_request_id(response)
     return sdk.stream_response(request_id, response, output_stream)
@@ -267,6 +271,7 @@ def download_logs(
         f'{server_common.get_server_url()}/jobs/download_logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     job_id_remote_path_dict = sdk.stream_and_get(
         server_common.get_request_id(response))
