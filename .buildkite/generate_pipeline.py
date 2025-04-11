@@ -307,10 +307,10 @@ def _dump_pipeline_to_file(yaml_file_path: str,
             all_steps.extend(pipeline['steps'])
 
         # Wrap steps in a group with notification settings
-
         grouped_steps = [{
             'group': 'Smoke Tests',
-            'key': trigger_command.split(' ')[0],
+            'key': re.sub(r'[^a-zA-Z0-9_\-:]', '',
+                          re.match(r'^[^ ]*', trigger_command).group(0)),
             'notify': [{
                 'github_commit_status': {
                     'context': f'{trigger_command}'
