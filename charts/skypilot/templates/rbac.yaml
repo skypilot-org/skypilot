@@ -1,3 +1,4 @@
+{{- if .Values.rbac.create }}
 {{- if .Values.rbac.rules }}
 {{- fail "`.rbac.rules` is deprecated. Please use `.rbac.namespaceRules` and `.rbac.clusterRules` instead" }}
 {{- end }}
@@ -68,4 +69,5 @@ roleRef:
   name: {{ $.Release.Name }}-api-role
   apiGroup: rbac.authorization.k8s.io
 ---
+{{- end }}
 {{- end }}
