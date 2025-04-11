@@ -17,12 +17,12 @@ Here we introduce the steps for upgrading a remote API server deployed with :ref
 
 .. note::
 
-    Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: drain the old API server and upgrade.
+    Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: cordon & drain the old API server and upgrade.
 
 Step 1: Prepare an upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Find the version to use in SkyPilot `nightly channel <https://pypi.org/project/skypilot-nightly/#history>`_.
+1. Find the version to use in SkyPilot `nightly build <https://pypi.org/project/skypilot-nightly/#history>`_.
 2. Update SkyPilot helm repository to the latest version:
 
 .. code-block:: bash
@@ -193,7 +193,7 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
 .. note::
 
-    Upgrade and restart the API server will interrupt all running requests.
+    Upgrade and restart the API server will interrupt all pending and running requests.
 
 .. code-block:: bash
 
