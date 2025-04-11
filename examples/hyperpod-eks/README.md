@@ -30,7 +30,7 @@ sky check k8s
 If you are using it with SkyPilot for the first time, you may see a hint to create GPU labels for your nodes. Follow the instructions to create the labels.
 
 ```bash
-python -m sky.utils.kubernetes.gpu_labeler --context <your-eks-context>
+python -m sky.utils.kubernetes.gpu_labeler
 ```
 
 ## Find available GPUs
@@ -70,6 +70,14 @@ This will launch a distributed training job with 2 nodes on the HyperPod cluster
 ```bash
 sky logs train
 ```
+
+To terminate the SkyPilot cluster, you can run:
+
+```bash
+sky down train
+```
+
+
 
 ### Start many jobs
 
