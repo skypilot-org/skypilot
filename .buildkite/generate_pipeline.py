@@ -112,6 +112,8 @@ def _parse_args(args: Optional[str] = None):
 
     parser.add_argument("--remote-server", action="store_true")
 
+    parser.add_argument('--base-branch')
+
     parsed_args, _ = parser.parse_known_args(args_list)
 
     # Collect chosen clouds from the flags
@@ -138,6 +140,8 @@ def _parse_args(args: Optional[str] = None):
     extra_args = []
     if parsed_args.remote_server:
         extra_args.append('--remote-server')
+    if parsed_args.base_branch:
+        extra_args.append(f'--base-branch {parsed_args.base_branch}')
 
     return default_clouds_to_run, parsed_args.k, extra_args
 
