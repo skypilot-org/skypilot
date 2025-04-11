@@ -203,6 +203,16 @@ export function ManagedJobsTable({
     onConfirm: null,
   });
 
+  const router = useRouter();
+
+  // Function to scroll to a specific section
+  const scrollToSection = (sectionId) => {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
   const handleRestartController = async () => {
     setConfirmationModal({
       isOpen: true,
@@ -282,6 +292,11 @@ export function ManagedJobsTable({
   useEffect(() => {
     setCurrentPage(1);
   }, [activeTab, data.length]);
+
+  // Reset status filter when activeTab changes
+  useEffect(() => {
+    setSelectedStatus('All');
+  }, [activeTab]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -733,113 +748,143 @@ export function JobDetails({
   actionButtons,
   customHeader,
   hideTabs = false,
+  loading = false,
 }) {
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
+  const [logs, setLogs] = useState([]);
   const router = useRouter();
-  const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('info'); // Default to 'info' tab
+  const isClusterJobPage = router.pathname.includes('/clusters/[cluster]/[job]');
 
-  // Update activeTab when the URL query changes
+  // Clear logs when jobData.id changes
   useEffect(() => {
-    if (router.isReady) {
-      const tab = router.query.tab || 'info';
-      setActiveTab(tab);
+    setLogs([]);
+  }, [jobData.id]);
+
+  // Fetch logs when component mounts or jobData.id changes
+  useEffect(() => {
+    let active = true;
+
+    if (clusterName && jobData.id) {
+      setIsLoadingLogs(true);
+
+      streamClusterJobLogs({
+        clusterName: clusterName,
+        jobId: jobData.id,
+        onNewLog: (log) => {
+          if (active) {
+            const strippedLog = formatLogs(log);
+            setLogs((prevLogs) => [...prevLogs, strippedLog]);
+          }
+        },
+      })
+        .then(() => {
+          if (active) {
+            setIsLoadingLogs(false);
+          }
+        })
+        .catch((error) => {
+          if (active) {
+            console.error('Error streaming logs:', error);
+            setIsLoadingLogs(false);
+          }
+        });
     }
-  }, [router.isReady, router.query.tab]);
 
-  // Update URL when tab changes
-  const handleTabChange = (tab) => {
-    if (tab === activeTab) return; // Don't update if it's the same tab
-
-    setActiveTab(tab);
-
-    // Update URL with the selected tab
-    router.push(
-      {
-        pathname: router.pathname,
-        query: { ...router.query, tab },
-      },
-      undefined,
-      { shallow: true }
-    );
-  };
+    return () => {
+      active = false;
+    };
+  }, [clusterName, jobData.id]);
 
   return (
     <Layout highlighted={highlighted}>
-      {customHeader ? (
-        // Render custom header if provided
-        <>{customHeader}</>
-      ) : (
-        // Otherwise render default header
-        <>
-          <div className="flex items-center">
-            <div className="text-sm mb-4">
-              {parent}
-              <span className="mx-2 text-gray-500">›</span>
-              <Link
-                href={`${parentLink}/${jobData.id}`}
-                className="text-sky-blue hover:underline"
-              >
-                {jobData.job} (ID: {jobData.id})
-              </Link>
-            </div>
-            {(!jobData.job || loading) && (
+      {customHeader || (
+        <div className="flex items-center justify-between mb-4">
+          <div className="text-base flex items-center">
+            {parentLink && (
               <>
-                <CircularProgress size={15} className="mx-5 mt-7" />
+                <Link href={parentLink} className="text-sky-blue hover:underline">
+                  {parent}
+                </Link>
+                <span className="mx-2 text-gray-500">›</span>
               </>
             )}
+            <span className="text-gray-900">{jobData.id}</span>
           </div>
-          <div className="border-b border-gray-200 my-4"></div>
-        </>
-      )}
-
-      {!hideTabs && (
-        <div className="flex justify-between items-center">
-          <div className="flex mb-4">
-            <button
-              className={`p-2 mx-4 ${activeTab === 'info' ? 'text-blue-600 font-semibold border-b-2 border-blue-600' : 'text-gray-700'}`}
-              onClick={() => handleTabChange('info')}
-            >
-              Info
-            </button>
-            <button
-              className={`p-2 mx-4 ${activeTab === 'logs' ? 'text-blue-600 font-semibold border-b-2 border-blue-600' : 'text-gray-700'}`}
-              onClick={() => handleTabChange('logs')}
-            >
-              Logs
-            </button>
-            {withEvents && (
-              <button
-                className={`p-2 mx-4 ${activeTab === 'event' ? 'text-blue-600 font-semibold border-b-2 border-blue-600' : 'text-gray-700'}`}
-                onClick={() => handleTabChange('event')}
-              >
-                Events
-              </button>
-            )}
-          </div>
-          {/* Only show action buttons in default header mode */}
-          {!customHeader && (
-            <div>
-              {actionButtons || (
-                <Status2Actions
-                  jobParent={parentLink}
-                  jobId={jobData.id}
-                  jobName={jobData.job}
-                  status={jobData.status || 'UNKNOWN'}
-                  managed={false}
-                  cluster={clusterName}
-                />
-              )}
-            </div>
-          )}
         </div>
       )}
 
-      <ActiveTab
-        clusterName={clusterName}
-        jobData={jobData}
-        activeTab={activeTab}
-        setLoading={setLoading}
-      />
+      <div className="border-b border-gray-200 my-4"></div>
+
+      {/* Display all sections directly on the page */}
+      <div className="space-y-8">
+        {/* Info Section */}
+        <div id="details-section">
+          <h2 className="text-xl font-semibold mb-4">Details</h2>
+          <div className="items-center mb-6">
+            <Card className="p-3">
+              <div className="grid grid-cols-2 gap-6">
+                <div>
+                  <div className="text-gray-600 font-medium text-base">Job ID</div>
+                  <div className="text-base mt-1">{jobData.id}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600 font-medium text-base">User</div>
+                  <div className="text-base mt-1">{jobData.user}</div>
+                </div>
+                <div>
+                  <div className="text-gray-600 font-medium text-base">Status</div>
+                  <div className="text-base mt-1">
+                    <Status2Icon status={jobData.status} />
+                  </div>
+                </div>
+                {jobData.resources && (
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">Resources</div>
+                    <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
+                  </div>
+                )}
+                <div>
+                  <div className="text-gray-600 font-medium text-base">Job Name</div>
+                  <div className="text-base mt-1">{jobData.job}</div>
+                </div>
+                {jobData.cluster && (
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">Cluster</div>
+                    <div className="text-base mt-1">
+                      <Link
+                        href={`/clusters/${jobData.cluster}`}
+                        className="text-sky-blue hover:underline"
+                      >
+                        {jobData.cluster}
+                      </Link>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </Card>
+          </div>
+        </div>
+
+        {/* Logs Section */}
+        <div id="logs-section">
+          <h2 className="text-xl font-semibold mb-4">Logs</h2>
+          <div className="items-center mb-6">
+            <Card className="p-3">
+              {isLoadingLogs ? (
+                <div className="flex items-center justify-center py-4">
+                  <CircularProgress size={20} className="mr-2" />
+                  <span>Loading logs...</span>
+                </div>
+              ) : (
+                <div className="max-h-96 overflow-y-auto">
+                  <LogFilter logs={logs.join('')} />
+                </div>
+              )}
+            </Card>
+          </div>
+        </div>
+      </div>
     </Layout>
   );
 }
@@ -1191,8 +1236,7 @@ export function Status2Actions({
 
   const handleLogsClick = (e, logType) => {
     e.preventDefault();
-  
-    // Use Next.js router for navigation if on the same page, otherwise direct URL
+
     const targetPath = `${jobParent}/${jobId}`;
   
     if (router.pathname.includes(targetPath)) {
@@ -1206,7 +1250,7 @@ export function Status2Actions({
         { shallow: true }
       );
     } else {
-      // If we're navigating to a different page, use the full URL
+      // If we're navigating to a different page, use the full URL with tab parameter
       router.push(`${targetPath}?tab=${logType}`);
     }
   };

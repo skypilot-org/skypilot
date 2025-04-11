@@ -58,15 +58,6 @@ function JobHeader({
               Refresh
             </button>
           </Tooltip>
-          <Status2Actions
-            withLabel={true}
-            jobParent={`/clusters/${cluster}`}
-            jobId={job}
-            jobName={jobData.job || job}
-            status={jobData.status || 'UNKNOWN'}
-            cluster={cluster}
-            managed={false}
-          />
         </div>
       </div>
       <div className="border-b border-gray-200 my-4"></div>

@@ -21,6 +21,69 @@ function JobDetails() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
+  const [scrollExecuted, setScrollExecuted] = useState(false);
+  const [pageLoaded, setPageLoaded] = useState(false);
+  const [domReady, setDomReady] = useState(false);
+
+  // Function to scroll to a specific section
+  const scrollToSection = (sectionId) => {
+    const element = document.getElementById(sectionId);
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
+    }
+  };
+
+  // Set pageLoaded to true when the component mounts
+  useEffect(() => {
+    setPageLoaded(true);
+  }, []);
+
+  // Use MutationObserver to detect when the DOM is fully rendered
+  useEffect(() => {
+    if (!domReady) {
+      const observer = new MutationObserver((mutations) => {
+        // Check if the sections we want to scroll to exist in the DOM
+        const logsSection = document.getElementById('logs-section');
+        const controllerLogsSection = document.getElementById('controller-logs-section');
+        
+        if ((tab === 'logs' && logsSection) || (tab === 'controllerlogs' && controllerLogsSection)) {
+          setDomReady(true);
+          observer.disconnect();
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true
+      });
+
+      return () => observer.disconnect();
+    }
+  }, [domReady, tab]);
+
+  // Scroll to the appropriate section when the page loads with a tab parameter
+  useEffect(() => {
+    if (router.isReady && pageLoaded && domReady && !scrollExecuted) {
+      // Add a small delay to ensure the DOM is fully rendered
+      const timer = setTimeout(() => {
+        if (tab === 'logs') {
+          scrollToSection('logs-section');
+          setScrollExecuted(true);
+        } else if (tab === 'controllerlogs') {
+          scrollToSection('controller-logs-section');
+          setScrollExecuted(true);
+        }
+      }, 800);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [router.isReady, tab, scrollExecuted, pageLoaded, domReady]);
+
+  // Reset scrollExecuted when tab changes
+  useEffect(() => {
+    setScrollExecuted(false);
+    setDomReady(false);
+  }, [tab]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
@@ -116,64 +179,42 @@ function JobDetails() {
 
       <div className="border-b border-gray-200 my-4"></div>
 
-      {/* Add visible tabs UI */}
+      {/* Display all sections directly on the page */}
       {detailJobData && (
-        <>
-          <div className="flex mb-4">
-            <button
-              className={`p-2 mx-4 ${activeTab === 'info' ? 'text-blue-600 font-semibold border-b-2 border-blue-600' : 'text-gray-700'}`}
-              onClick={() =>
-                router.push(
-                  {
-                    pathname: router.pathname,
-                    query: { ...router.query, tab: 'info' },
-                  },
-                  undefined,
-                  { shallow: true }
-                )
-              }
-            >
-              Info
-            </button>
-            <button
-              className={`p-2 mx-4 ${activeTab === 'logs' ? 'text-blue-600 font-semibold border-b-2 border-blue-600' : 'text-gray-700'}`}
-              onClick={() =>
-                router.push(
-                  {
-                    pathname: router.pathname,
-                    query: { ...router.query, tab: 'logs' },
-                  },
-                  undefined,
-                  { shallow: true }
-                )
-              }
-            >
-              Logs
-            </button>
-            <button
-              className={`p-2 mx-4 ${activeTab === 'controllerlogs' ? 'text-blue-600 font-semibold border-b-2 border-blue-600' : 'text-gray-700'}`}
-              onClick={() =>
-                router.push(
-                  {
-                    pathname: router.pathname,
-                    query: { ...router.query, tab: 'controllerlogs' },
-                  },
-                  undefined,
-                  { shallow: true }
-                )
-              }
-            >
-              Controller Logs
-            </button>
+        <div className="space-y-8">
+          {/* Info Section */}
+          <div id="details-section">
+            <h2 className="text-xl font-semibold mb-4">Details</h2>
+            <JobDetailsContent
+              jobData={detailJobData}
+              activeTab="info"
+              setIsLoadingLogs={setIsLoadingLogs}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+            />
           </div>
 
-          <JobDetailsContent
-            jobData={detailJobData}
-            activeTab={activeTab}
-            setIsLoadingLogs={setIsLoadingLogs}
-            setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-          />
-        </>
+          {/* Logs Section */}
+          <div id="logs-section">
+            <h2 className="text-xl font-semibold mb-4">Logs</h2>
+            <JobDetailsContent
+              jobData={detailJobData}
+              activeTab="logs"
+              setIsLoadingLogs={setIsLoadingLogs}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+            />
+          </div>
+
+          {/* Controller Logs Section */}
+          <div id="controller-logs-section">
+            <h2 className="text-xl font-semibold mb-4">Controller Logs</h2>
+            <JobDetailsContent
+              jobData={detailJobData}
+              activeTab="controllerlogs"
+              setIsLoadingLogs={setIsLoadingLogs}
+              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+            />
+          </div>
+        </div>
       )}
     </Layout>
   );
@@ -261,14 +302,16 @@ useEffect(() => {
     return (
       <div>
         <Card style={contentStyle}>
-          {logs.length > 0 ? (
-            <LogFilter logs={logs.join('')} />
-          ) : (
-            <div className="p-4 text-gray-500">
-              No logs available yet. Logs will appear here as they are
-              generated.
-            </div>
-          )}
+          <div className="max-h-96 overflow-y-auto">
+            {logs.length > 0 ? (
+              <LogFilter logs={logs.join('')} />
+            ) : (
+              <div className="p-4 text-gray-500">
+                No logs available yet. Logs will appear here as they are
+                generated.
+              </div>
+            )}
+          </div>
         </Card>
       </div>
     );
@@ -278,14 +321,16 @@ useEffect(() => {
     return (
       <div>
         <Card style={contentStyle}>
-          {controllerLogs.length > 0 ? (
-            <LogFilter logs={controllerLogs.join('')} />
-          ) : (
-            <div className="p-4 text-gray-500">
-              No logs available yet. Logs will appear here as they are
-              generated.
-            </div>
-          )}
+          <div className="max-h-96 overflow-y-auto">
+            {controllerLogs.length > 0 ? (
+              <LogFilter logs={controllerLogs.join('')} />
+            ) : (
+              <div className="p-4 text-gray-500">
+                No logs available yet. Logs will appear here as they are
+                generated.
+              </div>
+            )}
+          </div>
         </Card>
       </div>
     );
