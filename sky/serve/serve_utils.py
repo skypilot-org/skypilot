@@ -735,6 +735,7 @@ def check_service_status_healthy(service_name: str) -> Optional[str]:
 def _sort_replica_records(
         replica_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Sort replica records based on version, status and replica_id."""
+
     # Define the sorting key function internally
     def _sort_key(replica_record: Dict[str, Any]) -> Tuple[int, int, int]:
         # Sort by version descending (latest first)
