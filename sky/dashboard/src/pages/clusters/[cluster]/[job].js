@@ -18,50 +18,47 @@ function JobHeader({
   loading,
 }) {
   return (
-    <>
-      <div className="flex items-center justify-between mb-4">
-        <div className="text-base flex items-center">
-          <Link href="/clusters" className="text-sky-blue hover:underline">
-            Sky Clusters
-          </Link>
-          <span className="mx-2 text-gray-500">›</span>
-          <Link
-            href={`/clusters/${cluster}`}
-            className="text-sky-blue hover:underline"
-          >
-            {cluster}
-          </Link>
-          <span className="mx-2 text-gray-500">›</span>
-          <Link
-            href={`/clusters/${cluster}/${job}`}
-            className="text-sky-blue hover:underline"
-          >
-            {job}
-            {jobData.job && jobData.job != '-' ? ` (${jobData.job})` : ''}
-          </Link>
-        </div>
-
-        <div className="flex items-center">
-          {(loading || isRefreshing) && (
-            <div className="flex items-center mr-2">
-              <CircularProgress size={10} className="mt-0" />
-              <span className="text-sm ml-2 text-gray-500">Loading...</span>
-            </div>
-          )}
-          <Tooltip content="Refresh" className="text-sm text-muted-foreground">
-            <button
-              onClick={onRefresh}
-              disabled={loading || isRefreshing}
-              className="text-sm text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
-            >
-              <RotateCwIcon className="w-4 h-4 mr-1.5" />
-              <span>Refresh</span>
-            </button>
-          </Tooltip>
-        </div>
+    <div className="flex items-center justify-between mb-6">
+      <div className="text-base flex items-center">
+        <Link href="/clusters" className="text-sky-blue hover:underline">
+          Sky Clusters
+        </Link>
+        <span className="mx-2 text-gray-500">›</span>
+        <Link
+          href={`/clusters/${cluster}`}
+          className="text-sky-blue hover:underline"
+        >
+          {cluster}
+        </Link>
+        <span className="mx-2 text-gray-500">›</span>
+        <Link
+          href={`/clusters/${cluster}/${job}`}
+          className="text-sky-blue hover:underline"
+        >
+          {job}
+          {jobData.job && jobData.job != '-' ? ` (${jobData.job})` : ''}
+        </Link>
       </div>
-      <div className="border-b border-gray-200 my-4"></div>
-    </>
+
+      <div className="flex items-center">
+        {(loading || isRefreshing) && (
+          <div className="flex items-center mr-2">
+            <CircularProgress size={15} className="mt-0" />
+            <span className="text-sm ml-2 text-gray-500">Loading...</span>
+          </div>
+        )}
+        <Tooltip content="Refresh" className="text-muted-foreground">
+          <button
+            onClick={onRefresh}
+            disabled={loading || isRefreshing}
+            className="text-sm text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
+          >
+            <RotateCwIcon className="w-4 h-4 mr-1.5" />
+            <span>Refresh</span>
+          </button>
+        </Tooltip>
+      </div>
+    </div>
   );
 }
 

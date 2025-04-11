@@ -107,7 +107,7 @@ export function ManagedJobs() {
           {loading && (
             <div className="flex items-center mr-2">
               <CircularProgress size={15} className="mt-0" />
-              <span className="ml-2 text-gray-500">Loading...</span>
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
             </div>
           )}
           <Button
@@ -235,6 +235,7 @@ export function ManagedJobsTable({
 
   const fetchData = React.useCallback(async () => {
     setLocalLoading(true);
+    setLoading(true); // Set parent loading state
     try {
       const { jobs, controllerStopped } = await getManagedJobs();
       setData(jobs);
@@ -244,9 +245,10 @@ export function ManagedJobsTable({
       setData([]);
     } finally {
       setLocalLoading(false);
+      setLoading(false); // Clear parent loading state
       setIsInitialLoad(false);
     }
-  }, []);
+  }, [setLoading]); // Add setLoading to dependencies
 
   // Expose fetchData to parent component
   React.useEffect(() => {
@@ -819,10 +821,12 @@ export function JobDetails({
       {/* Display all sections directly on the page */}
       <div className="space-y-8">
         {/* Info Section */}
-        <div id="details-section">
-          <h2 className="text-xl font-semibold mb-4">Details</h2>
-          <div className="items-center mb-6">
-            <Card className="p-3">
+        <div id="details">
+          <Card>
+            <div className="flex items-center justify-between px-3 pt-4">
+              <h2 className="text-lg font-semibold">Details</h2>
+            </div>
+            <div className="p-3">
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <div className="text-gray-600 font-medium text-base">Job ID</div>
@@ -862,15 +866,17 @@ export function JobDetails({
                   </div>
                 )}
               </div>
-            </Card>
-          </div>
+            </div>
+          </Card>
         </div>
 
         {/* Logs Section */}
-        <div id="logs-section">
-          <h2 className="text-xl font-semibold mb-4">Logs</h2>
-          <div className="items-center mb-6">
-            <Card className="p-3">
+        <div id="logs" className="mt-6">
+          <Card>
+            <div className="flex items-center justify-between px-3 pt-4">
+              <h2 className="text-lg font-semibold">Logs</h2>
+            </div>
+            <div className="p-3">
               {isLoadingLogs ? (
                 <div className="flex items-center justify-center py-4">
                   <CircularProgress size={20} className="mr-2" />
@@ -881,8 +887,8 @@ export function JobDetails({
                   <LogFilter logs={logs.join('')} />
                 </div>
               )}
-            </Card>
-          </div>
+            </div>
+          </Card>
         </div>
       </div>
     </Layout>
@@ -931,7 +937,7 @@ function extractNodeTypes(logs) {
   return sortedNodeTypes; // Return sorted array
 }
 
-export function LogFilter({ logs }) {
+export function LogFilter({ logs, controller=false }) {
   const [selectedNode, setSelectedNode] = useState('all');
   const [filteredLogs, setFilteredLogs] = useState(logs);
   const [nodeTypes, setNodeTypes] = useState([]);
@@ -953,23 +959,27 @@ export function LogFilter({ logs }) {
 
   return (
     <div>
-      <Select
-        onValueChange={(value) => setSelectedNode(value)}
-        value={selectedNode}
-      >
-        <SelectTrigger aria-label="Node">
-          <SelectValue placeholder="Select Node" />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="all">All Nodes</SelectItem>
-          {nodeTypes.map((node) => (
-            <SelectItem key={node} value={node}>
-              {node}
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <br />
+      {!controller && (
+        <>
+          <Select
+            onValueChange={(value) => setSelectedNode(value)}
+            value={selectedNode}
+          >
+            <SelectTrigger aria-label="Node">
+              <SelectValue placeholder="Select Node" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Nodes</SelectItem>
+              {nodeTypes.map((node) => (
+                <SelectItem key={node} value={node}>
+                  {node}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <br />
+        </>
+      )}
       <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
         {filteredLogs}
       </pre>
@@ -1222,76 +1232,51 @@ export function Status2Actions({
   cluster,
 }) {
   const router = useRouter();
-  const actions = ['logs'];
-  if (managed) {
-    actions.push('controllerlogs');
-  }
 
-  const [confirmationModal, setConfirmationModal] = useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: null,
-  });
-
-  const handleLogsClick = (e, logType) => {
+  const handleLogsClick = (e, type) => {
     e.preventDefault();
-
-    const targetPath = `${jobParent}/${jobId}`;
-  
-    if (router.pathname.includes(targetPath)) {
-      // If we're already on the job page, just change the tab parameter
-      router.push(
-        {
-          pathname: router.pathname,
-          query: { ...router.query, tab: logType },
-        },
-        undefined,
-        { shallow: true }
-      );
-    } else {
-      // If we're navigating to a different page, use the full URL with tab parameter
-      router.push(`${targetPath}?tab=${logType}`);
-    }
+    e.stopPropagation();
+    router.push({
+      pathname: `${jobParent}/${jobId}`,
+      query: { tab: type },
+    });
   };
 
   return (
-    <>
-      <span className="flex content-center items-center text-sm">
+    <div className="flex items-center space-x-4">
+      <Tooltip
+        key="logs"
+        content="View Job Logs"
+        className="capitalize text-sm text-muted-foreground"
+      >
+        <button
+          onClick={(e) => handleLogsClick(e, 'logs')}
+          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+        >
+          <FileSearchIcon className="w-4 h-4" />
+          {withLabel && <span className="ml-1.5">Logs</span>}
+        </button>
+      </Tooltip>
+      {managed && (
         <Tooltip
-          key="logs"
-          content="View Job Logs"
+          key="controllerlogs"
+          content="View Controller Logs"
           className="capitalize text-sm text-muted-foreground"
         >
           <button
-            onClick={(e) => handleLogsClick(e, 'logs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium flex items-center"
+            onClick={(e) => handleLogsClick(e, 'controllerlogs')}
+            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
           >
-            <FileSearchIcon className="w-4 h-4 text-gray-500 inline-block" />
-            {withLabel && <span className="ml-1.5 leading-none">Logs</span>}
+            <MonitorPlay className="w-4 h-4" />
+            {withLabel && <span className="ml-1.5">Controller Logs</span>}
           </button>
         </Tooltip>
-        {managed && (
-          <Tooltip
-            key="controllerlogs"
-            content="View Controller Logs"
-            className="capitalize text-sm text-muted-foreground"
-          >
-            <button
-              onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
-            >
-              <MonitorPlay className="w-4 h-4 mr-1.5 text-gray-500 inline-block" />
-              {withLabel && 'Controller Logs'}
-            </button>
-          </Tooltip>
-        )}
-      </span>
-    </>
+      )}
+    </div>
   );
 }
 
-export function ClusterJobs({ clusterName, clusterJobData }) {
+export function ClusterJobs({ clusterName, clusterJobData, loading }) {
   const [expandedRowId, setExpandedRowId] = useState(null);
   const [sortConfig, setSortConfig] = useState({
     key: null,
@@ -1300,9 +1285,7 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const expandedRowRef = useRef(null);
-  const [loading, setLoading] = useState(true);
-  const [isInitialLoad, setIsInitialLoad] = useState(true); // Track if it's the initial load
-  const [prevClusterJobData, setPrevClusterJobData] = useState(null); // Track previous data
+  const [prevClusterJobData, setPrevClusterJobData] = useState(null);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -1327,16 +1310,9 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
   useEffect(() => {
     // Check if the data has changed significantly (new data received)
     if (JSON.stringify(clusterJobData) !== JSON.stringify(prevClusterJobData)) {
-      setLoading(true);
       setPrevClusterJobData(clusterJobData);
     }
-
-    // Set loading to false when job data is available
-    if (jobData.length > 0) {
-      setIsInitialLoad(false); // No longer initial load after first data fetch with content
-    }
-    setLoading(false);
-  }, [clusterJobData, jobData.length, prevClusterJobData]);
+  }, [clusterJobData, prevClusterJobData]);
 
   // Sort the data if sortConfig is present
   const sortedData = React.useMemo(() => {
@@ -1392,6 +1368,15 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
   return (
     <div className="relative">
       <Card>
+        <div className="flex items-center justify-between p-4">
+          <h3 className="text-lg font-semibold">Cluster Jobs</h3>
+          {loading && (
+            <div className="flex items-center mr-2">
+              <CircularProgress size={15} className="mt-0" />
+              <span className="ml-2 text-gray-500 text-sm">Loading...</span>
+            </div>
+          )}
+        </div>
         <Table>
           <TableHeader>
             <TableRow>
@@ -1441,19 +1426,7 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading && isInitialLoad ? (
-              <TableRow>
-                <TableCell
-                  colSpan={7}
-                  className="text-center py-6 text-gray-500"
-                >
-                  <div className="flex justify-center items-center">
-                    <CircularProgress size={20} className="mr-2" />
-                    <span>Loading...</span>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ) : paginatedData.length > 0 ? (
+            {paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
@@ -1520,13 +1493,6 @@ export function ClusterJobs({ clusterName, clusterJobData }) {
           </TableBody>
         </Table>
       </Card>
-
-      {/* Show small loading indicator in corner when not initial load */}
-      {loading && !isInitialLoad && paginatedData.length > 0 && (
-        <div className="fixed bottom-4 right-4 bg-white rounded-full shadow-lg p-3 z-50">
-          <CircularProgress size={24} />
-        </div>
-      )}
 
       {sortedData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">

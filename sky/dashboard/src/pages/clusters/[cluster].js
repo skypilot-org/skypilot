@@ -53,7 +53,7 @@ function ClusterDetails() {
 
   return (
     <Layout highlighted="clusters">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-6">
         <div className="text-base flex items-center">
           <Link href="/clusters" className="text-sky-blue hover:underline">
             Sky Clusters
@@ -72,7 +72,7 @@ function ClusterDetails() {
             <div className="text-sm flex items-center">
               {(loading || isRefreshing) && (
                 <div className="flex items-center mr-2">
-                  <CircularProgress size={10} className="mt-0" />
+                  <CircularProgress size={15} className="mt-0" />
                   <span className="ml-2 text-gray-500">Loading...</span>
                 </div>
               )}
@@ -83,7 +83,7 @@ function ClusterDetails() {
                 <button
                   onClick={handleManualRefresh}
                   disabled={loading || isRefreshing}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
+                  className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 inline-flex items-center"
                 >
                   <RotateCwIcon className="w-4 h-4 mr-1.5" />
                   <span>Refresh</span>
@@ -101,10 +101,8 @@ function ClusterDetails() {
         )}
       </div>
 
-      <div className="border-b border-gray-200 my-4"></div>
-
       {clusterData && (
-        <ActiveTab clusterData={clusterData} clusterJobData={clusterJobData} />
+        <ActiveTab clusterData={clusterData} clusterJobData={clusterJobData} loading={loading} />
       )}
 
       {/* SSH Instructions Modal */}
@@ -124,47 +122,51 @@ function ClusterDetails() {
   );
 }
 
-function ActiveTab({ clusterData, clusterJobData }) {
+function ActiveTab({ clusterData, clusterJobData, loading }) {
   return (
     <div>
       {/* Cluster Info Card */}
-      <h3 className="text-xl font-semibold mb-4">Details</h3>
-      <div className="items-center mb-6">
-        <Card className="p-3">
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className="text-gray-600 font-medium text-base">Cluster</div>
-              <div className="text-base mt-1">{clusterData.cluster}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">User</div>
-              <div className="text-base mt-1">{clusterData.user}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Status</div>
-              <div className="text-base mt-1">
-                <Status2Icon status={clusterData.status} />
+      <div className="mb-6">
+        <Card>
+          <div className="flex items-center justify-between px-3 pt-4">
+            <h3 className="text-lg font-semibold">Details</h3>
+          </div>
+          <div className="p-3">
+            <div className="grid grid-cols-2 gap-6">
+              <div>
+                <div className="text-gray-600 font-medium text-base">Cluster</div>
+                <div className="text-base mt-1">{clusterData.cluster}</div>
               </div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Resources</div>
-              <div className="text-base mt-1">{clusterData.resources_str || 'N/A'}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Region</div>
-              <div className="text-base mt-1">{clusterData.region || 'N/A'}</div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">User</div>
+                <div className="text-base mt-1">{clusterData.user}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">Status</div>
+                <div className="text-base mt-1">
+                  <Status2Icon status={clusterData.status} />
+                </div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">Resources</div>
+                <div className="text-base mt-1">{clusterData.resources_str || 'N/A'}</div>
+              </div>
+              <div>
+                <div className="text-gray-600 font-medium text-base">Region</div>
+                <div className="text-base mt-1">{clusterData.region || 'N/A'}</div>
+              </div>
             </div>
           </div>
         </Card>
       </div>
 
       {/* Jobs Table */}
-      <h3 className="text-lg font-semibold my-4">Cluster Jobs</h3>
       <div>
         {clusterJobData && (
           <ClusterJobs
             clusterName={clusterData.cluster}
             clusterJobData={clusterJobData}
+            loading={loading}
           />
         )}
       </div>

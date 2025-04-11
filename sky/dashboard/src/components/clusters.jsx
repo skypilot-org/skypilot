@@ -514,7 +514,7 @@ export function Status2Actions({
 
   return (
     <>
-      <span className="flex justify-start items-center text-sm">
+      <div className="flex items-center space-x-4">
         {Object.entries(actionIcons).map(([actionName, actionIcon]) => {
           let label, tooltipText;
           switch (actionName) {
@@ -541,12 +541,10 @@ export function Status2Actions({
               >
                 <button
                   onClick={() => handleActionClick(actionName)}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium mr-2 inline-flex items-center text-sm"
+                  className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                 >
-                  <span className="flex items-center justify-center w-5 h-5">
-                    {actionIcon}
-                  </span>
-                  {label && <span className="ml-1.5 leading-none">{label}</span>}
+                  {actionIcon}
+                  {label && <span className="ml-1.5">{label}</span>}
                 </button>
               </Tooltip>
             );
@@ -558,18 +556,16 @@ export function Status2Actions({
               className="capitalize text-sm text-muted-foreground"
             >
               <span
-                className="opacity-30 mr-2 flex items-center cursor-not-allowed text-sm"
+                className="opacity-30 flex items-center cursor-not-allowed text-sm"
                 title={actionName}
               >
-                <span className="w-5 h-5">
-                  {actionIcon}
-                </span>
-                {label && <span className="ml-1.5 text-sm">{label}</span>}
+                {actionIcon}
+                {label && <span className="ml-1.5">{label}</span>}
               </span>
             </Tooltip>
           );
         })}
-      </span>
+      </div>
     </>
   );
 }

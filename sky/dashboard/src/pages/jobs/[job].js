@@ -182,37 +182,55 @@ function JobDetails() {
       {/* Display all sections directly on the page */}
       {detailJobData && (
         <div className="space-y-8">
-          {/* Info Section */}
+          {/* Details Section */}
           <div id="details-section">
-            <h2 className="text-xl font-semibold mb-4">Details</h2>
-            <JobDetailsContent
-              jobData={detailJobData}
-              activeTab="info"
-              setIsLoadingLogs={setIsLoadingLogs}
-              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-            />
+            <Card>
+              <div className="flex items-center justify-between px-3 pt-4">
+                <h3 className="text-lg font-semibold">Details</h3>
+              </div>
+              <div className="p-3">
+                <JobDetailsContent
+                  jobData={detailJobData}
+                  activeTab="info"
+                  setIsLoadingLogs={setIsLoadingLogs}
+                  setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                />
+              </div>
+            </Card>
           </div>
 
           {/* Logs Section */}
-          <div id="logs-section">
-            <h2 className="text-xl font-semibold mb-4">Logs</h2>
-            <JobDetailsContent
-              jobData={detailJobData}
-              activeTab="logs"
-              setIsLoadingLogs={setIsLoadingLogs}
-              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-            />
+          <div id="logs-section" className="mt-6">
+            <Card>
+              <div className="flex items-center justify-between px-3 pt-4">
+                <h3 className="text-lg font-semibold">Logs</h3>
+              </div>
+              <div className="p-3">
+                <JobDetailsContent
+                  jobData={detailJobData}
+                  activeTab="logs"
+                  setIsLoadingLogs={setIsLoadingLogs}
+                  setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                />
+              </div>
+            </Card>
           </div>
 
           {/* Controller Logs Section */}
-          <div id="controller-logs-section">
-            <h2 className="text-xl font-semibold mb-4">Controller Logs</h2>
-            <JobDetailsContent
-              jobData={detailJobData}
-              activeTab="controllerlogs"
-              setIsLoadingLogs={setIsLoadingLogs}
-              setIsLoadingControllerLogs={setIsLoadingControllerLogs}
-            />
+          <div id="controller-logs-section" className="mt-6">
+            <Card>
+              <div className="flex items-center justify-between px-3 pt-4">
+                <h3 className="text-lg font-semibold">Controller Logs</h3>
+              </div>
+              <div className="p-3">
+                <JobDetailsContent
+                  jobData={detailJobData}
+                  activeTab="controllerlogs"
+                  setIsLoadingLogs={setIsLoadingLogs}
+                  setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                />
+              </div>
+            </Card>
           </div>
         </div>
       )}
@@ -300,87 +318,72 @@ useEffect(() => {
 
   if (activeTab === 'logs') {
     return (
-      <div>
-        <Card style={contentStyle}>
-          <div className="max-h-96 overflow-y-auto">
-            {logs.length > 0 ? (
-              <LogFilter logs={logs.join('')} />
-            ) : (
-              <div className="p-4 text-gray-500">
-                No logs available yet. Logs will appear here as they are
-                generated.
-              </div>
-            )}
+      <div className="max-h-96 overflow-y-auto" style={contentStyle}>
+        {logs.length > 0 ? (
+          <LogFilter logs={logs.join('')} />
+        ) : (
+          <div className="p-4 text-gray-500">
+            No logs available yet. Logs will appear here as they are
+            generated.
           </div>
-        </Card>
+        )}
       </div>
     );
   }
 
   if (activeTab === 'controllerlogs') {
     return (
-      <div>
-        <Card style={contentStyle}>
-          <div className="max-h-96 overflow-y-auto">
-            {controllerLogs.length > 0 ? (
-              <LogFilter logs={controllerLogs.join('')} />
-            ) : (
-              <div className="p-4 text-gray-500">
-                No logs available yet. Logs will appear here as they are
-                generated.
-              </div>
-            )}
+      <div className="max-h-96 overflow-y-auto" style={contentStyle}>
+        {controllerLogs.length > 0 ? (
+          <LogFilter logs={controllerLogs.join('')} controller={true} />
+        ) : (
+          <div className="p-4 text-gray-500">
+            No logs available yet. Logs will appear here as they are
+            generated.
           </div>
-        </Card>
+        )}
       </div>
     );
   }
 
   // Default 'info' tab content
   return (
-    <div>
-      {/* Job Info Section */}
-      <div className="items-center mb-6">
-        <Card className="p-3">
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className="text-gray-600 font-medium text-base">Job ID</div>
-              <div className="text-base mt-1">{jobData.id}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">User</div>
-              <div className="text-base mt-1">{jobData.user}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Status</div>
-              <div className="text-base mt-1">
-                <Status2Icon status={jobData.status} />
-              </div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Resources</div>
-              <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Job Name</div>
-              <div className="text-base mt-1">{jobData.name}</div>
-            </div>
-            {jobData.cluster && (
-              <div>
-                <div className="text-gray-600 font-medium text-base">Cluster</div>
-                <div className="text-base mt-1">
-                  <Link
-                    href={`/clusters/${jobData.cluster}`}
-                    className="text-sky-blue hover:underline"
-                  >
-                    {jobData.cluster}
-                  </Link>
-                </div>
-              </div>
-            )}
-          </div>
-        </Card>
+    <div className="grid grid-cols-2 gap-6">
+      <div>
+        <div className="text-gray-600 font-medium text-base">Job ID</div>
+        <div className="text-base mt-1">{jobData.id}</div>
       </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Job Name</div>
+        <div className="text-base mt-1">{jobData.name}</div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">User</div>
+        <div className="text-base mt-1">{jobData.user}</div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Status</div>
+        <div className="text-base mt-1">
+          <Status2Icon status={jobData.status} />
+        </div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">Resources</div>
+        <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
+      </div>
+      {jobData.cluster && (
+        <div>
+          <div className="text-gray-600 font-medium text-base">Cluster</div>
+          <div className="text-base mt-1">
+            <Link
+              href={`/clusters/${jobData.cluster}`}
+              className="text-sky-blue hover:underline"
+            >
+              {jobData.cluster}
+            </Link>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
