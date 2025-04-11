@@ -1,39 +1,356 @@
-
-.. _cloud-permissions-aws:
-
 AWS
 =====
 
+.. note::
+
+    By default, SkyPilot will use the credentials you have set up locally. For most cases, the :ref:`getting started instructions <aws-installation>` are all you need to do. The steps below are **optional advanced configuration options**, aimed primarily at cloud admins and advanced users.
+
+
+.. _aws-sso:
+
+Using AWS SSO
+-------------
+
+`AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (Successor to AWS Single Sign-On, or SSO) is supported.
+
+.. warning::
+  SSO login *will not work across multiple clouds*. If you use multiple clouds, you should :ref:`set up a dedicated user and credentials <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
+
+To use it, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. If you install v2, you may need to ``deactivate`` (for venv) or ``conda deactivate`` to avoid the v1 CLI taking precedence.
+
+You can use the following to check version:
+
+.. code-block:: console
+
+    $ aws --version
+    aws-cli/2.25.6 ...
+
+Visit your SSO login portal (e.g. ``https://my-sso-portal.awsapps.com/start``), and click on **Access keys** under the corresponding account. Under "AWS IAM Identity Center credentials (Recommended)", copy these values:
+
+- the ``SSO start URL``
+- the ``SSO Region``
+
+Then, log into your SSO account:
+
+.. code-block:: console
+
+    $ aws configure sso
+
+- **SSO session name**: should be set, but you can choose any name you want.
+- **SSO start URL**: copy from the SSO login portal
+- **SSO region**: copy from the SSO login portal
+- **SSO registration scopes**: leave blank to use the default
+
+Log in and approve the request in your web browser. Then back in the CLI, complete the remaining fields:
+
+- **Default client Region**: optional
+- **CLI default output format**: optional
+- **Profile name**: set to ``default`` if you want to use this profile by default with SkyPilot, otherwise see :ref:`several-aws-profiles`.
+
+If everything is set up correctly, :code:`sky check aws` should succeed!
+
+
+..
+    These two aren't currently used, but keep them so that old links like
+    /aws.html#cloud-permissions-aws will still jump to here.
+.. _cloud-permissions-aws:
 .. _cloud-permissions-aws-user-creation:
+
+.. _dedicated-aws-user:
+
+Dedicated SkyPilot IAM user
+----------------------------------------
+
+You can create a dedicated IAM user for SkyPilot, if you can't or don't want to use your normal credentials, or if you want to restrict SkyPilot's permissions.
+
+.. note::
+
+  **SSO users** that login via awsapps.com should set up a dedicated user to ensure cross-cloud access. Otherwise, instances launched in other clouds will not be able to access AWS resources, including buckets and managed jobs.
+
+Follow these steps to create a new AWS user:
+
+1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_ in the AWS console and click on the **Users** tab.
+
+   .. image:: ../../images/screenshots/aws/aws-add-user.png
+       :alt: AWS Add User
+
+
+   Then, click **Create User** and enter the user's name. Click **Next**.
+
+2. In the **Permissions options** section, select "Attach existing policies directly". Depending on whether you want simplified or minimal permissions, follow the instructions below:
+
+   .. tab-set::
+
+       .. tab-item:: Simplified permissions
+
+           Search for the **AdministratorAccess** policy, and check the box to add it. Click **Next** to proceed.
+
+       .. tab-item:: Minimal permissions
+
+           Click on **Create Policy**.
+
+           .. image:: ../../images/screenshots/aws/aws-create-policy.png
+               :alt: AWS Create Policy
+
+           This will open a new window to define the minimal policy.
+
+           Choose "JSON" tab and copy the needed minimal policy rules.
+           **See** :ref:`aws-minimal-policy` **for all the policy rules.**
+
+           Click **Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+
+           Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
+
+           .. image:: ../../images/screenshots/aws/aws-add-policy.png
+               :alt: AWS Add Policy
+
+           Check the box to add the policy, and click **Next** to proceed.
+
+3. Click on **Next** and follow the instructions to create the user.
+
+4. Select the newly created user from the dashboard, and go to the **Security credentials** tab. Click on **Create access key**
+
+   .. image:: ../../images/screenshots/aws/aws-create-access-key.png
+       :alt: AWS Create access key
+
+5. For "Use case", select **Other**. Click **Next**, then click **Create access key**.
+
+6. Use the newly created access key to configure your credentials with the AWS CLI:
+
+   .. code-block:: console
+     :emphasize-lines: 9-10
+
+     $ # Configure your AWS credentials
+     $ aws configure
+
+     $ # Check that AWS sees the shared-credentials-files
+     $ aws configure list
+           Name                    Value             Type    Location
+           ----                    -----             ----    --------
+        profile                <not set>             None    None
+     access_key     ****************xxxx shared-credentials-file
+     secret_key     ****************xxxx shared-credentials-file
+         region                <not set>             None    None
+
+     $ # Validate that credentials are working
+     $ sky check aws
+
+
+.. _several-aws-profiles:
+
+Switch profiles or accounts
+----------------------------------
+
+You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
+
+Example of mixing the default profile and another profile:
+
+.. code-block:: console
+
+    $ # A cluster launched under the default AWS identity.
+    $ sky launch --cloud aws -c default
+
+    $ # A cluster launched under a different profile.
+    $ AWS_PROFILE=AdministratorAccess-12345 sky launch --cloud aws -c other-profile-cluster
+
+
+.. _aws-troubleshooting:
+
+Troubleshooting
+----------------------
+
+If your credentials are not being picked up, or you're seeing the wrong credentials in SkyPilot, here are some steps you can take to troubleshoot:
+
+1. **Check** ``aws configure list``. This command should show the currently configured credentials.
+
+   If you have static credentials set up correctly, you should see something like this:
+
+   .. code-block:: console
+
+       $ aws configure list
+             Name                    Value             Type    Location
+             ----                    -----             ----    --------
+          profile                <not set>             None    None
+       access_key     ****************xxxx shared-credentials-file
+       secret_key     ****************xxxx shared-credentials-file
+           region                <not set>             None    None
+
+   If you have SSO credentials set up correctly, you should see something like this:
+
+   .. code-block:: console
+
+       $ aws configure list
+             Name                    Value             Type    Location
+             ----                    -----             ----    --------
+          profile                <not set>             None    None
+       access_key     ****************xxxx              sso
+       secret_key     ****************xxxx              sso
+           region                <not set>             None    None
+
+2. **Check** ``sky check aws``. This should show whether SkyPilot is picking up the credentials and has the necessary permissions.
+
+   .. code-block:: console
+
+       $ sky check aws -v
+       Checking credentials to enable clouds for SkyPilot.
+         AWS: enabled [compute, storage]
+           Activated account: VRSC9IFFYQI7THCKR5UVC [account=190763068689]
+       ...
+
+Common issues
+~~~~~~~~~~~~~~~~~
+
+- **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set - see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
+
+  You may have previously set ``AWS_PROFILE`` in your ``.bashrc`` file or similar. Try to double-check the value:
+
+  .. code-block:: console
+      :emphasize-lines: 13
+
+      $ # Check the account being used by skypilot
+      $ sky check aws -v
+      Checking credentials to enable clouds for SkyPilot.
+        AWS: enabled [compute, storage]
+          Activated account: XXXXXXXXXXXXXXXXXXXXX:user [account=123456789012]
+        ...
+      $ # AWS account 1234-5678-9012 is enabled via @user SSO login.
+
+      $ # See the currently enabled profile.
+      $ aws configure list
+            Name                    Value             Type    Location
+            ----                    -----             ----    --------
+         profile AWSPowerUserAccess-123456789012              env    ['AWS_DEFAULT_PROFILE', 'AWS_PROFILE']
+      access_key     ****************xxxx              sso
+      secret_key     ****************xxxx              sso
+          region                <not set>             None    None
+      $ # SSO profile AWSPowerUserAccess-123456789012 is enabled
+      $ #   via environment variable.
+
+      $ # See details of the currently enabled AWS account and user/role.
+      $ aws sts get-caller-identity
+
+      $ # See if the environment variable has been set.
+      $ echo $AWS_PROFILE
+      AWSPowerUserAccess-123456789012
+
+      $ unset AWS_PROFILE
+      $ # Delete from .bashrc/.zshrc to make the change permanent.
+      $ # Now, default profile will be used.
+      $ aws configure list
+            Name                    Value             Type    Location
+            ----                    -----             ----    --------
+         profile                <not set>             None    None
+         ...
+      $ sky check aws -v
+      Checking credentials to enable clouds for SkyPilot.
+        AWS: enabled [compute, storage]
+          Activated account: XXXXXXXXXXXXXXXXXXXXX [account=987654321098]
+        ...
+      $ # Now AWS account 9876-5432-1098 is enabled via default profile.
+
+
+- **Profile is not set**. If ``sky check aws`` and ``aws configure list`` cannot find credentials, you may not have a default profile set.
+
+  1. If the environment variable ``AWS_PROFILE`` is set, this profile name will be used.
+  2. If there is a profile named ``default``, it will be used.
+  3. Otherwise, the profile will not be accessible.
+
+  Note that even if there is only one profile, it will not be used unless ``AWS_PROFILE`` is set or the profile is named ``default``.
+
+  In AWS CLI v1, you can check ``~/.aws/credentials`` and ``~/.aws/config`` to look for profile names. In AWS CLI v2, you can check from the CLI.
+
+  .. code-block:: console
+
+      $ # AWS CLI v2 only
+      $ aws --version
+      aws-cli/2.25.6 ...
+
+      $ # List all profiles
+      $ aws configure list-profiles
+      AWSPowerUserAccess-xxxxxxx
+      default
+
+  If there is no ``default`` profile, you can edit the configuration directly:
+
+  .. code-block:: cfg
+      :emphasize-lines: 2
+
+      # ~/.aws/config
+      [profile default]
+      sso_session = my-skypilot-session
+      sso_account_id = XXXXXXXXXX
+      ...
+
+  .. code-block:: cfg
+      :emphasize-lines: 2
+
+      # ~/.aws/config
+      [default]
+      aws_access_key_id = XXXXXXXXXXXXXXXXXXXX
+      aws_secret_access_key = XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX
+
+  Or, you can set the ``AWS_PROFILE`` environment variable in your shell config:
+
+  .. code-block:: shell
+
+      # .bashrc / .zshrc
+      # Enable AWS profile named "AWSPowerUserAccess-123456789012"
+      export AWS_PROFILE='AWSPowerUserAccess-123456789012'
+
 
 Minimal permissions
 -----------------------
 
-Minimizing AWS permissions should be set up in two places:
+If you want to minimize the AWS permissions used by SkyPilot, you should set up the minimal permissions in two places:
 
-1. **User Account**: the user account is the individual account of an user created by the administrator.
-2. **IAM role**: the IAM role is assigned to all EC2 instances created by SkyPilot, which is used by the instances to access AWS resources, e.g., read/write S3 buckets or create other EC2 nodes. The IAM role is shared by all users under the same organization/root account. (If a user account has the permission to create IAM roles, SkyPilot can automatically create the role.)
+1. :ref:`User Account <aws-create-minimal-user>`: the user account is the individual account of an user created by the administrator.
+2. :ref:`IAM role <iam-role-creation>`: the IAM role is assigned to all EC2 instances created by SkyPilot, which is used by the instances to access AWS resources, e.g., read/write S3 buckets or create other EC2 nodes. The IAM role is shared by all users under the same organization/root account. (If a user account has the permission to create IAM roles, SkyPilot can automatically create the role.)
 
-User account
-~~~~~~~~~~~~~~~~~~
+.. _aws-create-minimal-user:
 
-AWS accounts can be attached with a policy that limits the permissions of the account. Follow these steps to create an AWS user with the minimum permissions required by SkyPilot:
+Create a user account with minimal permissions
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-1. Open the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_ in the AWS console and click on the **Users** tab. Then, click **Add users** and enter the user's name. Click **Next**.
+Follow the instructions above for :ref:`dedicated-aws-user`. When setting permissions for the user, use the :ref:`aws-minimal-policy` rules below.
 
-.. image:: ../../images/screenshots/aws/aws-add-user.png
-    :width: 80%
-    :align: center
-    :alt: AWS Add User
+.. _iam-role-creation:
 
-2. In the **Permissions options** section, select "Attach existing policies directly"; Click on the **Create Policy**. This opens another window to create an IAM policy.
+Create the internal IAM role for SkyPilot
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. image:: ../../images/screenshots/aws/aws-create-policy.png
-    :width: 80%
-    :align: center
-    :alt: AWS Create Policy
+.. note::
+    In most cases, the IAM role will be automatically created. You only need to manually create the IAM role if you have exlucded the optional role creation permissions from your minimal skypilot policy.
 
-3. Choose "JSON" tab and place the following policy into the box. Replace the ``<account-ID-without-hyphens>`` with your AWS account ID. You can find your AWS account ID by clicking on the upper right corner of the console.
+    If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
+
+1. In the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_, go to the "Roles" tab, and click on **Create role**.
+
+   .. image:: ../../images/screenshots/aws/aws-add-role.png
+       :alt: AWS Add Role
+
+2. Select **Trusted entity type**: AWS service, and **Use case**: EC2, as seen in the image below.
+
+   .. image:: ../../images/screenshots/aws/aws-add-role-entity.png
+       :alt: AWS Role Entity, with Trusted entity type set to AWS service, Service or use case set to EC2, and Use case set to EC2.
+
+   Click **Next**.
+
+3. Search for and select the policy you created in :ref:`User Creation <dedicated-aws-user>`.
+4. Click **Next**, and name your role exactly ``skypilot-v1``. Click **Create role**.
+
+
+.. _aws-minimal-policy:
+
+Minimal IAM policy rules
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+To avoid giving SkyPilot administrator access, you can create a policy that limits the permissions of the account. These are the minimal policy rules required by SkyPilot:
+
+.. note::
+    **Replace the** ``<account-ID-without-hyphens>`` **with your AWS account ID**. You can find your AWS account ID by clicking on the upper right corner of the console.
+
+.. note::
+    There are **additional optional rules** below. It's likely that you will want to use some of these, so please take a look.
 
 .. code-block:: json
     :name: aws-policy-json
@@ -85,6 +402,16 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
             },
             {
                 "Effect": "Allow",
+                "Action": "iam:CreateServiceLinkedRole",
+                "Resource": "*",
+                "Condition": {
+                    "StringEquals": {
+                        "iam:AWSServiceName": "spot.amazonaws.com"
+                    }
+                }
+            },
+            {
+                "Effect": "Allow",
                 "Action": [
                     "iam:GetRole",
                     "iam:PassRole"
@@ -99,73 +426,15 @@ AWS accounts can be attached with a policy that limits the permissions of the ac
                     "iam:GetInstanceProfile"
                 ],
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
-            },
-            {
-                "Effect": "Allow",
-                "Action": "iam:CreateServiceLinkedRole",
-                "Resource": "*",
-                "Condition": {
-                    "StringEquals": {
-                        "iam:AWSServiceName": "spot.amazonaws.com"
-                    }
-                }
             }
         ]
     }
 
-4. **Optional**: To enable ``sky launch --clone-disk-from``, you need to add the following permissions to the policy above as well.
+**Optional**: If you would like SkyPilot to automatically set up an IAM role and instance profile for EC2 instances, modify the last two rules in the policy with the highlighted four lines:
 
-.. code-block:: json
+.. warning::
 
-           {
-                "Effect": "Allow",
-                "Action": [
-                    "ec2:CreateImage",
-                    "ec2:CopyImage",
-                    "ec2:DeregisterImage"
-                ],
-                "Resource": "*"
-            }
-
-5. **Optional**: To enable opening ports on AWS cluster, you need to add the following permissions to the policy above as well.
-
-.. code-block:: json
-
-           {
-                "Effect": "Allow",
-                "Action": [
-                    "ec2:DeleteSecurityGroup",
-                    "ec2:ModifyInstanceAttribute"
-                ],
-                "Resource": "arn:aws:ec2:*:<account-ID-without-hyphens>:*"
-            }
-
-6. Click **Next: Tags** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
-7. Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
-
-.. image:: ../../images/screenshots/aws/aws-add-policy.png
-    :width: 80%
-    :align: center
-    :alt: AWS Add Policy
-
-8. **Optional**: If you would like to have your users access S3 buckets: You can additionally attach S3 access, such as the "AmazonS3FullAccess" policy. Note that enabling S3 access is required to use :ref:`managed-jobs` with `workdir` or `file_mounts` for now.
-
-.. image:: ../../images/screenshots/aws/aws-s3-policy.png
-    :width: 80%
-    :align: center
-    :alt: AWS Add S3 Policy
-
-9. Click on **Next** and follow the instructions to create the user.
-
-With the steps above you are almost ready to have the users in your organization to use SkyPilot with the minimal permissions.
-
-**One more thing** to do is to create a single IAM role ``skypilot-v1`` for all users in your organization. There are two ways to accomplish this:
-
-1. Add additional permission for the user you created to allow SkyPilot to automatically create the IAM role using the user account. You can modify the last two rules in the policy you created in step 4 with the highlighted four lines:
-
-.. note::
-
-    If you have created the policy, you can find the policy in the **Policies** tab in the IAM dashboard. Click on the policy ``minimal-skypilot-policy`` (or the name you set in step 4) and click on the **Edit** to edit the policy.
+    If you don't do this, you must manually set up the IAM role that SkyPilot will use: see :ref:`iam-role-creation`.
 
 .. code-block:: json
     :emphasize-lines: 6-7,17-18
@@ -192,33 +461,45 @@ With the steps above you are almost ready to have the users in your organization
                 "Resource": "arn:aws:iam::<account-ID-without-hyphens>:instance-profile/skypilot-v1"
             }
 
-2. Alternatively, you can create the ``skypilot-v1`` IAM role manually. The following section describes how to create the IAM role manually.
+**Optional**: To enable ``sky launch --clone-disk-from``, you need to add the following permissions to the policy above as well.
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "ec2:CreateImage",
+                    "ec2:CopyImage",
+                    "ec2:DeregisterImage"
+                ],
+                "Resource": "*"
+            }
+
+**Optional**: To enable opening ports on AWS cluster, you need to add the following permissions to the policy above as well.
+
+.. code-block:: json
+
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "ec2:DeleteSecurityGroup",
+                    "ec2:ModifyInstanceAttribute"
+                ],
+                "Resource": "arn:aws:ec2:*:<account-ID-without-hyphens>:*"
+            }
 
 
-IAM role creation
-~~~~~~~~~~~~~~~~~~
+**Optional**: If you would like to have your users access S3 buckets, you need to add the following permissions to the policy above as well.
 
-.. note::
+.. code-block:: json
 
-    If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
-
-1. Click the "Roles" tab in the IAM console, and click on **Create role**.
-
-.. image:: ../../images/screenshots/aws/aws-add-role.png
-    :width: 80%
-    :align: center
-    :alt: AWS Add Role
-
-2. Select the following entity and common use cases and click **Next**.
-
-.. image:: ../../images/screenshots/aws/aws-add-role-entity.png
-    :width: 80%
-    :align: center
-    :alt: AWS Role Entity
-
-3. Select the policy you created in step 4 in :ref:`User Creation <cloud-permissions-aws-user-creation>` (i.e. the previous step 6) and click on **Next: Tags**.
-4. **Optional**: If you would like to let the user access S3 buckets on the VM they created, you can additionally attach the s3 access permission to the IAM role, such as the "AmazonS3FullAccess" policy.
-5. Click **Next**, and name your role "skypilot-v1". Click **Create role**.
+           {
+                "Effect": "Allow",
+                "Action": [
+                    "s3:*"
+                ],
+                "Resource": "*"
+            }
 
 
 Using a specific VPC
