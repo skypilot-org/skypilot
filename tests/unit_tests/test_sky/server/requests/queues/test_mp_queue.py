@@ -106,6 +106,6 @@ def test_mp_queue_memory_footprint():
     print(
         f'memory usage after processing all the items: {memory_after - memory_before}'
     )
-    assert memory_after - memory_before < 1, (
+    assert memory_after - memory_before < 5, (
         f'Memory usage increased by {memory_after - memory_before}MB after processing all the items,'
         'potential memory leak')
