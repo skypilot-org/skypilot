@@ -1,4 +1,4 @@
-# Run on AWS SageMaker HyperPod with EKS
+# Run SkyPilot on AWS SageMaker HyperPod with EKS
 
 This example shows how to run SkyPilot on AWS SageMaker HyperPod with EKS.
 
