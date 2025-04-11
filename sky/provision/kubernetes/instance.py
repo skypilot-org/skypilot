@@ -903,7 +903,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
         return _create_namespaced_pod_with_retries(namespace, pod_spec_copy,
                                                    context)
 
-    if not to_start_count == 0:
+    if not to_start_count:
         is_provisioned_cluster_ha = is_high_availability_cluster_by_kubectl(
             cluster_name_on_cloud, context, namespace)
         if is_provisioned_cluster_ha != to_create_deployment:
@@ -916,10 +916,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                 'If you want to make the provisioned cluster '
                 f'{ha_str(to_create_deployment)}, please first down the cluster '
                 'and then up the cluster again.')
-            # This error is a user error instead of a provisioning failure.
-            # We should display this error to the user.
-            logger.error(message)
-            raise RuntimeError(message)
+            raise exceptions.InconsistentHighAvailabilityError(message)
 
     # Create pods in parallel
     pods = subprocess_utils.run_in_parallel(_create_pod_thread,
