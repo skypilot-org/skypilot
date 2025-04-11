@@ -54,6 +54,7 @@ from sky import jobs as managed_jobs
 from sky import models
 from sky import serve as serve_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky.adaptors import common as adaptors_common
 from sky.benchmark import benchmark_state
 from sky.benchmark import benchmark_utils
@@ -276,6 +277,36 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
     for (key, value) in env_list:
         env_dict[key] = value
     return list(env_dict.items())
+
+
+def config_option(expose_value: bool):
+
+    def preprocess_config_options(ctx, param, value):
+        del ctx  # Unused.
+        param.name = 'config_override'
+        try:
+            if len(value) == 0:
+                return None
+            elif len(value) > 1:
+                raise ValueError
+            else:
+                return skypilot_config.apply_cli_config(value[0])
+        except ValueError as e:
+            raise click.BadParameter('argument specified multiple times') from e
+
+    def return_option_decorator(func):
+        return click.option(
+            '--config',
+            required=False,
+            type=str,
+            multiple=True,
+            expose_value=expose_value,
+            callback=preprocess_config_options,
+            help=('Path to a config file or a comma-separated '
+                  'list of key-value pairs.'),
+        )(func)
+
+    return return_option_decorator
 
 
 _COMMON_OPTIONS = [
@@ -1010,6 +1041,7 @@ def cli():
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('entrypoint',
                 required=False,
                 type=str,
@@ -1245,6 +1277,7 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('cluster',
                 required=False,
                 type=str,
@@ -1657,6 +1690,7 @@ def _show_endpoint(query_clusters: Optional[List[str]],
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -1949,6 +1983,7 @@ def status(verbose: bool, refresh: bool, ip: bool, endpoints: bool,
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--all',
               '-a',
               default=False,
@@ -2019,6 +2054,7 @@ def cost_report(all: bool):  # pylint: disable=redefined-builtin
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option('--all-users',
               '-u',
               default=False,
@@ -2080,6 +2116,7 @@ def queue(clusters: List[str], skip_finished: bool, all_users: bool):
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.option(
     '--sync-down',
     '-s',
@@ -2217,6 +2254,7 @@ def logs(
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.argument('cluster',
                 required=True,
                 type=str,
@@ -2320,6 +2358,7 @@ def cancel(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2387,6 +2426,7 @@ def stop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2499,6 +2539,7 @@ def autostop(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -2744,6 +2785,7 @@ def start(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clusters',
                 nargs=-1,
                 required=False,
@@ -3182,6 +3224,7 @@ def _down_or_stop_clusters(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('clouds', required=False, type=str, nargs=-1)
 @click.option('--verbose',
               '-v',
@@ -3222,6 +3265,7 @@ def check(clouds: Tuple[str], verbose: bool):
 
 
 @cli.command()
+@config_option(expose_value=False)
 @click.argument('accelerator_str', required=False)
 @click.option('--all',
               '-a',
@@ -3693,6 +3737,7 @@ def storage():
 
 
 @storage.command('ls', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -3711,6 +3756,7 @@ def storage_ls(verbose: bool):
 
 
 @storage.command('delete', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('names',
                 required=False,
                 type=str,
@@ -3795,6 +3841,7 @@ def jobs():
 
 
 @jobs.command('launch', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -3929,6 +3976,7 @@ def jobs_launch(
 
 
 @jobs.command('queue', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -4045,6 +4093,7 @@ def jobs_queue(verbose: bool, refresh: bool, skip_finished: bool,
 
 
 @jobs.command('cancel', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4119,6 +4168,7 @@ def jobs_cancel(name: Optional[str], job_ids: Tuple[int], all: bool, yes: bool,
 
 
 @jobs.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--name',
               '-n',
               required=False,
@@ -4183,6 +4233,7 @@ def jobs_logs(name: Optional[str], job_id: Optional[int], follow: bool,
 
 
 @jobs.command('dashboard', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def jobs_dashboard():
     """Opens a dashboard for managed jobs."""
@@ -4312,6 +4363,7 @@ def _generate_task_with_service(
 
 
 @serve.command('up', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_yaml',
                 required=True,
                 type=str,
@@ -4423,6 +4475,7 @@ def serve_up(
 # TODO(MaoZiming): Expose mix replica traffic option to user.
 # Currently, we do not mix traffic from old and new replicas.
 @serve.command('update', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_name', required=True, type=str)
 @click.argument('service_yaml',
                 required=True,
@@ -4523,6 +4576,7 @@ def serve_update(service_name: str, service_yaml: Tuple[str, ...],
 
 
 @serve.command('status', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--verbose',
               '-v',
               default=False,
@@ -4648,6 +4702,7 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
 
 
 @serve.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('service_names', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -4761,6 +4816,7 @@ def serve_down(
 
 
 @serve.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option(
     '--follow/--no-follow',
     is_flag=True,
@@ -4874,6 +4930,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -5113,6 +5170,7 @@ def benchmark_launch(
 
 
 @bench.command('ls', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def benchmark_ls() -> None:
     """List the benchmark history."""
@@ -5176,6 +5234,7 @@ def benchmark_ls() -> None:
 
 
 @bench.command('show', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmark', required=True, type=str)
 # TODO(woosuk): Add --all option to show all the collected information
 # (e.g., setup time, warmup steps, total steps, etc.).
@@ -5301,6 +5360,7 @@ def benchmark_show(benchmark: str) -> None:
 
 
 @bench.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmark', required=True, type=str)
 @click.option(
     '--exclude',
@@ -5343,6 +5403,7 @@ def benchmark_down(
 
 
 @bench.command('delete', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('benchmarks', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5477,6 +5538,7 @@ def local():
               help='Password for the ssh-user to execute sudo commands. '
               'Required only if passwordless sudo is not setup.')
 @local.command('up', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
@@ -5532,6 +5594,7 @@ def local_up(gpus: bool, ips: str, ssh_user: str, ssh_key_path: str,
 
 
 @local.command('down', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @_add_click_options(_COMMON_OPTIONS)
 @usage_lib.entrypoint
 def local_down(async_call: bool):
@@ -5547,6 +5610,7 @@ def api():
 
 
 @api.command('start', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--deploy',
               type=bool,
               is_flag=True,
@@ -5579,6 +5643,7 @@ def api_start(deploy: bool, host: Optional[str], foreground: bool):
 
 
 @api.command('stop', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_stop():
     """Stops the SkyPilot API server locally."""
@@ -5586,6 +5651,7 @@ def api_stop():
 
 
 @api.command('logs', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_id', required=False, type=str)
 @click.option('--server-logs',
               is_flag=True,
@@ -5625,6 +5691,7 @@ def api_logs(request_id: Optional[str], server_logs: bool,
 
 
 @api.command('cancel', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all',
               '-a',
@@ -5666,6 +5733,7 @@ def api_cancel(request_ids: Optional[List[str]], all: bool, all_users: bool):
 
 
 @api.command('status', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.argument('request_ids', required=False, type=str, nargs=-1)
 @click.option('--all-status',
               '-a',
@@ -5709,6 +5777,7 @@ def api_status(request_ids: Optional[List[str]], all_status: bool,
 
 
 @api.command('login', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @click.option('--endpoint',
               '-e',
               required=False,
@@ -5720,6 +5789,7 @@ def api_login(endpoint: Optional[str]):
 
 
 @api.command('info', cls=_DocumentedCodeCommand)
+@config_option(expose_value=False)
 @usage_lib.entrypoint
 def api_info():
     """Shows the SkyPilot API server URL."""
