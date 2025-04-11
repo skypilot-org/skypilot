@@ -13,7 +13,7 @@ from sky.clouds.utils import oci_utils
 # effect.
 logging.getLogger('oci.circuit_breaker').setLevel(logging.WARNING)
 
-CONFIG_PATH = '~/.oci/config'
+OCI_CONFIG_PATH = '~/.oci/config'
 ENV_VAR_OCI_CONFIG = 'OCI_CONFIG'
 
 oci = common.LazyImport(
@@ -23,7 +23,7 @@ oci = common.LazyImport(
 
 
 def get_config_file() -> str:
-    conf_file_path = CONFIG_PATH
+    conf_file_path = OCI_CONFIG_PATH
     config_path_via_env_var = os.environ.get(ENV_VAR_OCI_CONFIG)
     if config_path_via_env_var is not None:
         conf_file_path = config_path_via_env_var

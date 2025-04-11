@@ -3,7 +3,7 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot in the ``~/.sky/skyconfig.yaml`` file.
 
 This configuration applies to all new clusters and does not affect existing clusters.
 

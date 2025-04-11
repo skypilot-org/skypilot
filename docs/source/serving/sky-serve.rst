@@ -500,7 +500,7 @@ You may want to customize the resources of the SkyServe controller for several r
 3. Changing the maximum number of services that can be run concurrently, which is the minimum number between 4x the vCPUs of the controller and the memory in GiB of the controller. (Default: 16)
 4. Changing the disk_size of the controller to store more logs. (Default: 200GB)
 
-To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
+To achieve the above, you can specify custom configs in :code:`~/.sky/skyconfig.yaml` with the following fields:
 
 .. code-block:: yaml
 

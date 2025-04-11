@@ -73,7 +73,7 @@ Once your cluster administrator has :ref:`setup a Kubernetes cluster <kubernetes
 
    .. note::
 
-     If your cluster administrator has also provided you with a specific service account to use, set it in your ``~/.sky/config.yaml`` file:
+     If your cluster administrator has also provided you with a specific service account to use, set it in your ``~/.sky/skyconfig.yaml`` file:
 
      .. code-block:: yaml
 
@@ -219,7 +219,7 @@ Your image must satisfy the following requirements:
 
 Using images from private repositories
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/config.yaml` to specify the secret like so:
+To use images from private repositories (e.g., Private DockerHub, Amazon ECR, Google Container Registry), create a `secret <https://kubernetes.io/docs/tasks/configure-pod-container/pull-image-private-registry/#create-a-secret-by-providing-credentials-on-the-command-line>`_ in your Kubernetes cluster and edit your :code:`~/.sky/skyconfig.yaml` to specify the secret like so:
 
 .. code-block:: yaml
 
@@ -280,14 +280,14 @@ After launching the cluster with :code:`sky launch -c myclus task.yaml`, you can
 Customizing SkyPilot Pods
 -------------------------
 
-You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/config.yaml`.
+You can override the pod configuration used by SkyPilot by setting the :code:`pod_config` key in :code:`~/.sky/skyconfig.yaml`.
 The value of :code:`pod_config` should be a dictionary that follows the `Kubernetes Pod API <https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.26/#pod-v1-core>`_. This will apply to all pods created by SkyPilot.
 
-For example, to set custom environment variables and use GPUDirect RDMA, you can add the following to your :code:`~/.sky/config.yaml` file:
+For example, to set custom environment variables and use GPUDirect RDMA, you can add the following to your :code:`~/.sky/skyconfig.yaml` file:
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml
+    # ~/.sky/skyconfig.yaml
     kubernetes:
       pod_config:
         spec:
@@ -332,20 +332,20 @@ FAQs
 
 * **Can I use multiple Kubernetes clusters with SkyPilot?**
 
-  SkyPilot can work with multiple Kubernetes contexts in your kubeconfig file by setting the ``allowed_contexts`` key in :code:`~/.sky/config.yaml`. See :ref:`multi-kubernetes`.
+  SkyPilot can work with multiple Kubernetes contexts in your kubeconfig file by setting the ``allowed_contexts`` key in :code:`~/.sky/skyconfig.yaml`. See :ref:`multi-kubernetes`.
 
   If ``allowed_contexts`` is not set, SkyPilot will use the current active context. To use a different context, change your current context using :code:`kubectl config use-context <context-name>`.
 
 * **Are autoscaling Kubernetes clusters supported?**
 
-  To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/config.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
+  To run on autoscaling clusters, set the :code:`provision_timeout` key in :code:`~/.sky/skyconfig.yaml` to a large value to give enough time for the cluster autoscaler to provision new nodes.
   This will direct SkyPilot to wait for the cluster to scale up before failing over to the next candidate resource (e.g., next cloud).
 
   If you are using GPUs in a scale-to-zero setting, you should also set the :code:`autoscaler` key to the autoscaler type of your cluster. More details in :ref:`config-yaml`.
 
   .. code-block:: yaml
 
-      # ~/.sky/config.yaml
+      # ~/.sky/skyconfig.yaml
       kubernetes:
         provision_timeout: 900  # Wait 15 minutes for nodes to get provisioned before failover. Set to -1 to wait indefinitely.
         autoscaler: gke  # [gke, karpenter, generic]; required if using GPUs/TPUs in scale-to-zero setting

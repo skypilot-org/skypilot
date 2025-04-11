@@ -1473,7 +1473,7 @@ class RetryingVmProvisioner(object):
                     f'invalid cloud credentials: '
                     f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
-                # Failed due to invalid user configs in ~/.sky/config.yaml.
+                # Failed due to invalid user configs in ~/.sky/skyconfig.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
                 # We should block the entire cloud if the user config is
                 # invalid.

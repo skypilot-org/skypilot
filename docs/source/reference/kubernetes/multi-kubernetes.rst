@@ -75,7 +75,7 @@ kubeconfig. You can get the current context with ``kubectl config
 current-context``.
 
 To allow SkyPilot to access multiple Kubernetes clusters, you can set the
-``kubernetes.allowed_contexts`` in the SkyPilot :ref:`global config <config-yaml>`, ``~/.sky/config.yaml``.
+``kubernetes.allowed_contexts`` in the SkyPilot :ref:`global config <config-yaml>`, ``~/.sky/skyconfig.yaml``.
 
 .. code-block:: yaml
 
@@ -148,4 +148,3 @@ Dynamically updating clusters to use
 ----------------------------------------------
 
 You can configure SkyPilot to dynamically fetch Kubernetes cluster configs and enforce restrictions on which clusters are used. Refer to :ref:`dynamic-kubernetes-contexts-update-policy` for more.
-
