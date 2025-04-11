@@ -95,7 +95,7 @@ User
 
 .. note::
 
-    For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/config.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
+    For custom VPC users (with :code:`gcp.vpc_name` specified in :code:`~/.sky/skyconfig.yaml`, check `here <#_gcp-bring-your-vpc>`_),  :code:`compute.firewalls.create` and :code:`compute.firewalls.delete` are not necessary unless opening ports is needed via `resources.ports` in task yaml.
 
 .. note::
 
@@ -151,7 +151,7 @@ User
     compute.images.get
     compute.images.useReadOnly
 
-9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/config.yaml <config-yaml>`, you can additionally add the following permissions:
+9. **Optional**: If your organization sets ``gcp.prioritize_reservations`` or ``gcp.specific_reservations`` in :ref:`~/.sky/skyconfig.yaml <config-yaml>`, you can additionally add the following permissions:
 
 .. code-block:: text
 
@@ -270,7 +270,7 @@ By default, SkyPilot uses the following behavior to get a VPC to use for all GCP
   automatically starts with one subnet per region.
 
 To instruct SkyPilot to use a specific VPC, you can use SkyPilot's global config
-file ``~/.sky/config.yaml`` to specify the VPC name in the ``gcp.vpc_name`` field:
+file ``~/.sky/skyconfig.yaml`` to specify the VPC name in the ``gcp.vpc_name`` field:
 
 .. code-block:: yaml
 
@@ -289,7 +289,7 @@ The custom VPC should contain the :ref:`required firewall rules <gcp-minimum-fir
 Using internal IPs
 -----------------------
 For security reason, users may only want to use internal IPs for SkyPilot instances.
-To do so, you can use SkyPilot's global config file ``~/.sky/config.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
+To do so, you can use SkyPilot's global config file ``~/.sky/skyconfig.yaml`` to specify the ``gcp.use_internal_ips`` and ``gcp.ssh_proxy_command`` fields (to see the detailed syntax, see :ref:`config-yaml`):
 
 .. code-block:: yaml
 

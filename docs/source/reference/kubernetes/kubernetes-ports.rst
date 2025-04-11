@@ -57,11 +57,11 @@ Internal load balancers
 
 To restrict your services to be accessible only within the cluster, you can set all SkyPilot services to use `internal load balancers <https://kubernetes.io/docs/concepts/services-networking/service/#internal-load-balancer>`_.
 
-Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/config.yaml``):
+Depending on your cloud, set the appropriate annotation in the SkyPilot config file (``~/.sky/skyconfig.yaml``):
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml
+    # ~/.sky/skyconfig.yaml
     kubernetes:
       custom_metadata:
         annotations:
@@ -114,7 +114,7 @@ To use this mode:
     and the endpoint may not be accessible from outside the cluster.
 
 
-3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/config.yaml` to use the ingress mode.
+3. Update the :ref:`SkyPilot config <config-yaml>` at :code:`~/.sky/skyconfig.yaml` to use the ingress mode.
 
 .. code-block:: yaml
 

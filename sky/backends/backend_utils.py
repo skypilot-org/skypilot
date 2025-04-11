@@ -682,7 +682,7 @@ def write_cluster_config(
             ssh_proxy_command = ssh_proxy_command_config[region_name]
     logger.debug(f'Using ssh_proxy_command: {ssh_proxy_command!r}')
 
-    # User-supplied global instance tags from ~/.sky/config.yaml.
+    # User-supplied global instance tags from ~/.sky/skyconfig.yaml.
     labels = skypilot_config.get_nested((str(cloud).lower(), 'labels'), {})
     # labels is a dict, which is guaranteed by the type check in
     # schemas.py

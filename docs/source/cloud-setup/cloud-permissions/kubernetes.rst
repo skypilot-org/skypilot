@@ -19,7 +19,7 @@ SkyPilot can operate using either of the following three authentication methods:
 
 2. **Using a custom service account**: If you have a custom service account
    with the `necessary permissions <k8s-permissions_>`__, you can configure
-   SkyPilot to use it by adding this to your :ref:`~/.sky/config.yaml <config-yaml>` file:
+   SkyPilot to use it by adding this to your :ref:`~/.sky/skyconfig.yaml <config-yaml>` file:
 
    .. code-block:: yaml
 
@@ -29,7 +29,7 @@ SkyPilot can operate using either of the following three authentication methods:
 3. **Using your local kubeconfig file**: In this case, SkyPilot will
    copy your local ``~/.kube/config`` file to the controller pod and use it for
    authentication. To use this method, set ``remote_identity: LOCAL_CREDENTIALS`` to your
-   Kubernetes configuration in the :ref:`~/.sky/config.yaml <config-yaml>` file:
+   Kubernetes configuration in the :ref:`~/.sky/skyconfig.yaml <config-yaml>` file:
 
    .. code-block:: yaml
 
@@ -349,10 +349,10 @@ Create the service account using the following command:
 
 After creating the service account, the cluster admin may distribute kubeconfigs with the ``sky-sa`` service account to users who need to access the cluster.
 
-Users should also configure SkyPilot to use the ``sky-sa`` service account through ``~/.sky/config.yaml``:
+Users should also configure SkyPilot to use the ``sky-sa`` service account through ``~/.sky/skyconfig.yaml``:
 
 .. code-block:: yaml
 
-    # ~/.sky/config.yaml
+    # ~/.sky/skyconfig.yaml
     kubernetes:
       remote_identity: sky-sa   # Or your service account name

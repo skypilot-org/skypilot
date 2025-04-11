@@ -183,11 +183,11 @@ You can set up multiple Kubernetes clusters with SkyPilot by using different ``c
     sky local up --ips cluster2-ips.txt --ssh-user user2 --ssh-key-path key2.pem --context-name cluster2
 
 
-You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi-kubernetes>` by adding them to ``allowed_contexts`` in your ``~/.sky/config.yaml`` file:
+You can then configure SkyPilot to use :ref:`multiple Kubernetes clusters <multi-kubernetes>` by adding them to ``allowed_contexts`` in your ``~/.sky/skyconfig.yaml`` file:
 
 .. code-block:: yaml
 
-   # ~/.sky/config.yaml
+   # ~/.sky/skyconfig.yaml
     allowed_contexts:
       - cluster1
       - cluster2

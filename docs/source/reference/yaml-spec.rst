@@ -867,12 +867,12 @@ OR
 Global config overrides
 ---------------------------
 
-To override the :ref:`global configs <config-yaml>` in ``~/.sky/config.yaml`` at a task level:
+To override the :ref:`global configs <config-yaml>` in ``~/.sky/skyconfig.yaml`` at a task level:
 
 .. code-block:: yaml
 
   experimental:
-    # Override the configs in ~/.sky/config.yaml from a task level.
+    # Override the configs in ~/.sky/skyconfig.yaml from a task level.
     #
     # The following fields can be overridden. Please refer to docs of Advanced
     # Configuration for more details of those fields:
