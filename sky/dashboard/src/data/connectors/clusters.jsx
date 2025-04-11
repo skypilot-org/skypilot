@@ -197,15 +197,6 @@ export function useClusterDetails({ cluster, job = null }) {
   useEffect(() => {
     fetchClusterData();
     fetchClusterJobData();
-
-    // Set up an interval to refresh the data every 20 seconds
-    const intervalId = setInterval(() => {
-      fetchClusterData();
-      fetchClusterJobData();
-    }, 20000);
-
-    // Clean up the interval on component unmount
-    return () => clearInterval(intervalId);
   }, [cluster, job, fetchClusterData, fetchClusterJobData]);
 
   return { clusterData, clusterJobData, loading, refreshData };

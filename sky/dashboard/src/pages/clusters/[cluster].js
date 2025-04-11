@@ -67,43 +67,50 @@ function ClusterDetails() {
           </Link>
         </div>
 
-        {clusterData && (
+        <div className="text-sm flex items-center">
           <div className="text-sm flex items-center">
-            <div className="text-sm flex items-center">
-              {(loading || isRefreshing) && (
-                <div className="flex items-center mr-2">
-                  <CircularProgress size={15} className="mt-0" />
-                  <span className="ml-2 text-gray-500">Loading...</span>
-                </div>
-              )}
-              <Tooltip
-                content="Refresh"
-                className="text-sm text-muted-foreground"
-              >
-                <button
-                  onClick={handleManualRefresh}
-                  disabled={loading || isRefreshing}
-                  className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 inline-flex items-center"
+            {(loading || isRefreshing) && (
+              <div className="flex items-center mr-2">
+                <CircularProgress size={15} className="mt-0" />
+                <span className="ml-2 text-gray-500">Loading...</span>
+              </div>
+            )}
+            {clusterData && (
+              <>
+                <Tooltip
+                  content="Refresh"
+                  className="text-sm text-muted-foreground"
                 >
-                  <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                  <span>Refresh</span>
-                </button>
-              </Tooltip>
-            </div>
-            <Status2Actions
-              withLabel={true}
-              cluster={clusterData.cluster}
-              status={clusterData.status}
-              onOpenSSHModal={handleConnectClick}
-              onOpenVSCodeModal={handleVSCodeClick}
-            />
+                  <button
+                    onClick={handleManualRefresh}
+                    disabled={loading || isRefreshing}
+                    className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 inline-flex items-center"
+                  >
+                    <RotateCwIcon className="w-4 h-4 mr-1.5" />
+                    <span>Refresh</span>
+                  </button>
+                </Tooltip>
+                <Status2Actions
+                  withLabel={true}
+                  cluster={clusterData.cluster}
+                  status={clusterData.status}
+                  onOpenSSHModal={handleConnectClick}
+                  onOpenVSCodeModal={handleVSCodeClick}
+                />
+              </>
+            )}
           </div>
-        )}
+        </div>
       </div>
 
-      {clusterData && (
+      {loading ? (
+        <div className="flex justify-center items-center py-12">
+          <CircularProgress size={24} className="mr-2" />
+          <span className="text-gray-500">Loading...</span>
+        </div>
+      ) : clusterData ? (
         <ActiveTab clusterData={clusterData} clusterJobData={clusterJobData} loading={loading} />
-      )}
+      ) : null}
 
       {/* SSH Instructions Modal */}
       <SSHInstructionsModal

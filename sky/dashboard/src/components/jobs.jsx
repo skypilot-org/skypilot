@@ -127,7 +127,7 @@ export function ManagedJobs() {
       <div className="flex flex-col space-y-4">
         {/* Activeness Filter */}
         <div className="flex items-center text-sm">
-          <span className="mr-2 text-gray-600">Activeness:</span>
+          <span className="mr-2 text-sm font-medium">Activeness:</span>
           <div className="flex space-x-2">
             <button
               onClick={() => setActiveTab('active')}
@@ -397,9 +397,9 @@ export function ManagedJobsTable({
     <div className="relative">
       {/* Status Filter Bar */}
       <div className="flex items-center mb-4 text-sm">
-        <span className="text-sm font-medium text-gray-700">Status:</span>
+        <span className="text-sm font-medium">Status:</span>
         <div className="flex flex-wrap gap-2">
-          {/* <button
+          <button
             onClick={() => setSelectedStatus('All')}
             className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
               selectedStatus === 'All'
@@ -411,7 +411,7 @@ export function ManagedJobsTable({
             <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
               {statusCounts.All}
             </span>
-          </button> */}
+          </button>
           {Object.entries(statusCounts)
             .filter(([status]) => status !== 'All')
             .map(([status, count]) => {
@@ -833,6 +833,10 @@ export function JobDetails({
                   <div className="text-base mt-1">{jobData.id}</div>
                 </div>
                 <div>
+                  <div className="text-gray-600 font-medium text-base">Job Name</div>
+                  <div className="text-base mt-1">{jobData.job}</div>
+                </div>
+                <div>
                   <div className="text-gray-600 font-medium text-base">User</div>
                   <div className="text-base mt-1">{jobData.user}</div>
                 </div>
@@ -848,10 +852,6 @@ export function JobDetails({
                     <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
                   </div>
                 )}
-                <div>
-                  <div className="text-gray-600 font-medium text-base">Job Name</div>
-                  <div className="text-base mt-1">{jobData.job}</div>
-                </div>
                 {jobData.cluster && (
                   <div>
                     <div className="text-gray-600 font-medium text-base">Cluster</div>
@@ -883,7 +883,7 @@ export function JobDetails({
                   <span>Loading logs...</span>
                 </div>
               ) : (
-                <div className="max-h-96 overflow-y-auto">
+                <div className="max-h-96 overflow-y-auto" style={contentStyle}>
                   <LogFilter logs={logs.join('')} />
                 </div>
               )}
@@ -1426,7 +1426,19 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {paginatedData.length > 0 ? (
+            {loading ? (
+              <TableRow>
+                <TableCell
+                  colSpan={7}
+                  className="text-center py-6 text-gray-500"
+                >
+                  <div className="flex justify-center items-center">
+                    <CircularProgress size={20} className="mr-2" />
+                    <span>Loading...</span>
+                  </div>
+                </TableCell>
+              </TableRow>
+            ) : paginatedData.length > 0 ? (
               paginatedData.map((item) => (
                 <React.Fragment key={item.id}>
                   <TableRow
