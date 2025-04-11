@@ -32,3 +32,14 @@
 {{- end -}}
 
 {{- end -}} 
+
+{{/*
+Create the name of the service account to use
+*/}}
+{{- define "skypilot.serviceAccountName" -}}
+{{- if .Values.rbac.serviceAccountName -}}
+{{ .Values.rbac.serviceAccountName }}
+{{- else -}}
+{{ .Release.Name }}-api-sa
+{{- end -}}
+{{- end -}} 
