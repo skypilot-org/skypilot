@@ -52,7 +52,6 @@ import contextlib
 import copy
 import os
 import pprint
-import tempfile
 import typing
 from typing import Any, Dict, Iterator, Optional, Tuple
 
@@ -92,6 +91,7 @@ CONFIG_PATH = '~/.sky/config.yaml'
 # The loaded config.
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
+_config_overridden: bool = False
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -178,7 +178,10 @@ def _reload_config() -> None:
 
 
 def loaded_config_path() -> Optional[str]:
-    """Returns the path to the loaded config file."""
+    """Returns the path to the loaded config file, or
+    '<overridden>' if the config is overridden."""
+    if _config_overridden:
+        return '<overridden>'
     return _loaded_config_path
 
 
@@ -195,31 +198,30 @@ def loaded() -> bool:
 def override_skypilot_config(
         override_configs: Optional[Dict[str, Any]]) -> Iterator[None]:
     """Overrides the user configurations."""
+    global _dict, _config_overridden
     # TODO(SKY-1215): allow admin user to extend the disallowed keys or specify
     # allowed keys.
     if not override_configs:
         # If no override configs (None or empty dict), do nothing.
         yield
         return
-    original_env_config_path = _loaded_config_path
-    original_config = dict(_dict)
+    original_config = _dict
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
         override_configs=override_configs,
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
-    with tempfile.NamedTemporaryFile(
-            mode='w',
-            prefix='skypilot_config',
-            # Have to avoid deleting the file as the underlying function needs
-            # to read the config file, and we need to close the file mode='w'
-            # to enable reading.
-            delete=False) as f:
-        common_utils.dump_yaml(f.name, dict(config))
-        os.environ[ENV_VAR_SKYPILOT_CONFIG] = f.name
     try:
-        _reload_config()
+        common_utils.validate_schema(
+            config,
+            schemas.get_config_schema(),
+            f'Invalid config {config}. See: '
+            'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
+            'Error: ',
+            skip_none=False)
+        _config_overridden = True
+        _dict = config
         yield
     except exceptions.InvalidSkyPilotConfigError as e:
         with ux_utils.print_exception_no_traceback():
@@ -227,23 +229,10 @@ def override_skypilot_config(
                 'Failed to override the SkyPilot config on API '
                 'server with your local SkyPilot config:\n'
                 '=== SkyPilot config on API server ===\n'
-                f'{common_utils.dump_yaml_str(original_config)}\n'
+                f'{common_utils.dump_yaml_str(dict(original_config))}\n'
                 '=== Your local SkyPilot config ===\n'
                 f'{common_utils.dump_yaml_str(override_configs)}\n'
                 f'Details: {e}') from e
-
     finally:
-        if original_env_config_path is not None:
-            os.environ[ENV_VAR_SKYPILOT_CONFIG] = original_env_config_path
-        else:
-            os.environ.pop(ENV_VAR_SKYPILOT_CONFIG, None)
-        # Reload the config to restore the original config to avoid the next
-        # request reusing the same process to use the config for the current
-        # request.
-        _reload_config()
-
-        try:
-            os.remove(f.name)
-        except Exception:  # pylint: disable=broad-except
-            # Failing to delete the file is not critical.
-            pass
+        _dict = original_config
+        _config_overridden = False

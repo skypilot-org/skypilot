@@ -64,8 +64,8 @@ def get_s3_mount_cmd(bucket_name: str,
 
 
 def get_nebius_mount_cmd(nebius_profile_name: str,
-                         endpoint_url: str,
                          bucket_name: str,
+                         endpoint_url: str,
                          mount_path: str,
                          _bucket_sub_path: Optional[str] = None) -> str:
     """Returns a command to install Nebius mount utility goofys."""

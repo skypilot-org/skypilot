@@ -372,12 +372,12 @@ def _start(
     with dag_lib.Dag():
         dummy_task = task_lib.Task().set_resources(handle.launched_resources)
         dummy_task.num_nodes = handle.launched_nodes
-    handle = backend.provision(dummy_task,
-                               to_provision=handle.launched_resources,
-                               dryrun=False,
-                               stream_logs=True,
-                               cluster_name=cluster_name,
-                               retry_until_up=retry_until_up)
+    (handle, _) = backend.provision(dummy_task,
+                                    to_provision=handle.launched_resources,
+                                    dryrun=False,
+                                    stream_logs=True,
+                                    cluster_name=cluster_name,
+                                    retry_until_up=retry_until_up)
     storage_mounts = backend.get_storage_mounts_metadata(handle.cluster_name)
     # Passing all_file_mounts as None ensures the local source set in Storage
     # to not redundantly sync source to the bucket.
@@ -629,26 +629,21 @@ def autostop(
         raise exceptions.NotSupportedError(
             f'{operation} cluster {cluster_name!r} with backend '
             f'{backend.__class__.__name__!r} is not supported.')
-    # Check autostop is implemented for cloud
     cloud = handle.launched_resources.cloud
-    if not down and not is_cancel:
-        try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.STOP})
-        except exceptions.NotSupportedError as e:
-            raise exceptions.NotSupportedError(
-                f'{colorama.Fore.YELLOW}Scheduling autostop on cluster '
-                f'{cluster_name!r}...skipped.{colorama.Style.RESET_ALL}\n'
-                f'  {_stop_not_supported_message(handle.launched_resources)}.'
-            ) from e
-
-    # Check if autodown is required and supported
+    # Check if autostop/autodown is required and supported
     if not is_cancel:
         try:
-            cloud.check_features_are_supported(
-                handle.launched_resources,
-                {clouds.CloudImplementationFeatures.AUTO_TERMINATE})
+            if down:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.AUTODOWN})
+            else:
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.STOP})
+                cloud.check_features_are_supported(
+                    handle.launched_resources,
+                    {clouds.CloudImplementationFeatures.AUTOSTOP})
         except exceptions.NotSupportedError as e:
             raise exceptions.NotSupportedError(
                 f'{colorama.Fore.YELLOW}{operation} on cluster '

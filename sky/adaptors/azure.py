@@ -232,7 +232,7 @@ def get_client(name: str,
                                 'Must provide resource_group_name keyword '
                                 'arguments for container client.')
                             sky_logger.info(
-                                'Failed to check the existance of the '
+                                'Failed to check the existence of the '
                                 f'container {container_url!r} due to '
                                 'insufficient IAM role for storage '
                                 f'account {storage_account_name!r}.')

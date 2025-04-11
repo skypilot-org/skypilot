@@ -74,6 +74,7 @@ def up(
         f'{server_common.get_server_url()}/serve/up',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -132,6 +133,7 @@ def update(
         f'{server_common.get_server_url()}/serve/update',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -173,6 +175,7 @@ def down(
         f'{server_common.get_server_url()}/serve/down',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -207,6 +210,7 @@ def terminate_replica(service_name: str, replica_id: int,
         f'{server_common.get_server_url()}/serve/terminate-replica',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -279,6 +283,7 @@ def status(
         f'{server_common.get_server_url()}/serve/status',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
+        cookies=server_common.get_api_cookie_jar(),
     )
     return server_common.get_request_id(response)
 
@@ -365,6 +370,7 @@ def tail_logs(service_name: str,
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
         stream=True,
+        cookies=server_common.get_api_cookie_jar(),
     )
     request_id = server_common.get_request_id(response)
     sdk.stream_response(request_id, response, output_stream)

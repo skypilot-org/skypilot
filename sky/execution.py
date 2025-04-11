@@ -159,9 +159,9 @@ def _execute(
       no_setup: bool; whether to skip setup commands or not when (re-)launching.
       clone_disk_from: Optional[str]; if set, clone the disk from the specified
         cluster.
-      skip_unecessary_provisioning: bool; if True, compare the calculated
+      skip_unnecessary_provisioning: bool; if True, compare the calculated
         cluster config to the current cluster's config. If they match, shortcut
-        provisioning even if we have Stage.PROVISION.
+        provisioning and setup, even if we have Stage.PROVISION and Stage.SETUP.
 
     Returns:
       job_id: Optional[int]; the job ID of the submitted job. None if the
@@ -247,11 +247,12 @@ def _execute(
             if Stage.DOWN in stages:
                 stages.remove(Stage.DOWN)
             if idle_minutes_to_autostop >= 0:
-                requested_features.add(
-                    clouds.CloudImplementationFeatures.AUTO_TERMINATE)
-                if not down:
+                if down:
                     requested_features.add(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTODOWN)
+                else:
+                    requested_features.add(
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
         # NOTE: in general we may not have sufficiently specified info
         # (cloud/resource) to check STOP_SPOT_INSTANCE here. This is checked in
         # the backend.
@@ -318,12 +319,13 @@ def _execute(
         task.sync_storage_mounts()
 
     try:
+        provisioning_skipped = False
         if Stage.PROVISION in stages:
             assert handle is None or skip_unnecessary_provisioning, (
                 'Provisioning requested, but handle is already set. PROVISION '
                 'should be excluded from stages or '
                 'skip_unecessary_provisioning should be set. ')
-            handle = backend.provision(
+            (handle, provisioning_skipped) = backend.provision(
                 task,
                 task.best_resources,
                 dryrun=dryrun,
@@ -356,7 +358,11 @@ def _execute(
         if no_setup:
             logger.info('Setup commands skipped.')
         elif Stage.SETUP in stages and not dryrun:
-            backend.setup(handle, task, detach_setup=detach_setup)
+            if skip_unnecessary_provisioning and provisioning_skipped:
+                logger.debug('Unnecessary provisioning was skipped, so '
+                             'skipping setup as well.')
+            else:
+                backend.setup(handle, task, detach_setup=detach_setup)
 
         if Stage.PRE_EXEC in stages and not dryrun:
             if idle_minutes_to_autostop is not None:
@@ -538,6 +544,8 @@ def launch(
                 Stage.PROVISION,
                 Stage.SYNC_WORKDIR,
                 Stage.SYNC_FILE_MOUNTS,
+                # Setup will be skipped if provisioning was skipped.
+                Stage.SETUP,
                 Stage.PRE_EXEC,
                 Stage.EXEC,
                 Stage.DOWN,

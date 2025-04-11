@@ -2070,10 +2070,10 @@ class RetryingVmProvisioner(object):
                                (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
-                    assert (clouds.CloudImplementationFeatures.STOP
+                    assert (clouds.CloudImplementationFeatures.AUTOSTOP
                             in requested_features), requested_features
                     requested_features.remove(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -2836,7 +2836,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[CloudVmRayResourceHandle]:
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
         Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
@@ -2976,7 +2976,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
-                return record['handle'] if record is not None else None
+                return record['handle'] if record is not None else None, False
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -2987,7 +2987,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 assert record is not None and record['handle'] is not None, (
                     cluster_name, record)
-                return record['handle']
+                return record['handle'], True
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -3029,7 +3029,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, lock_path, config_hash)
-                return handle
+                return handle, False
 
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
@@ -3101,7 +3101,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, lock_path, config_hash)
-            return handle
+            return handle, False
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
@@ -3454,7 +3454,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
             # with pid is the same driver process.
@@ -4356,7 +4356,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         cloud = handle.launched_resources.cloud
 
-        if (terminate and handle.launched_resources.is_image_managed is True):
+        if terminate and handle.launched_resources.is_image_managed is True:
             # Delete the image when terminating a "cloned" cluster, i.e.,
             # whose image is created by SkyPilot (--clone-disk-from)
             logger.debug(f'Deleting image {handle.launched_resources.image_id}')

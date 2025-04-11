@@ -15,6 +15,8 @@ apiService:
 
   
   # Set config.yaml content on the API server
+  # Updating this value will take tens of seconds to take effect on the API server.
+  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
   config: null
   # config: |
   #   admin_policy: admin_policy_examples.AddLabelsPolicy
@@ -153,7 +155,7 @@ rbac:
       resources: [ "roles", "rolebindings" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ] 
     # Required for managing SkyPilot system DaemonSets
-    - apiGroups: [ "" ]
+    - apiGroups: [ "apps" ]
       resources: [ "daemonsets" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
     # Required for managing configmaps for smarter-device-manager
@@ -165,6 +167,10 @@ rbac:
     - apiGroups: [ "" ]
       resources: [ "serviceaccounts" ]
       verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for getting reason when Pod scheduling fails.
+    - apiGroups: [ "" ]
+      resources: [ "events" ]
+      verbs: [ "get", "list", "watch" ]
   # Cluster-scoped rules for API server.
   clusterRules:
     # Required for managing skypilot-system namespace, which hosts skypilot system components like smarter-device-manager.
@@ -175,6 +181,10 @@ rbac:
     # Required for getting node resources. 
     - apiGroups: [ "" ]
       resources: [ "nodes" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for querying GPUs.
+    - apiGroups: [ "" ]
+      resources: [ "pods" ]
       verbs: [ "get", "list", "watch" ]
     # Required for autodetecting runtime classes
     - apiGroups: [ "node.k8s.io" ]
