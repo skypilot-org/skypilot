@@ -1,7 +1,7 @@
 """Immutable user configurations (EXPERIMENTAL).
 
 On module import, we attempt to parse the config located at USER_CONFIG_PATH
-(default: ~/.sky/config.yaml). Caller can then use
+(default: ~/.sky/skyconfig.yaml). Caller can then use
 
   >> skypilot_config.loaded()
 
@@ -35,14 +35,14 @@ Consider the following config contents:
 
 then:
 
-    # Assuming ~/.sky/config.yaml exists and can be loaded:
+    # Assuming ~/.sky/skyconfig.yaml exists and can be loaded:
     skypilot_config.loaded()  # ==> True
 
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> 1
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> {'nested': 1}
 
-    # If ~/.sky/config.yaml doesn't exist or failed to be loaded:
+    # If ~/.sky/skyconfig.yaml doesn't exist or failed to be loaded:
     skypilot_config.loaded()  # ==> False
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> None
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None

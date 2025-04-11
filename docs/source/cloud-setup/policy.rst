@@ -20,7 +20,7 @@ To implement and use an admin policy:
 
 - Admins writes a simple Python package with a policy class that implements SkyPilot's ``sky.AdminPolicy`` interface;
 - Admins distributes this package to users;
-- Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/config.yaml`` for the policy to go into effect.
+- Users simply set the ``admin_policy`` field in the SkyPilot config file ``~/.sky/skyconfig.yaml`` for the policy to go into effect.
 
 
 Overview
@@ -32,7 +32,7 @@ User-Side
 ~~~~~~~~~~
 
 To apply the policy, a user needs to set the ``admin_policy`` field in the SkyPilot config
-``~/.sky/config.yaml`` to the path of the Python package that implements the policy.
+``~/.sky/skyconfig.yaml`` to the path of the Python package that implements the policy.
 For example:
 
 .. code-block:: yaml
