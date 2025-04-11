@@ -134,34 +134,8 @@ jobs:
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
-  cleanup-on-failure:
-    needs: [release-build, wait-for-quicktest-core]
-    if: |
-      failure() ||
-      needs.wait-for-quicktest-core.outputs.build_status != 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v3
-        with:
-          fetch-depth: 0
-
-      - name: Delete test branch
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
-        run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-
-          if git ls-remote --heads origin ${TEST_BRANCH} | grep ${TEST_BRANCH}; then
-            echo "Deleting test branch ${TEST_BRANCH} due to build failure"
-            git push origin --delete ${TEST_BRANCH}
-          fi
-
   create-pr:
     needs: [release-build, wait-for-quicktest-core]
-    if: needs.wait-for-quicktest-core.outputs.build_status == 'success'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -199,7 +173,7 @@ jobs:
 
           Buildkite Test Links:
           - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - ✅ Success (MOCKED)
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - ✅ Success
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.wait-for-quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
           - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
@@ -209,7 +183,7 @@ jobs:
 
           Buildkite Test Links:
           - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - ✅ Success (MOCKED)
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - ✅ Success
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.wait-for-quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
 
           *Patch release - Release Tests not triggered.*"
           fi
