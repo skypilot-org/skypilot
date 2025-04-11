@@ -38,10 +38,64 @@ Step 1: Prepare an upgrade
     VERSION=1.0.0-dev20250408 # TODO: change to the version you want to upgrade to
     IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
-Step 2: (Optional) Cordon and drain the API server
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Step 2: Upgrade the API server and clients
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-To minimize the impact of the downtime introduced by the upgrade, we recommend cordon and drain the API server before upgrading the API server. The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
+.. note::
+
+    * Upgrading the API server will interrupt any pending and on-going requests on the API server, e.g., on-goining ``sky launch``. You can recover on-going requests by running the same commands again after the new API server starts.
+    * Upgrading the server or clients will break the compatibility between the server and clients.
+
+    To minimize the impact of upgrading, you can :ref:`cordon and drain the API server <cordon-drain-api-server>` before upgrading the API server and clients to enforce that all the requests to be finished before the upgrade and there is no new request during the upgrade.
+
+Upgrade the clients:
+
+.. code-block:: bash
+
+    pip install -U skypilot-nightly==${VERSION}
+
+Upgrade the API server:
+
+.. code-block:: bash
+
+    # --reuse-values is critical to keep the values set in the previous installation steps.
+    helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
+      --set apiService.image=${IMAGE_REPO}:${VERSION}
+
+Optionally, you can watch the upgrade progress with:
+
+.. code-block:: console
+
+    $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
+    NAME                                       READY   STATUS     RESTARTS   AGE
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2   0          7s
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2   0          24s
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     PodInitializing   0          26s
+    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
+    skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
+
+The upgraded API server is ready to serve requests after the pod is running and the ``READY`` column shows ``1/1``. The cordon will be removed automatically after the upgrade.
+
+Step 3: Verify the upgrade
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Verify the API server is able to serve requests and the version is consistent with the version you upgraded to:
+
+.. code-block:: console
+
+    $ sky api info
+    Using SkyPilot API server: <ENDPOINT>
+    ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
+    └── User: aclice (abcd1234)
+
+If possible, you can also trigger your pipelines that depend on the API server to verify there is no compatibility issue after the upgrade.
+
+.. _cordon-drain-api-server:
+
+Optional: Cordon and drain the API server
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
 
 1. Cordon SkyPilot API server to avoid new request:
 
@@ -57,11 +111,11 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
 .. code-block:: console
 
     $ sky api info
-    sky.exceptions.ApiServerConnectionError: Could not connect to SkyPilot API server at <URL>. Please ensure that the server is running. Try: curl <URL>
+    sky.exceptions.ApiServerConnectionError: Could not connect to SkyPilot API server at <ENDPOINT>. Please ensure that the server is running. Try: curl <ENDPIONT>
 
 .. dropdown:: Resolve cordon failure for early 0.8.0 nightly release
 
-    If you are upgrading from early 0.8.0 nightly release that does not support cordoning (``sky api info`` will succeed), you can manually enable cordon support by running:
+    If you are upgrading from an early nightly build that does not support cordoning (``sky api info`` will succeed), you can manually enable cordon support by running:
 
     .. code-block:: bash
 
@@ -88,7 +142,7 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
 
         .. note::
 
-            The `skypilot-status-refresh-daemon` is a background process managed by API server that can be safely interrupted.
+            The `skypilot-status-refresh-daemon` is a background process managed by API server that is never stop. And ``sky.logs`` can last for a long time. Both of them can be safely interrupted.
     
     .. tab-item:: Canceling requests
 
@@ -114,54 +168,6 @@ To minimize the impact of the downtime introduced by the upgrade, we recommend c
         # Stop the port-forward after you are satisfied with the status
         $ kill $PORT_FORWARD_PID
 
-Step 3: Upgrade SkyPilot clients
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Currently, compatibility between SkyPilot clients and server is only guaranteed when both sides are running on **the same version**. We recommend upgrading all the clients to the same version during the maintainence window to avoid breaking the pipeline after the upgrade:
-
-.. code-block:: bash
-
-    pip install -U skypilot-nightly==${VERSION}
-
-Step 4: Upgrade the API server
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Once all the critical requests have been finished and the clients in autonomous pipelines have been upgraded, you can upgrade the API server with the following command:
-
-.. code-block:: bash
-
-    # --reuse-values is critical to keep the values set in the previous installation steps.
-    helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel --reuse-values \
-      --set apiService.image=${IMAGE_REPO}:${VERSION}
-
-Optionally, you can watch the upgrade progress with:
-
-.. code-block:: console
-
-    $ kubectl get pod -l app=${RELEASE_NAME}-api --watch
-    NAME                                       READY   STATUS     RESTARTS   AGE
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:0/2   0          7s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Init:1/2   0          24s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     PodInitializing   0          26s
-    skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
-    skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
-
-The upgraded API server is ready to serve requests after the pod is running and the ``READY`` column shows ``1/1``. The cordon will be removed automatically after the upgrade.
-
-Step 5: Verify the upgrade
-~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Verify the API server is able to serve requests and the version is consistent with the version you upgraded to:
-
-.. code-block:: console
-
-    $ sky api info
-    Using SkyPilot API server: <URL>
-    ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
-    └── User: aclice (abcd1234)
-
-If possible, you can also trigger your pipelines that depend on the API server to verify there is no compatibility issue after the upgrade.
-
 .. _sky-api-server-vm-upgrade:
 
 Upgrade the API server deployed on VM
@@ -173,14 +179,16 @@ Upgrade the API server deployed on VM
 
 Suppose the cluster name of the API server is ``api-server`` (which is used in the :ref:`sky-api-server-cloud-deploy` guide), you can upgrade the API server with the following steps:
 
-1. Switch to the original API server endpoint used to launch the cloud VM for API server. It is usually locally started when you ran ``sky launch -c api-server skypilot-api-server.yaml`` in :ref:`sky-api-server-cloud-deploy` guide:
+1. Get the version to upgrade to from SkyPilot `nightly build <https://pypi.org/project/skypilot-nightly/#history>`_.
+
+2. Switch to the original API server endpoint used to launch the cloud VM for API server. It is usually locally started when you ran ``sky launch -c api-server skypilot-api-server.yaml`` in :ref:`sky-api-server-cloud-deploy` guide:
 
 .. code-block:: bash
 
     # Replace http://localhost:46580 with the real API server endpoint if you were not using the local API server to launch the API server VM instance.
     sky api login -e http://localhost:46580
 
-2. Check the API server VM instance is ``UP``:
+3. Check the API server VM instance is ``UP``:
 
 .. code-block:: console
 
@@ -189,7 +197,17 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
     NAME        LAUNCHED     RESOURCES                                                                  STATUS  AUTOSTOP  COMMAND
     api-server  41 mins ago  1x AWS(c6i.2xlarge, image_id={'us-east-1': 'docker:berkeleyskypilot/sk...  UP      -         sky exec api-server pip i...
 
-3. Upgrade the SkyPilot on the VM and restart the API server:
+4. Upgrade the clients:
+
+.. code-block:: bash
+
+    pip install -U skypilot-nightly==${VERSION}
+
+.. note:: 
+
+    After upgrading the clients, they should avoid being used until the API server is upgraded to the new version.
+
+5. Upgrade the SkyPilot on the VM and restart the API server:
 
 .. note::
 
@@ -201,18 +219,18 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
     # Alternatively, you can also upgrade to a specific version with:
     sky exec api-server "pip install -U skypilot-nightly[all]==${VERSION} && sky api stop && sky api start --deploy"
 
-4. Switch back to the remote API server:
+6. Switch back to the remote API server:
 
 .. code-block:: bash
 
-    URL=$(sky status --endpoint api-server)
-    sky api login -e $URL
+    ENDPOINT=$(sky status --endpoint api-server)
+    sky api login -e $ENDPOINT
 
-5. Verify the API server is running and the version is consistent with the version you upgraded to:
+7. Verify the API server is running and the version is consistent with the version you upgraded to:
 
 .. code-block:: console
 
     $ sky api info
-    Using SkyPilot API server: <URL>
+    Using SkyPilot API server: <ENDPOINT>
     ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
     └── User: aclice (abcd1234)
