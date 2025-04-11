@@ -168,7 +168,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.aws
 def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
     name = smoke_tests_utils.get_cluster_name()
-    tmp_config_path = tmp_path / 'config.yaml'
+    tmp_config_path = tmp_path / 'skyconfig.yaml'
     test = smoke_tests_utils.Test(
         'test_launch_fast_with_cluster_changes',
         [
@@ -186,7 +186,7 @@ def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
             f'sky logs {name} 2 --status',
 
             # Copy current config as a base.
-            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/skyconfig.yaml}} {tmp_config_path} && '
+            f'cp ${{{skypilot_config.ENV_VAR_SKYPILOT_CONFIG}:-~/.sky/config.yaml}} {tmp_config_path} && '
             # Set config override. This should change the cluster yaml, forcing reprovision/setup
             f'echo "aws: {{ remote_identity: test }}" >> {tmp_config_path}',
             # Launch and do full output validation. Setup/provisioning should be run.
