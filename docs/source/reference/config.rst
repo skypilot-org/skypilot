@@ -14,6 +14,8 @@ This configuration applies to all new clusters and does not affect existing clus
 Syntax
 ------
 
+For details about SkyServe controller and its customization, see :ref:`customizing-sky-serve-controller-resources`.
+
 Below is the configuration syntax and some example values. See detailed explanations under each field.
 
 .. parsed-literal::

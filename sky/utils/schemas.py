@@ -736,6 +736,9 @@ def get_config_schema():
                 'additionalProperties': False,
                 'properties': {
                     'resources': resources_schema,
+                    'high_availability': {
+                        'type': 'boolean',
+                    },
                 }
             },
             'bucket': {
