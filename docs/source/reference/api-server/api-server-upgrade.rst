@@ -95,7 +95,11 @@ If possible, you can also trigger your pipelines that depend on the API server t
 Optional: Cordon and drain the API server
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-The following steps require `patch` and `exec` (or `port-forward`) access to the API server Pod.
+
+The following steps help void new request being submitted to the API server (cordon) and wait for all existing requests to finish on old API server (drain) during the maintainance window -- gracefully upgrade the API server.
+
+.. note:: 
+  It requires `patch` and `exec` (or `port-forward`) access to the API server Pod.
 
 1. Cordon SkyPilot API server to avoid new request:
 
