@@ -35,7 +35,7 @@ Step 1: Prepare an upgrade
 
     NAMESPACE=skypilot # TODO: change to your installed namespace
     RELEASE_NAME=skypilot # TODO: change to your installed release name
-    VERSION=1.0.0-dev20250408 # TODO: change to the version you want to upgrade to
+    VERSION=1.0.0-dev20250410 # TODO: change to the version you want to upgrade to
     IMAGE_REPO=berkeleyskypilot/skypilot-nightly
 
 Step 2: Upgrade the API server and clients
@@ -85,7 +85,7 @@ Verify the API server is able to serve requests and the version is consistent wi
 
     $ sky api info
     Using SkyPilot API server: <ENDPOINT>
-    ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
+    ├── Status: healthy, commit: 022a5c3ffe258f365764b03cb20fac70934f5a60, version: 1.0.0.dev20250410
     └── User: aclice (abcd1234)
 
 If possible, you can also trigger your pipelines that depend on the API server to verify there is no compatibility issue after the upgrade.
@@ -232,5 +232,5 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
     $ sky api info
     Using SkyPilot API server: <ENDPOINT>
-    ├── Status: healthy, commit: 633e16611f2f858dc27c9eae2f410811e0bc714c, version: 1.0.0-dev0
+    ├── Status: healthy, commit: 022a5c3ffe258f365764b03cb20fac70934f5a60, version: 1.0.0.dev20250410
     └── User: aclice (abcd1234)
