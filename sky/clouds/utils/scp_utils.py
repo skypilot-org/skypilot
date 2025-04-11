@@ -404,7 +404,7 @@ class SCPClient:
         url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}'
         return self._delete(url)
 
-    def del_firwall_rules(self, firewall_id, rule_id_list):
+    def del_firewall_rules(self, firewall_id, rule_id_list):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
         request_body = {'ruleDeletionType': 'PARTIAL', 'ruleIds': rule_id_list}
         return self._delete(url, request_body=request_body)
@@ -428,11 +428,11 @@ class SCPClient:
         url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
         return self._get(url, contents_key=None)
 
-    def get_firewal_rule_info(self, firewall_id, rule_id):
+    def get_firewall_rule_info(self, firewall_id, rule_id):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules/{rule_id}'  # pylint: disable=line-too-long
         return self._get(url, contents_key=None)
 
-    def list_firwalls(self):
+    def list_firewalls(self):
         url = f'{API_ENDPOINT}/firewall/v2/firewalls'
         return self._get(url)
 
@@ -448,3 +448,156 @@ class SCPClient:
     def stop_instance(self, vm_id):
         url = f'{API_ENDPOINT}/virtual-server/v2/virtual-servers/{vm_id}/stop'
         return self._post(url=url, request_body={})
+
+    def list_security_group_rules(self, sg_id):
+        url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'
+        return self._get(url)
+
+    def _check_existing_security_group_rule(self, sg_id, direction, ports):
+        response = self.list_security_group_rules(sg_id)
+        rules = []
+        for rule in response:
+            rule_direction = rule['ruleDirection']
+            if rule_direction == direction:
+                rules.append(rule)
+        for rule in rules:
+            port_list = ','.join(rule['tcpServices'])
+            port = ','.join(ports)
+            if port == port_list:
+                return False
+        return True
+
+    def add_new_security_group_rule(self, sg_id, direction, ports):
+        if self._check_existing_security_group_rule(sg_id, direction, ports):
+            url = f'{API_ENDPOINT}/security-group/v2/security-groups/{sg_id}/rules'  # pylint: disable=line-too-long
+
+            services = []
+            for port in ports:
+                services.append({'serviceType': 'TCP', 'serviceValue': port})
+
+            if direction == 'IN':
+                target_address = 'sourceIpAddresses'
+            else:
+                target_address = 'destinationIpAddresses'
+
+            request_body = {
+                'ruleDirection': direction,
+                'services': services,
+                target_address: ['0.0.0.0/0'],
+                'ruleDescription': 'skyserve rule'
+            }
+
+            return self._post(url, request_body)
+
+    def list_firewall_rules(self, firewall_id):
+        url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+        return self._get(url)
+
+    def _check_existing_firewall_rule(self, firewall_id, internal_ip, direction,
+                                      ports):
+        response = self.list_firewall_rules(firewall_id)
+        rules = []
+        for rule in response:
+            if direction == 'IN':
+                if internal_ip == rule['destinationIpAddresses'][0]:
+                    rules.append(rule)
+            else:
+                if internal_ip == rule['sourceIpAddresses'][0]:
+                    rules.append(rule)
+        for rule in rules:
+            port_list = ','.join(rule['tcpServices'])
+            port = ','.join(ports)
+            if port == port_list:
+                return False
+        return True
+
+    def add_new_firewall_rule(self, firewall_id, internal_ip, direction, ports):
+        if self._check_existing_firewall_rule(firewall_id, internal_ip,
+                                              direction, ports):
+            url = f'{API_ENDPOINT}/firewall/v2/firewalls/{firewall_id}/rules'
+
+            services = []
+            for port in ports:
+                services.append({'serviceType': 'TCP', 'serviceValue': port})
+
+            if direction == 'IN':
+                source_ip = '0.0.0.0/0'
+                destination_ip = internal_ip
+            else:
+                source_ip = internal_ip
+                destination_ip = '0.0.0.0/0'
+
+            request_body = {
+                'sourceIpAddresses': [source_ip],
+                'destinationIpAddresses': [destination_ip],
+                'services': services,
+                'ruleDirection': direction,
+                'ruleAction': 'ALLOW',
+                'isRuleEnabled': True,
+                'ruleLocationType': 'FIRST',
+                'ruleDescription': 'skyserve rule'
+            }
+            return self._post(url, request_body)
+
+    def wait_firewall_rule_complete(self, firewall_id, rule_id):
+        attempts = 0
+        max_attempts = 300
+        while attempts < max_attempts:
+            try:
+                time.sleep(5)
+                rule_info = self.get_firewall_rule_info(firewall_id, rule_id)
+                if rule_info['ruleState'] == 'ACTIVE':
+                    break
+            except Exception:  # pylint: disable=broad-except
+                attempts += 1
+                continue
+        return
+
+    def get_virtual_server_info(self, vm_id):
+        url = f'{API_ENDPOINT}/virtual-server/v3/virtual-servers/{vm_id}'
+        return self._get(url=url, contents_key=None)
+
+    def create_vpc(self, zone_id):
+        vpc_name = 'skyvpc' + zone_id[5:10]
+        request_body = {
+            'serviceZoneId': zone_id,
+            'vpcName': vpc_name,
+            'vpcDescription': 'sky vpc'
+        }
+        url = f'{API_ENDPOINT}/vpc/v3/vpcs'
+        return self._post(url, request_body)
+
+    def create_subnet(self, vpc_id, zone_id):
+        subnet_name = 'skysubnet' + zone_id[5:10]
+        request_body = {
+            'subnetCidrBlock': '192.168.0.0/24',
+            'subnetName': subnet_name,
+            'subnetType': 'PUBLIC',
+            'vpcId': vpc_id,
+            'subnetDescription': 'sky subnet'
+        }
+        url = f'{API_ENDPOINT}/subnet/v2/subnets'
+        return self._post(url, request_body)
+
+    def create_internet_gateway(self, vpc_id):
+        request_body = {
+            'firewallEnabled': True,
+            'firewallLoggable': False,
+            'internetGatewayType': 'SHARED',
+            'vpcId': vpc_id,
+            'internetGatewayDescription': 'sky internet gateway'
+        }
+        url = f'{API_ENDPOINT}/internet-gateway/v4/internet-gateways'
+        return self._post(url, request_body)
+
+    def get_vpc_info(self, vpc_id):
+        url = f'{API_ENDPOINT}/vpc/v2/vpcs/{vpc_id}'
+        return self._get(url=url, contents_key=None)
+
+    def get_subnet_info(self, subnet_id):
+        url = f'{API_ENDPOINT}/subnet/v2/subnets/{subnet_id}'
+        return self._get(url=url, contents_key=None)
+
+    def get_internet_gateway_info(self, internet_gateway_id):
+        url = f'{API_ENDPOINT}/internet-gateway/v2/internet-gateways/{internet_gateway_id}'  # pylint: disable=line-too-long
+        return self._get(url=url, contents_key=None)
