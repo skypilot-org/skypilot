@@ -100,13 +100,28 @@ ENV_VAR_USER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}USER_CONFIG'
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the local config files.
-USER_CONFIG_PATH = '~/.sky/config.yaml'
-PROJECT_CONFIG_PATH = 'skyconfig.yaml'
+_LEGACY_USER_CONFIG_PATH = '~/.sky/config.yaml'
+_USER_CONFIG_PATH = '~/.sky/skyconfig.yaml'
+_PROJECT_CONFIG_PATH = 'skyconfig.yaml'
 
 # The loaded config.
 _dict = config_utils.Config()
 _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
+
+
+# This function exists solely to maintain backward compatibility with the
+# legacy user config file located at ~/.sky/config.yaml.
+def get_user_config_path() -> str:
+    """Returns the path to the user config file.
+
+    If the legacy user config file exists, return it.
+    Otherwise, return the new user config file.
+    """
+    legacy_user_config_path = os.path.expanduser(_LEGACY_USER_CONFIG_PATH)
+    if os.path.exists(legacy_user_config_path):
+        return _LEGACY_USER_CONFIG_PATH
+    return _USER_CONFIG_PATH
 
 
 def get_nested(keys: Tuple[str, ...],
@@ -231,7 +246,7 @@ def _reload_config_from_internal_file() -> None:
                     'exist. Please double check the path or unset the env var: '
                     f'unset {ENV_VAR_SKYPILOT_CONFIG}')
     else:
-        config_path = USER_CONFIG_PATH
+        config_path = _USER_CONFIG_PATH
     config_path = os.path.expanduser(config_path)
     if os.path.exists(config_path):
         logger.debug(f'Using config path: {config_path}')
@@ -258,8 +273,8 @@ def _reload_config_hierarchical() -> None:
                     'does not exist. Please double check the path or unset the '
                     f'env var: unset {ENV_VAR_USER_CONFIG}')
     else:
-        logger.debug(f'using default user config file: {USER_CONFIG_PATH}')
-        user_config_path = USER_CONFIG_PATH
+        user_config_path = get_user_config_path()
+        logger.debug(f'using default user config file: {user_config_path}')
         user_config_path = os.path.expanduser(user_config_path)
 
     overrides = []
@@ -279,8 +294,8 @@ def _reload_config_hierarchical() -> None:
                     f'env var: unset {ENV_VAR_PROJECT_CONFIG}')
     else:
         logger.debug(
-            f'using default project config file: {PROJECT_CONFIG_PATH}')
-        project_config_path = PROJECT_CONFIG_PATH
+            f'using default project config file: {_PROJECT_CONFIG_PATH}')
+        project_config_path = _PROJECT_CONFIG_PATH
         project_config_path = os.path.expanduser(project_config_path)
 
     # load the user config file

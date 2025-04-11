@@ -1780,7 +1780,8 @@ def api_login(endpoint: Optional[str] = None) -> None:
     server_common.check_server_healthy(endpoint)
 
     # Set the endpoint in the config file
-    config_path = pathlib.Path(skypilot_config.USER_CONFIG_PATH).expanduser()
+    config_path = pathlib.Path(
+        skypilot_config.get_user_config_path()).expanduser()
     with filelock.FileLock(config_path.with_suffix('.lock')):
         if not skypilot_config.loaded():
             config_path.touch()
