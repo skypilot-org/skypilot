@@ -39,7 +39,7 @@ python -m sky.utils.kubernetes.gpu_labeler --context <your-eks-context>
 sky show-gpus --cloud k8s
 ```
 
-![](https://i.imgur.com/2IdVjEz.png)
+![](https://i.imgur.com/pXPh5Li.png)
 
 
 
