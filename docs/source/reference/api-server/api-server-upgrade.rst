@@ -44,7 +44,7 @@ Step 2: Upgrade the API server and clients
 .. note::
 
     * Upgrading the API server will interrupt any pending and on-going requests on the API server, e.g., on-goining ``sky launch``. You can recover on-going requests by running the same commands again after the new API server starts.
-    * Upgrading the server or clients will break the compatibility between the server and clients.
+    * Upgrading only one of the server or clients may break the compatibility between the server and clients.
 
     To minimize the impact of upgrading, you can :ref:`cordon and drain the API server <cordon-drain-api-server>` before upgrading the API server and clients to enforce that all the requests to be finished before the upgrade and there is no new request during the upgrade.
 
@@ -113,7 +113,7 @@ The following steps require `patch` and `exec` (or `port-forward`) access to the
     $ sky api info
     sky.exceptions.ApiServerConnectionError: Could not connect to SkyPilot API server at <ENDPOINT>. Please ensure that the server is running. Try: curl <ENDPIONT>
 
-.. dropdown:: Resolve cordon failure for early 0.8.0 nightly release
+.. dropdown:: Resolve cordon failure for early nightly release
 
     If you are upgrading from an early nightly build that does not support cordoning (``sky api info`` will succeed), you can manually enable cordon support by running:
 
