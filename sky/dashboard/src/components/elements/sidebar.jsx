@@ -6,6 +6,7 @@ import React, {
   useContext,
 } from 'react';
 import Image from 'next/image';
+import { useRouter } from 'next/router';
 
 import Link from 'next/link';
 import { ServerIcon, BriefcaseIcon, ServiceBellIcon } from '@/components/elements/icons';
@@ -114,6 +115,7 @@ export function SideBar({ highlighted = 'clusters' }) {
 export function TopBar() {
   // Use the shared sidebar context
   const { toggleSidebar } = useSidebar();
+  const router = useRouter();
 
   // State to track if the viewport is mobile
   const [isMobile, setIsMobile] = useState(false);
@@ -136,6 +138,21 @@ export function TopBar() {
     };
   }, []);
 
+  // Function to determine if a path is active
+  const isActivePath = (path) => {
+    return router.pathname.startsWith(path);
+  };
+
+  // Get link classes based on active state
+  const getLinkClasses = (path) => {
+    const isActive = isActivePath(path);
+    return `inline-flex items-center space-x-2 px-1 pt-1 border-b-2 ${
+      isActive
+        ? 'border-blue-600 text-blue-600'
+        : 'border-transparent hover:text-blue-600 hover:border-blue-600'
+    }`;
+  };
+
   return (
     <div className="fixed top-0 left-0 right-0 bg-white z-30 h-14 px-4 border-b border-gray-200 shadow-sm">
       <div className="flex items-center h-full">
@@ -148,11 +165,11 @@ export function TopBar() {
             <Image
               src={`${BASE_PATH}/skypilot.svg`}
               alt="SkyPilot Logo"
-              width={32}
-              height={32}
-              className="h-8 w-8"
+              width={100}
+              height={100}
+              className="h-25 w-25"
             />
-            <span className="text-xl font-medium text-sky-blue">SkyPilot</span>
+            {/* <span className="text-xl font-medium text-sky-blue">SkyPilot</span> */}
           </Link>
         </div>
 
@@ -160,7 +177,7 @@ export function TopBar() {
         <div className="hidden md:flex items-center space-x-6 mr-6">
           <Link
             href="/clusters"
-            className="inline-flex items-center space-x-2 px-1 pt-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 text-sm"
+            className={getLinkClasses('/clusters')}
             prefetch={false}
           >
             <ServerIcon className="w-4 h-4" />
@@ -169,7 +186,7 @@ export function TopBar() {
           
           <Link
             href="/jobs"
-            className="inline-flex items-center space-x-2 px-1 pt-1 border-b-2 border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300 text-sm"
+            className={getLinkClasses('/jobs')}
             prefetch={false}
           >
             <BriefcaseIcon className="w-4 h-4" />
@@ -177,7 +194,7 @@ export function TopBar() {
           </Link>
 
           <div
-            className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400 text-sm"
+            className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400"
           >
             <ServiceBellIcon className="w-4 h-4" />
             <span>Services</span>
@@ -193,7 +210,7 @@ export function TopBar() {
             href="https://skypilot.readthedocs.io/en/latest/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-600 hover:text-blue-600 font-medium"
+            className="hover:text-blue-600 transition-colors"
           >
             Docs
           </a>
@@ -201,7 +218,7 @@ export function TopBar() {
             href="https://blog.skypilot.co/"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-600 hover:text-blue-600 font-medium"
+            className="hover:text-blue-600 transition-colors"
           >
             Blog
           </a>
@@ -209,7 +226,7 @@ export function TopBar() {
             href="https://github.com/skypilot-org/skypilot"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-600 hover:text-blue-600 font-medium"
+            className="hover:text-blue-600 transition-colors"
           >
             GitHub
           </a>
@@ -217,7 +234,7 @@ export function TopBar() {
             href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1ly8cxp65-Swjn3LKFkNE5CLuH5OjRbQ"
             target="_blank"
             rel="noopener noreferrer"
-            className="text-gray-600 hover:text-blue-600 font-medium"
+            className="hover:text-blue-600 transition-colors"
           >
             Slack
           </a>

@@ -55,7 +55,7 @@ function JobHeader({
               className="text-sm text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
             >
               <RotateCwIcon className="w-4 h-4 mr-1.5" />
-              Refresh
+              <span>Refresh</span>
             </button>
           </Tooltip>
         </div>

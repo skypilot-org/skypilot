@@ -118,8 +118,8 @@ export function ManagedJobs() {
             className="text-sky-blue hover:text-sky-blue-bright"
             title="Refresh"
           >
-            <RotateCwIcon className="h-4 w-4 mr-2" />
-            Refresh
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <span>Refresh</span>
           </Button>
         </div>
       </div>

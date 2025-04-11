@@ -29,7 +29,7 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Connect to <span className="font-light">"{cluster}"</span></DialogTitle>
+          <DialogTitle>Connect to: <span className="font-light">{cluster}</span></DialogTitle>
           <DialogDescription>
             Use these instructions to connect to your cluster via SSH.
           </DialogDescription>
@@ -79,7 +79,7 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Connect to <span className="font-light">"{cluster}"</span></DialogTitle>
+          <DialogTitle>Connect to: <span className="font-light">{cluster}</span></DialogTitle>
           <DialogDescription>
             <div className="flex flex-col space-y-4">
               <div>

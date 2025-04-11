@@ -68,16 +68,14 @@ export function Clusters() {
           )}
           <Button
             variant="ghost"
-            title="Refresh"
-            size="icon"
             onClick={handleRefresh}
             disabled={loading}
-            className="text-sky-blue hover:text-sky-blue-bright h-8 w-8 p-0"
+            className="text-sky-blue hover:text-sky-blue-bright flex items-center"
           >
-            <RotateCwIcon className="h-4 w-4" />
+            <RotateCwIcon className="h-4 w-4 mr-1.5" />
+            <span>Refresh</span>
           </Button>
-          Refresh
-          </div>
+        </div>
       </div>
       <div className="border-b border-gray-200 my-4"></div>
       <ClusterTable
