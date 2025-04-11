@@ -70,7 +70,7 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
 
     input('Press Enter to save results...')
 
-    result_file = f'@temp/result/metric_{args.exp_name}.json'
+    result_file = f'@temp/result/metric/{args.exp_name}.json'
 
     with open(result_file, 'w', encoding='utf-8') as fout:
         value = {
@@ -116,8 +116,8 @@ def prepare_lb_endpoints_and_confirm(backend_url: str) -> List[str]:
 
 async def pull_queue_status(exp_name: str, endpoints: List[str],
                             event: asyncio.Event) -> None:
-    tmp_name = f'@temp/result_queue_size_{exp_name}.txt'
-    dest_name = f'@temp/result/queue_size_{exp_name}.txt'
+    tmp_name = f'@temp/trash/result_queue_size_{exp_name}.txt'
+    dest_name = f'@temp/result/queue_size/{exp_name}.txt'
     print(f'Pulling queue status:      tail -f {tmp_name} | jq')
     if SGL_ROUTER_IDENTIFIER in endpoints:
         while not event.is_set():
@@ -145,11 +145,17 @@ def main():
     # py examples/serve/external-lb/bench.py --data-path @temp/test.jsonl
     # --exp-name sky-exp --num-branches 2 --num-users 5 --num-questions 1
     # --backend-url vllmtest.aws.cblmemo.net:8000
+    all_workloads_file = os.listdir(
+        os.path.join(os.path.dirname(__file__), 'workloads'))
+    all_workloads = [f.split('.')[0] for f in all_workloads_file]
     parser = argparse.ArgumentParser()
     parser.add_argument('--exp-name', type=str, default='sky-exp')
-    parser.add_argument('--num-users', type=int, default=5)
+    parser.add_argument('--num-users', type=int, default=1)
     parser.add_argument('--backend-url', type=str, default=None)
-    parser.add_argument('--workload', type=str, required=True, choices=['tot'])
+    parser.add_argument('--workload',
+                        type=str,
+                        required=True,
+                        choices=all_workloads)
 
     # First parse just the workload argument to import the right module
     temp_args, _ = parser.parse_known_args()

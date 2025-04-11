@@ -1,5 +1,6 @@
 """OpenAI client."""
 
+import json
 import threading
 import time
 import traceback
@@ -27,18 +28,24 @@ async def init_oai(url: str) -> None:
     global model, async_client
     async with aiohttp.ClientSession() as session:
         async with session.get(f'{url}/v1/models') as resp:
-            data = await resp.json()
+            try:
+                data = await resp.json()
+            except Exception:  # pylint: disable=broad-except
+                # SGLang Router does not has the Content-Type header.
+                # Here we manually parse the response as JSON.
+                data = json.loads(await resp.text())
             model = data['data'][0]['id']
     async_client = openai.AsyncOpenAI(base_url=f'{url}/v1',
                                       api_key='placeholder')
 
 
 async def call_chat_completion_async(
-        messages: utils.OAIChatHistory,
-        temperature: float,
-        max_tokens: int,
-        uid: int,
-        stop: Optional[List[str]] = None
+    messages: utils.OAIChatHistory,
+    temperature: float,
+    max_tokens: int,
+    uid: int,
+    stop: Optional[List[str]] = None,
+    only_return_new_round: bool = False
 ) -> Union[utils.OAIChatHistory, Exception]:
     typed_messages = typing.cast(List[ChatCompletionMessageParam], messages)
     output = ''
@@ -109,4 +116,7 @@ async def call_chat_completion_async(
     if metric.failed is not None:
         assert exception is not None
         return exception
-    return messages + [utils.get_one_round('assistant', output)]
+    new_round = [utils.get_one_round('assistant', output)]
+    if only_return_new_round:
+        return new_round
+    return messages + new_round
