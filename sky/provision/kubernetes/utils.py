@@ -2148,32 +2148,33 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     return content
 
 
-def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'nc' are installed"""
+def check_port_forward_mode_dependencies(
+        raise_error: bool = True) -> Optional[List[str]]:
+    """Checks if 'socat' and 'nc' are installed
 
-    # Construct runtime errors
-    socat_default_error = RuntimeError(
-        f'`socat` is required to setup Kubernetes cloud with '
+    Args:
+        raise_error: set to true when the dependencies need to be present.
+            set to false for `sky check`, where reason strings are compiled
+            at the end.
+    """
+
+    # errors
+    socat_message = (
+        '`socat` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install socat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install socat')
-    netcat_default_error = RuntimeError(
-        f'`nc` is required to setup Kubernetes cloud with '
+        'default networking mode and it is not installed. ')
+    netcat_default_message = (
+        '`nc` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install netcat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
-    mac_installed_error = RuntimeError(
-        f'The default MacOS `nc` is installed. However, for '
+        'default networking mode and it is not installed. ')
+    netcat_macos_message = (
+        'The default MacOS `nc` is installed. However, for '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode, GNU netcat is required. '
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
+        'default networking mode, GNU netcat is required. ')
+
+    # save
+    reason = []
+    required_binaries = []
 
     # Ensure socat is installed
     try:
@@ -2182,8 +2183,8 @@ def check_port_forward_mode_dependencies() -> None:
                        stderr=subprocess.DEVNULL,
                        check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
-        with ux_utils.print_exception_no_traceback():
-            raise socat_default_error from None
+        required_binaries.append('socat')
+        reason.append(socat_message)
 
     # Ensure netcat is installed
     #
@@ -2198,15 +2199,28 @@ def check_port_forward_mode_dependencies() -> None:
             netcat_output.stderr)
 
         if nc_mac_installed:
-            with ux_utils.print_exception_no_traceback():
-                raise mac_installed_error from None
+            required_binaries.append('netcat')
+            reason.append(netcat_macos_message)
         elif netcat_output.returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise netcat_default_error from None
+            required_binaries.append('netcat')
+            reason.append(netcat_default_message)
 
     except FileNotFoundError:
-        with ux_utils.print_exception_no_traceback():
-            raise netcat_default_error from None
+        required_binaries.append('netcat')
+        reason.append(netcat_default_message)
+
+    if required_binaries:
+        reason.extend([
+            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+            f'  $ sudo apt install {" ".join(required_binaries)}',
+            'On MacOS, install with: ',
+            f'  $ brew install {" ".join(required_binaries)}',
+        ])
+        if raise_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('\n'.join(reason))
+        return reason
+    return None
 
 
 def get_endpoint_debug_message() -> str:

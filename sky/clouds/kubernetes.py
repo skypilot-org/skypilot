@@ -658,6 +658,13 @@ class Kubernetes(clouds.Cloud):
     def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to
         Kubernetes."""
+        # Check for port forward dependencies
+        reason = kubernetes_utils.check_port_forward_mode_dependencies(False)
+        if reason is not None:
+            formatted = '\n'.join(
+                [reason[0]] + [f'{cls._INDENT_PREFIX}' + r for r in reason[1:]])
+            return (False, formatted)
+
         # Test using python API
         try:
             existing_allowed_contexts = cls.existing_allowed_contexts()
