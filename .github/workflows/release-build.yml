@@ -72,7 +72,7 @@ jobs:
           # Make version changes
           sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
           # Update Dockerfile with release version
-          sed -i "s|~/.local/bin/uv pip install skypilot-nightly\\[all\\] --system|~/.local/bin/uv pip install \\"skypilot[all]==${RELEASE_VERSION}\\" --system|" Dockerfile
+          sed -i 's/skypilot-nightly\[all\]/skypilot[all]==${RELEASE_VERSION}/g' Dockerfile
 
           # Commit the changes
           git add sky/__init__.py
