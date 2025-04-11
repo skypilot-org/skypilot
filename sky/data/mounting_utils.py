@@ -67,7 +67,6 @@ def get_s3_mount_cmd(bucket_name: str,
     mount_cmd = (f'{_GOOFYS_WRAPPER} -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
-                 f'--log-file $(mktemp -t goofys.XXXX.log) '
                  f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 

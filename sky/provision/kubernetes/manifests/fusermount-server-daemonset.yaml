@@ -43,9 +43,10 @@ spec:
             - /bin/sh
             - -c
             - "test -S /var/run/fusermount/server.sock"
-          initialDelaySeconds: 30
-          periodSeconds: 15
+          initialDelaySeconds: 10
+          periodSeconds: 5
           timeoutSeconds: 2
+          failureThreshold: 10
       volumes:
       - name: shared-dir
         hostPath:
