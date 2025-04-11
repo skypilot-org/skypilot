@@ -30,9 +30,17 @@ _BLOBFUSE_CACHE_DIR = ('~/.sky/blobfuse2_cache/'
 # https://github.com/rclone/rclone/releases
 RCLONE_VERSION = 'v1.68.2'
 
+# A wrapper for goofys to choose the logging mechanism based on environment.
+_GOOFYS_WRAPPER = ('$(if [ -S /dev/log ] ; then '
+                   'echo "goofys"; '
+                   'else '
+                   'echo "goofys --log-file $(mktemp -t goofys.XXXX.log)"; '
+                   'fi)')
+
 
 def get_s3_mount_install_cmd() -> str:
     """Returns a command to install S3 mount utility goofys."""
+    # TODO(aylei): maintain our goofys fork under skypilot-org
     install_cmd = ('ARCH=$(uname -m) && '
                    'if [ "$ARCH" = "aarch64" ] || [ "$ARCH" = "arm64" ]; then '
                    '  echo "goofys is not supported on $ARCH" && '
@@ -40,8 +48,8 @@ def get_s3_mount_install_cmd() -> str:
                    'else '
                    '  ARCH_SUFFIX="amd64"; '
                    'fi && '
-                   'sudo wget -nc https://github.com/romilbhardwaj/goofys/'
-                   'releases/download/0.24.0-romilb-upstream/goofys '
+                   'sudo wget -nc https://github.com/aylei/goofys/'
+                   'releases/download/0.24.0-aylei-upstream/goofys '
                    '-O /usr/local/bin/goofys && '
                    'sudo chmod 755 /usr/local/bin/goofys')
     return install_cmd
@@ -56,9 +64,10 @@ def get_s3_mount_cmd(bucket_name: str,
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = ('goofys -o allow_other '
+    mount_cmd = (f'{_GOOFYS_WRAPPER} -o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
+                 f'--log-file $(mktemp -t goofys.XXXX.log) '
                  f'{bucket_name}{_bucket_sub_path} {mount_path}')
     return mount_cmd
 
@@ -73,7 +82,8 @@ def get_nebius_mount_cmd(nebius_profile_name: str,
         _bucket_sub_path = ''
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
-    mount_cmd = (f'AWS_PROFILE={nebius_profile_name} goofys -o allow_other '
+    mount_cmd = (f'AWS_PROFILE={nebius_profile_name} {_GOOFYS_WRAPPER} '
+                 '-o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--endpoint {endpoint_url} '
@@ -223,7 +233,8 @@ def get_r2_mount_cmd(r2_credentials_path: str,
     else:
         _bucket_sub_path = f':{_bucket_sub_path}'
     mount_cmd = (f'AWS_SHARED_CREDENTIALS_FILE={r2_credentials_path} '
-                 f'AWS_PROFILE={r2_profile_name} goofys -o allow_other '
+                 f'AWS_PROFILE={r2_profile_name} {_GOOFYS_WRAPPER} '
+                 '-o allow_other '
                  f'--stat-cache-ttl {_STAT_CACHE_TTL} '
                  f'--type-cache-ttl {_TYPE_CACHE_TTL} '
                  f'--endpoint {endpoint_url} '
