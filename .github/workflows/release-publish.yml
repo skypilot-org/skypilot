@@ -57,3 +57,45 @@ jobs:
     with:
       package_name: 'skypilot'
     secrets: inherit
+
+  cleanup-branches:
+    if: github.event.pull_request.merged == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from PR base branch
+        id: extract_version
+        run: |
+          BASE_BRANCH="${{ github.base_ref }}"
+          VERSION=$(echo "$BASE_BRANCH" | sed 's/releases\///')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version extracted: $VERSION"
+
+      - name: Delete branches
+        run: |
+          VERSION="${{ steps.extract_version.outputs.version }}"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+
+          # Check if test branch exists and delete it
+          TEST_BRANCH="test_releases/${VERSION}"
+          if git ls-remote --heads origin ${TEST_BRANCH} | grep ${TEST_BRANCH}; then
+            echo "Deleting test branch: ${TEST_BRANCH}"
+            git push origin --delete ${TEST_BRANCH}
+          else
+            echo "Test branch ${TEST_BRANCH} does not exist, skipping"
+          fi
+
+          # Check if release branch exists and delete it
+          RELEASE_BRANCH="releases/${VERSION}"
+          if git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
+            echo "Deleting release branch: ${RELEASE_BRANCH}"
+            git push origin --delete ${RELEASE_BRANCH}
+          else
+            echo "Release branch ${RELEASE_BRANCH} does not exist, skipping"
+          fi
