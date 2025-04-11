@@ -722,3 +722,29 @@ def test_hierarchical_config(monkeypatch, tmp_path):
         skypilot_config._reload_config()
     monkeypatch.delenv(skypilot_config.ENV_VAR_PROJECT_CONFIG)
     skypilot_config._reload_config()
+
+    # test merging lists
+    # this test is to document the existing behavior, not
+    # necessarily to enforce the desired behavior.
+    env_user_config_path = tmp_path / 'env_user_config.yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_USER_CONFIG,
+                       str(env_user_config_path))
+    env_user_config_path.write_text(
+        textwrap.dedent(f"""\
+            allowed_clouds:
+                - aws
+                - gcp
+            """))
+    env_project_config_path = tmp_path / 'env_project_config.yaml'
+    monkeypatch.setenv(skypilot_config.ENV_VAR_PROJECT_CONFIG,
+                       str(env_project_config_path))
+    env_project_config_path.write_text(
+        textwrap.dedent(f"""\
+            allowed_clouds:
+                - azure
+                - kubernetes
+            """))
+    skypilot_config._reload_config()
+    # latest wins, no merging two lists
+    assert skypilot_config.get_nested(('allowed_clouds',),
+                                      None) == ['azure', 'kubernetes']
