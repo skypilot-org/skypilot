@@ -4625,21 +4625,27 @@ def serve_status(verbose: bool, endpoint: bool, service_names: List[str]):
       # Only show status of my-service
       sky serve status my-service
     """
-    service_names_to_query: Optional[List[str]] = service_names
-    if not service_names:
-        service_names_to_query = None
-    # This won't pollute the output of --endpoint.
+    # Use None to query all services if no names are provided
+    service_names_to_query: Optional[List[str]] = list(
+        service_names) if service_names else None
+
+    # Show a status message while fetching data
+    # This won't interfere with the --endpoint output.
     with rich_utils.client_status('[cyan]Checking services[/]'):
+        # Initiate the status request via the SDK
         service_status_request_id = serve_lib.status(service_names_to_query)
+        # Process the request and handle potential errors
         _, msg = _handle_services_request(service_status_request_id,
                                           service_names=service_names_to_query,
                                           show_all=verbose,
                                           show_endpoint=endpoint,
                                           is_called_by_user=True)
 
+    # Print header only if not just showing the endpoint
     if not endpoint:
         click.echo(f'{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
                    f'Services{colorama.Style.RESET_ALL}')
+    # Print the formatted table, endpoint, or error message
     click.echo(msg)
 
 

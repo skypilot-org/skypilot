@@ -13,7 +13,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar)
+                    Optional, TextIO, Type, TypeVar, Tuple)
 import uuid
 
 import colorama
@@ -732,6 +732,24 @@ def check_service_status_healthy(service_name: str) -> Optional[str]:
     return None
 
 
+def _sort_replica_records(
+        replica_records: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Sort replica records based on version, status and replica_id."""
+    # Define the sorting key function internally
+    def _sort_key(replica_record: Dict[str, Any]) -> Tuple[int, int, int]:
+        # Sort by version descending (latest first)
+        version = int(replica_record.get('version', 0))
+        # Sort by status, prioritizing READY
+        status_priority = 0 if replica_record['status'] == serve_state.ReplicaStatus.READY else 1
+        # Sort by replica_id ascending as a tie-breaker
+        replica_id = int(replica_record.get('id', 0))
+        return -version, status_priority, replica_id
+
+    # Sort the records using the defined key
+    sorted_records = sorted(replica_records, key=_sort_key)
+    return sorted_records
+
+
 def get_latest_version_with_min_replicas(
         service_name: str,
         replica_infos: List['replica_managers.ReplicaInfo']) -> Optional[int]:
@@ -935,8 +953,9 @@ def _get_replicas(service_record: Dict[str, Any]) -> str:
 
 def format_service_table(service_records: List[Dict[str, Any]],
                          show_all: bool) -> str:
+    """Format service table."""
     if not service_records:
-        return 'No existing services.'
+        return 'No services found.'
 
     service_columns = [
         'NAME', 'VERSION', 'UPTIME', 'STATUS', 'REPLICAS', 'ENDPOINT'
@@ -947,24 +966,22 @@ def format_service_table(service_records: List[Dict[str, Any]],
         ])
     service_table = log_utils.create_table(service_columns)
 
-    replica_infos: List[Dict[str, Any]] = []
+    all_replica_records: List[Dict[str, Any]] = []
     for record in service_records:
-        for replica in record['replica_info']:
-            replica['service_name'] = record['name']
-            replica_infos.append(replica)
+        # Add service name and replica id to replica info dict.
+        for info in record['replica_info']:
+            info['service_name'] = record['name']
+            info['replica_id'] = info['id']
+        all_replica_records.extend(record['replica_info'])
 
-        service_name = record['name']
+        uptime = log_utils.readable_time_duration(record['uptime'])
+        status = record['status'].colored_str()
+        replicas = _get_replicas(record)
+        endpoint = record['endpoint'] if record['endpoint'] else '-'
         version = ','.join(
             str(v) for v in record['active_versions']
         ) if 'active_versions' in record and record['active_versions'] else '-'
-        uptime = log_utils.readable_time_duration(record['uptime'],
-                                                  absolute=True)
-        service_status = record['status']
-        status_str = service_status.colored_str()
-        replicas = _get_replicas(record)
-        endpoint = record['endpoint']
-        if endpoint is None:
-            endpoint = '-'
+        service_name = record['name']
         policy = record['policy']
         requested_resources_str = record['requested_resources_str']
         load_balancing_policy = record['load_balancing_policy']
@@ -973,7 +990,7 @@ def format_service_table(service_records: List[Dict[str, Any]],
             service_name,
             version,
             uptime,
-            status_str,
+            status,
             replicas,
             endpoint,
         ]
@@ -982,11 +999,13 @@ def format_service_table(service_records: List[Dict[str, Any]],
                 [policy, load_balancing_policy, requested_resources_str])
         service_table.add_row(service_values)
 
-    replica_table = _format_replica_table(replica_infos, show_all)
-    return (f'{service_table}\n'
-            f'\n{colorama.Fore.CYAN}{colorama.Style.BRIGHT}'
-            f'Service Replicas{colorama.Style.RESET_ALL}\n'
-            f'{replica_table}')
+    # Sort all replica records according to the desired logic
+    sorted_replica_records = _sort_replica_records(all_replica_records)
+
+    # Format the replica table using the sorted records
+    replica_table_str = _format_replica_table(sorted_replica_records, show_all)
+
+    return f'{service_table}\n\nService Replicas\n{replica_table_str}'
 
 
 def _format_replica_table(replica_records: List[Dict[str, Any]],
