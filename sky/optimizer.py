@@ -6,6 +6,7 @@ import typing
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
 import colorama
+import numpy as np
 import prettytable
 
 from sky import check as sky_check
@@ -28,12 +29,10 @@ from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import networkx as nx
-    import numpy as np
 
     from sky import dag as dag_lib
 else:
     nx = adaptors_common.LazyImport('networkx')
-    np = adaptors_common.LazyImport('numpy')
 
 logger = sky_logging.init_logger(__name__)
 
