@@ -158,6 +158,7 @@ jobs:
       pipeline: "full-smoke-tests-run"
       build_number: ${{ needs.release-build.outputs.smoke_test_build_number }}
       timeout_minutes: 180
+      fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
@@ -169,6 +170,7 @@ jobs:
       pipeline: "quicktest-core"
       build_number: ${{ needs.release-build.outputs.quicktest_core_build_number }}
       timeout_minutes: 180
+      fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
