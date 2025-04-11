@@ -2065,10 +2065,10 @@ class RetryingVmProvisioner(object):
                                (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
-                    assert (clouds.CloudImplementationFeatures.STOP
+                    assert (clouds.CloudImplementationFeatures.AUTOSTOP
                             in requested_features), requested_features
                     requested_features.remove(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
