@@ -1,6 +1,6 @@
 """Immutable user configurations (EXPERIMENTAL).
 
-On module import, we attempt to parse the config located at USER_CONFIG_PATH
+On module import, we attempt to parse the config located at _USER_CONFIG_PATH
 (default: ~/.sky/skyconfig.yaml). Caller can then use
 
   >> skypilot_config.loaded()
@@ -78,9 +78,9 @@ logger = sky_logging.init_logger(__name__)
 #     This behavior is subject to change and should not be relied on by users.
 # Else,
 # (1) If env var {ENV_VAR_USER_CONFIG} exists, use its path as the user
-#     config file. Else, use the default path {USER_CONFIG_PATH}.
+#     config file. Else, use the default path {_USER_CONFIG_PATH}.
 # (2) If env var {ENV_VAR_PROJECT_CONFIG} exists, use its path as the project
-#     config file. Else, use the default path {PROJECT_CONFIG_PATH}.
+#     config file. Else, use the default path {_PROJECT_CONFIG_PATH}.
 # (3) Override any config keys in (1) with the ones in (2).
 # (4) Validate the final config.
 #
