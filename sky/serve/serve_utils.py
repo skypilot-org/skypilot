@@ -740,7 +740,12 @@ def _sort_replica_records(
         # Sort by version descending (latest first)
         version = int(replica_record.get('version', 0))
         # Sort by status, prioritizing READY
-        status_priority = 0 if replica_record['status'] == serve_state.ReplicaStatus.READY else 1
+        if replica_record['status'] == serve_state.ReplicaStatus.READY:
+            status_priority = 0
+        elif replica_record['status'] == serve_state.ReplicaStatus.PROVISIONING:
+            status_priority = 1
+        else:
+            status_priority = 2
         # Sort by replica_id ascending as a tie-breaker
         replica_id = int(replica_record.get('id', 0))
         return -version, status_priority, replica_id
