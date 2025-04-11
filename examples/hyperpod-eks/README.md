@@ -33,6 +33,16 @@ If you are using it with SkyPilot for the first time, you may see a hint to crea
 python -m sky.utils.kubernetes.gpu_labeler --context <your-eks-context>
 ```
 
+## Find available GPUs
+
+```bash
+sky show-gpus --cloud k8s
+```
+
+![](https://i.imgur.com/2IdVjEz.png)
+
+
+
 ## Launch a SkyPilot cluster for interactive dev
 
 ```bash
