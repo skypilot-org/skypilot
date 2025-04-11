@@ -60,11 +60,17 @@ async def websocket_to_stdout(websocket):
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
-    server_proto, server_fqdn = server_url.split('://')
-    websocket_proto = 'ws'
-    if server_proto == 'https':
-        websocket_proto = 'wss'
+    if '://' in server_url:
+        server_proto, server_fqdn = server_url.split('://')
+        websocket_proto = 'ws'
+        if server_proto == 'https':
+            websocket_proto = 'wss'
+        server_url = f'{websocket_proto}://{server_fqdn}'
+    else:
+        # Keep backward compatibility for legacy server URLs without protocol
+        # TODO(aylei): Remove this after 0.10.0
+        server_url = f'ws://{server_url}'
     websocket_url = (
-        f'{websocket_proto}://{server_fqdn}/kubernetes-pod-ssh-proxy'
+        f'{server_url}/kubernetes-pod-ssh-proxy'
         f'?cluster_name={sys.argv[2]}')
     asyncio.run(main(websocket_url))
