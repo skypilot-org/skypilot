@@ -138,6 +138,7 @@ def parse_readme(readme: str) -> str:
     readme = mode_re.sub(r'<img\1>', readme)
     return readme
 
+
 def build_dashboard():
     dashboard_dir = os.path.join("sky", "dashboard")
     try:
@@ -147,13 +148,14 @@ def build_dashboard():
             # Build the dashboard
             subprocess.check_call(["npm", "run", "build"], cwd=dashboard_dir)
         else:
-            raise RuntimeError(f"Dashboard directory {dashboard_dir} does not exist")
+            raise RuntimeError(
+                f"Dashboard directory {dashboard_dir} does not exist")
     except Exception as e:
         raise RuntimeError(f"Error building dashboard: {e}")
 
+
 class BuildDashboardCommand(setuptools.Command):
     description = "Build the dashboard"
-    user_options = []
 
     def initialize_options(self):
         pass
@@ -163,6 +165,7 @@ class BuildDashboardCommand(setuptools.Command):
 
     def run(self):
         build_dashboard()
+
 
 long_description = ''
 readme_filepath = 'README.md'
@@ -196,9 +199,7 @@ setuptools.setup(
         'console_scripts': ['sky = sky.cli:cli'],
     },
     package_data={
-        'dashboard': [
-            "sky/dashboard/out/**/*",
-        ],
+        'dashboard': ["sky/dashboard/out/**/*",],
     },
     include_package_data=True,
     classifiers=[

@@ -239,7 +239,13 @@ export function ClusterTable({
                 onClick={() => requestSort('resources_str')}
               >
                 Resources{getSortDirection('resources_str')}
-              </TableHead>              
+              </TableHead>
+              <TableHead
+                className="sortable whitespace-nowrap"
+                onClick={() => requestSort('region')}
+              >
+                Region{getSortDirection('region')}
+              </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('time')}
@@ -280,6 +286,7 @@ export function ClusterTable({
                     </TableCell>
                     <TableCell>{item.user}</TableCell>
                     <TableCell>{item.resources_str}</TableCell>
+                    <TableCell>{item.region}</TableCell>
                     <TableCell>{relativeTime(item.time)}</TableCell>
                     <TableCell className="text-left">
                       <Status2Actions

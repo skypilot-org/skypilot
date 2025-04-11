@@ -41,29 +41,18 @@ export async function getClusters({ clusterNames = null } = {}) {
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
-      const parsed_resources = parseResources(cluster.resources_str);
-      const {
-        infra,
-        instance_type,
-        cpus,
-        mem,
-        gpus,
-        num_nodes,
-        other_resources,
-      } = parsed_resources.parsed_resources;
       return {
         status: clusterStatusMap[cluster.status],
         cluster: cluster.name,
         user: cluster.user_name,
-        infra: infra,
-        instance_type: instance_type,
-        cpus: cpus,
-        mem: mem,
-        gpus: gpus,
-        other_resources: other_resources,
+        infra: cluster.cloud,
+        region: cluster.region,
+        cpus: cluster.cpus,
+        mem: cluster.memory,
+        gpus: cluster.accelerators,
         resources_str: cluster.resources_str,
         time: new Date(cluster.launched_at * 1000),
-        num_nodes: num_nodes || 1,
+        num_nodes: cluster.nodes,
         jobs: [],
         events: [
           {

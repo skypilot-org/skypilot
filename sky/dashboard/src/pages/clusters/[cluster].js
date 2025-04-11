@@ -150,6 +150,10 @@ function ActiveTab({ clusterData, clusterJobData }) {
               <div className="text-gray-600 font-medium text-base">Resources</div>
               <div className="text-base mt-1">{clusterData.resources_str || 'N/A'}</div>
             </div>
+            <div>
+              <div className="text-gray-600 font-medium text-base">Region</div>
+              <div className="text-base mt-1">{clusterData.region || 'N/A'}</div>
+            </div>
           </div>
         </Card>
       </div>

@@ -18,8 +18,6 @@ import zipfile
 
 import aiofiles
 import fastapi
-from fastapi import staticfiles
-from fastapi import responses
 from fastapi.middleware import cors
 import starlette.middleware.base
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -152,15 +150,18 @@ async def lifespan(app: fastapi.FastAPI):  # pylint: disable=redefined-outer-nam
     yield
     # Shutdown: Add any cleanup code here if needed
 
+
 # Add a new middleware class to handle /internal/dashboard prefix
 class InternalDashboardPrefixMiddleware(BaseHTTPMiddleware):
     """Middleware to handle /internal/dashboard prefix in requests."""
+
     async def dispatch(self, request: fastapi.Request, call_next):
         path = request.url.path
         if path.startswith('/internal/dashboard/'):
             # Remove /internal/dashboard prefix and update request scope
-            request.scope["path"] = path.replace('/internal/dashboard/', '/', 1)
+            request.scope['path'] = path.replace('/internal/dashboard/', '/', 1)
         return await call_next(request)
+
 
 app = fastapi.FastAPI(prefix='/api/v1', debug=True, lifespan=lifespan)
 app.add_middleware(InternalDashboardPrefixMiddleware)
@@ -1113,32 +1114,35 @@ async def complete_cluster_name(incomplete: str,) -> List[str]:
 async def complete_storage_name(incomplete: str,) -> List[str]:
     return global_user_state.get_storage_names_start_with(incomplete)
 
+
 # Get the path to the dashboard build output
-dashboard_dir = os.path.join(os.path.dirname(__file__), "..", "dashboard", "out")
+dashboard_dir = os.path.join(os.path.dirname(__file__), '..', 'dashboard',
+                             'out')
+
 
 # Add a route to serve static files
-@app.get("/{full_path:path}")
+@app.get('/{full_path:path}')
 async def serve_static_or_dashboard(full_path: str):
     """Serves static files for any unmatched routes.
     Handles the /dashboard prefix from Next.js configuration.
     """
     # Check if the path starts with 'dashboard/' and remove it if it does
-    if full_path.startswith("dashboard/"):
-        full_path = full_path[len("dashboard/"):]
-    
+    if full_path.startswith('dashboard/'):
+        full_path = full_path[len('dashboard/'):]
+
     # Try to serve the file directly from the out directory first
     file_path = os.path.join(dashboard_dir, full_path)
     if os.path.isfile(file_path):
         return fastapi.responses.FileResponse(file_path)
 
     # If file not found, serve the index.html for client-side routing
-    index_path = os.path.join(dashboard_dir, "index.html")
+    index_path = os.path.join(dashboard_dir, 'index.html')
     try:
         with open(index_path, 'r', encoding='utf-8') as f:
             content = f.read()
-        return fastapi.Response(content=content, media_type="text/html")
+        return fastapi.responses.HTMLResponse(content=content)
     except Exception as e:
-        logger.error(f"Error serving dashboard: {e}")
+        logger.error(f'Error serving dashboard: {e}')
         raise fastapi.HTTPException(status_code=500, detail=str(e))
 
 
