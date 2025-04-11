@@ -43,6 +43,7 @@ install_requires = [
     'requests',
     'fastapi',
     'uvicorn[standard]',
+    'websockets',
     # Some pydantic versions are not compatible with ray. Adopted from ray's
     # setup.py:
     # https://github.com/ray-project/ray/blob/ray-2.9.3/python/setup.py#L254

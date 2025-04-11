@@ -8,10 +8,11 @@ import os
 import sys
 
 import websockets
+from websockets.asyncio.client import connect
 
 
 async def main(url: str) -> None:
-    async with websockets.connect(url, ping_interval=None) as websocket:
+    async with connect(url, ping_interval=None) as websocket:
         if os.isatty(sys.stdin.fileno()):
             # pylint: disable=import-outside-toplevel
             import termios
@@ -59,6 +60,11 @@ async def websocket_to_stdout(websocket):
 
 if __name__ == '__main__':
     server_url = sys.argv[1].strip('/')
-    websocket_url = (f'ws://{server_url}/kubernetes-pod-ssh-proxy'
-                     f'?cluster_name={sys.argv[2]}')
+    server_proto, server_fqdn = server_url.split('://')
+    websocket_proto = 'ws'
+    if server_proto == 'https':
+        websocket_proto = 'wss'
+    websocket_url = (
+        f'{websocket_proto}://{server_fqdn}/kubernetes-pod-ssh-proxy'
+        f'?cluster_name={sys.argv[2]}')
     asyncio.run(main(websocket_url))
