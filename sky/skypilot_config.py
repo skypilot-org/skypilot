@@ -115,11 +115,14 @@ _config_overridden: bool = False
 def get_user_config_path() -> str:
     """Returns the path to the user config file.
 
-    If the legacy user config file exists, return it.
-    Otherwise, return the new user config file.
+    If only the legacy user config file exists, return
+    the legacy user config path.
+    Otherwise, return the new user config path.
     """
+    user_config_path = os.path.expanduser(_USER_CONFIG_PATH)
     legacy_user_config_path = os.path.expanduser(_LEGACY_USER_CONFIG_PATH)
-    if os.path.exists(legacy_user_config_path):
+    if (os.path.exists(legacy_user_config_path) and
+            not os.path.exists(user_config_path)):
         return _LEGACY_USER_CONFIG_PATH
     return _USER_CONFIG_PATH
 
@@ -207,7 +210,7 @@ def _reload_config() -> None:
         # behavior is not defined in the public interface.
         # SkyPilot reserves the right to change the config loading behavior
         # at any time when this environment variable is set.
-        _reload_config_from_internal_file()
+        _reload_config_from_internal_file(internal_config_path)
         return
 
     _reload_config_hierarchical()
@@ -229,29 +232,23 @@ def _parse_config_file(config_path: str) -> config_utils.Config:
     return config
 
 
-def _reload_config_from_internal_file() -> None:
+def _reload_config_from_internal_file(internal_config_path: str) -> None:
     global _dict, _loaded_config_path
     # Reset the global variables, to avoid using stale values.
     _dict = config_utils.Config()
     _loaded_config_path = None
 
-    config_path_via_env_var = os.environ.get(ENV_VAR_SKYPILOT_CONFIG)
-    if config_path_via_env_var is not None:
-        config_path = os.path.expanduser(config_path_via_env_var)
-        if not os.path.exists(config_path):
-            with ux_utils.print_exception_no_traceback():
-                raise FileNotFoundError(
-                    'Config file specified by env var '
-                    f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does not '
-                    'exist. Please double check the path or unset the env var: '
-                    f'unset {ENV_VAR_SKYPILOT_CONFIG}')
-    else:
-        config_path = _USER_CONFIG_PATH
-    config_path = os.path.expanduser(config_path)
-    if os.path.exists(config_path):
-        logger.debug(f'Using config path: {config_path}')
-        _dict = _parse_config_file(config_path)
-        _loaded_config_path = config_path
+    config_path = os.path.expanduser(internal_config_path)
+    if not os.path.exists(config_path):
+        with ux_utils.print_exception_no_traceback():
+            raise FileNotFoundError(
+                'Config file specified by env var '
+                f'{ENV_VAR_SKYPILOT_CONFIG} ({config_path!r}) does not '
+                'exist. Please double check the path or unset the env var: '
+                f'unset {ENV_VAR_SKYPILOT_CONFIG}')
+    logger.debug(f'Using config path: {config_path}')
+    _dict = _parse_config_file(config_path)
+    _loaded_config_path = config_path
 
 
 def _reload_config_hierarchical() -> None:
