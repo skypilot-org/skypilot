@@ -53,7 +53,9 @@ import copy
 import os
 import pprint
 import typing
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+from omegaconf import OmegaConf
 
 from sky import exceptions
 from sky import sky_logging
@@ -164,12 +166,12 @@ def _get_config_file_path(envvar: str) -> Optional[str]:
     return None
 
 
-def _validate_config(config: Dict[str, Any], config_path: str) -> None:
+def _validate_config(config: Dict[str, Any], config_source: str) -> None:
     """Validates the config."""
     common_utils.validate_schema(
         config,
         schemas.get_config_schema(),
-        f'Invalid config YAML ({config_path}). See: '
+        f'Invalid config YAML from ({config_source}). See: '
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
@@ -361,3 +363,52 @@ def override_skypilot_config(
     finally:
         _dict = original_config
         _config_overridden = False
+
+
+def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+    """Composes the skypilot CLI config.
+    CLI config can either be:
+    - A path to a config file
+    - A comma-separated list of key-value pairs
+    """
+
+    if not cli_config:
+        return config_utils.Config()
+
+    if os.path.isfile(cli_config):
+        # cli_config is a path to a config file
+        logger.info(f'Parsing CLI provided config file: {cli_config}')
+        parsed_config = OmegaConf.to_object(OmegaConf.load(cli_config))
+    else:
+        # cli_config is a comma-separated list of key-value pairs
+        logger.info(f'Parsing CLI provided config: {cli_config}')
+        variables: List[str] = []
+        variables = cli_config.split(',')
+        parsed_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
+    logger.info(f'Parsed CLI config: {parsed_config}')
+
+    _validate_config(parsed_config, 'CLI')
+    logger.debug('Config syntax check passed.')
+
+    return parsed_config
+
+
+def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+    """Applies the skypilot CLI config.
+    SAFETY:
+    This function directly modifies the global _dict variable.
+    This is considered fine in CLI context because the program will exit after
+    a single CLI command is executed.
+    Args:
+        cli_config: A path to a config file or a comma-separated
+        list of key-value pairs.
+    """
+    global _dict
+    parsed_config = _compose_cli_config(cli_config)
+    logger.info(
+        f'applying following overrides from CLI config: {parsed_config}')
+    print(f'original _dict: {_dict}')
+    _dict = _overlay_skypilot_config(original_config=_dict,
+                                     override_configs=parsed_config)
+    print(f'new _dict: {_dict}')
+    return parsed_config
