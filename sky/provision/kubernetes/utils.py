@@ -2156,6 +2156,8 @@ def check_port_forward_mode_dependencies(
         raise_error: set to true when the dependencies need to be present.
             set to false for `sky check`, where reason strings are compiled
             at the end.
+
+    Returns: the reasons list if there are missing dependencies.
     """
 
     # errors
@@ -2173,7 +2175,7 @@ def check_port_forward_mode_dependencies(
         'default networking mode, GNU netcat is required. ')
 
     # save
-    reason = []
+    reasons = []
     required_binaries = []
 
     # Ensure socat is installed
@@ -2184,7 +2186,7 @@ def check_port_forward_mode_dependencies(
                        check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
         required_binaries.append('socat')
-        reason.append(socat_message)
+        reasons.append(socat_message)
 
     # Ensure netcat is installed
     #
@@ -2200,17 +2202,17 @@ def check_port_forward_mode_dependencies(
 
         if nc_mac_installed:
             required_binaries.append('netcat')
-            reason.append(netcat_macos_message)
+            reasons.append(netcat_macos_message)
         elif netcat_output.returncode != 0:
             required_binaries.append('netcat')
-            reason.append(netcat_default_message)
+            reasons.append(netcat_default_message)
 
     except FileNotFoundError:
         required_binaries.append('netcat')
-        reason.append(netcat_default_message)
+        reasons.append(netcat_default_message)
 
     if required_binaries:
-        reason.extend([
+        reasons.extend([
             'On Debian/Ubuntu, install the missing dependenc(ies) with:',
             f'  $ sudo apt install {" ".join(required_binaries)}',
             'On MacOS, install with: ',
@@ -2218,8 +2220,8 @@ def check_port_forward_mode_dependencies(
         ])
         if raise_error:
             with ux_utils.print_exception_no_traceback():
-                raise RuntimeError('\n'.join(reason))
-        return reason
+                raise RuntimeError('\n'.join(reasons))
+        return reasons
     return None
 
 
