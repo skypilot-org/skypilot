@@ -1,9 +1,10 @@
 """SkyServe core APIs."""
+import pathlib
 import re
 import signal
 import tempfile
 import threading
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 
@@ -682,11 +683,14 @@ def status(
     return service_records
 
 
+ServiceComponentOrStr = Union[str, serve_utils.ServiceComponent]
+
+
 @usage_lib.entrypoint
 def tail_logs(
     service_name: str,
     *,
-    target: Union[str, serve_utils.ServiceComponent],
+    target: ServiceComponentOrStr,
     replica_id: Optional[int] = None,
     follow: bool = True,
 ) -> None:
@@ -740,10 +744,11 @@ def tail_logs(
             with ux_utils.print_exception_no_traceback():
                 raise ValueError('`replica_id` must be None when using '
                                  'target=CONTROLLER/LOAD_BALANCER.')
+
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = backend_utils.is_controller_accessible(
-        controller=controller_utils.Controllers.SKY_SERVE_CONTROLLER,
-        stopped_message=(controller_utils.Controllers.SKY_SERVE_CONTROLLER.
-                         value.default_hint_if_non_existent))
+        controller=controller_type,
+        stopped_message=controller_type.value.default_hint_if_non_existent)
 
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend), backend
@@ -772,3 +777,131 @@ def tail_logs(
                         stream_logs=True,
                         process_stream=False,
                         ssh_mode=command_runner.SshMode.INTERACTIVE)
+
+
+@usage_lib.entrypoint
+def sync_down_logs(service_name: str,
+                   *,
+                   targets: Union[ServiceComponentOrStr,
+                                  List[ServiceComponentOrStr], None] = None,
+                   replica_id: Optional[int] = None) -> str:
+    """Sync down logs from the controller for the given service.
+
+    Args:
+        service_name: The name of the service to download logs from.
+        targets: Which component(s) to download logs for. If None or empty,
+            means download all logs (controller, load-balancer, all replicas).
+            Can be a string (e.g. "controller"), or a `ServiceComponent` object,
+            or a list of them for multiple components. Currently accepted
+            values:
+                - "controller"/ServiceComponent.CONTROLLER
+                - "load_balancer"/ServiceComponent.LOAD_BALANCER
+                - "replica"/ServiceComponent.REPLICA
+        replica_id: The replica ID to download logs from, specified when and
+            only when target is `ServiceComponent.REPLICA`.
+
+    Returns:
+        The parent directory of the downloaded logs.
+    """
+    normalized_targets: Set[serve_utils.ServiceComponentTarget]
+    if not targets:
+        normalized_targets = set()  # later interpret as "all"
+    elif isinstance(targets, (str, serve_utils.ServiceComponent)):
+        normalized_targets = {
+            serve_utils.ServiceComponentTarget(targets, replica_id)
+        }
+    else:  # list
+        normalized_targets = {
+            serve_utils.ServiceComponentTarget(t, replica_id) for t in targets
+        }
+
+    # Step 0) get the controller handle
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Checking service status...')):
+        controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type,
+            stopped_message=controller_type.value.default_hint_if_non_existent)
+
+        backend: backends.CloudVmRayBackend = (
+            backend_utils.get_backend_from_handle(handle))
+
+    if not normalized_targets:
+        # Get all replica infos
+        with rich_utils.safe_status(
+                ux_utils.spinner_message('Getting live replicas...')):
+            code = serve_utils.ServeCodeGen.get_service_status([service_name])
+            returncode, serve_status_payload, stderr = backend.run_on_head(
+                handle,
+                code,
+                require_outputs=True,
+                stream_logs=False,
+                separate_stderr=True)
+
+            try:
+                subprocess_utils.handle_returncode(returncode,
+                                                   code,
+                                                   'Failed to fetch services',
+                                                   stderr,
+                                                   stream_logs=True)
+            except exceptions.CommandError as e:
+                raise RuntimeError(e.error_msg) from e
+
+            service_records = serve_utils.load_service_status(
+                serve_status_payload)
+            assert len(service_records) == 1
+            service_record = service_records[0]
+
+            normalized_targets = {
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.CONTROLLER),
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.LOAD_BALANCER),
+                *(serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.REPLICA,
+                    replica_info['replica_id'])
+                  for replica_info in service_record['replica_info'])
+            }
+
+    local_service_dir = serve_utils.generate_remote_service_dir_name(
+        service_name)
+    local_base = pathlib.Path(local_service_dir).expanduser()
+    local_base.mkdir(exist_ok=True)
+
+    def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
+        component = target.component
+        # We need to set one side of the pipe to a logs stream, and the other
+        # side to a file.
+        stream_logs_code: str
+
+        if component == serve_utils.ServiceComponent.CONTROLLER:
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name, stream_controller=True, follow=False))
+        elif component == serve_utils.ServiceComponent.LOAD_BALANCER:
+            stream_logs_code = (
+                serve_utils.ServeCodeGen.stream_serve_process_logs(
+                    service_name, stream_controller=False, follow=False))
+        elif component == serve_utils.ServiceComponent.REPLICA:
+            replica_id = target.replica_id
+            assert replica_id is not None, service_name
+            stream_logs_code = serve_utils.ServeCodeGen.stream_replica_logs(
+                service_name, replica_id, follow=False)
+        else:
+            assert False, component
+
+        # Refer to the notes in
+        # sky/backends/cloud_vm_ray_backend.py::CloudVmRayBackend::tail_logs.
+        backend.run_on_head(handle,
+                            stream_logs_code,
+                            stream_logs=False,
+                            process_stream=False,
+                            ssh_mode=command_runner.SshMode.INTERACTIVE,
+                            log_path=str(local_base / f'{target}.log'))
+
+    with rich_utils.safe_status(
+            ux_utils.spinner_message('Syncing down logs...')):
+        subprocess_utils.run_in_parallel(sync_down_logs_by_target,
+                                         list(normalized_targets))
+
+    return local_service_dir
