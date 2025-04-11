@@ -36,24 +36,6 @@ jobs:
           echo "Latest release branch: ${LATEST_RELEASE}"
           echo "base_branch=${LATEST_RELEASE}" >> $GITHUB_OUTPUT
 
-      # Check version for manual triggers
-      - name: Check version for manual triggers
-        id: check_version
-        if: github.event_name == 'workflow_dispatch' && github.event.inputs.release_version != ''
-        run: |
-          LATEST_VERSION=$(echo "${{ steps.find_release_branch.outputs.base_branch }}" | sed 's/releases\///')
-          INPUT_VERSION="${{ github.event.inputs.release_version }}"
-
-          # Convert versions to comparable format (e.g., 0.9.0 -> 000009000)
-          LATEST_COMPARABLE=$(echo $LATEST_VERSION | awk -F. '{ printf("%03d%03d%03d", $1, $2, $3); }')
-          INPUT_COMPARABLE=$(echo $INPUT_VERSION | awk -F. '{ printf("%03d%03d%03d", $1, $2, $3); }')
-
-          if [ "$INPUT_COMPARABLE" -le "$LATEST_COMPARABLE" ]; then
-            echo "Error: Input version $INPUT_VERSION is not greater than latest release $LATEST_VERSION"
-            exit 1
-          fi
-          echo "Version check passed: $INPUT_VERSION > $LATEST_VERSION"
-
       # Determine release version based on trigger type
       - name: Determine release version
         id: determine_version
@@ -86,11 +68,13 @@ jobs:
           git config --local user.name "GitHub Action"
 
           # Make version changes
-          sed -i "s/{{SKYPILOT_COMMIT_SHA}}/${{ github.sha }}/g" sky/__init__.py
           sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+          # Update Dockerfile with release version
+          sed -i "s|~/.local/bin/uv pip install skypilot-nightly\\\\[all\\\\] --system|~/.local/bin/uv pip install \\\\"skypilot[all]==${RELEASE_VERSION}\\\\" --system|" Dockerfile
 
           # Commit the changes
           git add sky/__init__.py
+          git add Dockerfile
           git commit -m "Release ${RELEASE_VERSION}"
 
           # Get the new commit SHA
