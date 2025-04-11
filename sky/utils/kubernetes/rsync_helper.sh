@@ -1,5 +1,8 @@
+# We need to determine the pod, namespace and context from the args
+# For backward compatibility, we use + as the separator between namespace and context and add handling when context is not provided
 if [ "$1" = "-l" ]; then
-    # -l pod namespace+context syntax
+    # -l pod namespace+context ...
+    # used by normal rsync
     shift
     pod=$1
     shift
@@ -15,7 +18,8 @@ if [ "$1" = "-l" ]; then
     context_lower=$(echo "$context" | tr '[:upper:]' '[:lower:]')
     shift
 else
-    # pod@namespace+context syntax
+    # pod@namespace+context ...
+    # used by openrsync
     encoded_pod_namespace_context=$1
     pod_namespace_context=$(echo "$encoded_pod_namespace_context" | sed 's|%40|@|g' | sed 's|%3A|:|g' | sed 's|%2B|+|g' | sed 's|%2F|/|g')
     echo "pod_namespace_context: $pod_namespace_context" >&2
