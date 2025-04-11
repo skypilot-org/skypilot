@@ -475,7 +475,7 @@ By default, SkyPilot automatically sets up a FUSE proxy to allow Pods created by
 
 In most clusters, SkyPilot handles setting up the FUSE proxy as a privileged DaemonSet, and **no manual configuration is required by the user**.
 
-However, if you are operating in a cluster with restricted permissions, you can deploy the DaemonSet externally to avoid granting SkyPilot to create privileged DaemonSets. SkyPilot will automatically discover the DaemonSet and use it as the FUSE proxy:
+However, if you are operating in a cluster with restricted permissions, you can deploy the DaemonSet externally, to avoid the need to grant SkyPilot the permission to create privileged DaemonSets. SkyPilot will automatically discover the DaemonSet and use it as the FUSE proxy:
 
 .. code-block:: console
 
