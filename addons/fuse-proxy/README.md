@@ -9,7 +9,7 @@ The fuse-proxy consists of two components:
 1. A client (`fusermount-shim`) that masks the `fusermount` binary to intercept `fusermount` calls;
 2. A privileged server running as a DaemonSet on each Kubernetes node;
 
-The client and server communicate via unix domain socket, so SkyPilot Pods and the DaemonSet Pods must mount a shared directoy from host.
+The client and server communicate via unix domain socket, so SkyPilot Pods and the DaemonSet Pods must mount a shared directory from host.
 
 ## Usage
 
