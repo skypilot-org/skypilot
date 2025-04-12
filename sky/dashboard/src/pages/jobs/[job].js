@@ -291,37 +291,43 @@ function JobDetailsContent({
           }
         })
         .catch((error) => {
-          if (active && error.name !== 'AbortError') {
-            console.error(`Error streaming ${logType}:`, error);
-            setIsLoading(false);
-            
-            // If there was an error, add it to the logs display
-            if (error.message) {
-              setLogs((prevLogs) => [
-                ...prevLogs,
-                `Error fetching logs: ${error.message}`,
-              ]);
+          if (active) {
+            // Only log and handle non-abort errors
+            if (error.name !== 'AbortError') {
+              console.error(`Error streaming ${logType}:`, error);
+              if (error.message) {
+                setLogs((prevLogs) => [
+                  ...prevLogs,
+                  `Error fetching logs: ${error.message}`,
+                ]);
+              }
             }
+            setIsLoading(false);
           }
         });
+
+      // Return cleanup function
+      return () => {
+        active = false;
+        controller.abort();
+      };
     }
-    
     return () => {
       active = false;
-      controller.abort();
-      console.log(`Cleaning up ${logType} streaming`);
     };
   };
 
-// Use the function for regular logs
-useEffect(() => {
-  return fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
-}, [activeTab, jobData.id, setIsLoadingLogs]);
+  // Only fetch logs when actually viewing the logs tab
+  useEffect(() => {
+    const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
+    return cleanup;
+  }, [activeTab, jobData.id]);
 
-// Use the function for controller logs
-useEffect(() => {
-  return fetchLogs('controllerlogs', jobData.id, setControllerLogs, setIsLoadingControllerLogs);
-}, [activeTab, jobData.id, setIsLoadingControllerLogs]);
+  // Only fetch controller logs when actually viewing the controller logs tab
+  useEffect(() => {
+    const cleanup = fetchLogs('controllerlogs', jobData.id, setControllerLogs, setIsLoadingControllerLogs);
+    return cleanup;
+  }, [activeTab, jobData.id]);
 
   if (activeTab === 'logs') {
     return (

@@ -48,9 +48,7 @@ export async function getClusters({ clusterNames = null } = {}) {
     }
   }
 
-  // The URL returns a request id as a string, and we can further get
-  // the actual data with http://xx.xx.xx.xx:xxxx/get with a json content
-  // { "request_id": <id> }.
+  // Always fetch fresh data when requesting specific clusters
   try {
     const response = await fetch(`${ENDPOINT}/status`, {
       method: 'POST',
@@ -64,7 +62,6 @@ export async function getClusters({ clusterNames = null } = {}) {
     });
     const id = response.headers.get('x-request-id');
     const fetchedData = await fetch(`${ENDPOINT}/api/get?request_id=${id}`);
-    // print out the response for debugging
     const data = await fetchedData.json();
     const clusters = data.return_value ? JSON.parse(data.return_value) : [];
     const clusterData = clusters.map((cluster) => {
@@ -89,11 +86,14 @@ export async function getClusters({ clusterNames = null } = {}) {
         ],
       };
     });
-    // Cache the data
-    localStorage.setItem(CLUSTERS_CACHE_KEY, JSON.stringify({
-      data: clusterData,
-      timestamp: Date.now(),
-    }));
+
+    // Only cache the data if we're not requesting specific clusters
+    if (!clusterNames) {
+      localStorage.setItem(CLUSTERS_CACHE_KEY, JSON.stringify({
+        data: clusterData,
+        timestamp: Date.now(),
+      }));
+    }
     return clusterData;
   } catch (error) {
     console.error('Error fetching clusters:', error);

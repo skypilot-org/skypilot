@@ -164,6 +164,7 @@ export function ManagedJobsTable({
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [statusCounts, setStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
+  const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState(initialActiveTab || 'active');
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
@@ -189,6 +190,7 @@ export function ManagedJobsTable({
       message: 'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
       onConfirm: async () => {
         try {
+          setIsRestarting(true);
           setLocalLoading(true);
           await handleJobAction('restartcontroller', null, null, true);
           // Refresh data after restarting the controller
@@ -196,6 +198,7 @@ export function ManagedJobsTable({
         } catch (err) {
           console.error('Error restarting controller:', err);
         } finally {
+          setIsRestarting(false);
           setLocalLoading(false);
         }
       },
@@ -604,10 +607,19 @@ export function ManagedJobsTable({
                           size="sm"
                           onClick={handleRestartController}
                           className="text-sky-blue hover:text-sky-blue-bright"
-                          disabled={loading}
+                          disabled={loading || isRestarting}
                         >
-                          <RefreshCcw className="h-4 w-4 mr-2" />
-                          Restart Controller
+                          {isRestarting ? (
+                            <>
+                              <CircularProgress size={12} className="mr-2" />
+                              Restarting...
+                            </>
+                          ) : (
+                            <>
+                              <RefreshCcw className="h-4 w-4 mr-2" />
+                              Restart Controller
+                            </>
+                          )}
                         </Button>
                       </div>
                     )}
@@ -908,17 +920,14 @@ export function JobDetails({
 
 export function formatLogs(str) {
   if (!str) return '';
+  // if one line matches with <rich_.*>[bold cyan] or
+  // <rich_.*>.*</rich_.*> or ├── or └──, skip this line
+  const lines = str.split('\n');
+  const filteredLines = lines.filter(line => !line.match(/<rich_.*?\[bold cyan\]/) && !line.match(/<rich_.*>.*<\/rich_.*>/) && !line.match(/├──/) && !line.match(/└──/));
+  str = filteredLines.join('\n');
 
   // First remove ANSI escape codes
   let result = stripAnsiCodes(str);
-
-  // Remove all HTML-like tags while preserving their content
-  // This handles both paired tags like <tag>content</tag> and standalone tags like <tag>
-  result = result.replace(/<[^>]*>(.*?)<\/[^>]*>/g, '$1'); // Remove paired tags but keep content
-  result = result.replace(/<[^>]*>/g, ''); // Remove any remaining standalone tags
-
-  // Remove formatting markers like [dim] and [/dim]
-  result = result.replace(/\[([^\]]+)\]/g, ''); // This will remove any text in square brackets
 
   return result;
 }
