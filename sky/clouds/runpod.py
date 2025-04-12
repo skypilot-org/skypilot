@@ -164,6 +164,7 @@ class RunPod(clouds.Cloud):
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
         del dryrun, cluster_name  # unused
+        assert zones is not None, (region, zones)
 
         zone_name = zones[0].name
 
