@@ -375,10 +375,13 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
     if not cli_config:
         return config_utils.Config()
 
-    if os.path.isfile(cli_config):
+    config_source = 'CLI'
+    maybe_config_path = os.path.expanduser(cli_config)
+    if os.path.isfile(maybe_config_path):
+        config_source = maybe_config_path
         # cli_config is a path to a config file
-        logger.info(f'Parsing CLI provided config file: {cli_config}')
-        parsed_config = OmegaConf.to_object(OmegaConf.load(cli_config))
+        logger.info(f'Parsing CLI provided config file: {maybe_config_path}')
+        parsed_config = OmegaConf.to_object(OmegaConf.load(maybe_config_path))
     else:
         # cli_config is a comma-separated list of key-value pairs
         logger.info(f'Parsing CLI provided config: {cli_config}')
@@ -387,14 +390,14 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
         parsed_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
     logger.info(f'Parsed CLI config: {parsed_config}')
 
-    _validate_config(parsed_config, 'CLI')
+    _validate_config(parsed_config, config_source)
     logger.debug('Config syntax check passed.')
 
     return parsed_config
 
 
 def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
-    """Applies the skypilot CLI config.
+    """Applies the CLI provided config.
     SAFETY:
     This function directly modifies the global _dict variable.
     This is considered fine in CLI context because the program will exit after
