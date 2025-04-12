@@ -13,7 +13,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar, Union, Set)
+                    Optional, Set, TextIO, Type, TypeVar, Union)
 import uuid
 
 import colorama
