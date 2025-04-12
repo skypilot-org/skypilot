@@ -71,12 +71,9 @@ jobs:
 
           # Make version changes
           sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
-          # Update Dockerfile with release version
-          sed -i "s/skypilot-nightly\[all\]/skypilot[all]==${RELEASE_VERSION}/g" Dockerfile
 
           # Commit the changes
           git add sky/__init__.py
-          git add Dockerfile
           git commit -m "Release ${RELEASE_VERSION}"
 
           # Get the new commit SHA

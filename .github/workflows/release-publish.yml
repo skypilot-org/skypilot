@@ -7,7 +7,26 @@ on:
       - 'releases/**'
 
 jobs:
+  extract-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+
+      - name: Extract version from PR base branch
+        id: extract_version
+        run: |
+          BASE_BRANCH="${{ github.base_ref }}"
+          VERSION=$(echo "$BASE_BRANCH" | sed 's/releases\///')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version extracted: $VERSION"
+
   publish-to-pypi:
+    needs: extract-version
     if: github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
@@ -51,14 +70,34 @@ jobs:
           password: ${{ secrets.PYPI_API_TOKEN }}
           skip-existing: true
 
+      - name: Validate published package
+        run: |
+          # Wait a moment for package to be available
+          sleep 30
+          # Install skypilot from Test PyPI with fallback to PyPI for dependencies
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
+          # Verify installation
+          sky -v
+          sky -c
+          # Verify version
+          EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
+          INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
+          echo "Expected version: $EXPECTED_VERSION, Installed version: $INSTALLED_VERSION"
+          if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch!"
+            exit 1
+          fi
+          echo "Version verified successfully!"
+
   trigger-docker-build:
-    needs: publish-to-pypi
+    needs: [extract-version, publish-to-pypi]
     uses: ./.github/workflows/docker-build.yaml
     with:
       package_name: 'skypilot'
     secrets: inherit
 
   cleanup-branches:
+    needs: extract-version
     if: github.event.pull_request.merged == false
     runs-on: ubuntu-latest
     steps:
@@ -68,17 +107,9 @@ jobs:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Extract version from PR base branch
-        id: extract_version
-        run: |
-          BASE_BRANCH="${{ github.base_ref }}"
-          VERSION=$(echo "$BASE_BRANCH" | sed 's/releases\///')
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Version extracted: $VERSION"
-
       - name: Delete branches
         run: |
-          VERSION="${{ steps.extract_version.outputs.version }}"
+          VERSION="${{ needs.extract-version.outputs.version }}"
           git config --global user.name "GitHub Action"
           git config --global user.email "action@github.com"
 
