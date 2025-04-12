@@ -265,7 +265,7 @@ class CommandError(SkyPilotExcludeArgsBaseException):
                 # Chunk the command to avoid overflow.
                 command = command[:100] + '...'
             message = (f'Command {command} failed with return code '
-                       f'{returncode}.\n{error_msg}')
+                       f'{returncode}.\n{error_msg}\n{detailed_reason}')
         super().__init__(message)
 
 

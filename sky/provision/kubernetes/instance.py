@@ -162,12 +162,9 @@ def _raise_pod_scheduling_errors(namespace, context, new_nodes):
                     raise config_lib.KubernetesError(
                         _lack_resource_msg('memory', pod,
                                            details=event_message))
-                if 'Insufficient smarter-devices/fuse' in event_message:
-                    raise config_lib.KubernetesError(
-                        'Something went wrong with FUSE device daemonset.'
-                        ' Try restarting your FUSE pods by running '
-                        '`kubectl delete pods -n skypilot-system -l name=smarter-device-manager`.'  # pylint: disable=line-too-long
-                        f' Full error: {event_message}')
+                # TODO(aylei): after switching from smarter-device-manager to
+                # fusermount-server, we need a new way to check whether the
+                # fusermount-server daemonset is ready.
                 gpu_lf_keys = [
                     key for lf in kubernetes_utils.LABEL_FORMATTER_REGISTRY
                     for key in lf.get_label_keys()
@@ -723,7 +720,7 @@ def _create_pods(region: str, cluster_name_on_cloud: str,
                        f'{common_utils.format_exception(e)}'
                        'Continuing without using nvidia RuntimeClass.\n'
                        'If you are on a K3s cluster, manually '
-                       'override runtimeClassName in ~/.sky/config.yaml. '
+                       'override runtimeClassName in ~/.sky/skyconfig.yaml. '
                        'For more details, refer to https://docs.skypilot.co/en/latest/reference/config.html')  # pylint: disable=line-too-long
 
     needs_gpus = False

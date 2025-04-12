@@ -466,11 +466,11 @@ Setting the job files bucket
 For managed jobs, SkyPilot requires an intermediate bucket to store files used in the task, such as local file mounts, temporary files, and the workdir.
 If you do not configure a bucket, SkyPilot will automatically create a temporary bucket named :code:`skypilot-filemounts-{username}-{run_id}` for each job launch. SkyPilot automatically deletes the bucket after the job completes.
 
-Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/config.yaml`:
+Alternatively, you can pre-provision a bucket and use it as an intermediate for storing file by setting :code:`jobs.bucket` in :code:`~/.sky/skyconfig.yaml`:
 
 .. code-block:: yaml
 
-  # ~/.sky/config.yaml
+  # ~/.sky/skyconfig.yaml
   jobs:
     bucket: s3://my-bucket  # Supports s3://, gs://, https://<azure_storage_account>.blob.core.windows.net/<container>, r2://, cos://<region>/<bucket>
 
@@ -527,7 +527,7 @@ You may want to customize the resources of the jobs controller for several reaso
 #. Enforcing the jobs controller to run on a specific location. (Default: cheapest location)
 #. Changing the disk_size of the jobs controller to store more logs. (Default: 50GB)
 
-To achieve the above, you can specify custom configs in :code:`~/.sky/config.yaml` with the following fields:
+To achieve the above, you can specify custom configs in :code:`~/.sky/skyconfig.yaml` with the following fields:
 
 .. code-block:: yaml
 

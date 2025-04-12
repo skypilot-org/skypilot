@@ -83,7 +83,7 @@ Run ``sky api login`` to connect to the API server.
     $ sky api login
     Enter your SkyPilot API server endpoint: http://skypilot:password@1.2.3.4:30050
 
-This will save the API server endpoint to your ``~/.sky/config.yaml`` file.
+This will save the API server endpoint to your ``~/.sky/skyconfig.yaml`` file.
 
 To verify that the API server is working, run ``sky api info``:
 
@@ -97,7 +97,7 @@ To verify that the API server is working, run ``sky api info``:
 
 .. tip::
 
-    You can also set the API server endpoint using the ``SKYPILOT_API_SERVER_ENDPOINT`` environment variable. It will override the value set in ``~/.sky/config.yaml``:
+    You can also set the API server endpoint using the ``SKYPILOT_API_SERVER_ENDPOINT`` environment variable. It will override the value set in ``~/.sky/skyconfig.yaml``:
 
     .. code-block:: console
 

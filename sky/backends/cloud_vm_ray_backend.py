@@ -1473,7 +1473,7 @@ class RetryingVmProvisioner(object):
                     f'invalid cloud credentials: '
                     f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
-                # Failed due to invalid user configs in ~/.sky/config.yaml.
+                # Failed due to invalid user configs in ~/.sky/skyconfig.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
                 # We should block the entire cloud if the user config is
                 # invalid.
@@ -2065,10 +2065,10 @@ class RetryingVmProvisioner(object):
                                (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
-                    assert (clouds.CloudImplementationFeatures.STOP
+                    assert (clouds.CloudImplementationFeatures.AUTOSTOP
                             in requested_features), requested_features
                     requested_features.remove(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(

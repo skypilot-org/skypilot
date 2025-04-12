@@ -1454,14 +1454,14 @@ def is_kubeconfig_exec_auth(
 
 
     Using exec-based authentication is problematic when used in conjunction
-    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/config.yaml.
+    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/skyconfig.yaml.
     This is because the exec-based authentication may not have the relevant
     dependencies installed on the remote cluster or may have hardcoded paths
     that are not available on the remote cluster.
 
     Returns:
         bool: True if exec-based authentication is used and LOCAL_CREDENTIAL
-            mode is used for remote_identity in ~/.sky/config.yaml.
+            mode is used for remote_identity in ~/.sky/skyconfig.yaml.
         str: Error message if exec-based authentication is used, None otherwise
     """
     k8s = kubernetes.kubernetes
@@ -1514,7 +1514,7 @@ def is_kubeconfig_exec_auth(
                     'Managed Jobs or SkyServe controller on Kubernetes. '
                     'To fix, configure SkyPilot to create a service account '
                     'for running pods by setting the following in '
-                    '~/.sky/config.yaml:\n'
+                    '~/.sky/skyconfig.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
                     '    More: https://docs.skypilot.co/en/latest/'
@@ -2148,32 +2148,35 @@ def fill_ssh_jump_template(ssh_key_secret: str, ssh_jump_image: str,
     return content
 
 
-def check_port_forward_mode_dependencies() -> None:
-    """Checks if 'socat' and 'nc' are installed"""
+def check_port_forward_mode_dependencies(
+        raise_error: bool = True) -> Optional[List[str]]:
+    """Checks if 'socat' and 'nc' are installed
 
-    # Construct runtime errors
-    socat_default_error = RuntimeError(
-        f'`socat` is required to setup Kubernetes cloud with '
+    Args:
+        raise_error: set to true when the dependencies need to be present.
+            set to false for `sky check`, where reason strings are compiled
+            at the end.
+
+    Returns: the reasons list if there are missing dependencies.
+    """
+
+    # errors
+    socat_message = (
+        '`socat` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install socat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install socat')
-    netcat_default_error = RuntimeError(
-        f'`nc` is required to setup Kubernetes cloud with '
+        'default networking mode and it is not installed. ')
+    netcat_default_message = (
+        '`nc` is required to setup Kubernetes cloud with '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode and it is not installed. '
-        'On Debian/Ubuntu, install it with:\n'
-        f'  $ sudo apt install netcat\n'
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
-    mac_installed_error = RuntimeError(
-        f'The default MacOS `nc` is installed. However, for '
+        'default networking mode and it is not installed. ')
+    netcat_macos_message = (
+        'The default MacOS `nc` is installed. However, for '
         f'`{kubernetes_enums.KubernetesNetworkingMode.PORTFORWARD.value}` '  # pylint: disable=line-too-long
-        'default networking mode, GNU netcat is required. '
-        f'On MacOS, install it with: \n'
-        f'  $ brew install netcat')
+        'default networking mode, GNU netcat is required. ')
+
+    # save
+    reasons = []
+    required_binaries = []
 
     # Ensure socat is installed
     try:
@@ -2182,8 +2185,8 @@ def check_port_forward_mode_dependencies() -> None:
                        stderr=subprocess.DEVNULL,
                        check=True)
     except (FileNotFoundError, subprocess.CalledProcessError):
-        with ux_utils.print_exception_no_traceback():
-            raise socat_default_error from None
+        required_binaries.append('socat')
+        reasons.append(socat_message)
 
     # Ensure netcat is installed
     #
@@ -2198,15 +2201,28 @@ def check_port_forward_mode_dependencies() -> None:
             netcat_output.stderr)
 
         if nc_mac_installed:
-            with ux_utils.print_exception_no_traceback():
-                raise mac_installed_error from None
+            required_binaries.append('netcat')
+            reasons.append(netcat_macos_message)
         elif netcat_output.returncode != 0:
-            with ux_utils.print_exception_no_traceback():
-                raise netcat_default_error from None
+            required_binaries.append('netcat')
+            reasons.append(netcat_default_message)
 
     except FileNotFoundError:
-        with ux_utils.print_exception_no_traceback():
-            raise netcat_default_error from None
+        required_binaries.append('netcat')
+        reasons.append(netcat_default_message)
+
+    if required_binaries:
+        reasons.extend([
+            'On Debian/Ubuntu, install the missing dependenc(ies) with:',
+            f'  $ sudo apt install {" ".join(required_binaries)}',
+            'On MacOS, install with: ',
+            f'  $ brew install {" ".join(required_binaries)}',
+        ])
+        if raise_error:
+            with ux_utils.print_exception_no_traceback():
+                raise RuntimeError('\n'.join(reasons))
+        return reasons
+    return None
 
 
 def get_endpoint_debug_message() -> str:
@@ -2236,7 +2252,7 @@ def combine_pod_config_fields(
     cluster_config_overrides: Dict[str, Any],
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
-    ~/.sky/config.yaml's kubernetes.pod_spec dict.
+    ~/.sky/skyconfig.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
     SkyPilot yet, or require simple configuration (e.g., adding an
     imagePullSecrets field).
@@ -2296,7 +2312,7 @@ def combine_pod_config_fields(
 
 def combine_metadata_fields(cluster_yaml_path: str) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
-    fields from the ~/.sky/config.yaml's kubernetes.custom_metadata dict.
+    fields from the ~/.sky/skyconfig.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """
