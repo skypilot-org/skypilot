@@ -70,13 +70,13 @@ function ClusterDetails() {
         <div className="text-sm flex items-center">
           <div className="text-sm flex items-center">
             {(loading || isRefreshing) && (
-              <div className="flex items-center mr-2">
+              <div className="flex items-center mr-4">
                 <CircularProgress size={15} className="mt-0" />
                 <span className="ml-2 text-gray-500">Loading...</span>
               </div>
             )}
             {clusterData && (
-              <>
+              <div className="flex items-center space-x-4">
                 <Tooltip
                   content="Refresh"
                   className="text-sm text-muted-foreground"
@@ -84,7 +84,7 @@ function ClusterDetails() {
                   <button
                     onClick={handleManualRefresh}
                     disabled={loading || isRefreshing}
-                    className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 inline-flex items-center"
+                    className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
                   >
                     <RotateCwIcon className="w-4 h-4 mr-1.5" />
                     <span>Refresh</span>
@@ -97,7 +97,7 @@ function ClusterDetails() {
                   onOpenSSHModal={handleConnectClick}
                   onOpenVSCodeModal={handleVSCodeClick}
                 />
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -135,10 +135,10 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
       {/* Cluster Info Card */}
       <div className="mb-6">
         <Card>
-          <div className="flex items-center justify-between px-3 pt-4">
+          <div className="flex items-center justify-between px-4 pt-4">
             <h3 className="text-lg font-semibold">Details</h3>
           </div>
-          <div className="p-3">
+          <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
                 <div className="text-gray-600 font-medium text-base">Cluster</div>

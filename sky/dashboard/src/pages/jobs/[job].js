@@ -131,22 +131,22 @@ function JobDetails() {
             isRefreshing ||
             isLoadingLogs ||
             isLoadingControllerLogs) && (
-            <div className="flex items-center mr-2">
+            <div className="flex items-center mr-4">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500">Loading...</span>
             </div>
           )}
-          <Tooltip content="Refresh" className="text-sm text-muted-foreground">
-            <button
-              onClick={handleManualRefresh}
-              disabled={loading || isRefreshing}
-              className="text-sky-blue hover:text-sky-blue-bright font-medium mx-2 flex items-center"
-            >
-              <RotateCwIcon className="w-4 h-4 mr-1.5" />
-              <span>Refresh</span>
-            </button>
-          </Tooltip>
-          <div>
+          <div className="flex items-center space-x-4">
+            <Tooltip content="Refresh" className="text-sm text-muted-foreground">
+              <button
+                onClick={handleManualRefresh}
+                disabled={loading || isRefreshing}
+                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
+              >
+                <RotateCwIcon className="w-4 h-4 mr-1.5" />
+                <span>Refresh</span>
+              </button>
+            </Tooltip>
             {detailJobData ? (
               <Status2Actions
                 withLabel={true}
@@ -165,7 +165,7 @@ function JobDetails() {
                 >
                   <button
                     disabled={true}
-                    className="text-gray-400 font-medium mx-2 flex items-center cursor-not-allowed"
+                    className="text-gray-400 font-medium inline-flex items-center h-8 cursor-not-allowed"
                   >
                     <FileSearchIcon className="w-4 h-4 mr-1.5" />
                     Logs
@@ -183,10 +183,10 @@ function JobDetails() {
           {/* Details Section */}
           <div id="details-section">
             <Card>
-              <div className="flex items-center justify-between px-3 pt-4">
+              <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Details</h3>
               </div>
-              <div className="p-3">
+              <div className="p-4">
                 <JobDetailsContent
                   jobData={detailJobData}
                   activeTab="info"
@@ -200,10 +200,10 @@ function JobDetails() {
           {/* Logs Section */}
           <div id="logs-section" className="mt-6">
             <Card>
-              <div className="flex items-center justify-between px-3 pt-4">
+              <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Logs</h3>
               </div>
-              <div className="p-3">
+              <div className="p-4">
                 <JobDetailsContent
                   jobData={detailJobData}
                   activeTab="logs"
@@ -217,10 +217,10 @@ function JobDetails() {
           {/* Controller Logs Section */}
           <div id="controller-logs-section" className="mt-6">
             <Card>
-              <div className="flex items-center justify-between px-3 pt-4">
+              <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Controller Logs</h3>
               </div>
-              <div className="p-3">
+              <div className="p-4">
                 <JobDetailsContent
                   jobData={detailJobData}
                   activeTab="controllerlogs"

@@ -148,7 +148,7 @@ export function TopBar() {
     const isActive = isActivePath(path);
     return `inline-flex items-center space-x-2 px-1 pt-1 border-b-2 ${
       isActive
-        ? 'border-blue-600 text-blue-600'
+        ? 'border-transparent text-blue-600'
         : 'border-transparent hover:text-blue-600 hover:border-blue-600'
     }`;
   };
@@ -159,15 +159,17 @@ export function TopBar() {
         <div className="flex items-center space-x-4 mr-6">
           <Link
             href="/"
-            className="flex items-center space-x-2"
+            className="flex items-center px-1 pt-1 h-full"
             prefetch={false}
           >
             <Image
               src={`${BASE_PATH}/skypilot.svg`}
               alt="SkyPilot Logo"
-              width={100}
-              height={100}
+              width={80}
+              height={80}
               priority
+              style={{ width: '80px', height: '80px' }}
+              className="h-12 w-12"
             />
             {/* <span className="text-xl font-medium text-sky-blue">SkyPilot</span> */}
           </Link>

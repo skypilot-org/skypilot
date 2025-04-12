@@ -836,10 +836,10 @@ export function JobDetails({
         {/* Info Section */}
         <div id="details">
           <Card>
-            <div className="flex items-center justify-between px-3 pt-4">
+            <div className="flex items-center justify-between px-4 pt-4">
               <h2 className="text-lg font-semibold">Details</h2>
             </div>
-            <div className="p-3">
+            <div className="p-4">
               <div className="grid grid-cols-2 gap-6">
                 <div>
                   <div className="text-gray-600 font-medium text-base">Job ID</div>
@@ -886,10 +886,10 @@ export function JobDetails({
         {/* Logs Section */}
         <div id="logs" className="mt-6">
           <Card>
-            <div className="flex items-center justify-between px-3 pt-4">
+            <div className="flex items-center justify-between px-4 pt-4">
               <h2 className="text-lg font-semibold">Logs</h2>
             </div>
-            <div className="p-3">
+            <div className="p-4">
               {isLoadingLogs ? (
                 <div className="flex items-center justify-center py-4">
                   <CircularProgress size={20} className="mr-2" />
@@ -1264,7 +1264,7 @@ export function Status2Actions({
       >
         <button
           onClick={(e) => handleLogsClick(e, 'logs')}
-          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+          className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
         >
           <FileSearchIcon className="w-4 h-4" />
           {withLabel && <span className="ml-1.5">Logs</span>}
@@ -1278,10 +1278,10 @@ export function Status2Actions({
         >
           <button
             onClick={(e) => handleLogsClick(e, 'controllerlogs')}
-            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center"
+            className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
           >
             <MonitorPlay className="w-4 h-4" />
-            {withLabel && <span className="ml-1.5">Controller Logs</span>}
+            {withLabel && <span className="ml-2">Controller Logs</span>}
           </button>
         </Tooltip>
       )}
