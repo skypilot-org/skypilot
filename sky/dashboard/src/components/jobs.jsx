@@ -125,7 +125,6 @@ export function ManagedJobs() {
           </Button>
         </div>
       </div>
-      <div className="border-b border-gray-200 my-4"></div>
       <div className="flex flex-col space-y-4">
         {/* Activeness Filter */}
         <div className="flex items-center text-sm">
@@ -831,8 +830,6 @@ export function JobDetails({
           </div>
         </div>
       )}
-
-      <div className="border-b border-gray-200 my-4"></div>
 
       {/* Display all sections directly on the page */}
       <div className="space-y-8">

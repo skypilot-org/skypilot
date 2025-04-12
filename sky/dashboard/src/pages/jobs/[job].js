@@ -177,8 +177,6 @@ function JobDetails() {
         </div>
       </div>
 
-      <div className="border-b border-gray-200 my-4"></div>
-
       {/* Display all sections directly on the page */}
       {detailJobData && (
         <div className="space-y-8">

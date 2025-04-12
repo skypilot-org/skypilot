@@ -103,8 +103,6 @@ function ClusterDetails() {
         </div>
       </div>
 
-      <div className="border-b border-gray-200 my-4"></div>
-
       {loading ? (
         <div className="flex justify-center items-center py-12">
           <CircularProgress size={24} className="mr-2" />

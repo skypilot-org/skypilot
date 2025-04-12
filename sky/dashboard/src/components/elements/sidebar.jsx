@@ -167,7 +167,7 @@ export function TopBar() {
               alt="SkyPilot Logo"
               width={100}
               height={100}
-              className="h-25 w-25"
+              priority
             />
             {/* <span className="text-xl font-medium text-sky-blue">SkyPilot</span> */}
           </Link>
