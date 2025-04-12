@@ -13,7 +13,7 @@ import threading
 import time
 import typing
 from typing import (Any, Callable, DefaultDict, Dict, Generic, Iterator, List,
-                    Optional, TextIO, Type, TypeVar, Union)
+                    Optional, TextIO, Type, TypeVar, Union, Set)
 import uuid
 
 import colorama
@@ -34,6 +34,7 @@ from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import resources_utils
 from sky.utils import status_lib
+from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
@@ -949,6 +950,40 @@ def stream_serve_process_logs(service_name: str, stream_controller: bool,
         ):
             print(line, end='', flush=True)
     return ''
+
+
+def _get_all_replica_targets(
+        service_name: str, backend: backends.CloudVmRayBackend,
+        handle: backends.CloudVmRayResourceHandle
+) -> Set[ServiceComponentTarget]:
+    """Helper function to get targets for all live replicas."""
+    code = ServeCodeGen.get_service_status([service_name])
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch services',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_records = load_service_status(serve_status_payload)
+    if not service_records:
+        raise ValueError(f'Service {service_name!r} not found.')
+    service_record = service_records[0]
+
+    return {
+        ServiceComponentTarget(ServiceComponent.REPLICA,
+                               replica_info['replica_id'])
+        for replica_info in service_record['replica_info']
+    }
 
 
 # ================== Table Formatter for `sky serve status` ==================

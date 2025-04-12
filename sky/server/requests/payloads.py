@@ -423,7 +423,7 @@ class ServeDownloadLogsBody(RequestBody):
     service_name: str
     targets: Optional[Union[str, serve.ServiceComponent,
                             List[Union[str, serve.ServiceComponent]]]]
-    replica_id: Optional[int] = None
+    replica_ids: Optional[List[int]] = None
 
 
 class ServeStatusBody(RequestBody):

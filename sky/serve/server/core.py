@@ -784,7 +784,7 @@ def sync_down_logs(service_name: str,
                    *,
                    targets: Union[ServiceComponentOrStr,
                                   List[ServiceComponentOrStr], None] = None,
-                   replica_id: Optional[int] = None) -> str:
+                   replica_ids: Optional[List[int]] = None) -> str:
     """Sync down logs from the controller for the given service.
 
     Args:
@@ -797,24 +797,14 @@ def sync_down_logs(service_name: str,
                 - "controller"/ServiceComponent.CONTROLLER
                 - "load_balancer"/ServiceComponent.LOAD_BALANCER
                 - "replica"/ServiceComponent.REPLICA
-        replica_id: The replica ID to download logs from, specified when and
-            only when target is `ServiceComponent.REPLICA`.
+        replica_ids: The list of replica IDs to download logs from, specified
+            when target includes `ServiceComponent.REPLICA`. If target includes
+            `ServiceComponent.REPLICA` but this is None/empty, logs for all
+            replicas will be downloaded.
 
     Returns:
         The parent directory of the downloaded logs.
     """
-    normalized_targets: Set[serve_utils.ServiceComponentTarget]
-    if not targets:
-        normalized_targets = set()  # later interpret as "all"
-    elif isinstance(targets, (str, serve_utils.ServiceComponent)):
-        normalized_targets = {
-            serve_utils.ServiceComponentTarget(targets, replica_id)
-        }
-    else:  # list
-        normalized_targets = {
-            serve_utils.ServiceComponentTarget(t, replica_id) for t in targets
-        }
-
     # Step 0) get the controller handle
     with rich_utils.safe_status(
             ux_utils.spinner_message('Checking service status...')):
@@ -826,42 +816,51 @@ def sync_down_logs(service_name: str,
         backend: backends.CloudVmRayBackend = (
             backend_utils.get_backend_from_handle(handle))
 
-    if not normalized_targets:
-        # Get all replica infos
-        with rich_utils.safe_status(
-                ux_utils.spinner_message('Getting live replicas...')):
-            code = serve_utils.ServeCodeGen.get_service_status([service_name])
-            returncode, serve_status_payload, stderr = backend.run_on_head(
-                handle,
-                code,
-                require_outputs=True,
-                stream_logs=False,
-                separate_stderr=True)
+    requested_components: Set[serve_utils.ServiceComponent] = set()
 
-            try:
-                subprocess_utils.handle_returncode(returncode,
-                                                   code,
-                                                   'Failed to fetch services',
-                                                   stderr,
-                                                   stream_logs=True)
-            except exceptions.CommandError as e:
-                raise RuntimeError(e.error_msg) from e
-
-            service_records = serve_utils.load_service_status(
-                serve_status_payload)
-            assert len(service_records) == 1
-            service_record = service_records[0]
-
-            normalized_targets = {
-                serve_utils.ServiceComponentTarget(
-                    serve_utils.ServiceComponent.CONTROLLER),
-                serve_utils.ServiceComponentTarget(
-                    serve_utils.ServiceComponent.LOAD_BALANCER),
-                *(serve_utils.ServiceComponentTarget(
-                    serve_utils.ServiceComponent.REPLICA,
-                    replica_info['replica_id'])
-                  for replica_info in service_record['replica_info'])
+    if not targets:
+        # No targets specified -> request all components
+        requested_components = {
+            serve_utils.ServiceComponent.CONTROLLER,
+            serve_utils.ServiceComponent.LOAD_BALANCER,
+            serve_utils.ServiceComponent.REPLICA
+        }
+    else:
+        # Parse provided targets
+        if isinstance(targets, (str, serve_utils.ServiceComponent)):
+            requested_components = {serve_utils.ServiceComponent(targets)}
+        else:  # list
+            requested_components = {
+                serve_utils.ServiceComponent(t) for t in targets
             }
+
+    # Build the final set of targets based on requested components and replica_ids
+    normalized_targets: Set[serve_utils.ServiceComponentTarget] = set()
+
+    if serve_utils.ServiceComponent.CONTROLLER in requested_components:
+        normalized_targets.add(
+            serve_utils.ServiceComponentTarget(
+                serve_utils.ServiceComponent.CONTROLLER))
+    if serve_utils.ServiceComponent.LOAD_BALANCER in requested_components:
+        normalized_targets.add(
+            serve_utils.ServiceComponentTarget(
+                serve_utils.ServiceComponent.LOAD_BALANCER))
+
+    if serve_utils.ServiceComponent.REPLICA in requested_components:
+        if not replica_ids:
+            # Replica target requested but no specific IDs -> Get all replica logs
+            with rich_utils.safe_status(
+                    ux_utils.spinner_message('Getting live replicas...')):
+                replica_targets = serve_utils._get_all_replica_targets(
+                    service_name, backend, handle)
+            normalized_targets.update(replica_targets)
+        else:
+            # Replica target requested with specific IDs
+            normalized_targets.update({
+                serve_utils.ServiceComponentTarget(
+                    serve_utils.ServiceComponent.REPLICA, rid)
+                for rid in replica_ids
+            })
 
     local_service_dir = serve_utils.generate_remote_service_dir_name(
         service_name)

@@ -4772,7 +4772,7 @@ def serve_down(
               help='Sync down logs to the local machine. Can be combined with '
               '--controller, --load-balancer, or a replica ID to narrow scope.')
 @click.argument('service_name', required=True, type=str)
-@click.argument('replica_id', required=False, type=int)
+@click.argument('replica_ids', required=False, type=int, nargs=-1)
 @usage_lib.entrypoint
 # TODO(tian): Add default argument for this CLI if none of the flags are
 # specified.
@@ -4781,10 +4781,13 @@ def serve_logs(
     follow: bool,
     controller: bool,
     load_balancer: bool,
-    replica_id: Optional[int],
+    replica_ids: Tuple[int, ...],
     sync_down: bool,
 ):
     """Tail or sync down logs of a service.
+
+    Logs can be tailed from one target (controller, load balancer, or a single
+    replica) or synced down from multiple targets simultaneously.
 
     Example:
 
@@ -4799,48 +4802,76 @@ def serve_logs(
         # Tail the logs of replica 1
         sky serve logs [SERVICE_NAME] 1
         \b
-        # Sync down all logs of the service
+        # Sync down all logs of the service (controller, LB, all replicas)
         sky serve logs [SERVICE_NAME] --sync-down
         \b
-        # Sync down controller logs of the service
-        sky serve logs [SERVICE_NAME] --controller --sync-down
+        # Sync down controller logs and logs for replicas 1 and 3
+        sky serve logs [SERVICE_NAME] 1 3 --controller --sync-down
     """
     chosen_components: Set[serve_lib.ServiceComponent] = set()
     if controller:
         chosen_components.add(serve_lib.ServiceComponent.CONTROLLER)
     if load_balancer:
         chosen_components.add(serve_lib.ServiceComponent.LOAD_BALANCER)
-    if replica_id is not None:
+    # replica_ids contains the specific replica IDs provided by the user.
+    # If it's not empty, it implies the user wants replica logs.
+    if replica_ids:
         chosen_components.add(serve_lib.ServiceComponent.REPLICA)
 
     if sync_down:
-        # For sync-down, no extra flags means all logs, and multiple targets
-        # is allowed.
+        # For sync-down, multiple targets are allowed.
+        # If no specific components/replicas are mentioned, sync all.
+        targets_to_sync = list(chosen_components)
+        if not targets_to_sync and not replica_ids:
+            # Default to all components if nothing specific is requested
+            targets_to_sync = [
+                serve_lib.ServiceComponent.CONTROLLER,
+                serve_lib.ServiceComponent.LOAD_BALANCER,
+                serve_lib.ServiceComponent.REPLICA,
+            ]
+
         request_id = serve_lib.sync_down_logs(service_name,
-                                              targets=list(chosen_components),
-                                              replica_id=replica_id)
+                                              targets=targets_to_sync,
+                                              replica_ids=list(replica_ids))
         local_path = sdk.stream_and_get(request_id)
         click.echo(f'Logs downloaded to {local_path}')
         return
 
-    if len(chosen_components) == 0:
-        raise click.UsageError('One of --controller, --load-balancer, '
-                               '[REPLICA_ID] must be specified if not '
-                               'using --sync-down.')
+    # Tailing requires exactly one target.
+    num_targets = len(chosen_components)
+    # If REPLICA component is chosen, len(replica_ids) must be 1 for tailing.
+    if serve_lib.ServiceComponent.REPLICA in chosen_components:
+        if len(replica_ids) != 1:
+            raise click.UsageError(
+                'Can only tail logs from a single replica at a time. '
+                'Provide exactly one REPLICA_ID or use --sync-down '
+                'to download logs from multiple replicas.')
+        # If replica is chosen and len is 1, num_targets effectively counts it.
+        # We need to ensure no other component (controller/LB) is selected.
+        if num_targets > 1:
+            raise click.UsageError(
+                'Can only tail logs from one target at a time (controller, '
+                'load balancer, or a single replica). Use --sync-down '
+                'to download logs from multiple sources.')
+    elif num_targets == 0:
+        raise click.UsageError(
+            'Specify a target to tail: --controller, --load-balancer, or '
+            'a REPLICA_ID.')
+    elif num_targets > 1:
+        raise click.UsageError(
+            'Can only tail logs from one target at a time. Use --sync-down '
+            'to download logs from multiple sources.')
 
-    if len(chosen_components) > 1:
-        raise click.UsageError('Can only tail one target, i.e. '
-                               'one of --controller, --load-balancer, or '
-                               '[REPLICA_ID] at a time. '
-                               'Use --sync-down to download multiple.')
-
+    # At this point, we have exactly one target for tailing.
     assert len(chosen_components) == 1
+    assert len(replica_ids) in [0, 1]
     target_component = chosen_components.pop()
+    target_replica_id: Optional[int] = replica_ids[0] if replica_ids else None
 
     try:
         serve_lib.tail_logs(service_name,
                             target=target_component,
-                            replica_id=replica_id,
+                            replica_id=target_replica_id,
                             follow=follow)
     except exceptions.ClusterNotUpError:
         with ux_utils.print_exception_no_traceback():

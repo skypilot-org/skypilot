@@ -372,13 +372,12 @@ def tail_logs(service_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def sync_down_logs(service_name: str,
-                   *,
-                   targets: Optional[Union[
-                       str, 'serve_utils.ServiceComponent',
-                       List[Union[str,
-                                  'serve_utils.ServiceComponent']]]] = None,
-                   replica_id: Optional[int] = None) -> server_common.RequestId:
+def sync_down_logs(
+        service_name: str,
+        *,
+        targets: Optional[Union[str, 'serve_utils.ServiceComponent', List[Union[
+            str, 'serve_utils.ServiceComponent']]]] = None,
+        replica_ids: Optional[List[int]] = None) -> server_common.RequestId:
     """Sync down logs from the controller for the given service.
 
     This function:
@@ -396,8 +395,10 @@ def sync_down_logs(service_name: str,
                 - "controller"/ServiceComponent.CONTROLLER
                 - "load_balancer"/ServiceComponent.LOAD_BALANCER
                 - "replica"/ServiceComponent.REPLICA
-        replica_id: The replica ID to download logs from, specified when and
-            only when target is `ServiceComponent.REPLICA`.
+        replica_ids: The list of replica IDs to download logs from, specified
+            when target includes `ServiceComponent.REPLICA`. If target includes
+            `ServiceComponent.REPLICA` but this is None/empty, logs for all
+            replicas will be downloaded.
 
     Raises:
         RuntimeError: If fails to gather logs or fails to rsync from the
@@ -408,7 +409,7 @@ def sync_down_logs(service_name: str,
     body = payloads.ServeDownloadLogsBody(
         service_name=service_name,
         targets=targets,
-        replica_id=replica_id,
+        replica_ids=replica_ids,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/serve/sync-down-logs',
