@@ -26,9 +26,8 @@ CONTROLLER_RESOURCES: Dict[str, Union[str, int]] = {
 # Autostop config for the jobs controller. These are the default values for
 # jobs.controller.autostop in ~/.sky/config.yaml.
 CONTROLLER_AUTOSTOP: Dict[str, Any] = {
-    'enabled': True,
-    'down_when_idle': False,
-    'idle_minutes': 10
+    'idle_minutes': 10,
+    'down': False,
 }
 
 # TODO(zhwu): This is no longer accurate, after #4592, which increases the

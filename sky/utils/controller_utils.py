@@ -615,22 +615,27 @@ def get_controller_autostop_config(
     controller_autostop_config_copied: Dict[str, Any] = copy.copy(
         controller.value.default_autostop_config)
     if skypilot_config.loaded():
-        # Override the controller autostop config with the ones specified in the
-        # config.
         custom_controller_autostop_config = skypilot_config.get_nested(
             (controller.value.controller_type, 'controller', 'autostop'), None)
-        if custom_controller_autostop_config is not None:
+        if custom_controller_autostop_config is False:
+            # Disabled with `autostop: false` in config.
+            # To indicate autostop is disabled, we return None for
+            # idle_minutes_to_autostop.
+            return None, False
+        elif custom_controller_autostop_config is True:
+            # Enabled with default values. There is no change in behavior, but
+            # this is included by for completeness, since `False` is valid.
+            pass
+        elif custom_controller_autostop_config is not None:
+            # We have specific config values.
+            # Override the controller autostop config with the ones specified in
+            # the config.
+            assert isinstance(custom_controller_autostop_config, dict)
             controller_autostop_config_copied.update(
                 custom_controller_autostop_config)
 
-    if not controller_autostop_config_copied['enabled']:
-        # To indicate autostop is disabled, we return None for
-        # idle_minutes_to_autostop.
-        # The idle_minutes and down_when_idle arguments are ignored, and are
-        # banned in schema validation.
-        return None, False
     return (controller_autostop_config_copied['idle_minutes'],
-            controller_autostop_config_copied['down_when_idle'])
+            controller_autostop_config_copied['down'])
 
 
 def _setup_proxy_command_on_controller(

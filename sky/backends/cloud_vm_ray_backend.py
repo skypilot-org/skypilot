@@ -4489,7 +4489,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # they have explicitly specified it.
                     config_override_down = skypilot_config.get_nested(
                         (controller.value.controller_type, 'controller',
-                         'autostop', 'down_when_idle'), None)
+                         'autostop', 'down'), None)
                     if config_override_down is False:  # will not match None
                         logger.warning(
                             'SkyServe controller autodown is disabled in the '

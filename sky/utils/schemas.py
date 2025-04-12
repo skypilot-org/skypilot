@@ -725,35 +725,26 @@ def get_config_schema():
         if k != '$schema'
     }
     autostop_schema = {
-        'type': 'object',
-        'required': [],
         'anyOf': [
-            # If enabled is False, don't allow down_when_idle or idle_minutes.
             {
-                'additionalProperties': False,
-                'properties': {
-                    'enabled': {
-                        'const': False,
-                    },
-                },
+                # Use boolean to disable autostop completely, e.g.
+                #   autostop: false
+                'type': 'boolean',
             },
-            # If enabled is True, allow down_when_idle and idle_minutes.
             {
+                'type': 'object',
+                'required': [],
                 'additionalProperties': False,
                 'properties': {
-                    'enabled': {
-                        'const': True,
-                    },
-                    'down_when_idle': {
-                        'type': 'boolean',
-                    },
                     'idle_minutes': {
                         'type': 'integer',
                         'minimum': 0,
                     },
+                    'down': {
+                        'type': 'boolean',
+                    },
                 },
             },
-            # If enabled is unset, either schema can match.
         ],
     }
     controller_resources_schema = {
