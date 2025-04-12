@@ -67,13 +67,18 @@ class RunPod(clouds.Cloud):
                               accelerators: Optional[Dict[str, int]],
                               use_spot: bool, region: Optional[str],
                               zone: Optional[str]) -> List[clouds.Region]:
-        assert zone is None, 'RunPod does not support zones.'
-        del accelerators, zone  # unused
+        del accelerators  # unused
         regions = service_catalog.get_region_zones_for_instance_type(
             instance_type, use_spot, 'runpod')
 
         if region is not None:
             regions = [r for r in regions if r.name == region]
+
+        if zone is not None:
+            for r in regions:
+                assert r.zones is not None, r
+                r.set_zones([z for z in r.zones if z.name == zone])
+            regions = [r for r in regions if r.zones]
         return regions
 
     @classmethod
@@ -158,7 +163,9 @@ class RunPod(clouds.Cloud):
             zones: Optional[List['clouds.Zone']],
             num_nodes: int,
             dryrun: bool = False) -> Dict[str, Optional[str]]:
-        del zones, dryrun, cluster_name  # unused
+        del dryrun, cluster_name  # unused
+
+        zone_name = zones[0].name
 
         r = resources
         acc_dict = self.get_accelerators_from_instance_type(r.instance_type)
@@ -187,6 +194,7 @@ class RunPod(clouds.Cloud):
             'instance_type': instance_type,
             'custom_resources': custom_resources,
             'region': region.name,
+            'availability_zone': zone_name,
             'image_id': image_id,
             'use_spot': use_spot,
             'bid_per_gpu': str(hourly_cost),

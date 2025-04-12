@@ -237,7 +237,7 @@ def _create_template_for_docker_login(
     return login_config.format_image(image_name), create_template_resp['id']
 
 
-def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
+def launch(cluster_name: str, node_type: str, instance_type: str, region: str, zone: str,
            disk_size: int, image_name: str, ports: Optional[List[int]],
            public_key: str, preemptible: Optional[bool], bid_per_gpu: float,
            docker_login_config: Optional[Dict[str, str]]) -> str:
@@ -305,7 +305,8 @@ def launch(cluster_name: str, node_type: str, instance_type: str, region: str,
         'min_vcpu_count': 4 * gpu_quantity,
         'min_memory_in_gb': gpu_specs['memoryInGb'] * gpu_quantity,
         'gpu_count': gpu_quantity,
-        'data_center_id': region,
+        'country_code': region,
+        'data_center_id': zone,
         'ports': ports_str,
         'support_public_ip': True,
         'docker_args': docker_args,
