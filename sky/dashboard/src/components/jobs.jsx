@@ -125,40 +125,6 @@ export function ManagedJobs() {
           </Button>
         </div>
       </div>
-      <div className="flex flex-col space-y-4">
-        {/* Activeness Filter */}
-        <div className="flex items-center text-sm">
-          <span className="mr-2 text-sm font-medium">Activeness:</span>
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setActiveTab('active')}
-              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                activeTab === 'active'
-                  ? 'bg-green-50 text-green-700'
-                  : 'bg-gray-50 text-gray-600 hover:bg-green-50 hover:text-green-700'
-              }`}
-            >
-              <span>ACTIVE</span>
-              <span className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
-                {counts.active}
-              </span>
-            </button>
-            <button
-              onClick={() => setActiveTab('finished')}
-              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                activeTab === 'finished'
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-700'
-              }`}
-            >
-              <span>FINISHED</span>
-              <span className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
-                {counts.finished}
-              </span>
-            </button>
-          </div>
-        </div>
-      </div>
       <ManagedJobsTable
         activeTab={activeTab}
         refreshInterval={20000}
@@ -178,7 +144,7 @@ export function ManagedJobs() {
 }
 
 export function ManagedJobsTable({
-  activeTab,
+  activeTab: initialActiveTab,
   refreshInterval,
   setLoading,
   refreshDataRef,
@@ -196,7 +162,9 @@ export function ManagedJobsTable({
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
   const [selectedStatus, setSelectedStatus] = useState('All');
+  const [statusCounts, setStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
+  const [activeTab, setActiveTab] = useState(initialActiveTab || 'active');
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -331,63 +299,61 @@ export function ManagedJobsTable({
   };
 
   // Calculate active and finished counts
-  const activeCount = data.filter(item =>
-    ['RUNNING', 'RECOVERING', 'PENDING', 'SUBMITTED', 'STARTING', 'CANCELLING'].includes(item.status)
-  ).length;
+  const counts = React.useMemo(() => {
+    const active = data.filter(item =>
+      ['RUNNING', 'RECOVERING', 'PENDING', 'SUBMITTED', 'STARTING', 'CANCELLING'].includes(item.status)
+    ).length;
+    const finished = data.filter(item =>
+      ['SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER'].includes(item.status)
+    ).length;
+    return { active, finished };
+  }, [data]);
 
-  const finishedCount = data.filter(item =>
-    ['SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER'].includes(item.status)
-  ).length;
+  // Define status groups
+  const statusGroups = {
+    active: ['PENDING', 'RUNNING', 'RECOVERING', 'SUBMITTED', 'STARTING', 'CANCELLING'],
+    finished: ['SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER']
+  };
 
-  // Update counts in parent component
-  useEffect(() => {
-    onCountsChange({ active: activeCount, finished: finishedCount });
-  }, [activeCount, finishedCount, onCountsChange]);
+  // Helper function to determine if a status should be highlighted
+  const isStatusHighlighted = (status) => {
+    if (selectedStatus === 'All') {
+      return statusGroups[activeTab].includes(status);
+    }
+    return status === selectedStatus;
+  };
 
-  // First, keep the activeTab filter
-  const filteredData = sortedData
-    .filter((item) => {
-      if (activeTab === 'active') {
-        return [
-          'RUNNING',
-          'RECOVERING',
-          'PENDING',
-          'SUBMITTED',
-          'STARTING',
-          'CANCELLING',
-        ].includes(item.status);
-      } else {
-        return [
-          'SUCCEEDED',
-          'FAILED',
-          'CANCELLED',
-          'FAILED_SETUP',
-          'FAILED_PRECHECKS',
-          'FAILED_NO_RESOURCE',
-          'FAILED_CONTROLLER',
-        ].includes(item.status);
+  // Filter data based on active tab and selected status
+  const filteredData = React.useMemo(() => {
+    return data.filter(item => {
+      const matchesActiveTab = statusGroups[activeTab].includes(item.status);
+      if (selectedStatus === 'All') {
+        return matchesActiveTab;
       }
+      return item.status === selectedStatus;
     });
+  }, [data, activeTab, selectedStatus]);
 
-  // Calculate status counts from the filtered data
-  const statusCounts = React.useMemo(() => {
-    const counts = {
-      All: filteredData.length,
-    };
-    filteredData.forEach(item => {
-      counts[item.status] = (counts[item.status] || 0) + 1;
-    });
-    return counts;
-  }, [filteredData]);
+  // Handle status selection
+  const handleStatusClick = (status) => {
+    if (status === selectedStatus) {
+      setSelectedStatus('All');
+    } else {
+      setSelectedStatus(status);
+    }
+  };
 
-  // Apply status filter
-  const statusFilteredData = React.useMemo(() => {
-    if (selectedStatus === 'All') return filteredData;
-    return filteredData.filter(item => item.status === selectedStatus);
-  }, [filteredData, selectedStatus]);
+  // Update status counts when data changes
+  useEffect(() => {
+    const counts = data.reduce((acc, job) => {
+      acc[job.status] = (acc[job.status] || 0) + 1;
+      return acc;
+    }, {});
+    setStatusCounts(counts);
+  }, [data]);
 
   // Calculate pagination
-  const totalPages = Math.ceil(statusFilteredData.length / pageSize);
+  const totalPages = Math.ceil(filteredData.length / pageSize);
   const startIndex = (currentPage - 1) * pageSize;
   const endIndex = startIndex + pageSize;
 
@@ -406,50 +372,80 @@ export function ManagedJobsTable({
     setCurrentPage(1); // Reset to first page when changing page size
   };
 
-  const paginatedData = statusFilteredData.slice(startIndex, endIndex);
+  const paginatedData = filteredData.slice(startIndex, endIndex);
 
   return (
     <div className="relative">
-      {/* Status Filter Bar */}
-      <div className="flex items-center mb-4 text-sm">
-        <span className="text-sm font-medium">Status:</span>
-        <div className="flex flex-wrap gap-2">
-          <button
-            onClick={() => setSelectedStatus('All')}
-            className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-              selectedStatus === 'All'
-                ? 'bg-sky-50 text-sky-700'
-                : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
-            }`}
-          >
-            <span>All</span>
-            <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
-              {statusCounts.All}
-            </span>
-          </button>
-          {Object.entries(statusCounts)
-            .filter(([status]) => status !== 'All')
-            .map(([status, count]) => {
-              const badgeStyle = getBadgeStyle(status);
-              return (
+      <Card>
+        <div className="p-4">
+          <div className="flex flex-col space-y-4">
+            {/* Activeness Filter */}
+            <div className="flex items-center text-sm">
+              <span className="mr-2 text-sm font-medium">Activeness:</span>
+              <div className="flex space-x-2">
                 <button
-                  key={status}
-                  onClick={() => setSelectedStatus(selectedStatus === status ? 'All' : status)}
+                  onClick={() => setActiveTab('active')}
                   className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                    selectedStatus === status
-                      ? `${badgeStyle}`
-                      : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                    activeTab === 'active'
+                      ? 'bg-green-50 text-green-700'
+                      : 'bg-gray-50 text-gray-600 hover:bg-green-50 hover:text-green-700'
                   }`}
                 >
-                  <span>{status}</span>
-                  <span className={`text-xs ${selectedStatus === status ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
-                    {count}
+                  <span>ACTIVE</span>
+                  <span className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                    {counts.active}
                   </span>
                 </button>
-              );
-            })}
+                <button
+                  onClick={() => setActiveTab('finished')}
+                  className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                    activeTab === 'finished'
+                      ? 'bg-blue-50 text-blue-700'
+                      : 'bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-700'
+                  }`}
+                >
+                  <span>FINISHED</span>
+                  <span className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                    {counts.finished}
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* Status Filter */}
+            <div className="flex items-center text-sm">
+              <span className="mr-2 text-sm font-medium">Status:</span>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => handleStatusClick('All')}
+                  className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                    selectedStatus === 'All' ? 'bg-sky-50 text-sky-700' : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
+                  }`}
+                >
+                  <span>ALL</span>
+                  <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                    {Object.values(statusCounts).reduce((a, b) => a + b, 0)}
+                  </span>
+                </button>
+                {Object.entries(statusCounts).map(([status, count]) => (
+                  <button
+                    key={status}
+                    onClick={() => handleStatusClick(status)}
+                    className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                      isStatusHighlighted(status) ? getBadgeStyle(status) : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                    }`}
+                  >
+                    <span>{status}</span>
+                    <span className={`text-xs ${isStatusHighlighted(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                      {count}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
+      </Card>
 
       <Card>
         <Table>
@@ -624,7 +620,7 @@ export function ManagedJobsTable({
       </Card>
 
       {/* Pagination controls */}
-      {statusFilteredData.length > 0 && (
+      {filteredData.length > 0 && (
         <div className="flex justify-end items-center py-2 px-4 text-sm text-gray-700">
           <div className="flex items-center space-x-4">
             <div className="flex items-center">
@@ -659,8 +655,8 @@ export function ManagedJobsTable({
               </div>
             </div>
             <div>
-              {startIndex + 1} – {Math.min(endIndex, statusFilteredData.length)} of{' '}
-              {statusFilteredData.length}
+              {startIndex + 1} – {Math.min(endIndex, filteredData.length)} of{' '}
+              {filteredData.length}
             </div>
             <div className="flex items-center space-x-2">
               <Button
