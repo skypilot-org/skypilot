@@ -359,7 +359,7 @@ def _start(
             arguments = []
             if down:
                 arguments.append('`down`')
-            if idle_minutes_to_autostop:
+            if idle_minutes_to_autostop is not None:
                 arguments.append('`idle_minutes_to_autostop`')
             arguments_str = ' and '.join(arguments) + ' argument'
             if len(arguments) > 1:
