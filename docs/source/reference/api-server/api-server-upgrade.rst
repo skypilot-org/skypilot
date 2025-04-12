@@ -17,7 +17,7 @@ Here we introduce the steps for upgrading a remote API server deployed with :ref
 
 .. note::
 
-    Upgrading the API server introduces downtime. We recommend to schedule the upgrade during a **maintenance window**: cordon & drain the old API server and upgrade.
+    Upgrading the API server introduces downtime. We recommend scheduling the upgrade during a **maintenance window**: cordon and drain the old API server, then perform the upgrade.
 
 Step 1: Prepare an upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -29,7 +29,7 @@ Step 1: Prepare an upgrade
 
     helm repo update skypilot
 
-3. Prepare variables for the upgrade, the ``NAMESPACE`` and ``RELEASE_NAME`` should be the same as the previous deployment step:
+3. Prepare versioning environment variables.  ``NAMESPACE`` and ``RELEASE_NAME`` should be set to the currently installed namespace and release:
 
 .. code-block:: bash
 
@@ -74,7 +74,7 @@ Optionally, you can watch the upgrade progress with:
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
     skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
 
-The upgraded API server is ready to serve requests after the pod is running and the ``READY`` column shows ``1/1``. The cordon will be removed automatically after the upgrade.
+The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. The cordon will be removed automatically after the upgrade.
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -96,12 +96,12 @@ Optional: Cordon and drain the API server
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 
-The following steps help void new request being submitted to the API server (cordon) and wait for all existing requests to finish on old API server (drain) during the maintainance window -- gracefully upgrade the API server.
+The following steps ensure graceful upgrade of the API server: (1) Reject new request to the API server (cordon), and (2) Wait for all existing requests to finish on the old API server (drain) during the maintenance window.
 
 .. note:: 
   It requires `patch` and `exec` (or `port-forward`) access to the API server Pod.
 
-1. Cordon SkyPilot API server to avoid new request:
+1. Cordon SkyPilot API server to reject new requests:
 
 .. code-block:: bash
 
@@ -127,7 +127,7 @@ The following steps help void new request being submitted to the API server (cor
     
     After the patch, verify the API server is cordoned again.
 
-3. Drain the old API server by waiting or canceling current requests:
+3. Drain the old API server by waiting for all current requests to finish, or canceling them:
 
 .. tab-set::
 
@@ -146,7 +146,7 @@ The following steps help void new request being submitted to the API server (cor
 
         .. note::
 
-            The `skypilot-status-refresh-daemon` is a background process managed by API server that is never stop. And ``sky.logs`` can last for a long time. Both of them can be safely interrupted.
+            The `skypilot-status-refresh-daemon` is a background process managed by API server that is never stopped. Also, ``sky.logs`` can last for a long time. Both of them can be safely interrupted.
     
     .. tab-item:: Canceling requests
 
@@ -158,7 +158,7 @@ The following steps help void new request being submitted to the API server (cor
 
 .. dropdown:: Using port-forward to access the API server
 
-    If you do not have `exec` access to the API server Pod, you can also use `port-forward` to access the api status:
+    If you do not have ``exec`` access to the API server Pod, you can also use ``port-forward`` to access the api status:
 
     .. code-block:: console
 
@@ -179,7 +179,7 @@ Upgrade the API server deployed on VM
 
 .. note::
 
-    VM deployment does not offer graceful upgrading support. We recommend to use Helm deployment :ref:`sky-api-server-deploy` in production environments. The following is a workaround for upgrading SkyPilot API server on VM deployment.
+    VM deployment does not offer graceful upgrade. We recommend the Helm deployment :ref:`sky-api-server-deploy` in production environments. The following is a workaround for upgrading SkyPilot API server in VM deployments.
 
 Suppose the cluster name of the API server is ``api-server`` (which is used in the :ref:`sky-api-server-cloud-deploy` guide), you can upgrade the API server with the following steps:
 
@@ -209,13 +209,13 @@ Suppose the cluster name of the API server is ``api-server`` (which is used in t
 
 .. note:: 
 
-    After upgrading the clients, they should avoid being used until the API server is upgraded to the new version.
+    After upgrading the clients, they should not be used until the API server is upgraded to the new version.
 
 5. Upgrade the SkyPilot on the VM and restart the API server:
 
 .. note::
 
-    Upgrade and restart the API server will interrupt all pending and running requests.
+    Upgrading and restarting the API server will interrupt all pending and running requests.
 
 .. code-block:: bash
 
