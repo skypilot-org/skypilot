@@ -267,11 +267,6 @@ available_node_types:
             {%- for label_key, label_value in labels.items() %}
             {{ label_key }}: {{ label_value|tojson }}
             {%- endfor %}
-        {% if k8s_fuse_device_required %}
-        annotations:
-            # Required for FUSE mounting to access /dev/fuse
-            container.apparmor.security.beta.kubernetes.io/ray-node: unconfined
-        {% endif %}
       spec:
         # serviceAccountName: skypilot-service-account
         serviceAccountName: {{k8s_service_account_name}}
@@ -310,9 +305,12 @@ available_node_types:
         - name: dshm
           emptyDir:
             medium: Memory
-        - name: dev-fuse    # Required for fuse mounting
+        {% if k8s_fuse_device_required %}
+        - name: fusermount-shared-dir
           hostPath:
-            path: /dev/fuse
+            path: {{k8s_fusermount_shared_dir}}
+            type: DirectoryOrCreate
+        {% endif %}
         containers:
         - name: ray-node
           imagePullPolicy: IfNotPresent
@@ -326,6 +324,10 @@ available_node_types:
             - name: {{ key }}
               value: {{ value }}
             {% endfor %}
+            {% if k8s_fuse_device_required %}
+            - name: FUSERMOUNT_SHARED_DIR
+              value: {{k8s_fusermount_shared_dir}}
+            {% endif %}
           # Do not change this command - it keeps the pod alive until it is
           # explicitly killed.
           command: ["/bin/bash", "-c", "--"]
@@ -350,11 +352,14 @@ available_node_types:
                 (
                 DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get update > /tmp/apt-update.log 2>&1 || \
                 echo "Warning: apt-get update failed. Continuing anyway..." >> /tmp/apt-update.log
-                PACKAGES="rsync curl netcat gcc patch pciutils fuse openssh-server";
+                # Install both fuse2 and fuse3 for compatibility for all possible fuse adapters in advance,
+                # so that both fusemount and fusermount3 can be masked before enabling SSH access.
+                PACKAGES="rsync curl wget netcat gcc patch pciutils fuse fuse3 openssh-server";
 
                 # Separate packages into two groups: packages that are installed first
-                # so that curl and rsync are available sooner to unblock the following
+                # so that curl, rsync and wget are available sooner to unblock the following
                 # conda installation and rsync.
+                # Also, we install fuse first to avoid confliction with fuse3.
                 set -e
                 INSTALL_FIRST="";
                 MISSING_PACKAGES="";
@@ -364,7 +369,7 @@ available_node_types:
                       INSTALL_FIRST="$INSTALL_FIRST netcat-openbsd";
                     fi
                   elif ! dpkg -l | grep -q "^ii  $pkg "; then
-                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ]; then
+                    if [ "$pkg" == "curl" ] || [ "$pkg" == "rsync" ] || [ "$pkg" == "fuse" ] || [ "$pkg" == "wget" ]; then
                       INSTALL_FIRST="$INSTALL_FIRST $pkg";
                     else
                       MISSING_PACKAGES="$MISSING_PACKAGES $pkg";
@@ -382,7 +387,52 @@ available_node_types:
                   echo "Installing missing packages: $MISSING_PACKAGES";
                   DEBIAN_FRONTEND=noninteractive $(prefix_cmd) apt-get install -y -o Dpkg::Options::="--force-confdef" -o Dpkg::Options::="--force-confold" $MISSING_PACKAGES;
                 fi;
-              
+
+                {% if k8s_fuse_device_required %}
+                set -e
+                # Mask fusermount binary before enabling SSH access
+                FUSERMOUNT_PATH=$(which fusermount)
+                if [ -z "$FUSERMOUNT_PATH" ]; then
+                    echo "Error: fusermount binary not found"
+                    exit 1
+                fi
+                $(prefix_cmd) cp -p "$FUSERMOUNT_PATH" "${FUSERMOUNT_PATH}-original"
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                FUSERMOUNT3_PATH=$(which fusermount3)
+                if [ -z "$FUSERMOUNT3_PATH" ]; then
+                    FUSERMOUNT3_PATH="${FUSERMOUNT_PATH}3"
+                fi
+                # Also mask fusermount3 for rclone and blobfuse2 (for unmount operation)
+                $(prefix_cmd) ln -sf "$FUSERMOUNT_PATH" "$FUSERMOUNT3_PATH"
+                # Add fusermount-wrapper to handle adapters that use libfuse directly, e.g. blobfuse2
+                $(prefix_cmd) ln -sf {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
+                # Wait for the server to setup the fusermount shim binary in case:
+                # 1. The server daemonset was just deployed and is still starting up.
+                # 2. The node was just started and the server Pod is still starting up.
+                wait_for_fusermount() {
+                    local timeout=60
+                    local start_time=$(date +%s)
+                    while ! command -v fusermount >/dev/null 2>&1; do
+                        current_time=$(date +%s)
+                        elapsed=$((current_time - start_time))
+                        if [ $elapsed -ge $timeout ]; then
+                            echo "Error: fusermount not ready after $timeout seconds"
+                            exit 1
+                        fi
+                        sleep 1
+                    done
+                }
+                wait_for_fusermount
+                # Some distributions may mount hostPath with noexec, copy the binary in this case.
+                if ! fusermount -V; then
+                    echo "fusermount -V failed, copying fusermount-shim directly"
+                    $(prefix_cmd) rm -f "$FUSERMOUNT_PATH"
+                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-shim "$FUSERMOUNT_PATH"
+                    $(prefix_cmd) rm -f /bin/fusermount-wrapper
+                    $(prefix_cmd) cp -p {{k8s_fusermount_shared_dir}}/fusermount-wrapper /bin/fusermount-wrapper
+                fi
+                {% endif %}            
+
                 $(prefix_cmd) mkdir -p /var/run/sshd;
                 $(prefix_cmd) sed -i "s/PermitRootLogin prohibit-password/PermitRootLogin yes/" /etc/ssh/sshd_config;
                 $(prefix_cmd) sed "s@session\s*required\s*pam_loginuid.so@session optional pam_loginuid.so@g" -i /etc/pam.d/sshd;
@@ -394,6 +444,7 @@ available_node_types:
                 $(prefix_cmd) chmod 644 ~/.ssh/authorized_keys;
                 $(prefix_cmd) service ssh restart;
                 $(prefix_cmd) sed -i "s/mesg n/tty -s \&\& mesg n/" ~/.profile;
+
                 ) > /tmp/${STEPS[0]}.log 2>&1 || {
                   echo "Error: ${STEPS[0]} failed. Continuing anyway..." > /tmp/${STEPS[0]}.failed
                   cat /tmp/${STEPS[0]}.log
@@ -539,10 +590,8 @@ available_node_types:
           - mountPath: /dev/shm
             name: dshm
           {% if k8s_fuse_device_required %}
-          securityContext:
-            capabilities:
-              add:
-                - "SYS_ADMIN"
+          - name: fusermount-shared-dir
+            mountPath: {{k8s_fusermount_shared_dir}}
           {% endif %}
           resources:
             requests:
@@ -556,19 +605,11 @@ available_node_types:
               # https://cloud.google.com/kubernetes-engine/docs/concepts/tpus#how_tpus_work
               {{k8s_resource_key}}: {{accelerator_count}}
               {% endif %}
-              {% if k8s_fuse_device_required %}
-              # Kubernetes resource exposed by the fuse device manager
-              # https://gitlab.com/arm-research/smarter/smarter-device-manager
-              smarter-devices/fuse: "1"
-              {% endif %}
-            {% if k8s_resource_key is not none or k8s_fuse_device_required %}
+            {% if k8s_resource_key is not none %}
             limits:
               # Limits need to be defined for GPU/TPU requests
               {% if k8s_resource_key is not none %}
               {{k8s_resource_key}}: {{accelerator_count}}
-              {% endif %}
-              {% if k8s_fuse_device_required %}
-              smarter-devices/fuse: "1"
               {% endif %}
             {% endif %}
             
@@ -578,7 +619,7 @@ setup_commands:
   # Line 'sudo bash ..': set the ulimit as suggested by ray docs for performance. https://docs.ray.io/en/latest/cluster/vms/user-guides/large-cluster-best-practices.html#system-configuration
   # Line 'sudo grep ..': set the number of threads per process to unlimited to avoid ray job submit stucking issue when the number of running ray jobs increase.
   # Line 'mkdir -p ..': disable host key check
-  # Line 'python3 -c ..': patch the buggy ray files and enable `-o allow_other` option for `goofys`
+  # Line '[-f /etc/fuse.conf] ..': enable `-o allow_other` option for `goofys`
   # Line 'for step in ..': check if any failure indicator exists for the setup done in pod args and print the error message. This is only a best effort, as the
   # commands in pod args are asynchronous and we cannot guarantee the failure indicators are created before the setup commands finish.
   - |
