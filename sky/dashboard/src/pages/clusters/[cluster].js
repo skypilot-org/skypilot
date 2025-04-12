@@ -53,7 +53,7 @@ function ClusterDetails() {
 
   return (
     <Layout highlighted="clusters">
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base flex items-center">
           <Link href="/clusters" className="text-sky-blue hover:underline">
             Sky Clusters
@@ -102,6 +102,8 @@ function ClusterDetails() {
           </div>
         </div>
       </div>
+
+      <div className="border-b border-gray-200 my-4"></div>
 
       {loading ? (
         <div className="flex justify-center items-center py-12">

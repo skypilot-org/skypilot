@@ -99,9 +99,9 @@ export function ManagedJobs() {
 
   return (
     <Layout highlighted="jobs">
-      <div className="flex items-center justify-between mb-4">
+      <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
-          <Link href="/jobs" className="text-sky-blue hover:underline">
+          <Link href="/jobs" className="text-sky-blue hover:underline leading-none">
             Managed Jobs
           </Link>
         </div>
@@ -1181,7 +1181,7 @@ function status2Icon(status) {
     case 'STARTING':
       return (
         <span className={`${badgeClasses} bg-cyan-50 text-cyan-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
+          <CircularProgress size={12} className="w-2 h-2 mr-2" />
           STARTING
         </span>
       );
