@@ -43,10 +43,12 @@ Step 2: Upgrade the API server and clients
 
 .. note::
 
-    * Upgrading the API server will interrupt any pending and on-going requests on the API server, e.g., on-goining ``sky launch``. You can recover on-going requests by running the same commands again after the new API server starts.
-    * Upgrading only one of the server or clients may break the compatibility between the server and clients.
-
-    To minimize the impact of upgrading, you can :ref:`cordon and drain the API server <cordon-drain-api-server>` before upgrading the API server and clients to enforce that all the requests to be finished before the upgrade and there is no new request during the upgrade.
+    To minimize the impact of upgrading, you can :ref:`cordon and drain the API server <cordon-drain-api-server>` before performing this step. The optional cordon and drain step enforces that all requests be finished before the upgrade and there is no new request during the upgrade.
+    
+    If you choose not to perform cordon and drain, upgrade has the following behaviors:
+    
+    * Upgrading the API server will interrupt any pending and ongoing requests on the API server, e.g., ongoining ``sky launch``. Clients can recover ongoing requests by running the same commands again after the new API server starts.
+    * Upgrading only the server or only the client may break the compatibility between them.
 
 Upgrade the clients:
 
