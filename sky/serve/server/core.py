@@ -65,6 +65,40 @@ def _rewrite_tls_credential_paths_and_get_tls_env_vars(
     return tls_template_vars
 
 
+def _get_all_replica_targets(
+    service_name: str, backend: backends.CloudVmRayBackend,
+    handle: backends.CloudVmRayResourceHandle
+) -> Set[serve_utils.ServiceComponentTarget]:
+    """Helper function to get targets for all live replicas."""
+    code = serve_utils.ServeCodeGen.get_service_status([service_name])
+    returncode, serve_status_payload, stderr = backend.run_on_head(
+        handle,
+        code,
+        require_outputs=True,
+        stream_logs=False,
+        separate_stderr=True)
+
+    try:
+        subprocess_utils.handle_returncode(returncode,
+                                           code,
+                                           'Failed to fetch services',
+                                           stderr,
+                                           stream_logs=True)
+    except exceptions.CommandError as e:
+        raise RuntimeError(e.error_msg) from e
+
+    service_records = serve_utils.load_service_status(serve_status_payload)
+    if not service_records:
+        raise ValueError(f'Service {service_name!r} not found.')
+    service_record = service_records[0]
+
+    return {
+        serve_utils.ServiceComponentTarget(serve_utils.ServiceComponent.REPLICA,
+                                           replica_info['replica_id'])
+        for replica_info in service_record['replica_info']
+    }
+
+
 @usage_lib.entrypoint
 def up(
     task: 'sky.Task',
@@ -817,7 +851,6 @@ def sync_down_logs(service_name: str,
             backend_utils.get_backend_from_handle(handle))
 
     requested_components: Set[serve_utils.ServiceComponent] = set()
-
     if not targets:
         # No targets specified -> request all components
         requested_components = {
@@ -834,9 +867,7 @@ def sync_down_logs(service_name: str,
                 serve_utils.ServiceComponent(t) for t in targets
             }
 
-    # Build the final set of targets based on requested components and replica_ids
     normalized_targets: Set[serve_utils.ServiceComponentTarget] = set()
-
     if serve_utils.ServiceComponent.CONTROLLER in requested_components:
         normalized_targets.add(
             serve_utils.ServiceComponentTarget(
@@ -845,10 +876,10 @@ def sync_down_logs(service_name: str,
         normalized_targets.add(
             serve_utils.ServiceComponentTarget(
                 serve_utils.ServiceComponent.LOAD_BALANCER))
-
     if serve_utils.ServiceComponent.REPLICA in requested_components:
         if not replica_ids:
-            # Replica target requested but no specific IDs -> Get all replica logs
+            # Replica target requested but no specific IDs
+            # -> Get all replica logs
             with rich_utils.safe_status(
                     ux_utils.spinner_message('Getting live replicas...')):
                 replica_targets = serve_utils._get_all_replica_targets(
