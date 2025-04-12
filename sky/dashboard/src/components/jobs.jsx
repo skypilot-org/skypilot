@@ -32,6 +32,7 @@ import {
   SelectItem,
 } from '@/components/ui/select';
 import { getManagedJobs } from '@/data/connectors/jobs';
+import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
 import { EventTable } from '@/components/elements/events';
 import { CustomTooltip as Tooltip, relativeTime } from '@/components/utils';
@@ -46,6 +47,7 @@ import {
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
+import { isJobController } from '@/data/utils';
 
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
@@ -237,18 +239,32 @@ export function ManagedJobsTable({
     setLocalLoading(true);
     setLoading(true); // Set parent loading state
     try {
-      const { jobs, controllerStopped } = await getManagedJobs();
+      // Fetch both jobs and clusters data in parallel
+      const [jobsResponse, clustersData] = await Promise.all([
+        getManagedJobs(),
+        getClusters()
+      ]);
+
+      const { jobs, controllerStopped } = jobsResponse;
+      // for the clusters, check if there is a cluster that `isJobController`
+      const jobControllerCluster = clustersData.find(c => isJobController(c.cluster));
+      const jobControllerClusterStatus = jobControllerCluster ? jobControllerCluster.status : 'NOT_FOUND';
+      let isControllerStopped=false
+      if (jobControllerClusterStatus=='STOPPED' && controllerStopped) {
+        isControllerStopped=true
+      }
+
       setData(jobs);
-      setControllerStopped(controllerStopped);
+      setControllerStopped(isControllerStopped);
     } catch (err) {
-      console.error('Error fetching managed jobs:', err);
+      console.error('Error fetching data:', err);
       setData([]);
     } finally {
       setLocalLoading(false);
       setLoading(false); // Clear parent loading state
       setIsInitialLoad(false);
     }
-  }, [setLoading]); // Add setLoading to dependencies
+  }, [setLoading]);
 
   // Expose fetchData to parent component
   React.useEffect(() => {
