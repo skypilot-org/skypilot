@@ -101,7 +101,7 @@ Optional: Cordon and drain the API server
 The following steps ensure graceful upgrade of the API server: (1) Reject new request to the API server (cordon), and (2) Wait for all existing requests to finish on the old API server (drain) during the maintenance window.
 
 .. note:: 
-  It requires `patch` and `exec` (or `port-forward`) access to the API server Pod.
+  It requires ``patch`` and ``exec`` (or ``port-forward``) access to the API server Pod.
 
 1. Cordon SkyPilot API server to reject new requests:
 
@@ -148,7 +148,7 @@ The following steps ensure graceful upgrade of the API server: (1) Reject new re
 
         .. note::
 
-            The `skypilot-status-refresh-daemon` is a background process managed by API server that is never stopped. Also, ``sky.logs`` can last for a long time. Both of them can be safely interrupted.
+            The ``skypilot-status-refresh-daemon`` is a background process managed by API server that is never stopped. Also, ``sky.logs`` can last for a long time. Both of them can be safely interrupted.
     
     .. tab-item:: Canceling requests
 
