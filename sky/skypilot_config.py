@@ -1,7 +1,7 @@
 """Immutable user configurations (EXPERIMENTAL).
 
 On module import, we attempt to parse the config located at _USER_CONFIG_PATH
-(default: ~/.sky/skyconfig.yaml). Caller can then use
+(default: ~/.sky/.sky.yaml). Caller can then use
 
   >> skypilot_config.loaded()
 
@@ -35,14 +35,14 @@ Consider the following config contents:
 
 then:
 
-    # Assuming ~/.sky/skyconfig.yaml exists and can be loaded:
+    # Assuming ~/.sky/.sky.yaml exists and can be loaded:
     skypilot_config.loaded()  # ==> True
 
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> 1
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> {'nested': 1}
 
-    # If ~/.sky/skyconfig.yaml doesn't exist or failed to be loaded:
+    # If ~/.sky/.sky.yaml doesn't exist or failed to be loaded:
     skypilot_config.loaded()  # ==> False
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> None
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
@@ -101,8 +101,8 @@ ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the local config files.
 _LEGACY_USER_CONFIG_PATH = '~/.sky/config.yaml'
-_USER_CONFIG_PATH = '~/.sky/skyconfig.yaml'
-_PROJECT_CONFIG_PATH = 'skyconfig.yaml'
+_USER_CONFIG_PATH = '~/.sky/.sky.yaml'
+_PROJECT_CONFIG_PATH = '.sky.yaml'
 
 # The loaded config.
 _dict = config_utils.Config()

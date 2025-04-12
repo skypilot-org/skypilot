@@ -1454,14 +1454,14 @@ def is_kubeconfig_exec_auth(
 
 
     Using exec-based authentication is problematic when used in conjunction
-    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/skyconfig.yaml.
+    with kubernetes.remote_identity = LOCAL_CREDENTIAL in ~/.sky/.sky.yaml.
     This is because the exec-based authentication may not have the relevant
     dependencies installed on the remote cluster or may have hardcoded paths
     that are not available on the remote cluster.
 
     Returns:
         bool: True if exec-based authentication is used and LOCAL_CREDENTIAL
-            mode is used for remote_identity in ~/.sky/skyconfig.yaml.
+            mode is used for remote_identity in ~/.sky/.sky.yaml.
         str: Error message if exec-based authentication is used, None otherwise
     """
     k8s = kubernetes.kubernetes
@@ -1514,7 +1514,7 @@ def is_kubeconfig_exec_auth(
                     'Managed Jobs or SkyServe controller on Kubernetes. '
                     'To fix, configure SkyPilot to create a service account '
                     'for running pods by setting the following in '
-                    '~/.sky/skyconfig.yaml:\n'
+                    '~/.sky/.sky.yaml:\n'
                     '    kubernetes:\n'
                     '      remote_identity: SERVICE_ACCOUNT\n'
                     '    More: https://docs.skypilot.co/en/latest/'
@@ -2252,7 +2252,7 @@ def combine_pod_config_fields(
     cluster_config_overrides: Dict[str, Any],
 ) -> None:
     """Adds or updates fields in the YAML with fields from the
-    ~/.sky/skyconfig.yaml's kubernetes.pod_spec dict.
+    ~/.sky/.sky.yaml's kubernetes.pod_spec dict.
     This can be used to add fields to the YAML that are not supported by
     SkyPilot yet, or require simple configuration (e.g., adding an
     imagePullSecrets field).
@@ -2312,7 +2312,7 @@ def combine_pod_config_fields(
 
 def combine_metadata_fields(cluster_yaml_path: str) -> None:
     """Updates the metadata for all Kubernetes objects created by SkyPilot with
-    fields from the ~/.sky/skyconfig.yaml's kubernetes.custom_metadata dict.
+    fields from the ~/.sky/.sky.yaml's kubernetes.custom_metadata dict.
 
     Obeys the same add or update semantics as combine_pod_config_fields().
     """

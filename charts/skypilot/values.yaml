@@ -16,7 +16,7 @@ apiService:
 
   # Set config.yaml content on the API server
   # Updating this value will take tens of seconds to take effect on the API server.
-  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/skyconfig.yaml`
+  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/.sky.yaml`
   config: null
   # config: |
   #   admin_policy: admin_policy_examples.AddLabelsPolicy
