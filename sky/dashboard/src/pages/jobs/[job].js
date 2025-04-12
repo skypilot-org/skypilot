@@ -192,6 +192,8 @@ function JobDetails() {
                   activeTab="info"
                   setIsLoadingLogs={setIsLoadingLogs}
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                  isLoadingLogs={isLoadingLogs}
+                  isLoadingControllerLogs={isLoadingControllerLogs}
                 />
               </div>
             </Card>
@@ -209,6 +211,8 @@ function JobDetails() {
                   activeTab="logs"
                   setIsLoadingLogs={setIsLoadingLogs}
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                  isLoadingLogs={isLoadingLogs}
+                  isLoadingControllerLogs={isLoadingControllerLogs}
                 />
               </div>
             </Card>
@@ -226,6 +230,8 @@ function JobDetails() {
                   activeTab="controllerlogs"
                   setIsLoadingLogs={setIsLoadingLogs}
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
+                  isLoadingLogs={isLoadingLogs}
+                  isLoadingControllerLogs={isLoadingControllerLogs}
                 />
               </div>
             </Card>
@@ -241,6 +247,8 @@ function JobDetailsContent({
   activeTab,
   setIsLoadingLogs,
   setIsLoadingControllerLogs,
+  isLoadingLogs,
+  isLoadingControllerLogs,
 }) {
   const [logs, setLogs] = useState([]);
   const [controllerLogs, setControllerLogs] = useState([]);
@@ -259,6 +267,7 @@ function JobDetailsContent({
   // Define a function to handle both log types
   const fetchLogs = (logType, jobId, setLogs, setIsLoading) => {
     let active = true;
+    const controller = new AbortController();
     
     if (activeTab === logType && jobId) {
       console.log(`Starting to fetch ${logType} for managed job`, jobId);
@@ -267,6 +276,7 @@ function JobDetailsContent({
       streamManagedJobLogs({
         jobId: jobId,
         controller: logType === 'controllerlogs',
+        signal: controller.signal,
         onNewLog: (log) => {
           if (active) {
             const strippedLog = formatLogs(log);
@@ -281,7 +291,7 @@ function JobDetailsContent({
           }
         })
         .catch((error) => {
-          if (active) {
+          if (active && error.name !== 'AbortError') {
             console.error(`Error streaming ${logType}:`, error);
             setIsLoading(false);
             
@@ -294,12 +304,11 @@ function JobDetailsContent({
             }
           }
         });
-    } else if (activeTab !== logType) {
-      setIsLoading(false);
     }
     
     return () => {
       active = false;
+      controller.abort();
       console.log(`Cleaning up ${logType} streaming`);
     };
   };
@@ -317,13 +326,13 @@ useEffect(() => {
   if (activeTab === 'logs') {
     return (
       <div className="max-h-96 overflow-y-auto" style={contentStyle}>
-        {logs.length > 0 ? (
-          <LogFilter logs={logs.join('')} />
-        ) : (
-          <div className="p-4 text-gray-500">
-            No logs available yet. Logs will appear here as they are
-            generated.
+        {isLoadingLogs ? (
+          <div className="flex items-center justify-center py-4">
+            <CircularProgress size={20} className="mr-2" />
+            <span>Loading...</span>
           </div>
+        ) : (
+          <LogFilter logs={logs.join('')} />
         )}
       </div>
     );
@@ -332,13 +341,13 @@ useEffect(() => {
   if (activeTab === 'controllerlogs') {
     return (
       <div className="max-h-96 overflow-y-auto" style={contentStyle}>
-        {controllerLogs.length > 0 ? (
-          <LogFilter logs={controllerLogs.join('')} controller={true} />
-        ) : (
-          <div className="p-4 text-gray-500">
-            No logs available yet. Logs will appear here as they are
-            generated.
+        {isLoadingControllerLogs ? (
+          <div className="flex items-center justify-center py-4">
+            <CircularProgress size={20} className="mr-2" />
+            <span>Loading...</span>
           </div>
+        ) : (
+          <LogFilter logs={controllerLogs.join('')} controller={true} />
         )}
       </div>
     );

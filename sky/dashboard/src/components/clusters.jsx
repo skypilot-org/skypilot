@@ -404,7 +404,7 @@ export function ClusterTable({
 
 function status2Icon(status) {
   const badgeClasses =
-    'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium';
+    'inline-flex items-center px-2 py-1 rounded-full';
   switch (status) {
     case 'LAUNCHING':
       return (

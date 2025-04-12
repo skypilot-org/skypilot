@@ -597,7 +597,9 @@ export function ManagedJobsTable({
                   className="text-center py-6"
                 >
                   <div className="flex flex-col items-center space-y-4">
-                    <p className="text-gray-500">No active jobs</p>
+                    {!controllerStopped && (
+                      <p className="text-gray-500">No active jobs</p>
+                    )}
                     {controllerStopped && (
                       <div className="flex flex-col items-center space-y-2">
                         <p className="text-gray-700">The managed job controller has been stopped. Please restart it to check the latest job status.</p>
@@ -893,7 +895,7 @@ export function JobDetails({
               {isLoadingLogs ? (
                 <div className="flex items-center justify-center py-4">
                   <CircularProgress size={20} className="mr-2" />
-                  <span>Loading logs...</span>
+                  <span>Loading...</span>
                 </div>
               ) : (
                 <div className="max-h-96 overflow-y-auto" style={contentStyle}>
@@ -1124,7 +1126,7 @@ function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
 
 function status2Icon(status) {
   const badgeClasses =
-    'inline-flex items-center px-2 py-1 rounded-full text-xs font-medium';
+    'inline-flex items-center px-2 py-1 rounded-full';
   switch (status) {
     case 'RUNNING':
       return (
