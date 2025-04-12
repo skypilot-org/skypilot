@@ -882,7 +882,7 @@ def sync_down_logs(service_name: str,
             # -> Get all replica logs
             with rich_utils.safe_status(
                     ux_utils.spinner_message('Getting live replicas...')):
-                replica_targets = serve_utils._get_all_replica_targets(
+                replica_targets = _get_all_replica_targets(
                     service_name, backend, handle)
             normalized_targets.update(replica_targets)
         else:
