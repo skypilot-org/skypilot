@@ -6,16 +6,16 @@ from rich import print as rp
 
 import sky
 
-st = sky.serve.status('s2')
+st = sky.serve.status('a2')
 st = sky.client.sdk.get(st)[0]
 rp('Replicas:')
 for r in st['replica_info']:
     rp(r['endpoint'], end=' ')
 rp()
+exit()
 rp('External Load Balancers:')
 external_lb_info = st['external_lb_info']
 rp(external_lb_info)
-exit()
 
 external_lb_info = [
     {

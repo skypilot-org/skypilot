@@ -1,8 +1,10 @@
 import asyncio
+import json
 import logging
 import multiprocessing
 import random
 import threading
+import time
 
 import fastapi
 import uvicorn
@@ -46,11 +48,81 @@ def _start_streaming_replica(port):
         await asyncio.sleep(time_to_sleep)
         return {'message': 'Sleeping done'}
 
+    @app.post('/v1/chat/completions')
+    async def chat_completions(request: fastapi.Request):
+        body = await request.json()
+        messages = body.get('messages', [])
+        temperature = body.get('temperature', 0.7)
+        max_tokens = body.get('max_tokens', 100)
+        stream = body.get('stream', False)
+        uid = random.randint(1, 10000)
+
+        if stream:
+
+            async def generate_stream():
+                # Simulate streaming response
+                for i in range(5):
+                    await asyncio.sleep(0.2)
+                    chunk = {
+                        "choices": [{
+                            "delta": {
+                                "content": f"chunk {i} "
+                            },
+                            "finish_reason": None if i < 4 else "stop"
+                        }]
+                    }
+                    if i == 4:
+                        chunk["choices"][0]["finish_reason"] = "stop"
+                        chunk["usage"] = {
+                            "prompt_tokens": 10,
+                            "completion_tokens": 2,
+                            "prompt_tokens_details": {
+                                "cached_tokens": 5
+                            }
+                        }
+
+                    yield f"data: {json.dumps(chunk)}\n\n"
+
+                final_chunk = {}
+
+                yield f"data: {json.dumps(final_chunk)}\n\n"
+
+                yield "data: [DONE]\n\n"
+
+            return fastapi.responses.StreamingResponse(
+                generate_stream(), media_type="text/event-stream")
+        else:
+            await asyncio.sleep(1)
+            return {
+                "choices": [{
+                    "message": {
+                        "content": "This is a test response"
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 10,
+                    "completion_tokens": 5,
+                    "total_tokens": 15
+                }
+            }
+
+    @app.get('/v1/models')
+    async def models():
+        return {
+            'data': [{
+                'id': 'meta-llama/Meta-Llama-3-8B-Instruct',
+                'object': 'model',
+                'owned_by': 'meta'
+            }]
+        }
+
     @app.get('/metrics')
     async def metrics():
         return fastapi.responses.PlainTextResponse(
-            "# HELP vllm:num_requests_waiting Number of requests waiting in queue\n# TYPE vllm:num_requests_waiting gauge\nvllm:num_requests_waiting 0.0\n"
-        )
+            "# HELP vllm:num_requests_waiting Number of requests waiting in queue\n"
+            "# TYPE vllm:num_requests_waiting gauge\n"
+            "vllm:num_requests_waiting 0.0\n")
 
     @app.get('/non-stream')
     async def non_stream():

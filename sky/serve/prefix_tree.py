@@ -167,7 +167,7 @@ class PrefixTree:
 
     async def insert(self, text: str, replica: str) -> None:
         """Insert a text into the tree."""
-        logger.info(f'insert: {text} with replica: {replica}')
+        logger.debug(f'insert: {text[:100]} with replica: {replica}')
         async with self.tree_lock:
             current_idx = 0
             text_len = len(text)
@@ -247,8 +247,8 @@ class PrefixTree:
             matched_text: The longest prefix of text that matches.
             replica: The replica that has accessed the matched node.
         """
-        logger.info(f'prefix_match: {text} with '
-                    f'available2load: {available2load}')
+        logger.debug(f'prefix_match: {text[:100]} with '
+                     f'available2load: {available2load}')
         current_idx = 0
         text_len = len(text)
         succ_node = self.root

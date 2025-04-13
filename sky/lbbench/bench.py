@@ -32,7 +32,13 @@ async def launch_task(args: argparse.Namespace, workload_module) -> None:
 
     num_users = args.num_users
     tic = time.time()
-    await asyncio.gather(*workload_module.launch_user_tasks(args, num_users))
+    tasks = workload_module.launch_user_tasks(args, num_users)
+    total_tasks = len(tasks)
+    finished = 0
+    for completed_task in asyncio.as_completed(tasks):
+        await completed_task
+        finished += 1
+        rp(f'> Progress: {finished}/{total_tasks} users finished')
     latency = time.time() - tic
     rp(f'All E2E Latency: {latency:.3f}')
 

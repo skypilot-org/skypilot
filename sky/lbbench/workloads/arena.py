@@ -195,6 +195,3 @@ def launch_user_tasks(
             intervals.append(interval)
         tasks.append(_user_task(uid, user_convs, intervals))
     return tasks
-
-
-# launch_user_tasks(None, 5)

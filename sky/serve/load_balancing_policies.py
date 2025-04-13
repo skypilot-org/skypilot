@@ -381,7 +381,6 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
     """Proximate tree load balancing policy."""
 
     async def _background_eviction_thread(self) -> None:
-        print('Starting background eviction thread')
         logger.info('Starting background eviction thread')
         while True:
             await asyncio.sleep(self.config.eviction_interval_secs)
@@ -429,7 +428,7 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
         #     return min(replica2load, key=replica2load.get)
         matched_text, replica = await self.tree.prefix_match(text, replica2load)
         matched_rate = len(matched_text) / len(text)
-        logger.info(f'Matched rate: {matched_rate} for request {text[:100]}.')
+        logger.debug(f'Matched rate: {matched_rate} for request {text[:100]}.')
         if cache_threshold is None:
             cache_threshold = self.config.cache_threshold
         if matched_rate > cache_threshold:
@@ -440,8 +439,8 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             return replica
         # logger.info('Falling back to least char count load. '
         #             f'{self.tree.replica_char_count}')
-        logger.info('Falling back to least replica load. '
-                    f'{replica2load}')
+        logger.debug('Falling back to least replica load. '
+                     f'{replica2load}')
         replica2load.pop(disabled_url, None)
         if not replica2load:
             return None

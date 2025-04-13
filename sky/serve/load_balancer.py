@@ -14,6 +14,7 @@ import fastapi
 import httpx
 from prometheus_client import parser as prometheus_parser
 from starlette import background
+from starlette import requests as starlette_requests
 import uvicorn
 
 from sky import sky_logging
@@ -34,6 +35,10 @@ class RequestEntry:
     request: fastapi.Request
     request_event: asyncio.Event
     response_future: asyncio.Future[fastapi.responses.Response]
+
+    def set_failed_on(self, e: Exception) -> None:
+        self.response_future.set_exception(e)
+        self.request_event.set()
 
 
 @dataclasses.dataclass
@@ -73,6 +78,12 @@ class QueueSizeFilter(logging.Filter):
 
     def filter(self, record):
         return '/queue-size' not in record.getMessage()
+
+
+class ConfFilter(logging.Filter):
+
+    def filter(self, record):
+        return '/conf' not in record.getMessage()
 
 
 T = TypeVar('T')
@@ -462,8 +473,7 @@ class SkyServeLoadBalancer:
             logger.error(f'Error when proxy request to {url}: '
                          f'{common_utils.format_exception(e)}\n'
                          f'  Traceback: {traceback.format_exc()}')
-            entry.response_future.set_exception(e)
-            entry.request_event.set()
+            entry.set_failed_on(e)
 
     async def _handle_requests(self, url: str, entry: RequestEntry,
                                is_from_lb: bool) -> None:
@@ -658,15 +668,20 @@ class SkyServeLoadBalancer:
                     #                      f'to LB {lb}: '
                     #                      f'{common_utils.format_exception(e)}\n'
                     #                      f'  Traceback: {traceback.format_exc()}')
-                    #         entry.response_future.set_exception(e)
-                    #         entry.request_event.set()
+                    #         entry.set_failed_on(e)
                     #     continue
 
                     # Either because of there is no LBs stealing requests, or
                     # because the match rate is high so the local region is
                     # selected, we attempt to find an available replica here.
-                    ready_replica_url = await self._replica_pool.select_replica(
-                        entry.request)
+                    try:
+                        ready_replica_url = await self._replica_pool.select_replica(
+                            entry.request)
+                    except starlette_requests.ClientDisconnect as e:
+                        # Client disconnected. Skip this request.
+                        await self._request_queue.get_and_remove()
+                        entry.set_failed_on(e)
+                        continue
 
                     if ready_replica_url is not None:
                         # Process the request if a replica is available
@@ -686,8 +701,7 @@ class SkyServeLoadBalancer:
                                 f'{common_utils.format_exception(e)}\n'
                                 f'  Traceback: {traceback.format_exc()}')
                             # Set exception to propagate to the waiting handler
-                            entry.response_future.set_exception(e)
-                            entry.request_event.set()
+                            entry.set_failed_on(e)
                         continue
 
                     # If a request stuck at head of queue for too long (happens
@@ -840,7 +854,7 @@ class SkyServeLoadBalancer:
                 # Don't steal if there is no available replica.
                 # if not self._replica_pool.ready_replicas():
                 #     continue
-                if not self._replica_pool.available_replicas():
+                if not await self._replica_pool.available_replicas():
                     continue
                 steal_targets, self_url = self._steal_targets()
                 if self._url is None:
@@ -883,7 +897,11 @@ class SkyServeLoadBalancer:
                                 'num_steal': num_steal,
                                 'source_lb_url': self_url,
                             }) as steal_response:
-                        steal_response.raise_for_status()
+                        # steal_response.raise_for_status()
+                        if steal_response.status != 200:
+                            logger.error(f'Error in request stealing: '
+                                         f'{await steal_response.text()}')
+                            continue
                         remaining_to_steal = (
                             await steal_response.json())['remaining_to_steal']
                         actual_num_steal = num_steal - remaining_to_steal
@@ -972,15 +990,23 @@ class SkyServeLoadBalancer:
             steal_entries: List[StealEntry] = []
             # First part: select LB replica and calculate match rates
             select_lb_start_time = time.perf_counter()
-            for i in range(await self._request_queue.qsize()):
+            i = 0
+            while i < await self._request_queue.qsize():
                 entry = await self._request_queue.get(i)
+                i += 1
                 if isinstance(entry, StealBarrierEntry):
                     continue
                 # Check if the request is from the source LB.
                 if entry.request.headers.get(_IS_FROM_LB_HEADER, False):
                     continue
-                result = await self._lb_pool.select_replica(
-                    entry.request, return_matched_rate=True)
+                try:
+                    result = await self._lb_pool.select_replica(
+                        entry.request, return_matched_rate=True)
+                except starlette_requests.ClientDisconnect as e:
+                    await self._request_queue.get_and_remove(i)
+                    i -= 1
+                    entry.set_failed_on(e)
+                    continue
                 if isinstance(result, tuple):
                     lb, matched_rate, matched_length = result
                 else:
@@ -1125,6 +1151,7 @@ class SkyServeLoadBalancer:
             for handler in uvicorn_access_logger.handlers:
                 handler.setFormatter(sky_logging.FORMATTER)
                 handler.addFilter(QueueSizeFilter())
+                handler.addFilter(ConfFilter())
             # # Make sure we're using the current event loop
             self._loop = asyncio.get_running_loop()
             self._workload_steal_session = aiohttp.ClientSession()
