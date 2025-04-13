@@ -1336,6 +1336,16 @@ def check_credentials(context: Optional[str],
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
+    # Check if KUBECONFIG consists of multiple config files. Multiple
+    # KUBECONFIG files are not supported yet.
+    kubeconfig_path = _get_kubeconfig_path()
+    kubeconfig_paths = kubeconfig_path.split(os.pathsep)
+    if len(kubeconfig_paths) > 1:
+        return False, (
+            'skypilot currently only supports one config file in the '
+            '$KUBECONFIG environment variable. Current $KUBECONFIG '
+            f'is {kubeconfig_path}.')
+
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
     if not run_optional_checks:
         return True, None
@@ -1489,9 +1499,7 @@ def is_kubeconfig_exec_auth(
     # K8s api does not provide a mechanism to get the user details from the
     # context. We need to load the kubeconfig file and parse it to get the
     # user details.
-    kubeconfig_path = os.path.expanduser(
-        os.getenv('KUBECONFIG',
-                  k8s.config.kube_config.KUBE_CONFIG_DEFAULT_LOCATION))
+    kubeconfig_path = _get_kubeconfig_path()
     # Load the kubeconfig file as a dictionary
     with open(kubeconfig_path, 'r', encoding='utf-8') as f:
         kubeconfig = yaml.safe_load(f)
@@ -3017,3 +3025,11 @@ def get_gpu_resource_key():
     # Else use default.
     # E.g., can be nvidia.com/gpu-h100, amd.com/gpu etc.
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
+
+
+def _get_kubeconfig_path():
+    """Get the stored path from KUBECONFIG env var"""
+    return os.path.expanduser(
+        os.getenv(
+            'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
+            KUBE_CONFIG_DEFAULT_LOCATION))
