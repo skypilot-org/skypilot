@@ -20,35 +20,7 @@ const clusterStatusMap = {
   null: 'TERMINATED',
 };
 
-// Cache key for clusters data
-const CLUSTERS_CACHE_KEY = 'sky_clusters_cache';
-// Cache expiration time in milliseconds (5 minutes)
-const CACHE_EXPIRATION = 1 * 60 * 1000;
-
 export async function getClusters({ clusterNames = null } = {}) {
-  // Check if we have cached data
-  const cachedData = localStorage.getItem(CLUSTERS_CACHE_KEY);
-
-  if (cachedData) {
-    try {
-      const { data, timestamp } = JSON.parse(cachedData);
-      const now = Date.now();
-
-      // If cache is not expired, return cached data
-      if (now - timestamp < CACHE_EXPIRATION) {
-        // If specific cluster names are requested, filter the cached data
-        if (clusterNames) {
-          return data.filter(cluster => clusterNames.includes(cluster.cluster));
-        }
-        return data;
-      }
-    } catch (error) {
-      console.error('Error parsing cached clusters data:', error);
-      // Continue to fetch fresh data if cache parsing fails
-    }
-  }
-
-  // Always fetch fresh data when requesting specific clusters
   try {
     const response = await fetch(`${ENDPOINT}/status`, {
       method: 'POST',
@@ -86,14 +58,6 @@ export async function getClusters({ clusterNames = null } = {}) {
         ],
       };
     });
-
-    // Only cache the data if we're not requesting specific clusters
-    if (!clusterNames) {
-      localStorage.setItem(CLUSTERS_CACHE_KEY, JSON.stringify({
-        data: clusterData,
-        timestamp: Date.now(),
-      }));
-    }
     return clusterData;
   } catch (error) {
     console.error('Error fetching clusters:', error);

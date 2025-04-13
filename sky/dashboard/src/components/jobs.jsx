@@ -164,6 +164,7 @@ export function ManagedJobsTable({
   const [selectedStatus, setSelectedStatus] = useState('All');
   const [statusCounts, setStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
+  const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState(initialActiveTab || 'active');
   const [confirmationModal, setConfirmationModal] = useState({
@@ -222,6 +223,11 @@ export function ManagedJobsTable({
       let isControllerStopped=false
       if (jobControllerClusterStatus=='STOPPED' && controllerStopped) {
         isControllerStopped=true
+      }
+      if (jobControllerClusterStatus=='LAUNCHING') {
+        setControllerLaunching(true);
+      }else{
+        setControllerLaunching(false);
       }
 
       setData(jobs);
@@ -596,7 +602,16 @@ export function ManagedJobsTable({
                   className="text-center py-6"
                 >
                   <div className="flex flex-col items-center space-y-4">
-                    {!controllerStopped && (
+                    {controllerLaunching && (
+                      <div className="flex flex-col items-center space-y-2">
+                        <p className="text-gray-700">The managed job controller is launching. Please wait for it to be ready.</p>
+                        <div className="flex items-center">
+                          <CircularProgress size={12} className="mr-2" />
+                          <span className="text-gray-500">Launching...</span>
+                        </div>
+                      </div>
+                    )}
+                    {!controllerStopped && !controllerLaunching && (
                       <p className="text-gray-500">No active jobs</p>
                     )}
                     {controllerStopped && (
@@ -776,20 +791,24 @@ export function JobDetails({
   customHeader,
   hideTabs = false,
   loading = false,
+  isRefreshing = false,
 }) {
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
   const [logs, setLogs] = useState([]);
   const router = useRouter();
   const isClusterJobPage = router.pathname.includes('/clusters/[cluster]/[job]');
+  console.log('cluster job details', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
 
-  // Clear logs when jobData.id changes
+  // Clear logs when jobData.id changes or when refreshing
   useEffect(() => {
+    console.log('clear logs', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
     setLogs([]);
-  }, [jobData.id]);
+  }, [jobData.id, isRefreshing]);
 
-  // Fetch logs when component mounts or jobData.id changes
+  // Fetch logs when component mounts, jobData.id changes, or when refreshing
   useEffect(() => {
+    console.log('fetch logs', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
     let active = true;
 
     if (clusterName && jobData.id) {
@@ -821,7 +840,7 @@ export function JobDetails({
     return () => {
       active = false;
     };
-  }, [clusterName, jobData.id]);
+  }, [clusterName, jobData.id, isRefreshing]);
 
   return (
     <Layout highlighted={highlighted}>
@@ -1012,122 +1031,6 @@ export const contentStyle = {
   padding: '30px',
   backgroundColor: '#f7f7f7',
 };
-
-function ActiveTab({ clusterName, jobData, activeTab, setLoading }) {
-  const [logs, setLogs] = useState([]);
-  const router = useRouter();
-  const isClusterJobPage = router.pathname.includes(
-    '/clusters/[cluster]/[job]'
-  ); // Check if we're on the clusters job page
-
-  // Clear logs when activeTab changes or when jobData.id changes
-  useEffect(() => {
-    setLogs([]);
-  }, [activeTab, jobData.id]);
-
-  // Only fetch logs when actually viewing the logs tab
-  useEffect(() => {
-    let active = true;
-
-    if (activeTab === 'logs' && clusterName && jobData.id) {
-      setLoading(true);
-
-      streamClusterJobLogs({
-        clusterName: clusterName,
-        jobId: jobData.id,
-        onNewLog: (log) => {
-          if (active) {
-            const strippedLog = formatLogs(log);
-            setLogs((prevLogs) => [...prevLogs, strippedLog]);
-          }
-        },
-      })
-        .then(() => {
-          if (active) {
-            setLoading(false);
-          }
-        })
-        .catch((error) => {
-          if (active) {
-            console.error('Error streaming logs:', error);
-            setLoading(false);
-          }
-        });
-    } else if (activeTab !== 'logs') {
-      setLoading(false);
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [activeTab, clusterName, jobData.id, setLoading]);
-
-  // For clusters job page with hidden tabs, we want to show different content based on the URL tab parameter
-  if (isClusterJobPage) {
-    if (activeTab === 'logs') {
-      return (
-        <div className="items-center mb-6">
-          <Card style={contentStyle}>
-            <LogFilter logs={logs.join('')} />
-          </Card>
-        </div>
-      );
-    }
-
-    // Default to info tab for hidden tabs
-    return (
-      <div className="items-center mb-6">
-        <Card className="p-3">
-          <div className="grid grid-cols-2 gap-6">
-            <div>
-              <div className="text-gray-600 font-medium text-base">Job ID</div>
-              <div className="text-base mt-1">{jobData.id}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">User</div>
-              <div className="text-base mt-1">{jobData.user}</div>
-            </div>
-            <div>
-              <div className="text-gray-600 font-medium text-base">Status</div>
-              <div className="text-base mt-1">
-                <Status2Icon status={jobData.status} />
-              </div>
-            </div>
-            {jobData.resources && (
-              <div>
-                <div className="text-gray-600 font-medium text-base">Resources</div>
-                <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
-              </div>
-            )}
-            <div>
-              <div className="text-gray-600 font-medium text-base">Job Name</div>
-              <div className="text-base mt-1">{jobData.job}</div>
-            </div>
-            {jobData.cluster && (
-              <div>
-                <div className="text-gray-600 font-medium text-base">Cluster</div>
-                <div className="text-base mt-1">
-                  <Link
-                    href={`/clusters/${jobData.cluster}`}
-                    className="text-sky-blue hover:underline"
-                  >
-                    {jobData.cluster}
-                  </Link>
-                </div>
-              </div>
-            )}
-            {jobData.infra && (
-              <div>
-                <div className="text-gray-600 font-medium text-base">Infra</div>
-                <div className="text-base mt-1">{jobData.infra}</div>
-              </div>
-            )}
-          </div>
-        </Card>
-      </div>
-    );
-  }
-}
 
 function status2Icon(status) {
   const badgeClasses =

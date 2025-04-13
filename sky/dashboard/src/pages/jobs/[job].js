@@ -91,6 +91,7 @@ function JobDetails() {
     try {
       // Force a page refresh to reload the data
       router.replace(router.asPath);
+
       // Wait a short time to show the refresh indicator
       await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
@@ -194,6 +195,7 @@ function JobDetails() {
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                   isLoadingLogs={isLoadingLogs}
                   isLoadingControllerLogs={isLoadingControllerLogs}
+                  isRefreshing={isRefreshing}
                 />
               </div>
             </Card>
@@ -213,6 +215,7 @@ function JobDetails() {
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                   isLoadingLogs={isLoadingLogs}
                   isLoadingControllerLogs={isLoadingControllerLogs}
+                  isRefreshing={isRefreshing}
                 />
               </div>
             </Card>
@@ -232,6 +235,7 @@ function JobDetails() {
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                   isLoadingLogs={isLoadingLogs}
                   isLoadingControllerLogs={isLoadingControllerLogs}
+                  isRefreshing={isRefreshing}
                 />
               </div>
             </Card>
@@ -249,20 +253,21 @@ function JobDetailsContent({
   setIsLoadingControllerLogs,
   isLoadingLogs,
   isLoadingControllerLogs,
+  isRefreshing,
 }) {
   const [logs, setLogs] = useState([]);
   const [controllerLogs, setControllerLogs] = useState([]);
 
-  // Clear logs when activeTab changes or when jobData.id changes
+  // Clear logs when activeTab changes, when jobData.id changes, or when refreshing
   useEffect(() => {
     setLogs([]);
-    console.log('Logs cleared due to tab change or job ID change');
-  }, [activeTab, jobData.id]);
+    console.log('Logs cleared due to tab change, job ID change, or refresh');
+  }, [activeTab, jobData.id, isRefreshing]);
 
   useEffect(() => {
     setControllerLogs([]);
-    console.log('Controller logs cleared due to tab change or job ID change');
-  }, [activeTab, jobData.id]);
+    console.log('Controller logs cleared due to tab change, job ID change, or refresh');
+  }, [activeTab, jobData.id, isRefreshing]);
 
   // Define a function to handle both log types
   const fetchLogs = (logType, jobId, setLogs, setIsLoading) => {
@@ -321,13 +326,13 @@ function JobDetailsContent({
   useEffect(() => {
     const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
     return cleanup;
-  }, [activeTab, jobData.id]);
+  }, [activeTab, jobData.id, isRefreshing]);
 
   // Only fetch controller logs when actually viewing the controller logs tab
   useEffect(() => {
     const cleanup = fetchLogs('controllerlogs', jobData.id, setControllerLogs, setIsLoadingControllerLogs);
     return cleanup;
-  }, [activeTab, jobData.id]);
+  }, [activeTab, jobData.id, isRefreshing]);
 
   if (activeTab === 'logs') {
     return (
