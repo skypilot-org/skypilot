@@ -17,7 +17,7 @@ spec:
         app: {{ .Release.Name }}-api
     spec:
       automountServiceAccountToken: {{ .Values.kubernetesCredentials.useApiServerCluster }}
-      serviceAccountName: {{ .Release.Name }}-api-sa
+      serviceAccountName: {{ include "skypilot.serviceAccountName" . }}
       {{- with .Values.podSecurityContext }}
       securityContext:
         {{- toYaml . | nindent 8 }}

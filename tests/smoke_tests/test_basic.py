@@ -167,7 +167,7 @@ def test_launch_fast_with_autostop(generic_cloud: str):
 @pytest.mark.aws
 def test_launch_fast_with_cluster_changes(generic_cloud: str, tmp_path):
     name = smoke_tests_utils.get_cluster_name()
-    tmp_config_path = tmp_path / 'config.yaml'
+    tmp_config_path = tmp_path / 'skyconfig.yaml'
     test = smoke_tests_utils.Test(
         'test_launch_fast_with_cluster_changes',
         [

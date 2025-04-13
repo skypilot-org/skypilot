@@ -46,7 +46,7 @@ logger = sky_logging.init_logger(__name__)
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '
-    '~/.sky/config.yaml file and make sure '
+    '~/.sky/skyconfig.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
 

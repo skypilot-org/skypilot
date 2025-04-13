@@ -117,7 +117,7 @@ RUNPOD_DOCKER_USERNAME_ENV_VAR = 'SKYPILOT_RUNPOD_DOCKER_USERNAME'
 
 # Commands for disable GPU ECC, which can improve the performance of the GPU
 # for some workloads by 30%. This will only be applied when a user specify
-# `nvidia_gpus.disable_ecc: true` in ~/.sky/config.yaml.
+# `nvidia_gpus.disable_ecc: true` in ~/.sky/skyconfig.yaml.
 # Running this command will reboot the machine, introducing overhead for
 # provisioning the machine.
 # https://portal.nutanix.com/page/documents/kbs/details?targetId=kA00e000000LKjOCAW
@@ -337,7 +337,7 @@ RCLONE_LOG_DIR = '~/.sky/rclone_log'
 RCLONE_CACHE_DIR = '~/.cache/rclone'
 RCLONE_CACHE_REFRESH_INTERVAL = 10
 
-# The keys that can be overridden in the `~/.sky/config.yaml` file. The
+# The keys that can be overridden in the `~/.sky/skyconfig.yaml` file. The
 # overrides are specified in task YAMLs.
 OVERRIDEABLE_CONFIG_KEYS_IN_TASK: List[Tuple[str, ...]] = [
     ('docker', 'run_options'),

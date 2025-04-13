@@ -29,7 +29,7 @@ To request capacity reservations/blocks, see the official docs:
 
 Once you have successfully created a reservation/block, you will get an ID of the reservation/block, such as ``cr-012345678``.
 
-To use the reservation/block, you can specify two fields in ``~/.sky/config.yaml``:
+To use the reservation/block, you can specify two fields in ``~/.sky/skyconfig.yaml``:
 
 * ``aws.prioritize_reservations``: whether to prioritize launching clusters from capacity reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your reserved capacity created with ``Instance eligibility: open``.
 * ``aws.specific_reservations``: a list of reservation IDs that can be used by SkyPilot. This is useful if you have multiple capacity reservations or blocks with ``Instance eligibility: targeted`` for different instance types in multiple regions/zones.
@@ -105,7 +105,7 @@ GCP reservations are similar to AWS capacity reservations, where you can reserve
 
 To get a reservation, see the `GCP official docs <https://cloud.google.com/compute/docs/instances/reservations-single-project>`__.
 
-Like AWS, you can specify two fields in ``~/.sky/config.yaml``:
+Like AWS, you can specify two fields in ``~/.sky/skyconfig.yaml``:
 
 * ``gcp.prioritize_reservations``: whether to prioritize launching clusters from reservations in any region/zone over on-demand/spot clusters. This is useful to fully utilize your `automatically consumed reservations <https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_instances_from_any_matching_reservation>`__.
 * ``gcp.specific_reservations``: a list of reservation IDs that can be used by SkyPilot. This is useful if you have multiple `specific reservations <https://cloud.google.com/compute/docs/instances/reservations-consume#consuming_instances_from_a_specific_reservation>`__ for different instance types in multiple regions/zones.
@@ -137,7 +137,7 @@ GCP `Dynamic Workload Scheduler (DWS) <https://cloud.google.com/blog/products/co
 Using DWS for VMs
 ~~~~~~~~~~~~~~~~~
 
-SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_instance_group`` field in ``~/.sky/config.yaml``:
+SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_instance_group`` field in ``~/.sky/skyconfig.yaml``:
 
 .. code-block:: yaml
 
