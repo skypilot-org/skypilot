@@ -129,7 +129,6 @@ jobs:
       # Trigger Buildkite release tests
       - name: Trigger Release Tests
         id: trigger_release_tests
-        if: endsWith(steps.determine_version.outputs.release_version, '.0')
         uses: buildkite/trigger-pipeline-action@v2.3.0
         with:
           buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
@@ -142,7 +141,6 @@ jobs:
       # Extract build number from response JSON
       - name: Extract release tests build number
         id: extract_release_test
-        if: endsWith(steps.determine_version.outputs.release_version, '.0')
         run: |
           build_number=$(echo '${{ steps.trigger_release_tests.outputs.json }}' | jq -r '.number')
           echo "release_test_build_number=$build_number" >> $GITHUB_OUTPUT
@@ -204,9 +202,7 @@ jobs:
           fi
 
           # Create PR with buildkite links
-          if [[ "${RELEASE_VERSION}" == *".0" ]]; then
-            # For .0 releases, include release tests
-            PR_BODY="Release ${RELEASE_VERSION}
+          PR_BODY="Release ${RELEASE_VERSION}
 
           Buildkite Test Links:
           - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.wait-for-smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
@@ -214,16 +210,6 @@ jobs:
           - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
 
           *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
-          else
-            # For patch releases, only include smoke tests and quicktest
-            PR_BODY="Release ${RELEASE_VERSION}
-
-          Buildkite Test Links:
-          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.wait-for-smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.wait-for-quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
-
-          *Patch release - Release Tests not triggered.*"
-          fi
 
           gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
             --title "Release ${RELEASE_VERSION}" \
