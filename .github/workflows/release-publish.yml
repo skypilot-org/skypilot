@@ -1,0 +1,132 @@
+name: Release Publish
+
+on:
+  pull_request:
+    types: [closed]
+    branches:
+      - 'releases/**'
+
+jobs:
+  extract-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.extract_version.outputs.version }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+
+      - name: Extract version from PR base branch
+        id: extract_version
+        run: |
+          BASE_BRANCH="${{ github.base_ref }}"
+          VERSION=$(echo "$BASE_BRANCH" | sed 's/releases\///')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Version extracted: $VERSION"
+
+  publish-to-pypi:
+    needs: extract-version
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.base_ref }}
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      - name: Install pypa/build
+        run: >-
+          python -m
+          pip install
+          build
+          --user
+
+      - name: Build a binary wheel and a source tarball
+        run: >-
+          python -m
+          build
+          --sdist
+          --wheel
+          --outdir dist/
+          .
+
+      - name: Publish distribution to Test PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.TEST_PYPI_API_TOKEN }}
+          repository-url: https://test.pypi.org/legacy/
+          skip-existing: true
+
+      - name: Publish distribution to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true
+
+      - name: Validate published package
+        run: |
+          # Wait a moment for package to be available
+          sleep 30
+          # Install skypilot from Test PyPI with fallback to PyPI for dependencies
+          pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple skypilot
+          # Verify installation
+          sky -v
+          sky -c
+          # Verify version
+          EXPECTED_VERSION="${{ needs.extract-version.outputs.version }}"
+          INSTALLED_VERSION=$(pip show skypilot | grep Version | awk '{print $2}')
+          echo "Expected version: $EXPECTED_VERSION, Installed version: $INSTALLED_VERSION"
+          if [ "$INSTALLED_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "Version mismatch!"
+            exit 1
+          fi
+          echo "Version verified successfully!"
+
+  trigger-docker-build:
+    needs: [extract-version, publish-to-pypi]
+    uses: ./.github/workflows/docker-build.yaml
+    with:
+      package_name: 'skypilot'
+    secrets: inherit
+
+  cleanup-branches:
+    needs: extract-version
+    if: github.event.pull_request.merged == false
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Delete branches
+        run: |
+          VERSION="${{ needs.extract-version.outputs.version }}"
+          git config --global user.name "GitHub Action"
+          git config --global user.email "action@github.com"
+
+          # Check if test branch exists and delete it
+          TEST_BRANCH="test_releases/${VERSION}"
+          if git ls-remote --heads origin ${TEST_BRANCH} | grep ${TEST_BRANCH}; then
+            echo "Deleting test branch: ${TEST_BRANCH}"
+            git push origin --delete ${TEST_BRANCH}
+          else
+            echo "Test branch ${TEST_BRANCH} does not exist, skipping"
+          fi
+
+          # Check if release branch exists and delete it
+          RELEASE_BRANCH="releases/${VERSION}"
+          if git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
+            echo "Deleting release branch: ${RELEASE_BRANCH}"
+            git push origin --delete ${RELEASE_BRANCH}
+          else
+            echo "Release branch ${RELEASE_BRANCH} does not exist, skipping"
+          fi
