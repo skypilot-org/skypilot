@@ -145,9 +145,10 @@ def test_logs_requests(num_requests, cloud):
 
 def test_jobs_requests(num_requests, cloud, is_async=True):
     print(f"Testing {num_requests} jobs launch requests")
-    cmd = f'sky jobs launch --cloud={cloud} --cpus=2 "echo hello" -y'
+    cmd = f'sky jobs launch --cloud={cloud} --cpus=2 "echo hello && sleep 120" -y'
     if is_async:
         cmd += ' --async'
+    print(f"Running {cmd}, concurrency={num_requests}")
     run_concurrent_requests(num_requests, cmd)
 
 
@@ -250,6 +251,10 @@ if __name__ == '__main__':
                         choices=all_apis + ['all'],
                         default=[],
                         help='List of APIs to test')
+    parser.add_argument(
+        '--run-async',
+        action='store_true',
+        help='Whether to run requests asynchronously (if possible)')
 
     args = parser.parse_args()
 
@@ -270,7 +275,7 @@ if __name__ == '__main__':
             thread = None
             if request_type == 'launch':
                 thread = threading.Thread(target=test_launch_requests,
-                                          args=(args.n, cloud, True))
+                                          args=(args.n, cloud, args.run_async))
             elif request_type == 'status':
                 thread = threading.Thread(target=test_status_requests,
                                           args=(args.n,))
@@ -279,7 +284,7 @@ if __name__ == '__main__':
                                           args=(args.n, cloud))
             elif request_type == 'jobs':
                 thread = threading.Thread(target=test_jobs_requests,
-                                          args=(args.n, cloud))
+                                          args=(args.n, cloud, args.run_async))
             elif request_type == 'serve':
                 thread = threading.Thread(target=test_serve_requests,
                                           args=(args.n, cloud))

@@ -243,7 +243,7 @@ The following setup steps are optional and can be performed based on your specif
 * :ref:`kubernetes-setup-priority`
 * :ref:`kubernetes-setup-serviceaccount`
 * :ref:`kubernetes-setup-ports`
-
+* :ref:`kubernetes-setup-fuse`
 
 .. _kubernetes-setup-volumes:
 
@@ -252,7 +252,7 @@ Set up NFS and other volumes
 
 `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/skyconfig.yaml`.
 
 Examples:
 
@@ -291,7 +291,7 @@ Examples:
 
       .. code-block:: yaml
 
-           # ~/.sky/config.yaml
+           # ~/.sky/skyconfig.yaml
            kubernetes:
              pod_config:
                spec:
@@ -339,7 +339,7 @@ Examples:
 
       .. code-block:: yaml
 
-           # ~/.sky/config.yaml
+           # ~/.sky/skyconfig.yaml
            kubernetes:
              pod_config:
                spec:
@@ -387,7 +387,7 @@ Examples:
 
       .. code-block:: yaml
 
-           # ~/.sky/config.yaml
+           # ~/.sky/skyconfig.yaml
            kubernetes:
              pod_config:
                spec:
@@ -466,6 +466,22 @@ SkyPilot supports either of two modes to expose ports:
 
 Refer to :ref:`Exposing Services on Kubernetes <kubernetes-ports>` for more details.
 
+.. _kubernetes-setup-fuse:
+
+Set up FUSE proxy
+^^^^^^^^^^^^^^^^^
+
+By default, SkyPilot automatically sets up a FUSE proxy to allow Pods created by SkyPilot to perform FUSE mounts/unmounts operations without root privileges. The proxy requires root privileges and ``SYS_ADMIN`` capabilities, which may require additional security audits. 
+
+In most clusters, SkyPilot handles setting up the FUSE proxy as a privileged DaemonSet, and **no manual configuration is required by the user**.
+
+However, if you are operating in a cluster with restricted permissions, you can deploy the DaemonSet externally, to avoid the need to grant SkyPilot the permission to create privileged DaemonSets. SkyPilot will automatically discover the DaemonSet and use it as the FUSE proxy:
+
+.. code-block:: console
+
+    # If you do not want to grant SkyPilot the ability to create privileged daemonsets, manually deploy the FUSE proxy:
+    $ kubectl create namespace skypilot-system || true
+    $ kubectl -n skypilot-system apply -f https://raw.githubusercontent.com/skypilot-org/skypilot/master/sky/provision/kubernetes/manifests/fusermount-server-daemonset.yaml
 
 .. _kubernetes-observability:
 

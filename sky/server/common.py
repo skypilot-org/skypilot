@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 import functools
+from http.cookiejar import MozillaCookieJar
 import json
 import os
 import pathlib
@@ -80,6 +81,18 @@ class ApiServerInfo:
     api_version: ApiVersion
 
 
+def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
+    """Returns the cookie jar used by the client to access the API server."""
+    cookie_file = os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR)
+    cookie_jar = requests.cookies.RequestsCookieJar()
+    if cookie_file and os.path.exists(cookie_file):
+        cookie_path = pathlib.Path(cookie_file).expanduser().resolve()
+        file_cookie_jar = MozillaCookieJar(cookie_path)
+        file_cookie_jar.load()
+        cookie_jar.update(file_cookie_jar)
+    return cookie_jar
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = DEFAULT_SERVER_URL
@@ -117,7 +130,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            response = requests.get(f'{server_url}/api/health', timeout=2.5)
+            response = requests.get(f'{server_url}/api/health',
+                                    timeout=2.5,
+                                    cookies=get_api_cookie_jar())
             if response.status_code == 200:
                 try:
                     result = response.json()

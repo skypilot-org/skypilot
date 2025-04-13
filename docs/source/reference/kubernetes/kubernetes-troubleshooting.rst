@@ -276,18 +276,18 @@ Your ingress's service must be of type :code:`LoadBalancer` or :code:`NodePort` 
 Is SkyPilot configured to use Nginx Ingress?
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Take a look at your :code:`~/.sky/config.yaml` file to verify that the :code:`ports: ingress` section is configured correctly.
+Take a look at your :code:`~/.sky/skyconfig.yaml` file to verify that the :code:`ports: ingress` section is configured correctly.
 
 .. code-block:: bash
 
-    $ cat ~/.sky/config.yaml
+    $ cat ~/.sky/skyconfig.yaml
 
     # Output should contain:
     #
     # kubernetes:
     #   ports: ingress
 
-If not, add the :code:`ports: ingress` section to your :code:`~/.sky/config.yaml` file.
+If not, add the :code:`ports: ingress` section to your :code:`~/.sky/skyconfig.yaml` file.
 
 .. _kubernetes-troubleshooting-ports-dryrun:
 

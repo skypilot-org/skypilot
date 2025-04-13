@@ -472,10 +472,10 @@ class AWS(clouds.Cloud):
             with ux_utils.print_exception_no_traceback():
                 logger.warning(
                     f'Skip opening ports {resources.ports} for cluster {cluster_name!r}, '
-                    'as `aws.security_group_name` in `~/.sky/config.yaml` is specified as '
+                    'as `aws.security_group_name` in `~/.sky/skyconfig.yaml` is specified as '
                     f' {security_group!r}. Please make sure the specified security group '
                     'has requested ports setup; or, leave out `aws.security_group_name` '
-                    'in `~/.sky/config.yaml`.')
+                    'in `~/.sky/skyconfig.yaml`.')
 
         return {
             'instance_type': r.instance_type,

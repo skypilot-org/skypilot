@@ -35,7 +35,8 @@ import sys
 import textwrap
 import traceback
 import typing
-from typing import Any, Callable, Dict, Generator, List, Optional, Tuple, Union
+from typing import (Any, Callable, Dict, Generator, List, Optional, Set, Tuple,
+                    Union)
 
 import click
 import colorama
@@ -134,49 +135,51 @@ def _get_cluster_records_and_set_ssh_config(
     # Update the SSH config for all clusters
     for record in cluster_records:
         handle = record['handle']
-        # During the failover, even though a cluster does not exist, the handle
-        # can still exist in the record, and we check for credentials to avoid
-        # updating the SSH config for non-existent clusters.
-        if (handle is not None and handle.cached_external_ips is not None and
-                'credentials' in record):
-            credentials = record['credentials']
-            if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
-                # Replace the proxy command to proxy through the SkyPilot API
-                # server with websocket.
-                key_path = (
-                    cluster_utils.SSHConfigHelper.generate_local_key_file(
-                        handle.cluster_name, credentials))
-                # Instead of directly use websocket_proxy.py, we add an
-                # additional proxy, so that ssh can use the head pod in the
-                # cluster to jump to worker pods.
-                proxy_command = (
-                    f'ssh -tt -i {key_path} '
-                    '-o StrictHostKeyChecking=no '
-                    '-o UserKnownHostsFile=/dev/null '
-                    '-o IdentitiesOnly=yes '
-                    '-W %h:%p '
-                    f'{handle.ssh_user}@127.0.0.1 '
-                    '-o ProxyCommand='
-                    # TODO(zhwu): write the template to a temp file, don't use
-                    # the one in skypilot repo, to avoid changing the file when
-                    # updating skypilot.
-                    f'\'{sys.executable} {sky.__root_dir__}/templates/'
-                    f'websocket_proxy.py '
-                    f'{server_common.get_server_url().split("://")[1]} '
-                    f'{handle.cluster_name}\'')
-                credentials['ssh_proxy_command'] = proxy_command
-            cluster_utils.SSHConfigHelper.add_cluster(
-                handle.cluster_name,
-                handle.cached_external_ips,
-                credentials,
-                handle.cached_external_ssh_ports,
-                handle.docker_user,
-                handle.ssh_user,
-            )
-        else:
+
+        if not (handle is not None and handle.cached_external_ips is not None
+                and 'credentials' in record):
             # If the cluster is not UP or does not have credentials available,
             # we need to remove the cluster from the SSH config.
             cluster_utils.SSHConfigHelper.remove_cluster(record['name'])
+            continue
+
+        # During the failover, even though a cluster does not exist, the handle
+        # can still exist in the record, and we check for credentials to avoid
+        # updating the SSH config for non-existent clusters.
+        credentials = record['credentials']
+        if isinstance(handle.launched_resources.cloud, clouds.Kubernetes):
+            # Replace the proxy command to proxy through the SkyPilot API
+            # server with websocket.
+            key_path = (cluster_utils.SSHConfigHelper.generate_local_key_file(
+                handle.cluster_name, credentials))
+            # Instead of directly use websocket_proxy.py, we add an
+            # additional proxy, so that ssh can use the head pod in the
+            # cluster to jump to worker pods.
+            proxy_command = (
+                f'ssh -tt -i {key_path} '
+                '-o StrictHostKeyChecking=no '
+                '-o UserKnownHostsFile=/dev/null '
+                '-o IdentitiesOnly=yes '
+                '-W %h:%p '
+                f'{handle.ssh_user}@127.0.0.1 '
+                '-o ProxyCommand='
+                # TODO(zhwu): write the template to a temp file, don't use
+                # the one in skypilot repo, to avoid changing the file when
+                # updating skypilot.
+                f'\'{sys.executable} {sky.__root_dir__}/templates/'
+                f'websocket_proxy.py '
+                f'{server_common.get_server_url()} '
+                f'{handle.cluster_name}\'')
+            credentials['ssh_proxy_command'] = proxy_command
+
+        cluster_utils.SSHConfigHelper.add_cluster(
+            handle.cluster_name,
+            handle.cached_external_ips,
+            credentials,
+            handle.cached_external_ssh_ports,
+            handle.docker_user,
+            handle.ssh_user,
+        )
 
     # Clean up SSH configs for clusters that do not exist.
     #
@@ -186,14 +189,15 @@ def _get_cluster_records_and_set_ssh_config(
     # removing clusters, because SkyPilot has no idea whether to remove
     # ssh config of a cluster from another user.
     clusters_exists = set(record['name'] for record in cluster_records)
+    clusters_to_remove: Set[str] = set()
     if clusters is not None:
-        for cluster in clusters:
-            if cluster not in clusters_exists:
-                cluster_utils.SSHConfigHelper.remove_cluster(cluster)
+        clusters_to_remove = set(clusters) - clusters_exists
     elif all_users:
-        for cluster_name in cluster_utils.SSHConfigHelper.list_cluster_names():
-            if cluster_name not in clusters_exists:
-                cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
+        clusters_to_remove = set(cluster_utils.SSHConfigHelper.
+                                 list_cluster_names()) - clusters_exists
+
+    for cluster_name in clusters_to_remove:
+        cluster_utils.SSHConfigHelper.remove_cluster(cluster_name)
 
     return cluster_records
 

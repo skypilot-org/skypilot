@@ -227,12 +227,12 @@ Our default of using a NodePort service is the recommended way to expose the API
             $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
             $ echo $ENDPOINT
             http://skypilot:yourpassword@1.1.1.1
-        
+
         .. tip::
-            
+
             If you're using a Kubernetes cluster without LoadBalancer support, you may get an empty IP address in the output above.
             In that case, use the NodePort option instead.
-        
+
         .. tip::
 
             For fine-grained control over the LoadBalancer service, refer to the `helm values of ingress-nginx <https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx#values>`_. Note that all values should be put under ``ingress-nginx.`` prefix since the ingress-nginx chart is installed as a subchart.
@@ -262,7 +262,7 @@ Our default of using a NodePort service is the recommended way to expose the API
             http://skypilot:yourpassword@1.1.1.1:30050
 
         .. tip::
-            
+
             You can also omit ``ingress-nginx.controller.service.nodePorts.http`` and ``ingress-nginx.controller.service.nodePorts.https`` to use random ports in the NodePort range (default 30000-32767). Make sure these ports are open on your nodes if you do so.
 
         .. tip::
@@ -369,7 +369,7 @@ Once the EBS CSI driver is installed, the default ``gp2`` storage class will be 
 Setting the SkyPilot config
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
+The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/skyconfig.yaml`` in the API server container.
 
 To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 
@@ -434,7 +434,7 @@ If you are upgrading from an early 0.8.0 nightly with a previously deployed Node
 - Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
 
   Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
-  
+
 - Disable the legacy NodePort service:
 
   Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.

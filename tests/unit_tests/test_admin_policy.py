@@ -39,7 +39,7 @@ def _load_task_and_apply_policy(
     config_path: str,
     idle_minutes_to_autostop: Optional[int] = None,
 ) -> Tuple[sky.Dag, config_utils.Config]:
-    os.environ['SKYPILOT_CONFIG'] = config_path
+    os.environ[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = config_path
     importlib.reload(skypilot_config)
     return admin_policy_utils.apply(
         task,

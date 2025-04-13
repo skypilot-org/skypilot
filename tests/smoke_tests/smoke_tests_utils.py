@@ -17,6 +17,7 @@ import yaml
 
 import sky
 from sky import serve
+from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
 from sky.skylet import constants
@@ -50,7 +51,7 @@ LOW_RESOURCE_PARAM = {
     'memory': '4+',
 }
 LOW_CONTROLLER_RESOURCE_ENV = {
-    'SKYPILOT_CONFIG': 'tests/test_yamls/low_resource_sky_config.yaml',
+    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
 }
 LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
     'jobs': {
@@ -367,9 +368,10 @@ def run_one_test(test: Test) -> None:
         temp_config = tempfile.NamedTemporaryFile(mode='w',
                                                   suffix='.yaml',
                                                   delete=False)
-        if 'SKYPILOT_CONFIG' in env_dict:
+        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
             # Read the original config
-            with open(env_dict['SKYPILOT_CONFIG'], 'r') as f:
+            with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG],
+                      'r') as f:
                 config = yaml.safe_load(f)
         else:
             config = {}
@@ -382,7 +384,7 @@ def run_one_test(test: Test) -> None:
         yaml.dump(config, temp_config)
         temp_config.close()
         # Update the environment variable to use the temporary file
-        env_dict['SKYPILOT_CONFIG'] = temp_config.name
+        env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
 
     for command in test.commands:
         write(f'+ {command}\n')
@@ -453,7 +455,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
-    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    # Filter the regions with proxy command in ~/.sky/skyconfig.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
         region for region in candidate_regions
@@ -481,7 +483,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
 
-    # Filter the regions with proxy command in ~/.sky/config.yaml.
+    # Filter the regions with proxy command in ~/.sky/skyconfig.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
         region for region in candidate_regions

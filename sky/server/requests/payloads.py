@@ -47,6 +47,8 @@ def request_body_env_vars() -> dict:
     # Remove the path to config file, as the config content is included in the
     # request body and will be merged with the config on the server side.
     env_vars.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_USER_CONFIG, None)
+    env_vars.pop(skypilot_config.ENV_VAR_PROJECT_CONFIG, None)
     return env_vars
 
 

@@ -66,7 +66,7 @@ def get_networking_mode(
     except ValueError as e:
         with ux_utils.print_exception_no_traceback():
             raise ValueError(str(e) +
-                             ' Please check: ~/.sky/config.yaml.') from None
+                             ' Please check: ~/.sky/skyconfig.yaml.') from None
     return networking_mode
 
 

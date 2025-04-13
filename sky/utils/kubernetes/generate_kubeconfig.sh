@@ -328,9 +328,9 @@ cp kubeconfig ~/.kube/config
 # Verify that you can access the cluster
 kubectl get pods
 
-Also add this to your ~/.sky/config.yaml to use the new service account:
+Also add this to your ~/.sky/skyconfig.yaml to use the new service account:
 
-# ~/.sky/config.yaml
+# ~/.sky/skyconfig.yaml
 kubernetes:
   remote_identity: ${SKYPILOT_SA}
 "
