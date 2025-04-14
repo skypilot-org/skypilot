@@ -61,17 +61,23 @@ class StealEntry:
         return self.matched_rate < other.matched_rate
 
 
+@dataclasses.dataclass
+class LBConfigEntry:
+    """Entry to store the load balancer configuration."""
+    queue_size: int
+    queue_size_actual: int
+    num_replicas: int
+    replica_queue_size_total: int
+
+
 StealBarrierEntry = str
 RequestQueueEntry = Union[RequestEntry, StealBarrierEntry]
 
 _IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
 _QUEUE_PROCESSOR_SLEEP_TIME = 0.01
-# Whether to use "whether the inference engine queue is full or not" as an
-# indicator for available replicas.
-_USE_IE_QUEUE_INDICATOR = True
 _IE_QUEUE_PROBE_INTERVAL = 0.2
-_MIN_STEAL_INTERVAL = 1.0
-_MAX_CACHE_HIT_DELAY_TIMES = 3
+# _MIN_STEAL_INTERVAL = 1.0
+# _MAX_CACHE_HIT_DELAY_TIMES = 3
 
 
 class QueueSizeFilter(logging.Filter):
@@ -142,7 +148,8 @@ class ClientPool:
     """
 
     def __init__(self, load_balancing_policy_name: Optional[str],
-                 max_concurrent_requests: int) -> None:
+                 max_concurrent_requests: int,
+                 use_ie_queue_indicator: bool) -> None:
         logger.info('Starting load balancer with policy '
                     f'{load_balancing_policy_name}.')
         # Use the registry to create the load balancing policy
@@ -166,6 +173,7 @@ class ClientPool:
         # We need this lock to avoid getting from the client pool while
         # updating it from _sync_with_controller.
         self._lock: asyncio.Lock = asyncio.Lock()
+        self._use_ie_queue_indicator = use_ie_queue_indicator
 
     async def background_task(self):
         await self._load_balancing_policy.background_task()
@@ -252,7 +260,7 @@ class ClientPool:
             #             f'Available replicas: {self._available_replicas}')
             await self._load_balancing_policy.pre_execute_hook(url, request)
             self._active_requests[url] = self._active_requests.get(url, 0) + 1
-            if _USE_IE_QUEUE_INDICATOR:
+            if self._use_ie_queue_indicator:
                 return
             if self._active_requests[url] >= self._max_concurrent_requests:
                 self.set_replica_unavailable_no_lock(url)
@@ -263,7 +271,7 @@ class ClientPool:
             await self._load_balancing_policy.post_execute_hook(url, request)
             if url in self._active_requests and self._active_requests[url] > 0:
                 self._active_requests[url] -= 1
-                if _USE_IE_QUEUE_INDICATOR:
+                if self._use_ie_queue_indicator:
                     return
                 if self._active_requests[url] < self._max_concurrent_requests:
                     self.set_replica_available_no_lock(url)
@@ -277,16 +285,19 @@ class SkyServeLoadBalancer:
     policy.
     """
 
-    def __init__(self,
-                 controller_url: str,
-                 load_balancer_port: int,
-                 load_balancing_policy_name: Optional[str] = None,
-                 meta_load_balancing_policy_name: Optional[str] = None,
-                 region: Optional[str] = None,
-                 tls_credential: Optional[serve_utils.TLSCredential] = None,
-                 max_concurrent_requests: int = 10,
-                 max_queue_size: int = 1000,
-                 is_local_debug_mode: bool = False) -> None:
+    def __init__(
+        self,
+        controller_url: str,
+        load_balancer_port: int,
+        load_balancing_policy_name: Optional[str] = None,
+        meta_load_balancing_policy_name: Optional[str] = None,
+        region: Optional[str] = None,
+        tls_credential: Optional[serve_utils.TLSCredential] = None,
+        max_concurrent_requests: int = 10,
+        max_queue_size: int = 1000,
+        is_local_debug_mode: bool = False,
+        use_ie_queue_indicator: bool = True,
+    ) -> None:
         """Initialize the load balancer.
 
         Args:
@@ -302,6 +313,9 @@ class SkyServeLoadBalancer:
             max_concurrent_requests: Maximum concurrent requests per replica.
                 Defaults to 10.
             max_queue_size: Maximum size of the request queue. Defaults to 1000.
+            use_ie_queue_indicator: Whether to use "whether the inference
+                engine queue is full or not" as an indicator for available
+                replicas. Defaults to True.
         """
         self._url: Optional[str] = None
         self._app: fastapi.FastAPI = fastapi.FastAPI()
@@ -316,9 +330,11 @@ class SkyServeLoadBalancer:
         self._load_balancing_policy_name: Optional[str] = (
             load_balancing_policy_name)
         self._replica_pool: ClientPool = ClientPool(load_balancing_policy_name,
-                                                    max_concurrent_requests)
+                                                    max_concurrent_requests,
+                                                    use_ie_queue_indicator)
         self._lb_pool: ClientPool = ClientPool(meta_load_balancing_policy_name,
-                                               max_concurrent_requests)
+                                               max_concurrent_requests,
+                                               use_ie_queue_indicator)
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._workload_steal_session: Optional[aiohttp.ClientSession] = None
         self._request_queue: Optional[QueueWithLock[RequestQueueEntry]] = None
@@ -336,6 +352,7 @@ class SkyServeLoadBalancer:
             float)
         self._steal_requests_lock: asyncio.Lock = asyncio.Lock()
         self._latest_req_id = 0
+        self._use_ie_queue_indicator = use_ie_queue_indicator
         # TODO(tian): Temporary debugging solution. Remove this in production.
         self._replica2id: Dict[str, str] = {}
         self._lb2region: Dict[str, str] = {}
@@ -827,6 +844,7 @@ class SkyServeLoadBalancer:
                 'queue_size': await self._request_queue.qsize(),
                 'queue_size_actual': await self._request_queue.actual_size(),
                 'replica_queue': await self._replica_pool.active_requests(),
+                'num_replicas': len(self._replica_pool.ready_replicas()),
                 'max_queue_size': self._max_queue_size,
                 'max_concurrent_requests': self._max_concurrent_requests,
                 'load_balancing_policy_name': self._load_balancing_policy_name
@@ -840,6 +858,36 @@ class SkyServeLoadBalancer:
                     self._handle_request_tasks.remove(task)
             await asyncio.sleep(_QUEUE_PROCESSOR_SLEEP_TIME)
 
+    async def _req_check_conf(self, target: str) -> LBConfigEntry:
+        assert self._workload_steal_session is not None
+        # TODO(tian): Use urlparse for robustness.
+        # TODO(tian): Investigate this pylint warning.
+        async with self._workload_steal_session.get(  # pylint: disable=not-async-context-manager
+            target + '/conf') as response:
+            conf = await response.json()
+            return LBConfigEntry(conf['queue_size'], conf['queue_size_actual'],
+                                 conf['num_replicas'],
+                                 sum(conf['replica_queue'].values()))
+
+    async def _req_steal_request(self, target: str, num_steal: int) -> None:
+        assert self._workload_steal_session is not None
+        async with self._workload_steal_session.post(  # pylint: disable=not-async-context-manager
+                target + '/steal-request',
+                json={
+                    'num_steal': num_steal,
+                    'source_lb_url': self._url,
+                }) as steal_response:
+            if steal_response.status != 200:
+                logger.error(f'Error in request stealing: '
+                             f'{await steal_response.text()}')
+                return
+            remaining_to_steal = (await
+                                  steal_response.json())['remaining_to_steal']
+            actual_num_steal = num_steal - remaining_to_steal
+            logger.info(f'Actual steal: '
+                        f'{actual_num_steal}/{num_steal} '
+                        f'from {target}.')
+
     async def _request_stealing_loop(self) -> None:
         """Background task to process request stealing."""
         assert self._loop is not None
@@ -852,8 +900,6 @@ class SkyServeLoadBalancer:
                 if not await self._request_queue.empty():
                     continue
                 # Don't steal if there is no available replica.
-                # if not self._replica_pool.ready_replicas():
-                #     continue
                 if not await self._replica_pool.available_replicas():
                     continue
                 steal_targets, self_url = self._steal_targets()
@@ -861,53 +907,52 @@ class SkyServeLoadBalancer:
                     self._url = self_url
                 else:
                     assert self._url == self_url
-                # logger.info(f'Steal targets: {steal_targets}, '
-                #             f'self_url: {self_url}')
                 # It is possible that self_url is not ready in the LB
                 # replica manager yet. We wait until it is ready.
-                if steal_targets and self_url is not None:
-                    # logger.info('Request queue is empty. Try to '
-                    #             f'steal from {steal_targets}')
-                    steal_target = steal_targets[0]
-                    if len(steal_targets) > 1:
-                        logger.error('More than one steal target. '
-                                     'Select the first one '
-                                     f'({steal_target}).')
-                    # TODO(tian): Use urlparse for robustness.
-                    # TODO(tian): Investigate this pylint warning.
-                    async with self._workload_steal_session.get(  # pylint: disable=not-async-context-manager
-                            steal_target + '/conf') as response:
-                        conf = await response.json()
-                        queue_size = conf['queue_size']
-                        queue_size_actual = conf['queue_size_actual']
-                    # logger.info(f'Queue size of {steal_target}: '
-                    #             f'{queue_size}')
-                    if queue_size_actual <= 0:
+                if not steal_targets or self_url is None:
+                    continue
+                conf_tasks = [
+                    self._req_check_conf(target) for target in steal_targets
+                ]
+                conf_results = await asyncio.gather(*conf_tasks)
+                total_queue_size = sum(result.queue_size +
+                                       result.replica_queue_size_total
+                                       for result in conf_results)
+                if total_queue_size <= 0:
+                    continue
+                total_num_replicas = sum(
+                    result.num_replicas for result in conf_results) + len(
+                        self._replica_pool.ready_replicas())
+                if total_num_replicas <= 0:
+                    continue
+                fair_share = total_queue_size // total_num_replicas - sum(
+                    (await self._replica_pool.active_requests()).values())
+                if fair_share <= 0:
+                    continue
+                fair_share_remaining = fair_share
+                for target, conf_result in zip(steal_targets, conf_results):
+                    if fair_share_remaining <= 0:
+                        break
+                    if (conf_result.queue_size <= 0 or
+                            conf_result.queue_size_actual <= 0):
                         continue
-                    num_steal = min(queue_size // 2, queue_size_actual)
+                    # Steal until the target reaches the fair share.
+                    # Dont steal more than the actual queue size.
+                    target_should_remain = (
+                        conf_result.queue_size +
+                        conf_result.replica_queue_size_total -
+                        fair_share * conf_result.num_replicas)
+                    num_steal = min(fair_share_remaining, target_should_remain,
+                                    conf_result.queue_size_actual)
                     if num_steal <= 0:
                         continue
-                    logger.info(f'Steal from {steal_target} with '
+                    fair_share_remaining -= num_steal
+                    logger.info(f'Steal from {target} with '
                                 f'{num_steal} requests; '
-                                f'queue_size: {queue_size}, '
-                                f'queue_size_actual: {queue_size_actual}.')
-                    async with self._workload_steal_session.post(  # pylint: disable=not-async-context-manager
-                            steal_target + '/steal-request',
-                            json={
-                                'num_steal': num_steal,
-                                'source_lb_url': self_url,
-                            }) as steal_response:
-                        # steal_response.raise_for_status()
-                        if steal_response.status != 200:
-                            logger.error(f'Error in request stealing: '
-                                         f'{await steal_response.text()}')
-                            continue
-                        remaining_to_steal = (
-                            await steal_response.json())['remaining_to_steal']
-                        actual_num_steal = num_steal - remaining_to_steal
-                        logger.info(f'Actual steal: '
-                                    f'{actual_num_steal}/{num_steal} '
-                                    f'from {steal_target}.')
+                                f'queue_size: {conf_result.queue_size}, '
+                                'queue_size_actual: '
+                                f'{conf_result.queue_size_actual}.')
+                    await self._req_steal_request(target, num_steal)
             except Exception as e:  # pylint: disable=broad-except
                 logger.error(f'Error in request stealing loop: '
                              f'{common_utils.format_exception(e)}\n'
@@ -1174,7 +1219,7 @@ class SkyServeLoadBalancer:
                 self._tasks.append(
                     self._loop.create_task(self._request_stealing_loop()))
 
-            if _USE_IE_QUEUE_INDICATOR:
+            if self._use_ie_queue_indicator:
                 self._tasks.append(
                     self._loop.create_task(self._probe_ie_queue()))
 
@@ -1225,6 +1270,7 @@ def run_load_balancer(
     tls_credential: Optional[serve_utils.TLSCredential] = None,
     max_concurrent_requests: int = 10,
     max_queue_size: int = 1000,
+    use_ie_queue_indicator: bool = True,
 ) -> None:
     """ Run the load balancer.
 
@@ -1250,6 +1296,7 @@ def run_load_balancer(
         tls_credential=tls_credential,
         max_concurrent_requests=max_concurrent_requests,
         max_queue_size=max_queue_size,
+        use_ie_queue_indicator=use_ie_queue_indicator,
     )
     load_balancer.run()
 

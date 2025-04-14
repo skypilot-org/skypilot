@@ -412,9 +412,8 @@ class ProximateTreePolicy(LeastLoadPolicy, name='prefix_tree', default=False):
             return None
         text = await _get_text(request)
         if text is None:
-            logger.warning(
-                f'No text found in request {_request_repr(request)}. '
-                'Falling back to least load.')
+            logger.debug(f'No text found in request {_request_repr(request)}. '
+                         'Falling back to least load.')
             return await super()._select_replica(request, **kwargs)
         disabled_url = kwargs.get('disabled_url_in_low_match_rate', None)
         cache_threshold = kwargs.get('cache_threshold', None)

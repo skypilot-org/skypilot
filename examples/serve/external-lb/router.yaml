@@ -1,3 +1,6 @@
+envs:
+  WORKER_URLS:
+
 resources:
   cloud: gcp
   cpus: 4
@@ -5,4 +8,4 @@ resources:
 
 setup: pip install sglang-router
 
-run: python -m sglang_router.launch_router --host 0.0.0.0 --port 9001 --worker-urls http://3.148.207.129:8081 http://52.193.17.184:8081 http://18.219.27.94:8081 http://52.192.99.3:8081
+run: python -m sglang_router.launch_router --host 0.0.0.0 --port 9001 --worker-urls $WORKER_URLS

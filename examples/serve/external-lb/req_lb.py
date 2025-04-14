@@ -6,7 +6,7 @@ import time
 
 import aiohttp
 
-num_req = 40
+num_req = 200
 
 host = '0.0.0.0'
 # host = 'test3.aws.cblmemo.net'

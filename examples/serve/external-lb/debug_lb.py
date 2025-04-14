@@ -14,9 +14,10 @@ from sky.serve import load_balancer
 REPLICA_URLS = {}
 PROCESSES = []
 CONTROLLER_PORT = 20018
-LB_PORTS = [6001, 6002]
+MAX_CONCURRENCY = 5
+LB_PORTS = [6001 + i for i in range(3)]
 WORD_TO_STREAM = 'Hello world! Nice to meet you!'
-TIME_TO_SLEEP = 1.2
+TIME_TO_SLEEP = 0.2
 REPLICA_KEY = 'self'
 
 
@@ -202,9 +203,10 @@ def _start_lb_in_process(lb_port):
         load_balancing_policy_name='prefix_tree',
         # load_balancing_policy_name='least_load',
         region=f'{REPLICA_KEY}-{lb_port}',
-        max_concurrent_requests=2,
+        max_concurrent_requests=MAX_CONCURRENCY,
         max_queue_size=10000,
-        is_local_debug_mode=True)
+        is_local_debug_mode=True,
+        use_ie_queue_indicator=False)
     lb_proc = threading.Thread(target=lb.run, daemon=True)
     lb_proc.start()
     # PROCESSES.append(lb_proc)
@@ -212,10 +214,12 @@ def _start_lb_in_process(lb_port):
 
 if __name__ == '__main__':
     try:
-        _start_streaming_replica_in_process(7001, LB_PORTS[0])
-        _start_streaming_replica_in_process(7002, LB_PORTS[0])
-        _start_streaming_replica_in_process(7003, LB_PORTS[1])
-        _start_streaming_replica_in_process(7004, LB_PORTS[1])
+        replica_port_start = 7001
+        for lb_port in LB_PORTS:
+            num_replica = random.randint(1, 3)
+            for _ in range(num_replica):
+                _start_streaming_replica_in_process(replica_port_start, lb_port)
+                replica_port_start += 1
         print('===========REPLICA URLS')
         print(REPLICA_URLS)
         _start_controller_in_process(REPLICA_URLS)

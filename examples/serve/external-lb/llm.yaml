@@ -15,7 +15,7 @@ service:
     #     - role: user
     #       content: Hello! What is your name?
     #   max_tokens: 1
-  replicas: 4
+  replicas: 3
   # TODO(tian): Change the config to a cloud-agnostic way.
   route53_hosted_zone: aws.cblmemo.net
   # Meta load balancing policy used to select the LB.
@@ -29,6 +29,10 @@ service:
         cloud: aws
         region: ap-northeast-1
       load_balancing_policy: prefix_tree
+    - resources:
+        cloud: aws
+        region: eu-west-2
+      load_balancing_policy: prefix_tree
   # max_concurrent_requests: 50
   # max_queue_size: 10000
 
@@ -38,6 +42,7 @@ resources:
   any_of:
     - region: us-east-2
     - region: ap-northeast-1
+    - region: eu-west-2
   ports: 8081
 
 setup: |
