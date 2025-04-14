@@ -1336,15 +1336,13 @@ def check_credentials(context: Optional[str],
         return False, ('An error occurred: '
                        f'{common_utils.format_exception(e, use_bracket=True)}')
 
-    # Check if KUBECONFIG consists of multiple config files. Multiple
-    # KUBECONFIG files are not supported yet.
+    # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
+    # optional checks.
     kubeconfig_path = _get_kubeconfig_path()
-    kubeconfig_paths = kubeconfig_path.split(os.pathsep)
-    if len(kubeconfig_paths) > 1:
+    if len(kubeconfig_path.split(os.pathsep)) > 1:
         return False, (
-            'skypilot currently only supports one config file in the '
-            '$KUBECONFIG environment variable. Current $KUBECONFIG '
-            f'is {kubeconfig_path}.')
+            'SkyPilot currently only supports one config file path '
+            f'with $KUBECONFIG. Current paths are {kubeconfig_path}.')
 
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
     if not run_optional_checks:
@@ -1352,7 +1350,6 @@ def check_credentials(context: Optional[str],
 
     # We now do softer checks to check if exec based auth is used and to
     # see if the cluster is GPU-enabled.
-
     _, exec_msg = is_kubeconfig_exec_auth(context)
 
     # We now check if GPUs are available and labels are set correctly on the
@@ -1500,6 +1497,12 @@ def is_kubeconfig_exec_auth(
     # context. We need to load the kubeconfig file and parse it to get the
     # user details.
     kubeconfig_path = _get_kubeconfig_path()
+    kubeconfig_paths = kubeconfig_path.split(os.pathsep)
+    if len(kubeconfig_paths) > 1:
+        raise ValueError('SkyPilot currently only supports one '
+                         'config file path with $KUBECONFIG. Current '
+                         f'path(s) are {kubeconfig_path}.')
+
     # Load the kubeconfig file as a dictionary
     with open(kubeconfig_path, 'r', encoding='utf-8') as f:
         kubeconfig = yaml.safe_load(f)
