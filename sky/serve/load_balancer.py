@@ -25,6 +25,12 @@ from sky.utils import common_utils
 
 logger = sky_logging.init_logger(__name__)
 
+_IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
+_QUEUE_PROCESSOR_SLEEP_TIME = 0.01
+_IE_QUEUE_PROBE_INTERVAL = 0.1
+# _MIN_STEAL_INTERVAL = 1.0
+# _MAX_CACHE_HIT_DELAY_TIMES = 3
+
 
 @dataclasses.dataclass
 class RequestEntry:
@@ -72,12 +78,6 @@ class LBConfigEntry:
 
 StealBarrierEntry = str
 RequestQueueEntry = Union[RequestEntry, StealBarrierEntry]
-
-_IS_FROM_LB_HEADER = 'X-Sky-Serve-From-LB'
-_QUEUE_PROCESSOR_SLEEP_TIME = 0.01
-_IE_QUEUE_PROBE_INTERVAL = 0.2
-# _MIN_STEAL_INTERVAL = 1.0
-# _MAX_CACHE_HIT_DELAY_TIMES = 3
 
 
 class QueueSizeFilter(logging.Filter):
