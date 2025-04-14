@@ -14,7 +14,6 @@ import {
   BriefcaseIcon,
   ServiceBellIcon,
 } from '@/components/elements/icons';
-import { MenuIcon } from 'lucide-react';
 import { BASE_PATH } from '@/data/connectors/constants';
 
 // Create a context for sidebar state management
@@ -117,8 +116,6 @@ export function SideBar({ highlighted = 'clusters' }) {
 }
 
 export function TopBar() {
-  // Use the shared sidebar context
-  const { toggleSidebar } = useSidebar();
   const router = useRouter();
 
   // State to track if the viewport is mobile
@@ -175,7 +172,6 @@ export function TopBar() {
               style={{ width: '80px', height: '80px' }}
               className="h-12 w-12"
             />
-            {/* <span className="text-xl font-medium text-sky-blue">SkyPilot</span> */}
           </Link>
         </div>
 

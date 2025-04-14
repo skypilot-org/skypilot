@@ -34,14 +34,11 @@ import {
 import { getManagedJobs } from '@/data/connectors/jobs';
 import { getClusters } from '@/data/connectors/clusters';
 import { Layout } from '@/components/elements/layout';
-import { EventTable } from '@/components/elements/events';
 import { CustomTooltip as Tooltip, relativeTime } from '@/components/utils';
 import {
   FileSearchIcon,
   RotateCwIcon,
   MonitorPlay,
-  Filter,
-  PowerIcon,
   RefreshCcw,
 } from 'lucide-react';
 import { handleJobAction } from '@/data/connectors/jobs';
@@ -79,7 +76,6 @@ export function formatDuration(durationInSeconds) {
 }
 
 export function ManagedJobs() {
-  const [activeTab, setActiveTab] = useState('active');
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [confirmationModal, setConfirmationModal] = useState({
@@ -88,7 +84,6 @@ export function ManagedJobs() {
     message: '',
     onConfirm: null,
   });
-  const [counts, setCounts] = useState({ active: 0, finished: 0 });
 
   const handleRefresh = () => {
     if (refreshDataRef.current) {
@@ -128,11 +123,9 @@ export function ManagedJobs() {
         </div>
       </div>
       <ManagedJobsTable
-        activeTab={activeTab}
         refreshInterval={20000}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
-        onCountsChange={setCounts}
       />
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
@@ -148,11 +141,9 @@ export function ManagedJobs() {
 }
 
 export function ManagedJobsTable({
-  activeTab: initialActiveTab,
   refreshInterval,
   setLoading,
   refreshDataRef,
-  onCountsChange,
 }) {
   const [data, setData] = useState([]);
   const [sortConfig, setSortConfig] = useState({
@@ -170,23 +161,13 @@ export function ManagedJobsTable({
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
-  const [activeTab, setActiveTab] = useState(initialActiveTab || 'active');
+  const [activeTab, setActiveTab] = useState('active');
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
     message: '',
     onConfirm: null,
   });
-
-  const router = useRouter();
-
-  // Function to scroll to a specific section
-  const scrollToSection = (sectionId) => {
-    const element = document.getElementById(sectionId);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
 
   const handleRestartController = async () => {
     setConfirmationModal({
@@ -276,21 +257,6 @@ export function ManagedJobsTable({
     };
   }, [refreshInterval, fetchData]);
 
-  // Sort the data if sortConfig is present
-  const sortedData = React.useMemo(() => {
-    if (!sortConfig.key) return data;
-
-    return [...data].sort((a, b) => {
-      if (a[sortConfig.key] < b[sortConfig.key]) {
-        return sortConfig.direction === 'ascending' ? -1 : 1;
-      }
-      if (a[sortConfig.key] > b[sortConfig.key]) {
-        return sortConfig.direction === 'ascending' ? 1 : -1;
-      }
-      return 0;
-    });
-  }, [data, sortConfig]);
-
   // Reset to first page when activeTab changes or when data changes
   useEffect(() => {
     setCurrentPage(1);
@@ -316,32 +282,6 @@ export function ManagedJobsTable({
     return '';
   };
 
-  // Calculate active and finished counts
-  const counts = React.useMemo(() => {
-    const active = data.filter((item) =>
-      [
-        'RUNNING',
-        'RECOVERING',
-        'PENDING',
-        'SUBMITTED',
-        'STARTING',
-        'CANCELLING',
-      ].includes(item.status)
-    ).length;
-    const finished = data.filter((item) =>
-      [
-        'SUCCEEDED',
-        'FAILED',
-        'CANCELLED',
-        'FAILED_SETUP',
-        'FAILED_PRECHECKS',
-        'FAILED_NO_RESOURCE',
-        'FAILED_CONTROLLER',
-      ].includes(item.status)
-    ).length;
-    return { active, finished };
-  }, [data]);
-
   // Define status groups
   const statusGroups = {
     active: [
@@ -362,6 +302,17 @@ export function ManagedJobsTable({
       'FAILED_CONTROLLER',
     ],
   };
+
+  // Calculate active and finished counts
+  const counts = React.useMemo(() => {
+    const active = data.filter((item) =>
+      statusGroups.active.includes(item.status)
+    ).length;
+    const finished = data.filter((item) =>
+      statusGroups.finished.includes(item.status)
+    ).length;
+    return { active, finished };
+  }, [data]);
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
@@ -1026,13 +977,6 @@ export function LogFilter({ logs, controller = false }) {
   );
 }
 
-export const contentStyle = {
-  height: '80%',
-  padding: '30px',
-  backgroundColor: '#f7f7f7',
-  overflow: 'hidden',
-};
-
 function status2Icon(status) {
   const badgeClasses = 'inline-flex items-center px-2 py-1 rounded-full';
   switch (status) {
@@ -1149,10 +1093,7 @@ export function Status2Actions({
   withLabel = false,
   jobParent,
   jobId,
-  jobName,
-  status,
   managed,
-  cluster,
 }) {
   const router = useRouter();
 
@@ -1399,10 +1340,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                       <Status2Actions
                         jobParent={`/clusters/${clusterName}`}
                         jobId={item.id}
-                        jobName={item.job}
-                        status={item.status}
                         managed={false}
-                        cluster={clusterName}
                       />
                     </TableCell>
                   </TableRow>

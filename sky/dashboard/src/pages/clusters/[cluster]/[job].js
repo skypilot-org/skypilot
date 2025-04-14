@@ -111,10 +111,7 @@ export function JobDetailPage() {
       clusterName={cluster}
       jobData={jobData}
       parentLink={`/clusters/${cluster}`}
-      withEvents={false}
       highlighted="clusters"
-      loading={loading || isRefreshing}
-      hideTabs={false}
       isRefreshing={isRefreshing}
       customHeader={
         <JobHeader
@@ -135,21 +132,12 @@ function JobDetails({
   jobData,
   parent,
   parentLink,
-  withEvents = true,
   highlighted = 'jobs',
-  actionButtons,
   customHeader,
-  hideTabs = false,
-  loading = false,
   isRefreshing = false,
 }) {
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
   const [logs, setLogs] = useState([]);
-  const router = useRouter();
-  const isClusterJobPage = router.pathname.includes(
-    '/clusters/[cluster]/[job]'
-  );
   const lastFetchedJobId = React.useRef(null);
   console.log(
     'cluster job details',

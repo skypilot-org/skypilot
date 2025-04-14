@@ -2,16 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import { showToast } from '@/data/connectors/toast';
-import {
-  ENDPOINT,
-  ClusterDoesNotExist,
-  NotSupportedError,
-} from '@/data/connectors/constants';
-import {
-  isJobController,
-  isSkyServeController,
-  parseResources,
-} from '@/data/utils';
+import { ENDPOINT } from '@/data/connectors/constants';
 
 const clusterStatusMap = {
   UP: 'RUNNING',

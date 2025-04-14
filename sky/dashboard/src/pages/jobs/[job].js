@@ -14,9 +14,7 @@ import { streamManagedJobLogs } from '@/data/connectors/jobs';
 function JobDetails() {
   const router = useRouter();
   const { job: jobId, tab } = router.query; // Get tab parameter from URL
-  const activeTab = tab || 'info'; // Default to 'info' if no tab specified
-
-  const { jobData, loading } = useManagedJobDetails({});
+  const { jobData, loading } = useManagedJobDetails();
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
@@ -40,7 +38,7 @@ function JobDetails() {
   // Use MutationObserver to detect when the DOM is fully rendered
   useEffect(() => {
     if (!domReady) {
-      const observer = new MutationObserver((mutations) => {
+      const observer = new MutationObserver(() => {
         // Check if the sections we want to scroll to exist in the DOM
         const logsSection = document.getElementById('logs-section');
         const controllerLogsSection = document.getElementById(
@@ -160,9 +158,6 @@ function JobDetails() {
                 withLabel={true}
                 jobParent="/jobs"
                 jobId={detailJobData.id}
-                jobName={detailJobData.name}
-                status={detailJobData.status}
-                cluster={detailJobData.cluster}
                 managed={true}
               />
             ) : (

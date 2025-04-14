@@ -6,12 +6,8 @@ import {
   ClusterDoesNotExist,
   ClusterNotUpError,
 } from '@/data/connectors/constants';
-import { parseResources } from '@/data/utils';
 
 export async function getManagedJobs({ allUsers = true } = {}) {
-  // The URL returns a request id as a string, and we can further get
-  // the actual data with http://xx.xx.xx.xx:xxxx/get with a json content
-  // { "request_id": <id> }.
   try {
     const response = await fetch(`${ENDPOINT}/jobs/queue`, {
       method: 'POST',
@@ -86,17 +82,6 @@ export async function getManagedJobs({ allUsers = true } = {}) {
       let endTime = job.end_at ? job.end_at : Date.now() / 1000;
       const total_duration = endTime - job.submitted_at;
 
-      const parsed_resources = parseResources(job.cluster_resources);
-      const {
-        infra,
-        instance_type,
-        cpus,
-        mem,
-        gpus,
-        num_nodes,
-        other_resources,
-      } = parsed_resources.parsed_resources;
-
       return {
         id: job.job_id,
         task: job.task_name,
@@ -110,13 +95,6 @@ export async function getManagedJobs({ allUsers = true } = {}) {
         recoveries: job.recovery_count,
         details: job.failure_reason,
         user: job.user_name,
-        infra: infra,
-        instance_type: instance_type,
-        cpus: cpus,
-        mem: mem,
-        gpus: gpus,
-        num_nodes: num_nodes,
-        other_resources: other_resources,
         submitted_at: job.submitted_at
           ? new Date(job.submitted_at * 1000)
           : null,
@@ -222,7 +200,7 @@ export async function streamManagedJobLogs({
   }
 }
 
-export async function handleJobAction(action, jobId, cluster, managed) {
+export async function handleJobAction(action, jobId, cluster) {
   let logStarter = '';
   let logMiddle = '';
   let apiPath = '';

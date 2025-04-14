@@ -25,18 +25,16 @@ import {
   TableCell,
 } from '@/components/ui/table';
 import { getClusters } from '@/data/connectors/clusters';
-import { sortData, isController } from '@/data/utils';
-import { SquareCode, Terminal, PlayIcon, RotateCwIcon } from 'lucide-react';
+import { sortData } from '@/data/utils';
+import { SquareCode, Terminal, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
 import { Layout } from '@/components/elements/layout';
 import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
-  ConfirmationModal,
 } from '@/components/elements/modals';
 
 export function Clusters() {
-  const [activeTab, setActiveTab] = useState('active');
   const [loading, setLoading] = useState(false);
   const refreshDataRef = React.useRef(null);
   const [isSSHModalOpen, setIsSSHModalOpen] = useState(false);
@@ -76,7 +74,6 @@ export function Clusters() {
         </div>
       </div>
       <ClusterTable
-        activeTab={activeTab}
         refreshInterval={10000}
         setLoading={setLoading}
         refreshDataRef={refreshDataRef}
@@ -107,7 +104,6 @@ export function Clusters() {
 }
 
 export function ClusterTable({
-  activeTab,
   refreshInterval,
   setLoading,
   refreshDataRef,
@@ -132,7 +128,7 @@ export function ClusterTable({
     setLoading(false);
     setLocalLoading(false);
     setIsInitialLoad(false);
-  }, [activeTab, setLoading]);
+  }, [setLoading]);
 
   // Use useMemo to compute sorted data
   const sortedData = React.useMemo(() => {
@@ -162,12 +158,12 @@ export function ClusterTable({
       isCurrent = false;
       clearInterval(interval);
     };
-  }, [activeTab, refreshInterval, fetchData]);
+  }, [refreshInterval, fetchData]);
 
-  // Reset to first page when activeTab changes or when data changes
+  // Reset to first page when data changes
   useEffect(() => {
     setCurrentPage(1);
-  }, [activeTab, data.length]);
+  }, [data.length]);
 
   const requestSort = (key) => {
     let direction = 'ascending';
@@ -465,7 +461,7 @@ const handleConnect = (cluster, onOpenSSHModal) => {
 };
 
 // TODO(hailong): The enabled actions are also related to the `cloud` of the cluster
-export const enabledActions = (status, cluster) => {
+export const enabledActions = (status) => {
   switch (status) {
     case 'RUNNING':
       return ['connect', 'VSCode'];
@@ -486,14 +482,7 @@ export function Status2Actions({
   onOpenSSHModal,
   onOpenVSCodeModal,
 }) {
-  const [confirmationModal, setConfirmationModal] = React.useState({
-    isOpen: false,
-    title: '',
-    message: '',
-    onConfirm: null,
-  });
-
-  const actions = enabledActions(status, cluster);
+  const actions = enabledActions(status);
 
   const handleActionClick = (actionName) => {
     switch (actionName) {
