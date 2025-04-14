@@ -117,7 +117,7 @@ Follow these steps to create a new AWS user:
 
            This will open a new window to define the minimal policy. Follow the instructions to create a new policy: :ref:`aws-minimal-policy`.
 
-           Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
+           Come back to this window, and in the **Permissions policies** box, click on the refresh button. You can now search for the policy you just created.
 
            .. image:: ../../images/screenshots/aws/aws-add-policy.png
                :alt: AWS Add Policy
@@ -126,7 +126,7 @@ Follow these steps to create a new AWS user:
 
 3. Click on **Next** and follow the instructions to create the user.
 
-4. Select the newly created user from the dashboard, and go to the **Security credentials** tab. Click on **Create access key**
+4. Select the newly created user from the dashboard, and go to the **Security credentials** tab. Click on **Create access key**.
 
    .. image:: ../../images/screenshots/aws/aws-create-access-key.png
        :alt: AWS Create access key
@@ -140,6 +140,10 @@ Follow these steps to create a new AWS user:
 
      $ # Configure your AWS credentials
      $ aws configure
+     AWS Access Key ID [None]: <Access key>
+     AWS Secret Access Key [None]: <Secret access key>
+     Default region name [None]:
+     Default output format [None]:
 
      $ # Check that AWS sees the shared-credentials-files
      $ aws configure list
@@ -151,7 +155,7 @@ Follow these steps to create a new AWS user:
          region                <not set>             None    None
 
      $ # Validate that credentials are working
-     $ sky check aws
+     $ sky check aws -v
 
 
 .. _several-aws-profiles:
@@ -242,7 +246,7 @@ Common issues
       secret_key     ****************xxxx              sso
           region                <not set>             None    None
       $ # SSO profile AWSPowerUserAccess-123456789012 is enabled
-      $ #   via environment variable.
+      $ # via environment variable.
 
       $ # See details of the currently enabled AWS account and user/role.
       $ aws sts get-caller-identity
@@ -273,7 +277,7 @@ Common issues
   2. If there is a profile named ``default``, it will be used.
   3. Otherwise, the profile will not be accessible.
 
-  Note that even if there is only one profile, it will not be used unless ``AWS_PROFILE`` is set or the profile is named ``default``.
+  Even if there is only one profile, it will not be used unless ``AWS_PROFILE`` is set or the profile is named ``default``.
 
   In AWS CLI v1, you can check ``~/.aws/credentials`` and ``~/.aws/config`` to look for profile names. In AWS CLI v2, you can check from the CLI.
 
@@ -366,7 +370,7 @@ Minimal IAM policy
 
 To avoid giving SkyPilot administrator access, you can create a policy that limits the permissions of the account.
 
-When creating the policy, use the JSON policy editor. You can copy in the minimal policy rules and additional optional policy rules.
+When creating the policy, use the **JSON** policy editor. You can copy in the minimal policy rules and additional optional policy rules.
 
 These are the minimal policy rules required by SkyPilot:
 
