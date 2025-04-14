@@ -147,43 +147,61 @@ export async function streamManagedJobLogs({
   signal,
   onNewLog,
 }) {
-  try {
-    const response = await fetch(`${ENDPOINT}/jobs/logs`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        // TODO(hailong): set follow to true?
-        // - Too much streaming requests may consume too much resources in api server
-        // - Need to stop the api request in different cases
-        controller: controller,
-        follow: false,
-        job_id: jobId,
-      }),
-      // Only use the signal if it's provided
-      ...(signal ? { signal } : {}),
-    });
+  const timeout = 10000; // Default timeout of 10 seconds
 
-    // Stream the logs
-    const reader = response.body.getReader();
+  // Create a timeout promise that resolves after the specified time
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => {
+      resolve({ timeout: true });
+    }, timeout);
+  });
 
+  // Create the fetch promise
+  const fetchPromise = (async () => {
     try {
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = new TextDecoder().decode(value);
-        onNewLog(chunk);
+      const response = await fetch(`${ENDPOINT}/jobs/logs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          controller: controller,
+          follow: false,
+          job_id: jobId,
+        }),
+        // Only use the signal if it's provided
+        ...(signal ? { signal } : {}),
+      });
+
+      // Stream the logs
+      const reader = response.body.getReader();
+
+      try {
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          const chunk = new TextDecoder().decode(value);
+          onNewLog(chunk);
+        }
+      } finally {
+        reader.cancel();
       }
-    } finally {
-      reader.cancel();
+      return { timeout: false };
+    } catch (error) {
+      // If this was an abort, just return silently
+      if (error.name === 'AbortError') {
+        return { timeout: false };
+      }
+      throw error;
     }
-  } catch (error) {
-    // If this was an abort, just return silently
-    if (error.name === 'AbortError') {
-      return;
-    }
-    throw error;
+  })();
+
+  // Race the fetch against the timeout
+  const result = await Promise.race([fetchPromise, timeoutPromise]);
+  // If we timed out, just return silently without throwing an error
+  if (result.timeout) {
+    showToast(`Log request for job ${jobId} timed out after ${timeout}ms`, 'error');
+    return;
   }
 }
 
