@@ -59,7 +59,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
         .. tip::
 
-            The default permissions granted to the API server works out of box. For further hardening, you can refer to :ref:`Setting minimum permissions in Helm Deployment <minimum-permissions-in-helm>` to understand the permissions and how to customize them.
+            The default permissions granted to the API server works out of box. For further hardening, you can refer to :ref:`Setting minimum permissions in helm deployment <minimum-permissions-in-helm>` to understand the permissions and how to customize them.
 
         To use a kubeconfig file to authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file with :ref:`necessary permissions <cloud-permissions-kubernetes>`:
 
@@ -427,7 +427,7 @@ Then apply the values.yaml file using the `-f` flag when running the helm upgrad
 
 .. _minimum-permissions-in-helm:
 
-Setting minimum permissions in Helm Deployment
+Setting minimum permissions in helm deployment
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 In helm deployment, a set of default permissions are granted to the API server to access the hosting Kubernetes cluster. You can customize the permissions in the following conditions:
