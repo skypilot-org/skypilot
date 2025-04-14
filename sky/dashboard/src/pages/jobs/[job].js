@@ -3,13 +3,12 @@ import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
-import { EventTable } from '@/components/elements/events';
 import { useManagedJobDetails } from '@/data/connectors/jobs';
 import { Status2Actions, Status2Icon } from '@/components/jobs';
 import Link from 'next/link';
-import { RotateCwIcon, FileSearchIcon, SquareIcon } from 'lucide-react';
+import { RotateCwIcon, FileSearchIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
-import { LogFilter, formatLogs, contentStyle } from '@/components/jobs';
+import { LogFilter, formatLogs } from '@/components/jobs';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 
 function JobDetails() {
@@ -336,7 +335,7 @@ function JobDetailsContent({
 
   if (activeTab === 'logs') {
     return (
-      <div className="max-h-96 overflow-y-auto" style={contentStyle}>
+      <div className="max-h-96 overflow-y-auto">
         {isLoadingLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />
@@ -351,7 +350,7 @@ function JobDetailsContent({
 
   if (activeTab === 'controllerlogs') {
     return (
-      <div className="max-h-96 overflow-y-auto" style={contentStyle}>
+      <div className="max-h-96 overflow-y-auto">
         {isLoadingControllerLogs ? (
           <div className="flex items-center justify-center py-4">
             <CircularProgress size={20} className="mr-2" />

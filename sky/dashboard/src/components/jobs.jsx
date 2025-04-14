@@ -44,7 +44,6 @@ import {
   PowerIcon,
   RefreshCcw,
 } from 'lucide-react';
-import { streamClusterJobLogs } from '@/data/connectors/clusters';
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
@@ -780,176 +779,98 @@ function getBadgeStyle(status) {
   }
 }
 
-export function JobDetails({
-  clusterName,
-  jobData,
-  parent,
-  parentLink,
-  withEvents = true,
-  highlighted = 'jobs',
-  actionButtons,
-  customHeader,
-  hideTabs = false,
-  loading = false,
-  isRefreshing = false,
-}) {
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const router = useRouter();
-  const isClusterJobPage = router.pathname.includes('/clusters/[cluster]/[job]');
-  console.log('cluster job details', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
-
-  // Clear logs when jobData.id changes or when refreshing
-  useEffect(() => {
-    console.log('clear logs', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
-    setLogs([]);
-  }, [jobData.id, isRefreshing]);
-
-  // Fetch logs when component mounts, jobData.id changes, or when refreshing
-  useEffect(() => {
-    console.log('fetch logs', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
-    let active = true;
-
-    if (clusterName && jobData.id) {
-      setIsLoadingLogs(true);
-
-      streamClusterJobLogs({
-        clusterName: clusterName,
-        jobId: jobData.id,
-        onNewLog: (log) => {
-          if (active) {
-            const strippedLog = formatLogs(log);
-            setLogs((prevLogs) => [...prevLogs, strippedLog]);
-          }
-        },
-      })
-        .then(() => {
-          if (active) {
-            setIsLoadingLogs(false);
-          }
-        })
-        .catch((error) => {
-          if (active) {
-            console.error('Error streaming logs:', error);
-            setIsLoadingLogs(false);
-          }
-        });
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [clusterName, jobData.id, isRefreshing]);
-
-  return (
-    <Layout highlighted={highlighted}>
-      {customHeader || (
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-base flex items-center">
-            {parentLink && (
-              <>
-                <Link href={parentLink} className="text-sky-blue hover:underline">
-                  {parent}
-                </Link>
-                <span className="mx-2 text-gray-500">›</span>
-              </>
-            )}
-            <span className="text-gray-900">{jobData.id}</span>
-          </div>
-        </div>
-      )}
-
-      {/* Display all sections directly on the page */}
-      <div className="space-y-8">
-        {/* Info Section */}
-        <div id="details">
-          <Card>
-            <div className="flex items-center justify-between px-4 pt-4">
-              <h2 className="text-lg font-semibold">Details</h2>
-            </div>
-            <div className="p-4">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <div className="text-gray-600 font-medium text-base">Job ID</div>
-                  <div className="text-base mt-1">{jobData.id}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600 font-medium text-base">Job Name</div>
-                  <div className="text-base mt-1">{jobData.job}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600 font-medium text-base">User</div>
-                  <div className="text-base mt-1">{jobData.user}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600 font-medium text-base">Status</div>
-                  <div className="text-base mt-1">
-                    <Status2Icon status={jobData.status} />
-                  </div>
-                </div>
-                {jobData.resources && (
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">Resources</div>
-                    <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
-                  </div>
-                )}
-                {jobData.cluster && (
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">Cluster</div>
-                    <div className="text-base mt-1">
-                      <Link
-                        href={`/clusters/${jobData.cluster}`}
-                        className="text-sky-blue hover:underline"
-                      >
-                        {jobData.cluster}
-                      </Link>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          </Card>
-        </div>
-
-        {/* Logs Section */}
-        <div id="logs" className="mt-6">
-          <Card>
-            <div className="flex items-center justify-between px-4 pt-4">
-              <h2 className="text-lg font-semibold">Logs</h2>
-            </div>
-            <div className="p-4">
-              {isLoadingLogs ? (
-                <div className="flex items-center justify-center py-4">
-                  <CircularProgress size={20} className="mr-2" />
-                  <span>Loading...</span>
-                </div>
-              ) : (
-                <div className="max-h-96 overflow-y-auto" style={contentStyle}>
-                  <LogFilter logs={logs.join('')} />
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
-    </Layout>
-  );
-}
-
 export function formatLogs(str) {
   if (!str) return '';
-  // if one line matches with <rich_.*>[bold cyan] or
-  // <rich_.*>.*</rich_.*> or ├── or └──, skip this line
-  const lines = str.split('\n');
-  const filteredLines = lines.filter(line => !line.match(/<rich_.*?\[bold cyan\]/) && !line.match(/<rich_.*>.*<\/rich_.*>/) && !line.match(/├──/) && !line.match(/└──/));
-  str = filteredLines.join('\n');
 
-  // First remove ANSI escape codes
-  let result = stripAnsiCodes(str);
+  // Filter out unwanted lines
+  const lines = str.split('\n').filter(line =>
+    !line.match(/<rich_.*?\[bold cyan\]/) &&
+    !line.match(/<rich_.*>.*<\/rich_.*>/) &&
+    !line.match(/├──/) &&
+    !line.match(/└──/)
+  );
 
-  return result;
+  // Remove ANSI escape codes
+  str = stripAnsiCodes(lines.join('\n'));
+
+  // Process each line
+  return str.split('\n').map(line => {
+    // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
+    const match = line.match(/^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/);
+
+    if (match) {
+      const [_, level, timestamp, location, message] = match;
+      const logLevel = {
+        'I': 'INFO',
+        'W': 'WARNING',
+        'E': 'ERROR',
+        'D': 'DEBUG'
+      }[level] || '';
+
+      return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
+    }
+
+    return `<span class="log-line"><span class="message">${line}</span></span>`;
+  }).join('\n');
 }
+
+export const logStyles = `
+  .logs-container {
+    background-color: #f7f7f7;
+    padding: 30px;
+    height: 80%;
+    overflow-y: scroll;
+    font-family: monospace;
+    line-height: 1.5;
+  }
+
+  .log-line {
+    display: block;
+    white-space: pre;
+    margin: 2px 0;
+  }
+
+  .log-line .level {
+    display: inline;
+    width: 1ch;
+    margin-right: 1ch;
+    font-weight: bold;
+  }
+
+  .log-line.INFO .level {
+    color: #2563eb;
+  }
+
+  .log-line.WARNING .level {
+    color: #d97706;
+  }
+
+  .log-line.ERROR .level {
+    color: #dc2626;
+  }
+
+  .log-line.DEBUG .level {
+    color: #6b7280;
+  }
+
+  .log-line .timestamp {
+    color: #059669;
+    margin-right: 1ch;
+    white-space: nowrap;
+  }
+
+  .log-line .location {
+    color: #6366f1;
+    margin-right: 1ch;
+    white-space: nowrap;
+  }
+
+  .log-line .message {
+    color: #111827;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+`;
 
 export function stripAnsiCodes(str) {
   return str.replace(/\x1b\[([0-9]{1,2}(;[0-9]{1,2})?)?[mGKH]/g, '');
@@ -998,6 +919,7 @@ export function LogFilter({ logs, controller=false }) {
 
   return (
     <div>
+      <style>{logStyles}</style>
       {!controller && (
         <>
           <Select
@@ -1019,12 +941,23 @@ export function LogFilter({ logs, controller=false }) {
           <br />
         </>
       )}
-      <pre style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
-        {filteredLogs}
-      </pre>
+      <div
+        className="logs-container"
+        style={{
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          fontFamily: 'monospace',
+          backgroundColor: '#f7f7f7',
+          padding: '8px',
+          borderRadius: '4px',
+          border: '1px solid #e5e7eb'
+        }}
+        dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
+      />
     </div>
   );
 }
+
 export const contentStyle = {
   height: '80%',
   overflowY: 'scroll',

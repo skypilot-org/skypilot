@@ -9,7 +9,7 @@ import { CustomTooltip as Tooltip } from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
-import { Status2Icon, contentStyle, LogFilter } from '@/components/jobs';
+import { Status2Icon, LogFilter } from '@/components/jobs';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -273,7 +273,7 @@ function JobDetails({
                   <span>Loading...</span>
                 </div>
               ) : (
-                <div className="max-h-96 overflow-y-auto" style={contentStyle}>
+                <div className="max-h-96 overflow-y-auto">
                   <LogFilter logs={logs.join('')} />
                 </div>
               )}
