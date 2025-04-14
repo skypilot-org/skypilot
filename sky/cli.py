@@ -661,7 +661,8 @@ def _parse_override_params(
         image_id: Optional[str] = None,
         disk_size: Optional[int] = None,
         disk_tier: Optional[str] = None,
-        ports: Optional[Tuple[str, ...]] = None) -> Dict[str, Any]:
+        ports: Optional[Tuple[str, ...]] = None,
+        config_override: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """Parses the override parameters into a dictionary."""
     override_params: Dict[str, Any] = {}
     if cloud is not None:
@@ -722,6 +723,8 @@ def _parse_override_params(
             override_params['ports'] = None
         else:
             override_params['ports'] = ports
+    if config_override:
+        override_params['_cluster_config_overrides'] = config_override
     return override_params
 
 
@@ -824,6 +827,7 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
     field_to_ignore: Optional[List[str]] = None,
     # job launch specific
     job_recovery: Optional[str] = None,
+    config_override: Optional[Dict[str, Any]] = None,
 ) -> Union[sky.Task, sky.Dag]:
     """Creates a task or a dag from an entrypoint with overrides.
 
@@ -857,7 +861,8 @@ def _make_task_or_dag_from_entrypoint_with_overrides(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             config_override=config_override)
     if field_to_ignore is not None:
         _pop_and_ignore_fields_in_override_params(override_params,
                                                   field_to_ignore)
@@ -1041,7 +1046,7 @@ def cli():
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=False,
                 type=str,
@@ -1171,7 +1176,8 @@ def launch(
         no_setup: bool,
         clone_disk_from: Optional[str],
         fast: bool,
-        async_call: bool):
+        async_call: bool,
+        config_override: Optional[Dict[str, Any]] = None):
     """Launch a cluster or task.
 
     If ENTRYPOINT points to a valid YAML file, it is read in as the task
@@ -1213,6 +1219,7 @@ def launch(
         disk_size=disk_size,
         disk_tier=disk_tier,
         ports=ports,
+        config_override=config_override,
     )
     if isinstance(task_or_dag, sky.Dag):
         raise click.UsageError(
@@ -1277,7 +1284,7 @@ def launch(
 
 
 @cli.command(cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@config_option(expose_value=True)
 @click.argument('cluster',
                 required=False,
                 type=str,
@@ -1306,15 +1313,29 @@ def launch(
                     _COMMON_OPTIONS)
 @usage_lib.entrypoint
 # pylint: disable=redefined-builtin
-def exec(cluster: Optional[str], cluster_option: Optional[str],
-         entrypoint: Tuple[str, ...], detach_run: bool, name: Optional[str],
-         cloud: Optional[str], region: Optional[str], zone: Optional[str],
-         workdir: Optional[str], gpus: Optional[str], ports: Tuple[str],
-         instance_type: Optional[str], num_nodes: Optional[int],
-         use_spot: Optional[bool], image_id: Optional[str],
-         env_file: Optional[Dict[str, str]], env: List[Tuple[str, str]],
-         cpus: Optional[str], memory: Optional[str], disk_size: Optional[int],
-         disk_tier: Optional[str], async_call: bool):
+def exec(cluster: Optional[str],
+         cluster_option: Optional[str],
+         entrypoint: Tuple[str, ...],
+         detach_run: bool,
+         name: Optional[str],
+         cloud: Optional[str],
+         region: Optional[str],
+         zone: Optional[str],
+         workdir: Optional[str],
+         gpus: Optional[str],
+         ports: Tuple[str],
+         instance_type: Optional[str],
+         num_nodes: Optional[int],
+         use_spot: Optional[bool],
+         image_id: Optional[str],
+         env_file: Optional[Dict[str, str]],
+         env: List[Tuple[str, str]],
+         cpus: Optional[str],
+         memory: Optional[str],
+         disk_size: Optional[int],
+         disk_tier: Optional[str],
+         async_call: bool,
+         config_override: Optional[Dict[str, Any]] = None):
     # NOTE(dev): Keep the docstring consistent between the Python API and CLI.
     """Execute a task or command on an existing cluster.
 
@@ -1407,6 +1428,7 @@ def exec(cluster: Optional[str], cluster_option: Optional[str],
         disk_tier=disk_tier,
         ports=ports,
         field_to_ignore=['cpus', 'memory', 'disk_size', 'disk_tier', 'ports'],
+        config_override=config_override,
     )
 
     if isinstance(task_or_dag, sky.Dag):
@@ -3841,7 +3863,7 @@ def jobs():
 
 
 @jobs.command('launch', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -3899,6 +3921,7 @@ def jobs_launch(
     detach_run: bool,
     yes: bool,
     async_call: bool,
+    config_override: Optional[Dict[str, Any]] = None,
 ):
     """Launch a managed job from a YAML or a command.
 
@@ -3939,6 +3962,7 @@ def jobs_launch(
         disk_tier=disk_tier,
         ports=ports,
         job_recovery=job_recovery,
+        config_override=config_override,
     )
 
     if not isinstance(task_or_dag, sky.Dag):
@@ -4930,7 +4954,7 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
 
 
 @bench.command('launch', cls=_DocumentedCodeCommand)
-@config_option(expose_value=False)
+@config_option(expose_value=True)
 @click.argument('entrypoint',
                 required=True,
                 type=str,
@@ -4976,27 +5000,28 @@ def _get_candidate_configs(yaml_path: str) -> Optional[List[Dict[str, str]]]:
               help='Skip confirmation prompt.')
 @usage_lib.entrypoint
 def benchmark_launch(
-        entrypoint: str,
-        benchmark: str,
-        name: Optional[str],
-        workdir: Optional[str],
-        cloud: Optional[str],
-        region: Optional[str],
-        zone: Optional[str],
-        gpus: Optional[str],
-        num_nodes: Optional[int],
-        use_spot: Optional[bool],
-        image_id: Optional[str],
-        env_file: Optional[Dict[str, str]],
-        env: List[Tuple[str, str]],
-        cpus: Optional[str],
-        memory: Optional[str],
-        disk_size: Optional[int],
-        disk_tier: Optional[str],
-        ports: Tuple[str],
-        idle_minutes_to_autostop: Optional[int],
-        yes: bool,
-        async_call: bool,  # pylint: disable=unused-argument
+    entrypoint: str,
+    benchmark: str,
+    name: Optional[str],
+    workdir: Optional[str],
+    cloud: Optional[str],
+    region: Optional[str],
+    zone: Optional[str],
+    gpus: Optional[str],
+    num_nodes: Optional[int],
+    use_spot: Optional[bool],
+    image_id: Optional[str],
+    env_file: Optional[Dict[str, str]],
+    env: List[Tuple[str, str]],
+    cpus: Optional[str],
+    memory: Optional[str],
+    disk_size: Optional[int],
+    disk_tier: Optional[str],
+    ports: Tuple[str],
+    idle_minutes_to_autostop: Optional[int],
+    yes: bool,
+    async_call: bool,  # pylint: disable=unused-argument
+    config_override: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Benchmark a task on different resources.
 
@@ -5105,7 +5130,8 @@ def benchmark_launch(
                                              image_id=image_id,
                                              disk_size=disk_size,
                                              disk_tier=disk_tier,
-                                             ports=ports)
+                                             ports=ports,
+                                             config_override=config_override)
     _pop_and_ignore_fields_in_override_params(
         override_params, field_to_ignore=['cpus', 'memory'])
     resources_config.update(override_params)
