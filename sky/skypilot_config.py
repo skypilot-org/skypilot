@@ -377,21 +377,29 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
 
     config_source = 'CLI'
     maybe_config_path = os.path.expanduser(cli_config)
-    if os.path.isfile(maybe_config_path):
-        config_source = maybe_config_path
-        # cli_config is a path to a config file
-        logger.info(f'Parsing CLI provided config file: {maybe_config_path}')
-        parsed_config = OmegaConf.to_object(OmegaConf.load(maybe_config_path))
-    else:
-        # cli_config is a comma-separated list of key-value pairs
-        logger.info(f'Parsing CLI provided config: {cli_config}')
-        variables: List[str] = []
-        variables = cli_config.split(',')
-        parsed_config = OmegaConf.to_object(OmegaConf.from_dotlist(variables))
-    logger.info(f'Parsed CLI config: {parsed_config}')
+    try:
+        if os.path.isfile(maybe_config_path):
+            config_source = maybe_config_path
+            # cli_config is a path to a config file
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.load(maybe_config_path))
+        else:  # cli_config is a comma-separated list of key-value pairs
+            variables: List[str] = []
+            variables = cli_config.split(',')
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.from_dotlist(variables))
+        _validate_config(parsed_config, config_source)
+    except ValueError as e:
+        if '=' in cli_config:
+            # treat the config as an attempt at a dotlist.
+            raise ValueError(f'Invalid config override: {cli_config}. '
+                             f'{str(e)}') from e
+        else:
+            # treat the config as a path to a (missing) config file.
+            raise ValueError(f'Invalid config file: {cli_config}. '
+                             'Does the config file exist?') from e
 
-    _validate_config(parsed_config, config_source)
-    logger.debug('Config syntax check passed.')
+    logger.debug('CLI overrides config syntax check passed.')
 
     return parsed_config
 
@@ -408,8 +416,6 @@ def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
     """
     global _dict
     parsed_config = _compose_cli_config(cli_config)
-    logger.info(
-        f'applying following overrides from CLI config: {parsed_config}')
     logger.debug(f'applying following CLI overrides: {parsed_config}')
     _dict = overlay_skypilot_config(original_config=_dict,
                                     override_configs=parsed_config)

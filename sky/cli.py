@@ -280,6 +280,20 @@ def _merge_env_vars(env_dict: Optional[Dict[str, str]],
 
 
 def config_option(expose_value: bool):
+    """A decorator for the --config option.
+
+    This decorator is used to parse the --config option.
+
+    Any overrides specified in the command line will be applied to the skypilot
+    config before the decorated function is called.
+
+    If expose_value is True, the decorated function will receive the parsed
+    config overrides as 'config_override' parameter.
+
+    Args:
+        expose_value: Whether to expose the value of the option to the decorated
+            function.
+    """
 
     def preprocess_config_options(ctx, param, value):
         del ctx  # Unused.
@@ -288,11 +302,12 @@ def config_option(expose_value: bool):
             if len(value) == 0:
                 return None
             elif len(value) > 1:
-                raise ValueError
+                raise ValueError('argument specified multiple times')
             else:
+                # Apply the config overrides to the skypilot config.
                 return skypilot_config.apply_cli_config(value[0])
         except ValueError as e:
-            raise click.BadParameter('argument specified multiple times') from e
+            raise click.BadParameter(f'{str(e)}') from e
 
     def return_option_decorator(func):
         return click.option(
@@ -303,7 +318,8 @@ def config_option(expose_value: bool):
             expose_value=expose_value,
             callback=preprocess_config_options,
             help=('Path to a config file or a comma-separated '
-                  'list of key-value pairs.'),
+                  'list of key-value pairs '
+                  '(e.g. "nested.key=val,another.key=val").'),
         )(func)
 
     return return_option_decorator

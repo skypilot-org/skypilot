@@ -1303,7 +1303,7 @@ class Resources:
         override_configs = config_utils.Config()
         for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
             elem = overlaid_configs.get_nested(key, None)
-            if elem:
+            if elem is not None:
                 override_configs.set_nested(key, elem)
 
         override_configs = dict(override_configs) if override_configs else None
