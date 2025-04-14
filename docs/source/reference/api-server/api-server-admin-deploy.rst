@@ -94,7 +94,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             To use multiple Kubernetes clusters from the config file, you will need to add the context names to ``allowed_contexts`` in the SkyPilot config file. See :ref:`sky-api-server-config` on how to set the config file.
 
-            You can also set both ``kubernetesCredentials.useKubeconfig=true`` and ``rbac.create=true`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
+            You can also set both ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.useApiServerCluster=true`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
 
     .. tab-item:: AWS
         :sync: aws-creds-tab
