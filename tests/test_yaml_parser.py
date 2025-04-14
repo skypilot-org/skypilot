@@ -3,6 +3,7 @@ import textwrap
 
 import pytest
 
+from sky.exceptions import InvalidSkyPilotConfigError
 from sky.task import Task
 
 
@@ -81,20 +82,19 @@ def test_gpu_resources(tmp_path):
     assert resources.accelerators == {'V100': 1}
 
 
-def test_gpu_resources_overrides_accelerators(tmp_path):
-    """Ensure consistency with cli behavior."""
+def test_both_gpus_and_accelerators_raises_config_error(tmp_path):
+    """Aliased and canonical names cannot both be specified in config."""
     config_path = _create_config_file(
         textwrap.dedent("""\
             resources:
                 accelerators: V100:1
                 gpus: [T4:4, V100:8]
             """), tmp_path)
-    task = Task.from_yaml(config_path)
 
-    resources = list(task.resources)
-    assert len(resources) == 2
-    assert resources[0].accelerators == {'T4': 4}
-    assert resources[1].accelerators == {'V100': 8}
+    with pytest.raises(InvalidSkyPilotConfigError) as e:
+        Task.from_yaml(config_path)
+    assert e.value.args[
+        0] == "Cannot specify both gpus and accelerators in config."
 
 
 def test_invalid_fields_resources(tmp_path):

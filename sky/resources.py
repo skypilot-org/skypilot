@@ -28,7 +28,7 @@ logger = sky_logging.init_logger(__name__)
 
 _DEFAULT_DISK_SIZE_GB = 256
 
-RESOURCE_CONFIG_OVERRIDING_ALIASES = {
+RESOURCE_CONFIG_ALIASES = {
     'gpus': 'accelerators',
 }
 
@@ -1354,14 +1354,18 @@ class Resources:
         return features
 
     @staticmethod
-    def apply_overriding_aliases(
+    def apply_resource_config_aliases(
             config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         """Mutatively applies overriding aliases to the passed in config."""
         if not config:
             return config
 
-        for alias, canonical in RESOURCE_CONFIG_OVERRIDING_ALIASES.items():
+        for alias, canonical in RESOURCE_CONFIG_ALIASES.items():
             if alias in config:
+                if canonical in config:
+                    raise exceptions.InvalidSkyPilotConfigError(
+                        f'Cannot specify both {alias} '
+                        f'and {canonical} in config.')
                 config[canonical] = config[alias]
                 del config[alias]
         return config
@@ -1373,7 +1377,7 @@ class Resources:
         if config is None:
             return {Resources()}
 
-        Resources.apply_overriding_aliases(config)
+        Resources.apply_resource_config_aliases(config)
         common_utils.validate_schema(config, schemas.get_resources_schema(),
                                      'Invalid resources YAML: ')
 
