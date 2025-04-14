@@ -45,7 +45,7 @@ Create the name of the service account to use
 {{- end -}} 
 
 {{/*
-Create the namespace if not exist and if not the release namespace
+Create the namespace if not exist
 */}}
 {{- define "skypilot.ensureNamespace" -}}
 {{ if not (lookup "v1" "Namespace" "" .) }}
