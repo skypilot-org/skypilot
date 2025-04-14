@@ -57,9 +57,9 @@ export function formatDuration(durationInSeconds) {
 
   const units = [
     { value: 86400, label: 'd' }, // days
-    { value: 3600, label: 'h' },  // hours
-    { value: 60, label: 'm' },    // minutes
-    { value: 1, label: 's' }      // seconds
+    { value: 3600, label: 'h' }, // hours
+    { value: 60, label: 'm' }, // minutes
+    { value: 1, label: 's' }, // seconds
   ];
 
   let remaining = durationInSeconds;
@@ -100,7 +100,10 @@ export function ManagedJobs() {
     <Layout highlighted="jobs">
       <div className="flex items-center justify-between mb-4 h-5">
         <div className="text-base">
-          <Link href="/jobs" className="text-sky-blue hover:underline leading-none">
+          <Link
+            href="/jobs"
+            className="text-sky-blue hover:underline leading-none"
+          >
             Managed Jobs
           </Link>
         </div>
@@ -133,7 +136,9 @@ export function ManagedJobs() {
       />
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
-        onClose={() => setConfirmationModal({ ...confirmationModal, isOpen: false })}
+        onClose={() =>
+          setConfirmationModal({ ...confirmationModal, isOpen: false })
+        }
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
@@ -187,7 +192,8 @@ export function ManagedJobsTable({
     setConfirmationModal({
       isOpen: true,
       title: 'Restart Controller',
-      message: 'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
+      message:
+        'Are you sure you want to restart the controller? This will temporarily interrupt job management.',
       onConfirm: async () => {
         try {
           setIsRestarting(true);
@@ -212,20 +218,24 @@ export function ManagedJobsTable({
       // Fetch both jobs and clusters data in parallel
       const [jobsResponse, clustersData] = await Promise.all([
         getManagedJobs(),
-        getClusters()
+        getClusters(),
       ]);
 
       const { jobs, controllerStopped } = jobsResponse;
       // for the clusters, check if there is a cluster that `isJobController`
-      const jobControllerCluster = clustersData.find(c => isJobController(c.cluster));
-      const jobControllerClusterStatus = jobControllerCluster ? jobControllerCluster.status : 'NOT_FOUND';
-      let isControllerStopped=false
-      if (jobControllerClusterStatus=='STOPPED' && controllerStopped) {
-        isControllerStopped=true
+      const jobControllerCluster = clustersData.find((c) =>
+        isJobController(c.cluster)
+      );
+      const jobControllerClusterStatus = jobControllerCluster
+        ? jobControllerCluster.status
+        : 'NOT_FOUND';
+      let isControllerStopped = false;
+      if (jobControllerClusterStatus == 'STOPPED' && controllerStopped) {
+        isControllerStopped = true;
       }
-      if (jobControllerClusterStatus=='LAUNCHING') {
+      if (jobControllerClusterStatus == 'LAUNCHING') {
         setControllerLaunching(true);
-      }else{
+      } else {
         setControllerLaunching(false);
       }
 
@@ -308,19 +318,49 @@ export function ManagedJobsTable({
 
   // Calculate active and finished counts
   const counts = React.useMemo(() => {
-    const active = data.filter(item =>
-      ['RUNNING', 'RECOVERING', 'PENDING', 'SUBMITTED', 'STARTING', 'CANCELLING'].includes(item.status)
+    const active = data.filter((item) =>
+      [
+        'RUNNING',
+        'RECOVERING',
+        'PENDING',
+        'SUBMITTED',
+        'STARTING',
+        'CANCELLING',
+      ].includes(item.status)
     ).length;
-    const finished = data.filter(item =>
-      ['SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER'].includes(item.status)
+    const finished = data.filter((item) =>
+      [
+        'SUCCEEDED',
+        'FAILED',
+        'CANCELLED',
+        'FAILED_SETUP',
+        'FAILED_PRECHECKS',
+        'FAILED_NO_RESOURCE',
+        'FAILED_CONTROLLER',
+      ].includes(item.status)
     ).length;
     return { active, finished };
   }, [data]);
 
   // Define status groups
   const statusGroups = {
-    active: ['PENDING', 'RUNNING', 'RECOVERING', 'SUBMITTED', 'STARTING', 'CANCELLING'],
-    finished: ['SUCCEEDED', 'FAILED', 'CANCELLED', 'FAILED_SETUP', 'FAILED_PRECHECKS', 'FAILED_NO_RESOURCE', 'FAILED_CONTROLLER']
+    active: [
+      'PENDING',
+      'RUNNING',
+      'RECOVERING',
+      'SUBMITTED',
+      'STARTING',
+      'CANCELLING',
+    ],
+    finished: [
+      'SUCCEEDED',
+      'FAILED',
+      'CANCELLED',
+      'FAILED_SETUP',
+      'FAILED_PRECHECKS',
+      'FAILED_NO_RESOURCE',
+      'FAILED_CONTROLLER',
+    ],
   };
 
   // Helper function to determine if a status should be highlighted
@@ -333,7 +373,7 @@ export function ManagedJobsTable({
 
   // Filter data based on active tab and selected status
   const filteredData = React.useMemo(() => {
-    return data.filter(item => {
+    return data.filter((item) => {
       const matchesActiveTab = statusGroups[activeTab].includes(item.status);
       if (selectedStatus === 'All') {
         return matchesActiveTab;
@@ -400,7 +440,9 @@ export function ManagedJobsTable({
                   }`}
                 >
                   <span>ACTIVE</span>
-                  <span className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                  <span
+                    className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
                     {counts.active}
                   </span>
                 </button>
@@ -413,7 +455,9 @@ export function ManagedJobsTable({
                   }`}
                 >
                   <span>FINISHED</span>
-                  <span className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                  <span
+                    className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
                     {counts.finished}
                   </span>
                 </button>
@@ -427,11 +471,15 @@ export function ManagedJobsTable({
                 <button
                   onClick={() => handleStatusClick('All')}
                   className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                    selectedStatus === 'All' ? 'bg-sky-50 text-sky-700' : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
+                    selectedStatus === 'All'
+                      ? 'bg-sky-50 text-sky-700'
+                      : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
                   }`}
                 >
                   <span>ALL</span>
-                  <span className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                  <span
+                    className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  >
                     {Object.values(statusCounts).reduce((a, b) => a + b, 0)}
                   </span>
                 </button>
@@ -440,11 +488,15 @@ export function ManagedJobsTable({
                     key={status}
                     onClick={() => handleStatusClick(status)}
                     className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                      isStatusHighlighted(status) ? getBadgeStyle(status) : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                      isStatusHighlighted(status)
+                        ? getBadgeStyle(status)
+                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                     }`}
                   >
                     <span>{status}</span>
-                    <span className={`text-xs ${isStatusHighlighted(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}>
+                    <span
+                      className={`text-xs ${isStatusHighlighted(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                    >
                       {count}
                     </span>
                   </button>
@@ -542,12 +594,18 @@ export function ManagedJobsTable({
                   <React.Fragment key={item.id}>
                     <TableRow>
                       <TableCell>
-                        <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                        <Link
+                          href={`/jobs/${item.id}`}
+                          className="text-blue-600"
+                        >
                           {item.id}
                         </Link>
                       </TableCell>
                       <TableCell>
-                        <Link href={`/jobs/${item.id}`} className="text-blue-600">
+                        <Link
+                          href={`/jobs/${item.id}`}
+                          className="text-blue-600"
+                        >
                           {item.name}
                         </Link>
                       </TableCell>
@@ -596,14 +654,14 @@ export function ManagedJobsTable({
               </>
             ) : (
               <TableRow>
-                <TableCell
-                  colSpan={11}
-                  className="text-center py-6"
-                >
+                <TableCell colSpan={11} className="text-center py-6">
                   <div className="flex flex-col items-center space-y-4">
                     {controllerLaunching && (
                       <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">The managed job controller is launching. Please wait for it to be ready.</p>
+                        <p className="text-gray-700">
+                          The managed job controller is launching. Please wait
+                          for it to be ready.
+                        </p>
                         <div className="flex items-center">
                           <CircularProgress size={12} className="mr-2" />
                           <span className="text-gray-500">Launching...</span>
@@ -615,7 +673,10 @@ export function ManagedJobsTable({
                     )}
                     {controllerStopped && (
                       <div className="flex flex-col items-center space-y-2">
-                        <p className="text-gray-700">The managed job controller has been stopped. Please restart it to check the latest job status.</p>
+                        <p className="text-gray-700">
+                          The managed job controller has been stopped. Please
+                          restart it to check the latest job status.
+                        </p>
                         <Button
                           variant="outline"
                           size="sm"
@@ -736,7 +797,9 @@ export function ManagedJobsTable({
 
       <ConfirmationModal
         isOpen={confirmationModal.isOpen}
-        onClose={() => setConfirmationModal({ ...confirmationModal, isOpen: false })}
+        onClose={() =>
+          setConfirmationModal({ ...confirmationModal, isOpen: false })
+        }
         onConfirm={confirmationModal.onConfirm}
         title={confirmationModal.title}
         message={confirmationModal.message}
@@ -783,35 +846,44 @@ export function formatLogs(str) {
   if (!str) return '';
 
   // Filter out unwanted lines
-  const lines = str.split('\n').filter(line =>
-    !line.match(/<rich_.*?\[bold cyan\]/) &&
-    !line.match(/<rich_.*>.*<\/rich_.*>/) &&
-    !line.match(/├──/) &&
-    !line.match(/└──/)
-  );
+  const lines = str
+    .split('\n')
+    .filter(
+      (line) =>
+        !line.match(/<rich_.*?\[bold cyan\]/) &&
+        !line.match(/<rich_.*>.*<\/rich_.*>/) &&
+        !line.match(/├──/) &&
+        !line.match(/└──/)
+    );
 
   // Remove ANSI escape codes
   str = stripAnsiCodes(lines.join('\n'));
 
   // Process each line
-  return str.split('\n').map(line => {
-    // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
-    const match = line.match(/^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/);
+  return str
+    .split('\n')
+    .map((line) => {
+      // Match the format: "I 04-14 02:07:19 controller.py:59] DAG:"
+      const match = line.match(
+        /^([IWED])\s+(\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s+([^:]+:\d+\])(.*)/
+      );
 
-    if (match) {
-      const [_, level, timestamp, location, message] = match;
-      const logLevel = {
-        'I': 'INFO',
-        'W': 'WARNING',
-        'E': 'ERROR',
-        'D': 'DEBUG'
-      }[level] || '';
+      if (match) {
+        const [_, level, timestamp, location, message] = match;
+        const logLevel =
+          {
+            I: 'INFO',
+            W: 'WARNING',
+            E: 'ERROR',
+            D: 'DEBUG',
+          }[level] || '';
 
-      return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
-    }
+        return `<span class="log-line ${logLevel}"><span class="level">${level}</span><span class="timestamp">${timestamp}</span><span class="location">${location}</span><span class="message">${message}</span></span>`;
+      }
 
-    return `<span class="log-line"><span class="message">${line}</span></span>`;
-  }).join('\n');
+      return `<span class="log-line"><span class="message">${line}</span></span>`;
+    })
+    .join('\n');
 }
 
 export const logStyles = `
@@ -900,7 +972,7 @@ function extractNodeTypes(logs) {
   return sortedNodeTypes; // Return sorted array
 }
 
-export function LogFilter({ logs, controller=false }) {
+export function LogFilter({ logs, controller = false }) {
   const [selectedNode, setSelectedNode] = useState('all');
   const [filteredLogs, setFilteredLogs] = useState(logs);
   const [nodeTypes, setNodeTypes] = useState([]);
@@ -929,7 +1001,10 @@ export function LogFilter({ logs, controller=false }) {
             onValueChange={(value) => setSelectedNode(value)}
             value={selectedNode}
           >
-            <SelectTrigger aria-label="Node" className="focus:ring-0 focus:ring-offset-0">
+            <SelectTrigger
+              aria-label="Node"
+              className="focus:ring-0 focus:ring-offset-0"
+            >
               <SelectValue placeholder="Select Node" />
             </SelectTrigger>
             <SelectContent>
@@ -955,12 +1030,11 @@ export const contentStyle = {
   height: '80%',
   padding: '30px',
   backgroundColor: '#f7f7f7',
-  overflow: 'hidden'
+  overflow: 'hidden',
 };
 
 function status2Icon(status) {
-  const badgeClasses =
-    'inline-flex items-center px-2 py-1 rounded-full';
+  const badgeClasses = 'inline-flex items-center px-2 py-1 rounded-full';
   switch (status) {
     case 'RUNNING':
       return (
@@ -1494,7 +1568,7 @@ function TruncatedDetails({ text, rowId, expandedRowId, setExpandedRowId }) {
           className="text-blue-600 hover:text-blue-800 font-medium ml-1 flex-shrink-0"
           data-button-type="show-more-less"
         >
-          {isExpanded ? "... show less" : "... show more"}
+          {isExpanded ? '... show less' : '... show more'}
         </button>
       )}
     </div>

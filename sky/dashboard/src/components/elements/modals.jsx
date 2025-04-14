@@ -29,7 +29,9 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Connect to: <span className="font-light">{cluster}</span></DialogTitle>
+          <DialogTitle>
+            Connect to: <span className="font-light">{cluster}</span>
+          </DialogTitle>
           <DialogDescription>
             Use these instructions to connect to your cluster via SSH.
           </DialogDescription>
@@ -79,11 +81,15 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
     <Dialog open={isOpen} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-3xl">
         <DialogHeader>
-          <DialogTitle>Connect to: <span className="font-light">{cluster}</span></DialogTitle>
+          <DialogTitle>
+            Connect to: <span className="font-light">{cluster}</span>
+          </DialogTitle>
           <DialogDescription>
             <div className="flex flex-col space-y-4">
               <div>
-                <h3 className="text-sm font-medium mb-2 my-2">Setup SSH access</h3>
+                <h3 className="text-sm font-medium mb-2 my-2">
+                  Setup SSH access
+                </h3>
                 <Card className="p-3 bg-gray-50">
                   <pre className="text-sm">
                     <code>sky status {cluster}</code>
@@ -91,8 +97,13 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                 </Card>
               </div>
               <div>
-                <h3 className="text-sm font-medium">Connect with VSCode/Cursor</h3>
-                <div className="relative -mt-10" style={{ paddingBottom: '75%' }}>
+                <h3 className="text-sm font-medium">
+                  Connect with VSCode/Cursor
+                </h3>
+                <div
+                  className="relative -mt-10"
+                  style={{ paddingBottom: '75%' }}
+                >
                   <video
                     className="absolute top-0 left-0 w-full h-full rounded-lg"
                     controls
@@ -100,7 +111,10 @@ export function VSCodeInstructionsModal({ isOpen, onClose, cluster }) {
                     muted
                     preload="metadata"
                   >
-                    <source src={`${BASE_PATH}/videos/cursor-small.mp4`} type="video/mp4" />
+                    <source
+                      src={`${BASE_PATH}/videos/cursor-small.mp4`}
+                      type="video/mp4"
+                    />
                     Your browser does not support the video tag.
                   </video>
                 </div>

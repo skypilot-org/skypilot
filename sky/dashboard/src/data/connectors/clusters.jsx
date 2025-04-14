@@ -65,11 +65,7 @@ export async function getClusters({ clusterNames = null } = {}) {
   }
 }
 
-export async function streamClusterJobLogs({
-  clusterName,
-  jobId,
-  onNewLog,
-}) {
+export async function streamClusterJobLogs({ clusterName, jobId, onNewLog }) {
   try {
     const response = await fetch(`${ENDPOINT}/logs`, {
       method: 'POST',

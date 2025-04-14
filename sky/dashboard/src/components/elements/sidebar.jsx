@@ -9,7 +9,11 @@ import Image from 'next/image';
 import { useRouter } from 'next/router';
 
 import Link from 'next/link';
-import { ServerIcon, BriefcaseIcon, ServiceBellIcon } from '@/components/elements/icons';
+import {
+  ServerIcon,
+  BriefcaseIcon,
+  ServiceBellIcon,
+} from '@/components/elements/icons';
 import { MenuIcon } from 'lucide-react';
 import { BASE_PATH } from '@/data/connectors/constants';
 
@@ -185,7 +189,7 @@ export function TopBar() {
             <ServerIcon className="w-4 h-4" />
             <span>Clusters</span>
           </Link>
-          
+
           <Link
             href="/jobs"
             className={getLinkClasses('/jobs')}
@@ -195,9 +199,7 @@ export function TopBar() {
             <span>Jobs</span>
           </Link>
 
-          <div
-            className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400"
-          >
+          <div className="inline-flex items-center space-x-2 px-1 pt-1 text-gray-400">
             <ServiceBellIcon className="w-4 h-4" />
             <span>Services</span>
             <span className="text-xs ml-2 px-1.5 py-0.5 bg-gray-100 text-gray-500 rounded">

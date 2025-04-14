@@ -43,9 +43,14 @@ function JobDetails() {
       const observer = new MutationObserver((mutations) => {
         // Check if the sections we want to scroll to exist in the DOM
         const logsSection = document.getElementById('logs-section');
-        const controllerLogsSection = document.getElementById('controller-logs-section');
-        
-        if ((tab === 'logs' && logsSection) || (tab === 'controllerlogs' && controllerLogsSection)) {
+        const controllerLogsSection = document.getElementById(
+          'controller-logs-section'
+        );
+
+        if (
+          (tab === 'logs' && logsSection) ||
+          (tab === 'controllerlogs' && controllerLogsSection)
+        ) {
           setDomReady(true);
           observer.disconnect();
         }
@@ -53,7 +58,7 @@ function JobDetails() {
 
       observer.observe(document.body, {
         childList: true,
-        subtree: true
+        subtree: true,
       });
 
       return () => observer.disconnect();
@@ -73,7 +78,7 @@ function JobDetails() {
           setScrollExecuted(true);
         }
       }, 800);
-      
+
       return () => clearTimeout(timer);
     }
   }, [router.isReady, tab, scrollExecuted, pageLoaded, domReady]);
@@ -137,7 +142,10 @@ function JobDetails() {
             </div>
           )}
           <div className="flex items-center space-x-4">
-            <Tooltip content="Refresh" className="text-sm text-muted-foreground">
+            <Tooltip
+              content="Refresh"
+              className="text-sm text-muted-foreground"
+            >
               <button
                 onClick={handleManualRefresh}
                 disabled={loading || isRefreshing}
@@ -265,18 +273,20 @@ function JobDetailsContent({
 
   useEffect(() => {
     setControllerLogs([]);
-    console.log('Controller logs cleared due to tab change, job ID change, or refresh');
+    console.log(
+      'Controller logs cleared due to tab change, job ID change, or refresh'
+    );
   }, [activeTab, jobData.id, isRefreshing]);
 
   // Define a function to handle both log types
   const fetchLogs = (logType, jobId, setLogs, setIsLoading) => {
     let active = true;
     const controller = new AbortController();
-    
+
     if (activeTab === logType && jobId) {
       console.log(`Starting to fetch ${logType} for managed job`, jobId);
       setIsLoading(true);
-      
+
       streamManagedJobLogs({
         jobId: jobId,
         controller: logType === 'controllerlogs',
@@ -329,7 +339,12 @@ function JobDetailsContent({
 
   // Only fetch controller logs when actually viewing the controller logs tab
   useEffect(() => {
-    const cleanup = fetchLogs('controllerlogs', jobData.id, setControllerLogs, setIsLoadingControllerLogs);
+    const cleanup = fetchLogs(
+      'controllerlogs',
+      jobData.id,
+      setControllerLogs,
+      setIsLoadingControllerLogs
+    );
     return cleanup;
   }, [activeTab, jobData.id, isRefreshing]);
 

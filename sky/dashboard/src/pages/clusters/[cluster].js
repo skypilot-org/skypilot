@@ -4,17 +4,10 @@ import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
-import {
-  Status2Actions,
-  Status2Icon,
-} from '@/components/clusters';
+import { Status2Actions, Status2Icon } from '@/components/clusters';
 import { Card } from '@/components/ui/card';
-import {
-  useClusterDetails,
-} from '@/data/connectors/clusters';
-import {
-  RotateCwIcon,
-} from 'lucide-react';
+import { useClusterDetails } from '@/data/connectors/clusters';
+import { RotateCwIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import {
   SSHInstructionsModal,
@@ -109,7 +102,11 @@ function ClusterDetails() {
           <span className="text-gray-500">Loading...</span>
         </div>
       ) : clusterData ? (
-        <ActiveTab clusterData={clusterData} clusterJobData={clusterJobData} loading={loading} />
+        <ActiveTab
+          clusterData={clusterData}
+          clusterJobData={clusterJobData}
+          loading={loading}
+        />
       ) : null}
 
       {/* SSH Instructions Modal */}
@@ -141,7 +138,9 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
           <div className="p-4">
             <div className="grid grid-cols-2 gap-6">
               <div>
-                <div className="text-gray-600 font-medium text-base">Cluster</div>
+                <div className="text-gray-600 font-medium text-base">
+                  Cluster
+                </div>
                 <div className="text-base mt-1">{clusterData.cluster}</div>
               </div>
               <div>
@@ -149,18 +148,28 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                 <div className="text-base mt-1">{clusterData.user}</div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Status</div>
+                <div className="text-gray-600 font-medium text-base">
+                  Status
+                </div>
                 <div className="text-base mt-1">
                   <Status2Icon status={clusterData.status} />
                 </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Resources</div>
-                <div className="text-base mt-1">{clusterData.resources_str || 'N/A'}</div>
+                <div className="text-gray-600 font-medium text-base">
+                  Resources
+                </div>
+                <div className="text-base mt-1">
+                  {clusterData.resources_str || 'N/A'}
+                </div>
               </div>
               <div>
-                <div className="text-gray-600 font-medium text-base">Region</div>
-                <div className="text-base mt-1">{clusterData.region || 'N/A'}</div>
+                <div className="text-gray-600 font-medium text-base">
+                  Region
+                </div>
+                <div className="text-base mt-1">
+                  {clusterData.region || 'N/A'}
+                </div>
               </div>
             </div>
           </div>

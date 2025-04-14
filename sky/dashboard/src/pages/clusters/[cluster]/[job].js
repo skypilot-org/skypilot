@@ -147,17 +147,39 @@ function JobDetails({
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
   const [logs, setLogs] = useState([]);
   const router = useRouter();
-  const isClusterJobPage = router.pathname.includes('/clusters/[cluster]/[job]');
+  const isClusterJobPage = router.pathname.includes(
+    '/clusters/[cluster]/[job]'
+  );
   const lastFetchedJobId = React.useRef(null);
-  console.log('cluster job details', 'jobData.id', jobData.id, 'isRefreshing', isRefreshing);
+  console.log(
+    'cluster job details',
+    'jobData.id',
+    jobData.id,
+    'isRefreshing',
+    isRefreshing
+  );
 
   // Single effect for log management
   useEffect(() => {
-    console.log('fetch logs', 'clusterName', clusterName, 'jobData.id', jobData.id, 'isRefreshing', isRefreshing, 'lastFetchedJobId', lastFetchedJobId.current);
+    console.log(
+      'fetch logs',
+      'clusterName',
+      clusterName,
+      'jobData.id',
+      jobData.id,
+      'isRefreshing',
+      isRefreshing,
+      'lastFetchedJobId',
+      lastFetchedJobId.current
+    );
     let active = true;
 
     // Only fetch if we haven't fetched this job's logs yet or if we're refreshing
-    if (clusterName && jobData.id && (lastFetchedJobId.current !== jobData.id || isRefreshing)) {
+    if (
+      clusterName &&
+      jobData.id &&
+      (lastFetchedJobId.current !== jobData.id || isRefreshing)
+    ) {
       setIsLoadingLogs(true);
       setLogs([]); // Clear logs before fetching new ones
       lastFetchedJobId.current = jobData.id;
@@ -197,7 +219,10 @@ function JobDetails({
           <div className="text-base flex items-center">
             {parentLink && (
               <>
-                <Link href={parentLink} className="text-sky-blue hover:underline">
+                <Link
+                  href={parentLink}
+                  className="text-sky-blue hover:underline"
+                >
                   {parent}
                 </Link>
                 <span className="mx-2 text-gray-500">›</span>
@@ -219,32 +244,46 @@ function JobDetails({
             <div className="p-4">
               <div className="grid grid-cols-2 gap-6">
                 <div>
-                  <div className="text-gray-600 font-medium text-base">Job ID</div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Job ID
+                  </div>
                   <div className="text-base mt-1">{jobData.id}</div>
                 </div>
                 <div>
-                  <div className="text-gray-600 font-medium text-base">Job Name</div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Job Name
+                  </div>
                   <div className="text-base mt-1">{jobData.job}</div>
                 </div>
                 <div>
-                  <div className="text-gray-600 font-medium text-base">User</div>
+                  <div className="text-gray-600 font-medium text-base">
+                    User
+                  </div>
                   <div className="text-base mt-1">{jobData.user}</div>
                 </div>
                 <div>
-                  <div className="text-gray-600 font-medium text-base">Status</div>
+                  <div className="text-gray-600 font-medium text-base">
+                    Status
+                  </div>
                   <div className="text-base mt-1">
                     <Status2Icon status={jobData.status} />
                   </div>
                 </div>
                 {jobData.resources && (
                   <div>
-                    <div className="text-gray-600 font-medium text-base">Resources</div>
-                    <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Resources
+                    </div>
+                    <div className="text-base mt-1">
+                      {jobData.resources || 'N/A'}
+                    </div>
                   </div>
                 )}
                 {jobData.cluster && (
                   <div>
-                    <div className="text-gray-600 font-medium text-base">Cluster</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Cluster
+                    </div>
                     <div className="text-base mt-1">
                       <Link
                         href={`/clusters/${jobData.cluster}`}

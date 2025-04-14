@@ -32,7 +32,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
             const error = JSON.parse(data.detail.error);
             // Handle specific error types
             if (error.type && error.type === ClusterNotUpError) {
-              return { jobs: [], controllerStopped: true }; 
+              return { jobs: [], controllerStopped: true };
             }
           } catch (jsonError) {
             console.error('Error parsing JSON:', jsonError);

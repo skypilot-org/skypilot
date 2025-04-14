@@ -3,7 +3,7 @@ import { TopBar, SidebarProvider } from './sidebar';
 
 function LayoutContent({ children, highlighted }) {
   const [isMobile, setIsMobile] = useState(false);
-  
+
   useEffect(() => {
     const checkMobile = () => {
       setIsMobile(window.innerWidth < 768);

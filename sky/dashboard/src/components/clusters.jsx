@@ -24,9 +24,7 @@ import {
   TableBody,
   TableCell,
 } from '@/components/ui/table';
-import {
-  getClusters,
-} from '@/data/connectors/clusters';
+import { getClusters } from '@/data/connectors/clusters';
 import { sortData, isController } from '@/data/utils';
 import { SquareCode, Terminal, PlayIcon, RotateCwIcon } from 'lucide-react';
 import { relativeTime } from '@/components/utils';
@@ -230,7 +228,7 @@ export function ClusterTable({
                 onClick={() => requestSort('user')}
               >
                 User{getSortDirection('user')}
-              </TableHead>              
+              </TableHead>
               <TableHead
                 className="sortable whitespace-nowrap"
                 onClick={() => requestSort('resources_str')}
@@ -403,8 +401,7 @@ export function ClusterTable({
 }
 
 function status2Icon(status) {
-  const badgeClasses =
-    'inline-flex items-center px-2 py-1 rounded-full';
+  const badgeClasses = 'inline-flex items-center px-2 py-1 rounded-full';
   switch (status) {
     case 'LAUNCHING':
       return (
@@ -524,7 +521,7 @@ export function Status2Actions({
             case 'VSCode':
               label = 'VSCode';
               tooltipText = 'Open in VS Code';
-              break;            
+              break;
             default:
               break;
           }
