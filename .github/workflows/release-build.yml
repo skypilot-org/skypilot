@@ -1,0 +1,216 @@
+name: Release Build
+
+on:
+  schedule:
+    - cron: '0 0 1,15 * *'  # Runs at 00:00 on the 1st and 15th of each month (UTC)
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: 'Release version (e.g., 0.9.0)'
+        required: false
+        type: string
+
+jobs:
+  release-build:
+    runs-on: ubuntu-latest
+    outputs:
+      test_branch: ${{ steps.commit_changes.outputs.test_branch }}
+      smoke_test_build_number: ${{ steps.extract_smoke_test.outputs.smoke_test_build_number }}
+      quicktest_core_build_number: ${{ steps.extract_quicktest.outputs.quicktest_core_build_number }}
+      release_test_build_number: ${{ steps.extract_release_test.outputs.release_test_build_number }}
+      release_version: ${{ steps.determine_version.outputs.release_version }}
+    steps:
+      - name: Clone repository
+        uses: actions/checkout@v3
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+
+      # Find the latest release branch to use as base branch for tests
+      - name: Find latest release branch
+        id: find_release_branch
+        run: |
+          git fetch --all --tags
+          LATEST_RELEASE=$(git branch -r | grep 'origin/releases/' | sort -V | tail -n1 | sed 's/origin\///')
+          echo "Latest release branch: ${LATEST_RELEASE}"
+          echo "base_branch=${LATEST_RELEASE}" >> $GITHUB_OUTPUT
+
+      # Determine release version based on trigger type
+      - name: Determine release version
+        id: determine_version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ] && [ -n "${{ github.event.inputs.release_version }}" ]; then
+            # Manual trigger with input version provided
+            RELEASE_VERSION="${{ github.event.inputs.release_version }}"
+            echo "Using manually specified version: ${RELEASE_VERSION}"
+          else
+            # Scheduled trigger or manual trigger without version - extract version from latest release and increment patch
+            LATEST_VERSION=$(echo "${{ steps.find_release_branch.outputs.base_branch }}" | sed 's/releases\///')
+            # Split version into parts
+            MAJOR=$(echo $LATEST_VERSION | cut -d. -f1)
+            MINOR=$(echo $LATEST_VERSION | cut -d. -f2)
+            PATCH=$(echo $LATEST_VERSION | cut -d. -f3)
+            # Increment patch version
+            NEW_PATCH=$((PATCH + 1))
+            RELEASE_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+            echo "Incrementing from ${LATEST_VERSION} to ${RELEASE_VERSION}"
+          fi
+          echo "release_version=${RELEASE_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Set release version and commit changes
+        id: commit_changes
+        run: |
+          RELEASE_VERSION="${{ steps.determine_version.outputs.release_version }}"
+
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Make version changes
+          sed -i "s/__version__ = '.*'/__version__ = '${RELEASE_VERSION}'/g" sky/__init__.py
+
+          # Commit the changes
+          git add sky/__init__.py
+          git commit -m "Release ${RELEASE_VERSION}"
+
+          # Get the new commit SHA
+          NEW_COMMIT_SHA=$(git rev-parse HEAD)
+          echo "new_commit_sha=${NEW_COMMIT_SHA}" >> $GITHUB_OUTPUT
+          echo "New commit SHA: ${NEW_COMMIT_SHA}"
+
+          # Create and push the branch
+          TEST_BRANCH="test_releases/${RELEASE_VERSION}"
+          git checkout -b ${TEST_BRANCH}
+          git push -f origin ${TEST_BRANCH}
+          echo "test_branch=${TEST_BRANCH}" >> $GITHUB_OUTPUT
+
+      # Trigger Buildkite smoke tests
+      - name: Trigger Full Smoke Tests
+        id: trigger_smoke_tests
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/full-smoke-tests-run"
+          branch: "${{ steps.commit_changes.outputs.test_branch }}"
+          commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
+          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          ignore_pipeline_branch_filter: true
+
+      # Extract build number from response JSON
+      - name: Extract smoke tests build number
+        id: extract_smoke_test
+        run: |
+          build_number=$(echo '${{ steps.trigger_smoke_tests.outputs.json }}' | jq -r '.number')
+          echo "smoke_test_build_number=$build_number" >> $GITHUB_OUTPUT
+
+      # Trigger Buildkite quicktest-core
+      - name: Trigger Quicktest Core
+        id: trigger_quicktest_core
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/quicktest-core"
+          branch: "${{ steps.commit_changes.outputs.test_branch }}"
+          commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
+          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          ignore_pipeline_branch_filter: true
+          build_env_vars: '{"ARGS": "--base-branch ${{ steps.find_release_branch.outputs.base_branch }}"}'
+
+      # Extract build number from response JSON
+      - name: Extract quicktest core build number
+        id: extract_quicktest
+        run: |
+          build_number=$(echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq -r '.number')
+          echo "quicktest_core_build_number=$build_number" >> $GITHUB_OUTPUT
+
+      # Trigger Buildkite release tests
+      - name: Trigger Release Tests
+        id: trigger_release_tests
+        uses: buildkite/trigger-pipeline-action@v2.3.0
+        with:
+          buildkite_api_access_token: ${{ secrets.BUILDKITE_TOKEN }}
+          pipeline: "skypilot-1/release"
+          branch: "${{ steps.commit_changes.outputs.test_branch }}"
+          commit: "${{ steps.commit_changes.outputs.new_commit_sha }}"
+          message: "Release ${{ steps.determine_version.outputs.release_version }}"
+          ignore_pipeline_branch_filter: true
+
+      # Extract build number from response JSON
+      - name: Extract release tests build number
+        id: extract_release_test
+        run: |
+          build_number=$(echo '${{ steps.trigger_release_tests.outputs.json }}' | jq -r '.number')
+          echo "release_test_build_number=$build_number" >> $GITHUB_OUTPUT
+
+  wait-for-smoke-tests:
+    needs: release-build
+    uses: ./.github/workflows/wait-for-buildkite.yml
+    with:
+      organization: "skypilot-1"
+      pipeline: "full-smoke-tests-run"
+      build_number: ${{ needs.release-build.outputs.smoke_test_build_number }}
+      timeout_minutes: 180
+      fail_on_buildkite_failure: false
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  wait-for-quicktest-core:
+    needs: release-build
+    uses: ./.github/workflows/wait-for-buildkite.yml
+    with:
+      organization: "skypilot-1"
+      pipeline: "quicktest-core"
+      build_number: ${{ needs.release-build.outputs.quicktest_core_build_number }}
+      timeout_minutes: 180
+      fail_on_buildkite_failure: false
+    secrets:
+      BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
+
+  create-pr:
+    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Create release branch and PR
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
+          RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
+          SMOKE_TEST_BUILD: ${{ needs.release-build.outputs.smoke_test_build_number }}
+          QUICKTEST_BUILD: ${{ needs.release-build.outputs.quicktest_core_build_number }}
+          RELEASE_TEST_BUILD: ${{ needs.release-build.outputs.release_test_build_number }}
+        run: |
+          RELEASE_BRANCH="releases/${RELEASE_VERSION}"
+
+          # Configure git
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+
+          # Check if the release branch already exists remotely
+          if ! git ls-remote --heads origin ${RELEASE_BRANCH} | grep ${RELEASE_BRANCH}; then
+            echo "Release branch ${RELEASE_BRANCH} does not exist, creating it..."
+            # Create the release branch from the current commit
+            git checkout -b ${RELEASE_BRANCH}
+            git push origin ${RELEASE_BRANCH}
+          fi
+
+          # Create PR with buildkite links
+          PR_BODY="Release ${RELEASE_VERSION}
+
+          Buildkite Test Links:
+          - [Full Smoke Tests](https://buildkite.com/skypilot-1/full-smoke-tests-run/builds/${SMOKE_TEST_BUILD}) - $([ "${{ needs.wait-for-smoke-tests.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Quicktest Core](https://buildkite.com/skypilot-1/quicktest-core/builds/${QUICKTEST_BUILD}) - $([ "${{ needs.wait-for-quicktest-core.outputs.build_status }}" == "success" ] && echo "✅ Success" || echo "❌ Failed")
+          - [Release Tests](https://buildkite.com/skypilot-1/release/builds/${RELEASE_TEST_BUILD}) - ⏳ (not waiting for completion)
+
+          *Release Tests may take up to 24 hours to complete and might fail due to resource constraints.*"
+
+          gh pr create --base ${RELEASE_BRANCH} --head ${TEST_BRANCH} \
+            --title "Release ${RELEASE_VERSION}" \
+            --body "${PR_BODY}"

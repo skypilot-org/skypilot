@@ -2069,7 +2069,7 @@ class RetryingVmProvisioner(object):
                     # If autostop is disabled in config, the feature may not be
                     # requested, so use discard() instead of remove().
                     requested_features.discard(
-                        clouds.CloudImplementationFeatures.STOP)
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
