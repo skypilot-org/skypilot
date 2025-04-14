@@ -13,10 +13,31 @@ Using AWS SSO
 
 `AWS IAM Identity Center <https://aws.amazon.com/iam/identity-center/>`_ (Successor to AWS Single Sign-On, or SSO) is supported.
 
-.. warning::
-  SSO login *will not work across multiple clouds*. If you use multiple clouds, you should :ref:`set up a dedicated user and credentials <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
+.. _sso-feature-compat:
+.. note::
+  SSO login has limited functionality *across multiple clouds*. If you use multiple clouds, you can :ref:`set up a dedicated IAM user and access key <dedicated-aws-user>` so that instances launched on other clouds can use AWS resources.
 
-To use it, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. If you install v2, you may need to ``deactivate`` (for venv) or ``conda deactivate`` to avoid the v1 CLI taking precedence.
+  .. list-table::
+     :header-rows: 1
+     :stub-columns: 1
+
+     * - *Supported features:*
+       - SSO credentials
+       - Static credentials
+     * - Launch AWS instances with S3 buckets
+       - |:white_check_mark:|
+       - |:white_check_mark:|
+     * - Use S3 buckets from other clouds
+       - |:x:|
+       - |:white_check_mark:|
+     * - Use managed jobs across multiple clouds
+       - |:yellow_circle:| [1]_
+       - |:white_check_mark:|
+
+  .. [1] To allow managed jobs to run on AWS instances, make sure your controller is also on AWS, by :ref:`specifying the controller resources <jobs-controller-custom-resources>`.
+
+
+To use SSO, ensure that your machine `has AWS CLI v2 installed <https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html>`_. By default, ``pip install skypilot[aws]`` installs v1; v2 cannot be installed via pip. If you install v2, you may need to ``deactivate`` (for venv) or ``conda deactivate`` to avoid the v1 CLI taking precedence.
 
 You can use the following to check version:
 
@@ -59,13 +80,15 @@ If everything is set up correctly, :code:`sky check aws` should succeed!
 .. _dedicated-aws-user:
 
 Dedicated SkyPilot IAM user
-----------------------------------------
+---------------------------
 
-You can create a dedicated IAM user for SkyPilot, if you can't or don't want to use your normal credentials, or if you want to restrict SkyPilot's permissions.
+You can optionally create a dedicated IAM user for SkyPilot with specifically granted permissions. **Creating a dedicated user is not required** --- as long as you have AWS CLI credentials set up, SkyPilot will automatically use those credentials.
 
-.. note::
+However, using a dedicated IAM user can have some benefits:
 
-  **SSO users** that login via awsapps.com should set up a dedicated user to ensure cross-cloud access. Otherwise, instances launched in other clouds will not be able to access AWS resources, including buckets and managed jobs.
+- Avoid using your personal credentials with SkyPilot.
+- Specify minimal permissions to avoid granting broad access to SkyPilot.
+- If you use SSO login, enable some :ref:`additional cross-cloud features <sso-feature-compat>`.
 
 Follow these steps to create a new AWS user:
 
@@ -92,12 +115,7 @@ Follow these steps to create a new AWS user:
            .. image:: ../../images/screenshots/aws/aws-create-policy.png
                :alt: AWS Create Policy
 
-           This will open a new window to define the minimal policy.
-
-           Choose "JSON" tab and copy the needed minimal policy rules.
-           **See** :ref:`aws-minimal-policy` **for all the policy rules.**
-
-           Click **Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
+           This will open a new window to define the minimal policy. Follow the instructions to create a new policy: :ref:`aws-minimal-policy`.
 
            Go back to the previous window and click on the refresh button, and you can now search for the policy you just created.
 
@@ -139,7 +157,7 @@ Follow these steps to create a new AWS user:
 .. _several-aws-profiles:
 
 Switch profiles or accounts
-----------------------------------
+---------------------------
 
 You can use different AWS profiles or accounts to launch different clusters. SkyPilot will remember the owner identity of each cluster and properly protects any "write" operations. All clusters are shown in ``sky status``.
 
@@ -157,7 +175,7 @@ Example of mixing the default profile and another profile:
 .. _aws-troubleshooting:
 
 Troubleshooting
-----------------------
+---------------
 
 If your credentials are not being picked up, or you're seeing the wrong credentials in SkyPilot, here are some steps you can take to troubleshoot:
 
@@ -198,7 +216,7 @@ If your credentials are not being picked up, or you're seeing the wrong credenti
        ...
 
 Common issues
-~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~
 
 - **Wrong profile is enabled.** SkyPilot will respect the ``AWS_PROFILE`` environment variable if it is set - see :ref:`several-aws-profiles`. If ``AWS_PROFILE`` is not set, SkyPilot will use the profile named ``default``.
 
@@ -323,28 +341,34 @@ Create the internal IAM role for SkyPilot
 
     If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
-1. In the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_, go to the "Roles" tab, and click on **Create role**.
+1. If you haven't yet, :ref:`create a minimal IAM policy for SkyPilot <aws-minimal-policy>`. If you previously created a dedicated IAM user with minimal permissions, you can re-use the same policy you used for the dedicated user.
+
+2. In the `IAM dashboard <https://us-east-1.console.aws.amazon.com/iamv2/home#/home>`_, go to the "Roles" tab, and click on **Create role**.
 
    .. image:: ../../images/screenshots/aws/aws-add-role.png
        :alt: AWS Add Role
 
-2. Select **Trusted entity type**: AWS service, and **Use case**: EC2, as seen in the image below.
+3. Select **Trusted entity type**: AWS service, and **Use case**: EC2, as seen in the image below.
 
    .. image:: ../../images/screenshots/aws/aws-add-role-entity.png
-       :alt: AWS Role Entity, with Trusted entity type set to AWS service, Service or use case set to EC2, and Use case set to EC2.
+       :alt: AWS Role Entity, with "Trusted entity type" set to "AWS service", "Service or use case" set to "EC2", and "Use case" set to "EC2".
 
    Click **Next**.
 
-3. Search for and select the policy you created in :ref:`User Creation <dedicated-aws-user>`.
-4. Click **Next**, and name your role exactly ``skypilot-v1``. Click **Create role**.
+4. Search for and select the IAM policy from step 1.
+5. Click **Next**, and name your role exactly ``skypilot-v1``. Click **Create role**.
 
 
 .. _aws-minimal-policy:
 
-Minimal IAM policy rules
-~~~~~~~~~~~~~~~~~~~~~~~~
+Minimal IAM policy
+~~~~~~~~~~~~~~~~~~
 
-To avoid giving SkyPilot administrator access, you can create a policy that limits the permissions of the account. These are the minimal policy rules required by SkyPilot:
+To avoid giving SkyPilot administrator access, you can create a policy that limits the permissions of the account.
+
+When creating the policy, use the JSON policy editor. You can copy in the minimal policy rules and additional optional policy rules.
+
+These are the minimal policy rules required by SkyPilot:
 
 .. note::
     **Replace the** ``<account-ID-without-hyphens>`` **with your AWS account ID**. You can find your AWS account ID by clicking on the upper right corner of the console.
@@ -501,6 +525,7 @@ To avoid giving SkyPilot administrator access, you can create a policy that limi
                 "Resource": "*"
             }
 
+**Once you have added all needed policies, click Next** and follow the instructions to finish creating the policy. You can give the policy a descriptive name, such as ``minimal-skypilot-policy``.
 
 Using a specific VPC
 -----------------------
