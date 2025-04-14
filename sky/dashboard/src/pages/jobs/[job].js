@@ -318,7 +318,6 @@ function JobDetailsContent({
       // Return cleanup function
       return () => {
         active = false;
-        controller.abort();
       };
     }
     return () => {

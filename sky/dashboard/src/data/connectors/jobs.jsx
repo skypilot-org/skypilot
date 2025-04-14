@@ -161,7 +161,8 @@ export async function streamManagedJobLogs({
         follow: false,
         job_id: jobId,
       }),
-      signal, // Pass the abort signal to the fetch request
+      // Only use the signal if it's provided
+      ...(signal ? { signal } : {}),
     });
 
     // Stream the logs
@@ -174,27 +175,13 @@ export async function streamManagedJobLogs({
         const chunk = new TextDecoder().decode(value);
         onNewLog(chunk);
       }
-    } catch (error) {
-      // Normalize error types
-      if (
-        error.name === 'AbortError' ||
-        error.message?.includes('aborted') ||
-        signal?.aborted
-      ) {
-        throw new DOMException('Log streaming was aborted', 'AbortError');
-      }
-      throw error;
     } finally {
-      try {
-        reader.cancel();
-      } catch (e) {
-        console.log('Error canceling reader:', e);
-      }
+      reader.cancel();
     }
   } catch (error) {
-    // Check again if this was an abort
-    if (signal?.aborted && error.name !== 'AbortError') {
-      throw new DOMException('Log streaming was aborted', 'AbortError');
+    // If this was an abort, just return silently
+    if (error.name === 'AbortError') {
+      return;
     }
     throw error;
   }
