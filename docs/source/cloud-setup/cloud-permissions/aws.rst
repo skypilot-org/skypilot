@@ -319,7 +319,7 @@ Create the internal IAM role for SkyPilot
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. note::
-    In most cases, the IAM role will be automatically created. You only need to manually create the IAM role if you have exlucded the optional role creation permissions from your minimal skypilot policy.
+    In most cases, the IAM role will be automatically created. You only need to manually create the IAM role if you have excluded the optional role creation permissions from your minimal skypilot policy.
 
     If you already have an IAM role called ``skypilot-v1`` in your AWS account, it is likely created by SkyPilot automatically, and you can skip this section.
 
