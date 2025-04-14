@@ -4493,7 +4493,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     if config_override_down is False:  # will not match None
                         logger.warning(
                             'SkyServe controller autodown is disabled in the '
-                            '~/.sky/skyconfig.yaml configuration file '
+                            '~/.sky/config.yaml configuration file '
                             '(serve.controller.autostop.down_when_idle), but '
                             'it is force enabled for Kubernetes clusters.')
 
