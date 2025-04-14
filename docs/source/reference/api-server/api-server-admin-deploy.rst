@@ -54,8 +54,8 @@ Following tabs describe how to configure credentials for different clouds on the
 
         By default, SkyPilot API server is granted permissions to use its hosting Kubernetes cluster:
 
-        * To disable this behavior, set ``rbac.create=false`` in the Helm chart values.
-        * When running in the same cluster, tasks are launched in the same namespace as the API server. To use a different namespace for tasks, set ``rbac.inClusterNamespace=<namespace>`` when deploying the API server.
+        * To disable this behavior, set ``kubernetesCredentials.useApiServerCluster=false`` in the Helm chart values.
+        * When running in the same cluster, tasks are launched in the same namespace as the API server. To use a different namespace for tasks, set ``kubernetesCredentials.inclusterNamespace=<namespace>`` when deploying the API server.
 
         .. tip::
 
