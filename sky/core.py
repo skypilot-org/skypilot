@@ -365,7 +365,7 @@ def _start(
             if len(arguments) > 1:
                 arguments_str += 's'
             raise ValueError(
-                'Passing custom autostop/down settings is currently not '
+                'Passing per-request autostop/down settings is currently not '
                 'supported when starting SkyPilot controllers. To '
                 f'fix: omit the {arguments_str} to use the '
                 f'default autostop settings from config.')
