@@ -138,6 +138,7 @@ def parse_readme(readme: str) -> str:
     readme = mode_re.sub(r'<img\1>', readme)
     return readme
 
+
 long_description = ''
 readme_filepath = 'README.md'
 # When sky/backends/wheel_utils.py builds wheels, it will not contain the
