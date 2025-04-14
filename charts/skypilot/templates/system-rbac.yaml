@@ -29,7 +29,7 @@ metadata:
 subjects:
 - kind: ServiceAccount
   name: {{ include "skypilot.serviceAccountName" . }}
-  namespace: {{ $namespace }}
+  namespace: {{ .Release.Namespace }}
 roleRef:
   kind: Role
   name: {{ .Release.Name }}-system-role
