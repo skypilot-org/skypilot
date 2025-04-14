@@ -252,7 +252,7 @@ Set up NFS and other volumes
 
 `Kubernetes volumes <https://kubernetes.io/docs/concepts/storage/volumes/>`_ can be attached to your SkyPilot pods using the :ref:`pod_config <kubernetes-custom-pod-config>` field. This is useful for accessing shared storage such as NFS or local high-performance storage like NVMe drives.
 
-Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/.sky.yaml`.
+Volume mounting can be done directly in the task YAML on a per-task basis, or globally for all tasks in :code:`~/.sky/config.yaml`.
 
 Examples:
 
@@ -291,7 +291,7 @@ Examples:
 
       .. code-block:: yaml
 
-           # ~/.sky/.sky.yaml
+           # ~/.sky/config.yaml
            kubernetes:
              pod_config:
                spec:
@@ -339,7 +339,7 @@ Examples:
 
       .. code-block:: yaml
 
-           # ~/.sky/.sky.yaml
+           # ~/.sky/config.yaml
            kubernetes:
              pod_config:
                spec:
@@ -387,7 +387,7 @@ Examples:
 
       .. code-block:: yaml
 
-           # ~/.sky/.sky.yaml
+           # ~/.sky/config.yaml
            kubernetes:
              pod_config:
                spec:

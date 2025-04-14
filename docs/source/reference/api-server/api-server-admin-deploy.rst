@@ -369,7 +369,7 @@ Once the EBS CSI driver is installed, the default ``gp2`` storage class will be 
 Setting the SkyPilot config
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/.sky.yaml`` in the API server container.
+The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
 
 To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 

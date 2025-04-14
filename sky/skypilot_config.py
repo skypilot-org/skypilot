@@ -1,7 +1,7 @@
 """Immutable user configurations (EXPERIMENTAL).
 
 On module import, we attempt to parse the config located at _USER_CONFIG_PATH
-(default: ~/.sky/.sky.yaml). Caller can then use
+(default: ~/.sky/config.yaml). Caller can then use
 
   >> skypilot_config.loaded()
 
@@ -35,14 +35,14 @@ Consider the following config contents:
 
 then:
 
-    # Assuming ~/.sky/.sky.yaml exists and can be loaded:
+    # Assuming ~/.sky/config.yaml exists and can be loaded:
     skypilot_config.loaded()  # ==> True
 
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> 1
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
     skypilot_config.get_nested(('a',), None)             # ==> {'nested': 1}
 
-    # If ~/.sky/.sky.yaml doesn't exist or failed to be loaded:
+    # If ~/.sky/config.yaml doesn't exist or failed to be loaded:
     skypilot_config.loaded()  # ==> False
     skypilot_config.get_nested(('a', 'nested'), None)    # ==> None
     skypilot_config.get_nested(('a', 'nonexist'), None)  # ==> None
@@ -100,8 +100,7 @@ ENV_VAR_USER_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}USER_CONFIG'
 ENV_VAR_PROJECT_CONFIG = f'{constants.SKYPILOT_ENV_VAR_PREFIX}PROJECT_CONFIG'
 
 # Path to the local config files.
-_LEGACY_USER_CONFIG_PATH = '~/.sky/config.yaml'
-_USER_CONFIG_PATH = '~/.sky/.sky.yaml'
+_USER_CONFIG_PATH = '~/.sky/config.yaml'
 _PROJECT_CONFIG_PATH = '.sky.yaml'
 
 # The loaded config.
@@ -110,20 +109,8 @@ _loaded_config_path: Optional[str] = None
 _config_overridden: bool = False
 
 
-# This function exists solely to maintain backward compatibility with the
-# legacy user config file located at ~/.sky/config.yaml.
 def get_user_config_path() -> str:
-    """Returns the path to the user config file.
-
-    If only the legacy user config file exists, return
-    the legacy user config path.
-    Otherwise, return the new user config path.
-    """
-    user_config_path = os.path.expanduser(_USER_CONFIG_PATH)
-    legacy_user_config_path = os.path.expanduser(_LEGACY_USER_CONFIG_PATH)
-    if (os.path.exists(legacy_user_config_path) and
-            not os.path.exists(user_config_path)):
-        return _LEGACY_USER_CONFIG_PATH
+    """Returns the path to the user config file."""
     return _USER_CONFIG_PATH
 
 

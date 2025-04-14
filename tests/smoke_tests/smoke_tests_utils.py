@@ -455,7 +455,7 @@ def get_aws_region_for_quota_failover() -> Optional[str]:
                                        instance_type='p3.16xlarge',
                                        use_spot=True)
 
-    # Filter the regions with proxy command in ~/.sky/.sky.yaml.
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
         region for region in candidate_regions
@@ -483,7 +483,7 @@ def get_gcp_region_for_quota_failover() -> Optional[str]:
                                        accelerators={'A100-80GB': 1},
                                        use_spot=True)
 
-    # Filter the regions with proxy command in ~/.sky/.sky.yaml.
+    # Filter the regions with proxy command in ~/.sky/config.yaml.
     filtered_regions = original_resources.get_valid_regions_for_launchable()
     candidate_regions = [
         region for region in candidate_regions
