@@ -142,7 +142,7 @@ def check_capabilities(
     if disallowed_cloud_names:
         disallowed_clouds_hint = (
             '\nNote: The following clouds were disabled because they were not '
-            'included in allowed_clouds in ~/.sky/skyconfig.yaml: '
+            'included in allowed_clouds in ~/.sky/config.yaml: '
             f'{", ".join([c for c in disallowed_cloud_names])}')
     if not all_enabled_clouds:
         echo(

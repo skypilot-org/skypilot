@@ -43,7 +43,7 @@ def bootstrap_instances(
     if (requested_service_account ==
             kubernetes_utils.DEFAULT_SERVICE_ACCOUNT_NAME):
         # If the user has requested a different service account (via pod_config
-        # in ~/.sky/skyconfig.yaml), we assume they have already set up the
+        # in ~/.sky/config.yaml), we assume they have already set up the
         # necessary roles and role bindings.
         # If not, set up the roles and bindings for skypilot-service-account
         # here.
