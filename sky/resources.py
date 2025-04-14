@@ -1306,6 +1306,7 @@ class Resources:
             if elem:
                 override_configs.set_nested(key, elem)
 
+        override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1331,7 +1332,7 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
-            _cluster_config_overrides=dict(override_configs),
+            _cluster_config_overrides=override_configs,
         )
         assert not override
         return resources
