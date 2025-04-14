@@ -143,12 +143,15 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
         # Wait for the job to complete
         with rich_utils.client_status(
                 'Waiting for GPU labeler jobs to complete'):
-            wait_for_jobs_completion(jobs_to_node_names,
-                                     'kube-system',
-                                     context=context)
-        print(
-            _format_string('✅ GPU labeling completed successfully',
-                           colorama.Fore.GREEN))
+            success = wait_for_jobs_completion(jobs_to_node_names,
+                                               'kube-system',
+                                               context=context)
+        if success:
+            print(
+                _format_string('✅ GPU labeling completed successfully',
+                               colorama.Fore.GREEN))
+        else:
+            print(_format_string('❌ GPU labeling failed', colorama.Fore.RED))
         cleanup(context=context)
     else:
         print(
@@ -165,13 +168,13 @@ def label(context: Optional[str] = None, wait_for_completion: bool = True):
 def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
                              namespace: str,
                              context: Optional[str] = None,
-                             timeout: int = 300):
+                             timeout: int = 60 * 20):
     """Waits for a Kubernetes Job to complete or fail.
 
     Args:
         jobs_to_node_names: A dictionary mapping job names to node names.
         namespace: The namespace the Job is in (default: "default").
-        timeout: Timeout in seconds (default: 300).
+        timeout: Timeout in seconds (default: 1200 seconds = 20 minutes).
 
     Returns:
         True if the Job completed successfully, False if it failed or timed out.
@@ -201,13 +204,13 @@ def wait_for_jobs_completion(jobs_to_node_names: Dict[str, str],
                 print(
                     _format_string(
                         f'GPU labeler job for node {node_name} failed',
-                        colorama.Fore.RED))
+                        colorama.Style.DIM))
                 w.stop()
                 return False
     print(
         _format_string(
             f'Timed out after waiting {timeout} seconds '
-            'for job to complete', colorama.Fore.RED))
+            'for job to complete', colorama.Style.DIM))
     return False  #Timed out
 
 
