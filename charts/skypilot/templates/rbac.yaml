@@ -36,7 +36,9 @@ roleRef:
   apiGroup: rbac.authorization.k8s.io
 ---
 {{- $namespace := .Values.kubernetesCredentials.inclusterNamespace | default .Release.Namespace }}
+{{- if ne $namespace .Release.Namespace -}}
 {{- include "skypilot.ensureNamespace" $namespace }}
+{{- end -}}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
