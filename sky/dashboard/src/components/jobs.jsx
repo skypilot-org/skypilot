@@ -817,16 +817,19 @@ export function formatLogs(str) {
 export const logStyles = `
   .logs-container {
     background-color: #f7f7f7;
-    padding: 30px;
-    height: 80%;
-    overflow-y: scroll;
-    font-family: monospace;
+    padding: 16px;
+    max-height: calc(100vh - 300px);
+    overflow-y: auto;
+    overflow-x: hidden;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
     line-height: 1.5;
+    border-radius: 6px;
+    min-height: fit-content;
   }
 
   .log-line {
     display: block;
-    white-space: pre;
+    white-space: pre-wrap;
     margin: 2px 0;
   }
 
@@ -867,8 +870,8 @@ export const logStyles = `
 
   .log-line .message {
     color: #111827;
-    white-space: pre-wrap;
     word-break: break-word;
+    white-space: pre-wrap;
   }
 `;
 
@@ -921,12 +924,12 @@ export function LogFilter({ logs, controller=false }) {
     <div>
       <style>{logStyles}</style>
       {!controller && (
-        <>
+        <div style={{ marginBottom: '1rem' }}>
           <Select
             onValueChange={(value) => setSelectedNode(value)}
             value={selectedNode}
           >
-            <SelectTrigger aria-label="Node">
+            <SelectTrigger aria-label="Node" className="focus:ring-0 focus:ring-offset-0">
               <SelectValue placeholder="Select Node" />
             </SelectTrigger>
             <SelectContent>
@@ -938,20 +941,10 @@ export function LogFilter({ logs, controller=false }) {
               ))}
             </SelectContent>
           </Select>
-          <br />
-        </>
+        </div>
       )}
       <div
         className="logs-container"
-        style={{
-          whiteSpace: 'pre-wrap',
-          wordBreak: 'break-word',
-          fontFamily: 'monospace',
-          backgroundColor: '#f7f7f7',
-          padding: '8px',
-          borderRadius: '4px',
-          border: '1px solid #e5e7eb'
-        }}
         dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
       />
     </div>
@@ -960,9 +953,9 @@ export function LogFilter({ logs, controller=false }) {
 
 export const contentStyle = {
   height: '80%',
-  overflowY: 'scroll',
   padding: '30px',
   backgroundColor: '#f7f7f7',
+  overflow: 'hidden'
 };
 
 function status2Icon(status) {
