@@ -313,6 +313,7 @@ available_node_types:
           hostPath:
             path: {{k8s_fusermount_shared_dir}}
             type: DirectoryOrCreate
+        {% endif %}
         {% if high_availability %}
         - name: {{k8s_high_availability_deployment_volume_mount_name}}
           persistentVolumeClaim:
