@@ -1713,12 +1713,15 @@ def api_start(
     if foreground:
         # Explain why current process exited
         logger.info('API server is already running:')
-    logger.info(f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
-                f'{server_common.get_server_url(host)}\n'
-                f'{ux_utils.INDENT_SYMBOL}SkyPilot Dashboard: '
-                f'{server_common.get_server_url(host)}/dashboard\n'
-                f'{ux_utils.INDENT_LAST_SYMBOL}'
-                f'View API server logs at: {constants.API_SERVER_LOGS}')
+    logger.info(
+        f'{ux_utils.INDENT_SYMBOL}SkyPilot API server: '
+        f'{server_common.get_server_url(host)}\n'
+        f'{ux_utils.INDENT_SYMBOL}SkyPilot Dashboard: '
+        f'{server_common.get_server_url(host)}/dashboard\n'
+        f'{ux_utils.INDENT_SYMBOL}  Please run `npm run build`'
+        f' to generate the dashboard if you install skypilot from source\n'
+        f'{ux_utils.INDENT_LAST_SYMBOL}'
+        f'View API server logs at: {constants.API_SERVER_LOGS}')
 
 
 @usage_lib.entrypoint
