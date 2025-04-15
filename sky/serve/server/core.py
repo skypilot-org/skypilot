@@ -13,6 +13,7 @@ from sky import backends
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
+from sky import core
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -98,6 +99,39 @@ def _get_all_replica_targets(
         for replica_info in service_record['replica_info']
     }
 
+
+def _maybe_restart_controller(
+        refresh: bool, stopped_message: str, spinner_message: str
+) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
+    """Restart controller if refresh is True and it is stopped."""
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
+    if refresh:
+        stopped_message = ''
+    try:
+        handle = backend_utils.is_controller_accessible(
+            controller=controller_type, stopped_message=stopped_message)
+    except exceptions.ClusterNotUpError as e:
+        if not refresh:
+            raise
+        handle = None
+        controller_status = e.cluster_status
+
+    if handle is not None:
+        return handle
+
+    sky_logging.print(f'{colorama.Fore.YELLOW}'
+                      f'Restarting {controller_type.value.name}...'
+                      f'{colorama.Style.RESET_ALL}')
+
+    rich_utils.force_update_status(
+        ux_utils.spinner_message(f'{spinner_message} - restarting '
+                                 'controller'))
+    handle = core.start(cluster_name=controller_type.value.cluster_name)
+    controller_status = status_lib.ClusterStatus.UP
+    rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
+
+    assert handle is not None, (controller_status, refresh)
+    return handle
 
 @usage_lib.entrypoint
 def up(
@@ -818,7 +852,8 @@ def sync_down_logs(service_name: str,
                    *,
                    targets: Union[ServiceComponentOrStr,
                                   List[ServiceComponentOrStr], None] = None,
-                   replica_ids: Optional[List[int]] = None) -> str:
+                   replica_ids: Optional[List[int]] = None,
+                   refresh: bool = False) -> str:
     """Sync down logs from the controller for the given service.
 
     Args:
@@ -840,15 +875,17 @@ def sync_down_logs(service_name: str,
         The parent directory of the downloaded logs.
     """
     # Step 0) get the controller handle
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Checking service status...')):
-        controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
-        handle = backend_utils.is_controller_accessible(
-            controller=controller_type,
-            stopped_message=controller_type.value.default_hint_if_non_existent)
+    handle = _maybe_restart_controller(
+        refresh=refresh,
+        stopped_message=(
+            f'{controller_type.value.name.capitalize()} is stopped. To '
+            f'get the logs, run: {colorama.Style.BRIGHT}sky serve logs '
+            f'-r --sync-down {service_name}{colorama.Style.RESET_ALL}'),
+        spinner_message='Retrieving service logs',
+    )
 
-        backend: backends.CloudVmRayBackend = (
-            backend_utils.get_backend_from_handle(handle))
+    backend: backends.CloudVmRayBackend = (
+        backend_utils.get_backend_from_handle(handle))
 
     requested_components: Set[serve_utils.ServiceComponent] = set()
     if not targets:
@@ -929,9 +966,7 @@ def sync_down_logs(service_name: str,
                             ssh_mode=command_runner.SshMode.INTERACTIVE,
                             log_path=str(local_base / f'{target}.log'))
 
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Syncing down logs...')):
-        subprocess_utils.run_in_parallel(sync_down_logs_by_target,
-                                         list(normalized_targets))
+    subprocess_utils.run_in_parallel(sync_down_logs_by_target,
+                                     list(normalized_targets))
 
     return local_service_dir
