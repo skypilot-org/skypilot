@@ -439,8 +439,7 @@ class RayCodeGen:
                 pg = ray_util.placement_group({json.dumps(bundles)}, 'STRICT_SPREAD')
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
-
-                message += ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
+                message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
                             'Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
                 print(message, flush=True)
