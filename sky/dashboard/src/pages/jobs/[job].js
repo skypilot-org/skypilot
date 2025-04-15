@@ -4,23 +4,26 @@ import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { useManagedJobDetails } from '@/data/connectors/jobs';
-import { Status2Actions, Status2Icon } from '@/components/jobs';
+import { Status2Icon } from '@/components/jobs';
 import Link from 'next/link';
-import { RotateCwIcon, FileSearchIcon } from 'lucide-react';
+import { RotateCwIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/jobs';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
 
 function JobDetails() {
   const router = useRouter();
-  const { job: jobId, tab } = router.query; // Get tab parameter from URL
-  const { jobData, loading } = useManagedJobDetails();
+  const { job: jobId, tab } = router.query;
+  const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const { jobData, loading } = useManagedJobDetails(refreshTrigger);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [isLoadingControllerLogs, setIsLoadingControllerLogs] = useState(false);
   const [scrollExecuted, setScrollExecuted] = useState(false);
   const [pageLoaded, setPageLoaded] = useState(false);
   const [domReady, setDomReady] = useState(false);
+  const [logsRefreshKey, setLogsRefreshKey] = useState(0);
+  const [controllerLogsRefreshKey, setControllerLogsRefreshKey] = useState(0);
 
   // Function to scroll to a specific section
   const scrollToSection = (sectionId) => {
@@ -87,13 +90,12 @@ function JobDetails() {
     setDomReady(false);
   }, [tab]);
 
-  // Handle manual refresh
+  // Handle manual refresh of everything
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
     try {
-      // Force a page refresh to reload the data
-      router.replace(router.asPath);
-
+      // Trigger job data refresh
+      setRefreshTrigger(prev => prev + 1);
       // Wait a short time to show the refresh indicator
       await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
@@ -103,12 +105,19 @@ function JobDetails() {
     }
   };
 
-  // Render loading state until data is available
+  // Individual refresh handlers for logs
+  const handleLogsRefresh = () => {
+    setLogsRefreshKey(prev => prev + 1);
+  };
+
+  const handleControllerLogsRefresh = () => {
+    setControllerLogsRefreshKey(prev => prev + 1);
+  };
+
   if (!router.isReady) {
     return <div>Loading...</div>;
   }
 
-  // Convert both to strings to ensure proper comparison
   const detailJobData = jobData?.jobs?.find(
     (item) => String(item.id) === String(jobId)
   );
@@ -130,58 +139,31 @@ function JobDetails() {
         </div>
 
         <div className="text-sm flex items-center">
-          {(loading ||
-            isRefreshing ||
-            isLoadingLogs ||
-            isLoadingControllerLogs) && (
+          {(loading || isRefreshing || isLoadingLogs || isLoadingControllerLogs) && (
             <div className="flex items-center mr-4">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500">Loading...</span>
             </div>
           )}
-          <div className="flex items-center space-x-4">
-            <Tooltip
-              content="Refresh"
-              className="text-sm text-muted-foreground"
+          <Tooltip content="Refresh" className="text-muted-foreground">
+            <button
+              onClick={handleManualRefresh}
+              disabled={loading || isRefreshing}
+              className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
             >
-              <button
-                onClick={handleManualRefresh}
-                disabled={loading || isRefreshing}
-                className="text-sky-blue hover:text-sky-blue-bright font-medium inline-flex items-center h-8"
-              >
-                <RotateCwIcon className="w-4 h-4 mr-1.5" />
-                <span>Refresh</span>
-              </button>
-            </Tooltip>
-            {detailJobData ? (
-              <Status2Actions
-                withLabel={true}
-                jobParent="/jobs"
-                jobId={detailJobData.id}
-                managed={true}
-              />
-            ) : (
-              <div className="flex items-center">
-                <Tooltip
-                  content="View Logs"
-                  className="text-sm text-muted-foreground"
-                >
-                  <button
-                    disabled={true}
-                    className="text-gray-400 font-medium inline-flex items-center h-8 cursor-not-allowed"
-                  >
-                    <FileSearchIcon className="w-4 h-4 mr-1.5" />
-                    Logs
-                  </button>
-                </Tooltip>
-              </div>
-            )}
-          </div>
+              <RotateCwIcon className="w-4 h-4 mr-1.5" />
+              <span>Refresh</span>
+            </button>
+          </Tooltip>
         </div>
       </div>
 
-      {/* Display all sections directly on the page */}
-      {detailJobData && (
+      {loading ? (
+        <div className="flex items-center justify-center py-32">
+          <CircularProgress size={20} className="mr-2" />
+          <span>Loading...</span>
+        </div>
+      ) : detailJobData ? (
         <div className="space-y-8">
           {/* Details Section */}
           <div id="details-section">
@@ -197,7 +179,6 @@ function JobDetails() {
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                   isLoadingLogs={isLoadingLogs}
                   isLoadingControllerLogs={isLoadingControllerLogs}
-                  isRefreshing={isRefreshing}
                 />
               </div>
             </Card>
@@ -208,16 +189,25 @@ function JobDetails() {
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Logs</h3>
+                <Tooltip content="Refresh logs" className="text-muted-foreground">
+                  <button
+                    onClick={handleLogsRefresh}
+                    disabled={isLoadingLogs}
+                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  >
+                    <RotateCwIcon className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                  </button>
+                </Tooltip>
               </div>
               <div className="p-4">
                 <JobDetailsContent
+                  key={logsRefreshKey}
                   jobData={detailJobData}
                   activeTab="logs"
                   setIsLoadingLogs={setIsLoadingLogs}
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                   isLoadingLogs={isLoadingLogs}
                   isLoadingControllerLogs={isLoadingControllerLogs}
-                  isRefreshing={isRefreshing}
                 />
               </div>
             </Card>
@@ -228,20 +218,33 @@ function JobDetails() {
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Controller Logs</h3>
+                <Tooltip content="Refresh controller logs" className="text-muted-foreground">
+                  <button
+                    onClick={handleControllerLogsRefresh}
+                    disabled={isLoadingControllerLogs}
+                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  >
+                    <RotateCwIcon className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`} />
+                  </button>
+                </Tooltip>
               </div>
               <div className="p-4">
                 <JobDetailsContent
+                  key={controllerLogsRefreshKey}
                   jobData={detailJobData}
                   activeTab="controllerlogs"
                   setIsLoadingLogs={setIsLoadingLogs}
                   setIsLoadingControllerLogs={setIsLoadingControllerLogs}
                   isLoadingLogs={isLoadingLogs}
                   isLoadingControllerLogs={isLoadingControllerLogs}
-                  isRefreshing={isRefreshing}
                 />
               </div>
             </Card>
           </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-center py-32">
+          <span>Job not found</span>
         </div>
       )}
     </Layout>
@@ -254,24 +257,21 @@ function JobDetailsContent({
   setIsLoadingLogs,
   setIsLoadingControllerLogs,
   isLoadingLogs,
-  isLoadingControllerLogs,
-  isRefreshing,
+  isLoadingControllerLogs
 }) {
   const [logs, setLogs] = useState([]);
   const [controllerLogs, setControllerLogs] = useState([]);
 
-  // Clear logs when activeTab changes, when jobData.id changes, or when refreshing
+  // Clear logs when activeTab changes or when jobData.id changes
   useEffect(() => {
     setLogs([]);
-    console.log('Logs cleared due to tab change, job ID change, or refresh');
-  }, [activeTab, jobData.id, isRefreshing]);
+    console.log('Logs cleared due to tab change or job ID change');
+  }, [activeTab, jobData.id]);
 
   useEffect(() => {
     setControllerLogs([]);
-    console.log(
-      'Controller logs cleared due to tab change, job ID change, or refresh'
-    );
-  }, [activeTab, jobData.id, isRefreshing]);
+    console.log('Controller logs cleared due to tab change or job ID change');
+  }, [activeTab, jobData.id]);
 
   // Define a function to handle both log types
   const fetchLogs = (logType, jobId, setLogs, setIsLoading) => {
@@ -329,7 +329,7 @@ function JobDetailsContent({
   useEffect(() => {
     const cleanup = fetchLogs('logs', jobData.id, setLogs, setIsLoadingLogs);
     return cleanup;
-  }, [activeTab, jobData.id, isRefreshing]);
+  }, [activeTab, jobData.id]);
 
   // Only fetch controller logs when actually viewing the controller logs tab
   useEffect(() => {
@@ -340,7 +340,7 @@ function JobDetailsContent({
       setIsLoadingControllerLogs
     );
     return cleanup;
-  }, [activeTab, jobData.id, isRefreshing]);
+  }, [activeTab, jobData.id]);
 
   if (activeTab === 'logs') {
     return (

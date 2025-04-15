@@ -108,7 +108,7 @@ export async function getManagedJobs({ allUsers = true } = {}) {
   }
 }
 
-export function useManagedJobDetails() {
+export function useManagedJobDetails(refreshTrigger = 0) {
   const [jobData, setJobData] = useState(null);
   const [loadingJobData, setLoadingJobData] = useState(true);
 
@@ -128,15 +128,7 @@ export function useManagedJobDetails() {
     }
 
     fetchJobData();
-
-    // Set up an interval to refresh the data every 20 seconds
-    const intervalId = setInterval(() => {
-      fetchJobData();
-    }, 20000);
-
-    // Clean up the interval on component unmount
-    return () => clearInterval(intervalId);
-  }, []);
+  }, [refreshTrigger]);
 
   return { jobData, loading };
 }

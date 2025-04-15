@@ -139,13 +139,13 @@ function JobDetails({
   const [isLoadingLogs, setIsLoadingLogs] = useState(false);
   const [logs, setLogs] = useState([]);
   const lastFetchedJobId = React.useRef(null);
-  console.log(
-    'cluster job details',
-    'jobData.id',
-    jobData.id,
-    'isRefreshing',
-    isRefreshing
-  );
+  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+
+  const handleRefreshLogs = () => {
+    setIsRefreshingLogs(prev => !prev); // Toggle this to trigger the useEffect
+    lastFetchedJobId.current = null;
+    setLogs([]); // Clear existing logs
+  };
 
   // Single effect for log management
   useEffect(() => {
@@ -158,7 +158,9 @@ function JobDetails({
       'isRefreshing',
       isRefreshing,
       'lastFetchedJobId',
-      lastFetchedJobId.current
+      lastFetchedJobId.current,
+      'isRefreshingLogs',
+      isRefreshingLogs
     );
     let active = true;
 
@@ -168,6 +170,7 @@ function JobDetails({
       jobData.id &&
       (lastFetchedJobId.current !== jobData.id || isRefreshing)
     ) {
+      console.log('fetching logs');
       setIsLoadingLogs(true);
       setLogs([]); // Clear logs before fetching new ones
       lastFetchedJobId.current = jobData.id;
@@ -198,7 +201,7 @@ function JobDetails({
     return () => {
       active = false;
     };
-  }, [clusterName, jobData.id, isRefreshing]);
+  }, [clusterName, jobData.id, isRefreshing, isRefreshingLogs]); // Added isRefreshingLogs as a dependency
 
   return (
     <Layout highlighted={highlighted}>
@@ -292,6 +295,15 @@ function JobDetails({
           <Card>
             <div className="flex items-center justify-between px-4 pt-4">
               <h2 className="text-lg font-semibold">Logs</h2>
+              <Tooltip content="Refresh logs" className="text-muted-foreground">
+                <button
+                  onClick={handleRefreshLogs}
+                  disabled={isLoadingLogs}
+                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                >
+                  <RotateCwIcon className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                </button>
+              </Tooltip>
             </div>
             <div className="p-4">
               {isLoadingLogs ? (
