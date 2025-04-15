@@ -280,20 +280,21 @@ def _start_api_server(deploy: bool = False,
                     raise RuntimeError(
                         'SkyPilot API server process exited unexpectedly.\n'
                         f'View logs at: {constants.API_SERVER_LOGS}')
-            api_server_info = get_api_server_status()
-            assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
-                f'API server version mismatch when starting the server. '
-                f'Server version: {api_server_info.api_version} '
-                f'Client version: {server_constants.API_VERSION}')
-            if api_server_info.status == ApiServerStatus.HEALTHY:
+            try:
+                check_server_healthy()
+            except exceptions.APIVersionMismatchError:
+                raise
+            except Exception as e:  # pylint: disable=broad-except
+                if time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
+                    with ux_utils.print_exception_no_traceback():
+                        raise RuntimeError(
+                            'Failed to start SkyPilot API server at '
+                            f'{get_server_url(host)}'
+                            '\nView logs at: '
+                            f'{constants.API_SERVER_LOGS}') from e
+                time.sleep(0.5)
+            else:
                 break
-            elif time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
-                with ux_utils.print_exception_no_traceback():
-                    raise RuntimeError(
-                        'Failed to start SkyPilot API server at '
-                        f'{get_server_url(host)}'
-                        f'\nView logs at: {constants.API_SERVER_LOGS}')
-            time.sleep(0.5)
         logger.info(ux_utils.finishing_message('SkyPilot API server started.'))
 
 
@@ -340,7 +341,7 @@ def check_server_healthy(endpoint: Optional[str] = None,) -> None:
                     version_info=version_info,
                     command=_install_server_version_command(api_server_info))
         with ux_utils.print_exception_no_traceback():
-            raise RuntimeError(msg)
+            raise exceptions.APIVersionMismatchError(msg)
     elif api_server_status == ApiServerStatus.UNHEALTHY:
         with ux_utils.print_exception_no_traceback():
             raise exceptions.ApiServerConnectionError(endpoint)
