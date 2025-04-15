@@ -222,6 +222,9 @@ gcpCredentials:
   # TODO(romilb): This can be made optional by using the project in the key json by default.
   projectId: null
 
+# Populate RunPod credentials from a secret `runpod-credentials` with key `api_key`
+runpodCredentials:
+  enabled: false
 
 # Set securityContext for the api pod
 podSecurityContext: {}
