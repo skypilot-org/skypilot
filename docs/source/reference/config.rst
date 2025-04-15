@@ -3,13 +3,120 @@
 Advanced Configuration
 ======================
 
-You can pass **optional configuration** to SkyPilot in the ``~/.sky/config.yaml`` file.
+You can pass **optional configuration** to SkyPilot.
 
-This configuration applies to all new clusters and does not affect existing clusters.
+Any configuration provided does not affect existing clusters.
 
-.. tip::
+Sources
+-------
 
-  Some config fields can be overridden on a per-task basis through the ``experimental.config_overrides`` field. See :ref:`here <task-yaml-experimental>` for more details.
+**Client-side configuration sources, in order of precedence**
+
+.. note::
+
+  Client-side configuration sources take precedence over server-side configuration sources.
+  ``allowed_clouds`` and ``admin_policy`` are ignored if specified in client configuration sources.
+
+1. CLI argument
+When using SkyPilot CLI, you can pass optional configuration arguments to the CLI using the ``--config`` flag.
+``--config`` flag can either be a path to a YAML file meeting configuration, or a dotlist of key-value pairs.
+See :ref:`Syntax <syntax>` section for supported fields.
+
+.. code-block:: bash
+  # pass a config file
+  sky launch --config my_config.yaml ...
+  # pass individual config options
+  sky launch --config 'kubernetes.autoscaler=gke,api_server.endpoint=http://1.2.3.4:8000' ...
+  # list and dictionary syntax are supported
+  sky launch --config 'kubernetes.allowed_contexts=[context1,context2]' ...
+  sky launch --config 'aws.labels={"map-migrated": "my-value", "Owner": "user-unique-name"}' ...
+
+1. Job / Task YAML
+When using a YAML file to launch a job or a task, you can specify an inline configuration options in the YAML file.
+
+Following fields are supported in task YAML configuration options:
+- :ref:`docker.run_options <config-yaml-docker-run-options>`
+- :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
+- :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`
+- :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+- :ref:`gcp.managed_instance_group <config-yaml-gcp-managed-instance-group>`
+
+.. code-block:: yaml
+
+  # job or task yaml
+  config:
+    docker:
+      run_options: ...
+    kubernetes:
+      pod_config: ...
+      provision_timeout: ...
+    gcp:
+      managed_instance_group: ...
+    nvidia_gpus:
+      disable_ecc: ...
+
+1. Project Configuration
+SkyPilot looks for ``$pwd/.sky.yaml`` to configure project-level defaults.
+To change the location of the project configuration file, set the ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
+See :ref:`Syntax <syntax>` section for supported fields.
+
+1. User Configuration
+SkyPilot looks for ``~/.sky/config.yaml`` to configure user-level defaults.
+To change the location of the user configuration file, set the ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
+See :ref:`Syntax <syntax>` section for supported fields.
+
+**Server-side configuration sources, in order of precedence**
+
+1. Project Configuration
+SkyPilot looks for ``$pwd/.sky.yaml`` to configure project-level defaults.
+To change the location of the project configuration file, set the ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
+See :ref:`Syntax <syntax>` section for supported fields.
+
+1. User Configuration
+SkyPilot looks for ``~/.sky/config.yaml`` to configure user-level defaults.
+To change the location of the user configuration file, set the ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
+See :ref:`Syntax <syntax>` section for supported fields.
+
+
+Configuration Overrides
+----------------------
+
+If the same configuration field is specified in multiple configuration sources, configuration is combined according to precedence.
+
+If a client has the following user-level config file:
+.. code-block:: yaml
+  # user config specified in ~/.sky/config.yaml
+  kubernetes:
+    allowed_contexts: [context1, context2]
+    provision_timeout: 600
+  aws:
+    labels:
+      map-migrated: my-value
+      Owner: user-unique-name
+
+And the following project-level config file:
+.. code-block:: yaml
+  # project config specified in $pwd/.sky.yaml
+  # project config has precedence over user config
+  kubernetes:
+    allowed_contexts: [context3, context4]
+    provision_timeout: 300
+  aws:
+    labels:
+      Owner: project-unique-name
+
+The combined configuration is:
+.. code-block:: yaml
+  kubernetes:
+    # lists are overridden by config sources with higher precedence
+    allowed_contexts: [context3, context4]
+    provision_timeout: 300
+    aws:
+      # dicts are merged, with individual keys overridden by
+      # config sources with higher precedence
+      labels:
+        map-migrated: my-value
+        Owner: project-unique-name
 
 Syntax
 ------

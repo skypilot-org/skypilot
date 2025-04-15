@@ -862,35 +862,28 @@ OR
     python my_script.py --data-dir /remote/data --output-dir /remote/output
 
 
-.. _task-yaml-experimental:
+.. _task-spec-config:
 
-Global config overrides
----------------------------
+``config``
+~~~~~~~
 
-To override the :ref:`global configs <config-yaml>` in ``~/.sky/config.yaml`` at a task level:
+Any configuration options to apply to the task.
+See :ref:`config-yaml` for supported fields.
+
+Example:
 
 .. code-block:: yaml
 
-  experimental:
-    # Override the configs in ~/.sky/config.yaml from a task level.
-    #
-    # The following fields can be overridden. Please refer to docs of Advanced
-    # Configuration for more details of those fields:
-    # https://docs.skypilot.co/en/latest/reference/config.html
-    config_overrides:
-      docker:
-        run_options: ...
-      kubernetes:
-        pod_config: ...
-        provision_timeout: ...
-      gcp:
-        managed_instance_group: ...
-      nvidia_gpus:
-        disable_ecc: ...
-
-.. note::
-
-  Experimental features and APIs may be changed or removed in the future.
+  config:
+    docker:
+      run_options: ...
+    kubernetes:
+      pod_config: ...
+      provision_timeout: ...
+    gcp:
+      managed_instance_group: ...
+    nvidia_gpus:
+      disable_ecc: ...
 
 .. _service-yaml-spec:
 
