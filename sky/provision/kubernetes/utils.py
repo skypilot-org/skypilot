@@ -1338,11 +1338,10 @@ def check_credentials(context: Optional[str],
 
     # Check if $KUBECONFIG envvar consists of multiple paths. We run this before
     # optional checks.
-    kubeconfig_path = _get_kubeconfig_path()
-    if len(kubeconfig_path.split(os.pathsep)) > 1:
-        return False, (
-            'SkyPilot currently only supports one config file path '
-            f'with $KUBECONFIG. Current paths are {kubeconfig_path}.')
+    try:
+        _ = _get_kubeconfig_path()
+    except ValueError as e:
+        return False, f'{common_utils.format_exception(e, use_bracket=True)}'
 
     # If we reach here, the credentials are valid and Kubernetes cluster is up.
     if not run_optional_checks:
@@ -1497,11 +1496,6 @@ def is_kubeconfig_exec_auth(
     # context. We need to load the kubeconfig file and parse it to get the
     # user details.
     kubeconfig_path = _get_kubeconfig_path()
-    kubeconfig_paths = kubeconfig_path.split(os.pathsep)
-    if len(kubeconfig_paths) > 1:
-        raise ValueError('SkyPilot currently only supports one '
-                         'config file path with $KUBECONFIG. Current '
-                         f'path(s) are {kubeconfig_path}.')
 
     # Load the kubeconfig file as a dictionary
     with open(kubeconfig_path, 'r', encoding='utf-8') as f:
@@ -3031,8 +3025,16 @@ def get_gpu_resource_key():
 
 
 def _get_kubeconfig_path():
-    """Get the stored path from KUBECONFIG env var"""
-    return os.path.expanduser(
+    """Get the stored path from KUBECONFIG env var
+    Currently, specifying multiple KUBECONFIG paths in the envvar is not
+    allowed, hence will raise a ValueError.
+    """
+    kubeconfig_path = os.path.expanduser(
         os.getenv(
             'KUBECONFIG', kubernetes.kubernetes.config.kube_config.
             KUBE_CONFIG_DEFAULT_LOCATION))
+    if len(kubeconfig_path.split(os.pathsep)) > 1:
+        raise ValueError('SkyPilot currently only supports one '
+                         'config file path with $KUBECONFIG. Current '
+                         f'path(s) are {kubeconfig_path}.')
+    return kubeconfig_path
