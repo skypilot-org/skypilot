@@ -13,11 +13,22 @@ import {
   ServerIcon,
   BriefcaseIcon,
   ServiceBellIcon,
+  ExternalLinkIcon,
+  GitHubIcon,
+  StarIcon,
+  DocumentIcon,
+  RssIcon,
+  TwitterIcon,
+  SlackIcon,
+  FeedbackIcon,
+  BookDocIcon,
+  CommentFeedbackIcon,
 } from '@/components/elements/icons';
 import { BASE_PATH } from '@/data/connectors/constants';
+import { CustomTooltip } from '@/components/utils';
 
 // Create a context for sidebar state management
-const SidebarContext = createContext();
+const SidebarContext = createContext(null);
 
 export function SidebarProvider({ children }) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
@@ -205,39 +216,65 @@ export function TopBar() {
         </div>
 
         {/* External links - pushed to the right with ml-auto */}
-        <div className="hidden md:flex items-center space-x-6 ml-auto">
-          <a
-            href="https://skypilot.readthedocs.io/en/latest/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-blue-600 transition-colors"
-          >
-            Docs
-          </a>
-          <a
-            href="https://blog.skypilot.co/"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-blue-600 transition-colors"
-          >
-            Blog
-          </a>
-          <a
-            href="https://github.com/skypilot-org/skypilot"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-blue-600 transition-colors"
-          >
-            GitHub
-          </a>
-          <a
-            href="https://join.slack.com/t/skypilot-org/shared_invite/zt-1ly8cxp65-Swjn3LKFkNE5CLuH5OjRbQ"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="hover:text-blue-600 transition-colors"
-          >
-            Slack
-          </a>
+        <div className="hidden md:flex items-center space-x-2 ml-auto">
+          <div className="flex items-center space-x-1">
+            <CustomTooltip content="Documentation" className="text-sm text-muted-foreground">
+              <a
+                href="https://skypilot.readthedocs.io/en/latest/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center px-3 py-1 text-gray-600 hover:text-blue-600 transition-colors duration-150 cursor-pointer"
+                title="Docs"
+              >
+                <span className="mr-1">Docs</span>
+                <ExternalLinkIcon className="w-3.5 h-3.5" />
+              </a>
+            </CustomTooltip>
+            
+            <div className="border-l border-gray-200 h-6 mx-1"></div>
+            
+            <CustomTooltip content="GitHub Repository" className="text-sm text-muted-foreground">
+              <a
+                href="https://github.com/skypilot-org/skypilot"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                title="GitHub"
+              >
+                <span className="flex items-center justify-center">
+                  <GitHubIcon className="w-5 h-5" />
+                </span>
+              </a>
+            </CustomTooltip>
+            
+            <CustomTooltip content="Join Slack" className="text-sm text-muted-foreground">
+              <a
+                href="https://slack.skypilot.co/"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                title="Slack"
+              >
+                <span className="flex items-center justify-center">
+                  <SlackIcon className="w-5 h-5" />
+                </span>
+              </a>
+            </CustomTooltip>
+            
+            <CustomTooltip content="Leave Feedback" className="text-sm text-muted-foreground">
+              <a
+                href="https://github.com/skypilot-org/skypilot/issues/new?assignees=&labels=type%3A+enhancement&title="
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center justify-center p-2 rounded-full text-gray-600 hover:bg-gray-100 transition-colors duration-150 cursor-pointer"
+                title="Leave Feedback"
+              >
+                <span className="flex items-center justify-center">
+                  <CommentFeedbackIcon className="w-5 h-5" />
+                </span>
+              </a>
+            </CustomTooltip>
+          </div>
         </div>
       </div>
     </div>
