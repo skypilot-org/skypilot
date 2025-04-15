@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -46,7 +46,7 @@ logger = sky_logging.init_logger(__name__)
 # controller resources spec.
 CONTROLLER_RESOURCES_NOT_VALID_MESSAGE = (
     '{controller_type} controller resources is not valid, please check '
-    '~/.sky/skyconfig.yaml file and make sure '
+    '~/.sky/config.yaml file and make sure '
     '{controller_type}.controller.resources is a valid resources spec. '
     'Details:\n  {err}')
 
@@ -72,6 +72,7 @@ class _ControllerSpec:
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
+    default_autostop_config: Dict[str, Any]
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -118,7 +119,8 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
             'Failed to connect to jobs controller, please try again later.'),
-        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES)
+        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES,
+        default_autostop_config=managed_job_constants.CONTROLLER_AUTOSTOP)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
@@ -148,7 +150,8 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'),
-        default_resources_config=serve_constants.CONTROLLER_RESOURCES)
+        default_resources_config=serve_constants.CONTROLLER_RESOURCES,
+        default_autostop_config=serve_constants.CONTROLLER_AUTOSTOP)
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -623,6 +626,40 @@ def get_controller_resources(
     if not result:
         return {controller_resources_to_use}
     return result
+
+
+def get_controller_autostop_config(
+        controller: Controllers) -> Tuple[Optional[int], bool]:
+    """Get the autostop config for the controller.
+
+    Returns:
+      A tuple of (idle_minutes_to_autostop, down), which correspond to the
+      values passed to execution.launch().
+    """
+    controller_autostop_config_copied: Dict[str, Any] = copy.copy(
+        controller.value.default_autostop_config)
+    if skypilot_config.loaded():
+        custom_controller_autostop_config = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller', 'autostop'), None)
+        if custom_controller_autostop_config is False:
+            # Disabled with `autostop: false` in config.
+            # To indicate autostop is disabled, we return None for
+            # idle_minutes_to_autostop.
+            return None, False
+        elif custom_controller_autostop_config is True:
+            # Enabled with default values. There is no change in behavior, but
+            # this is included by for completeness, since `False` is valid.
+            pass
+        elif custom_controller_autostop_config is not None:
+            # We have specific config values.
+            # Override the controller autostop config with the ones specified in
+            # the config.
+            assert isinstance(custom_controller_autostop_config, dict)
+            controller_autostop_config_copied.update(
+                custom_controller_autostop_config)
+
+    return (controller_autostop_config_copied['idle_minutes'],
+            controller_autostop_config_copied['down'])
 
 
 def _setup_proxy_command_on_controller(
