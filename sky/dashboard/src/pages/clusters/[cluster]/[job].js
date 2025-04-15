@@ -67,16 +67,54 @@ function JobHeader({
 
 export function JobDetailPage() {
   const router = useRouter();
-  const { cluster, job } = router.query; // Access the dynamic part of the URL
+  const { cluster, job } = router.query;
   const { clusterData, clusterJobData, loading, refreshData } =
     useClusterDetails({ cluster });
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
+  const [logs, setLogs] = useState([]);
+  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
+
+  const handleRefreshLogs = () => {
+    setIsRefreshingLogs(prev => !prev);
+    setLogs([]);
+  };
+
+  useEffect(() => {
+    let active = true;
+    if (cluster && job && !isLoadingLogs) {
+      setIsLoadingLogs(true);
+      streamClusterJobLogs({
+        clusterName: cluster,
+        jobId: job,
+        onNewLog: (log) => {
+          if (active) {
+            const strippedLog = formatLogs(log);
+            setLogs((prevLogs) => [...prevLogs, strippedLog]);
+          }
+        },
+      })
+        .then(() => {
+          if (active) setIsLoadingLogs(false);
+        })
+        .catch((error) => {
+          if (active) {
+            console.error('Error streaming logs:', error);
+            setIsLoadingLogs(false);
+          }
+        });
+    }
+    return () => {
+      active = false;
+    };
+  }, [cluster, job, isRefreshingLogs]);
 
   // Handle manual refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
+    setIsRefreshingLogs(prev => !prev);
+    setLogs([]);
     try {
-      // Refresh the job data
       if (refreshData) {
         await refreshData();
       }
@@ -100,226 +138,112 @@ export function JobDetailPage() {
   };
 
   if (clusterData && clusterJobData) {
-    jobData = clusterJobData.find((j) => j.id == job);
-    jobData.infra = clusterData.infra;
-    jobData.cluster = clusterData.cluster;
-    jobData.user = clusterData.user;
+    const foundJob = clusterJobData.find((j) => j.id == job);
+    if (foundJob) {
+      jobData = {
+        ...foundJob,
+        infra: clusterData.infra,
+        cluster: clusterData.cluster,
+        user: clusterData.user,
+      };
+    }
   }
 
   return (
-    <JobDetails
-      clusterName={cluster}
-      jobData={jobData}
-      parentLink={`/clusters/${cluster}`}
-      highlighted="clusters"
-      isRefreshing={isRefreshing}
-      customHeader={
-        <JobHeader
-          cluster={cluster}
-          job={job}
-          jobData={jobData}
-          onRefresh={handleManualRefresh}
-          isRefreshing={isRefreshing}
-          loading={loading}
-        />
-      }
-    />
-  );
-}
-
-function JobDetails({
-  clusterName,
-  jobData,
-  parent,
-  parentLink,
-  highlighted = 'jobs',
-  customHeader,
-  isRefreshing = false,
-}) {
-  const [isLoadingLogs, setIsLoadingLogs] = useState(false);
-  const [logs, setLogs] = useState([]);
-  const lastFetchedJobId = React.useRef(null);
-  const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
-
-  const handleRefreshLogs = () => {
-    setIsRefreshingLogs(prev => !prev); // Toggle this to trigger the useEffect
-    lastFetchedJobId.current = null;
-    setLogs([]); // Clear existing logs
-  };
-
-  // Single effect for log management
-  useEffect(() => {
-    console.log(
-      'fetch logs',
-      'clusterName',
-      clusterName,
-      'jobData.id',
-      jobData.id,
-      'isRefreshing',
-      isRefreshing,
-      'lastFetchedJobId',
-      lastFetchedJobId.current,
-      'isRefreshingLogs',
-      isRefreshingLogs
-    );
-    let active = true;
-
-    // Only fetch if we haven't fetched this job's logs yet or if we're refreshing
-    if (
-      clusterName &&
-      jobData.id &&
-      (lastFetchedJobId.current !== jobData.id || isRefreshing)
-    ) {
-      console.log('fetching logs');
-      setIsLoadingLogs(true);
-      setLogs([]); // Clear logs before fetching new ones
-      lastFetchedJobId.current = jobData.id;
-
-      streamClusterJobLogs({
-        clusterName: clusterName,
-        jobId: jobData.id,
-        onNewLog: (log) => {
-          if (active) {
-            const strippedLog = formatLogs(log);
-            setLogs((prevLogs) => [...prevLogs, strippedLog]);
-          }
-        },
-      })
-        .then(() => {
-          if (active) {
-            setIsLoadingLogs(false);
-          }
-        })
-        .catch((error) => {
-          if (active) {
-            console.error('Error streaming logs:', error);
-            setIsLoadingLogs(false);
-          }
-        });
-    }
-
-    return () => {
-      active = false;
-    };
-  }, [clusterName, jobData.id, isRefreshing, isRefreshingLogs]); // Added isRefreshingLogs as a dependency
-
-  return (
-    <Layout highlighted={highlighted}>
-      {customHeader || (
-        <div className="flex items-center justify-between mb-4">
-          <div className="text-base flex items-center">
-            {parentLink && (
-              <>
-                <Link
-                  href={parentLink}
-                  className="text-sky-blue hover:underline"
-                >
-                  {parent}
-                </Link>
-                <span className="mx-2 text-gray-500">›</span>
-              </>
-            )}
-            <span className="text-gray-900">{jobData.id}</span>
-          </div>
+    <Layout highlighted="clusters">
+      <JobHeader
+        cluster={cluster}
+        job={job}
+        jobData={jobData}
+        onRefresh={handleManualRefresh}
+        isRefreshing={isRefreshing}
+        loading={loading}
+      />
+      {loading ? (
+        <div className="flex items-center justify-center h-64">
+          <CircularProgress size={24} className="mr-2" />
+          <span>Loading...</span>
         </div>
-      )}
+      ) : (
+        <div className="space-y-8">
+          {/* Info Section */}
+          <div id="details">
+            <Card>
+              <div className="flex items-center justify-between px-4 pt-4">
+                <h2 className="text-lg font-semibold">Details</h2>
+              </div>
+              <div className="p-4">
+                <div className="grid grid-cols-2 gap-6">
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">Job ID</div>
+                    <div className="text-base mt-1">{jobData.id}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">Job Name</div>
+                    <div className="text-base mt-1">{jobData.job}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">User</div>
+                    <div className="text-base mt-1">{jobData.user}</div>
+                  </div>
+                  <div>
+                    <div className="text-gray-600 font-medium text-base">Status</div>
+                    <div className="text-base mt-1">
+                      <Status2Icon status={jobData.status} />
+                    </div>
+                  </div>
+                  {jobData.resources && (
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">Resources</div>
+                      <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
+                    </div>
+                  )}
+                  {jobData.cluster && (
+                    <div>
+                      <div className="text-gray-600 font-medium text-base">Cluster</div>
+                      <div className="text-base mt-1">
+                        <Link href={`/clusters/${jobData.cluster}`} className="text-sky-blue hover:underline">
+                          {jobData.cluster}
+                        </Link>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </Card>
+          </div>
 
-      {/* Display all sections directly on the page */}
-      <div className="space-y-8">
-        {/* Info Section */}
-        <div id="details">
-          <Card>
-            <div className="flex items-center justify-between px-4 pt-4">
-              <h2 className="text-lg font-semibold">Details</h2>
-            </div>
-            <div className="p-4">
-              <div className="grid grid-cols-2 gap-6">
-                <div>
-                  <div className="text-gray-600 font-medium text-base">
-                    Job ID
+          {/* Logs Section */}
+          <div id="logs" className="mt-6">
+            <Card>
+              <div className="flex items-center justify-between px-4 pt-4">
+                <h2 className="text-lg font-semibold">Logs</h2>
+                <Tooltip content="Refresh logs" className="text-muted-foreground">
+                  <button
+                    onClick={handleRefreshLogs}
+                    disabled={isLoadingLogs}
+                    className="text-sky-blue hover:text-sky-blue-bright flex items-center"
+                  >
+                    <RotateCwIcon className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                  </button>
+                </Tooltip>
+              </div>
+              <div className="p-4">
+                {isLoadingLogs ? (
+                  <div className="flex items-center justify-center py-4">
+                    <CircularProgress size={20} className="mr-2" />
+                    <span>Loading...</span>
                   </div>
-                  <div className="text-base mt-1">{jobData.id}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600 font-medium text-base">
-                    Job Name
-                  </div>
-                  <div className="text-base mt-1">{jobData.job}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600 font-medium text-base">
-                    User
-                  </div>
-                  <div className="text-base mt-1">{jobData.user}</div>
-                </div>
-                <div>
-                  <div className="text-gray-600 font-medium text-base">
-                    Status
-                  </div>
-                  <div className="text-base mt-1">
-                    <Status2Icon status={jobData.status} />
-                  </div>
-                </div>
-                {jobData.resources && (
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Resources
-                    </div>
-                    <div className="text-base mt-1">
-                      {jobData.resources || 'N/A'}
-                    </div>
-                  </div>
-                )}
-                {jobData.cluster && (
-                  <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Cluster
-                    </div>
-                    <div className="text-base mt-1">
-                      <Link
-                        href={`/clusters/${jobData.cluster}`}
-                        className="text-sky-blue hover:underline"
-                      >
-                        {jobData.cluster}
-                      </Link>
-                    </div>
+                ) : (
+                  <div className="max-h-96 overflow-y-auto">
+                    <LogFilter logs={logs.join('')} />
                   </div>
                 )}
               </div>
-            </div>
-          </Card>
+            </Card>
+          </div>
         </div>
-
-        {/* Logs Section */}
-        <div id="logs" className="mt-6">
-          <Card>
-            <div className="flex items-center justify-between px-4 pt-4">
-              <h2 className="text-lg font-semibold">Logs</h2>
-              <Tooltip content="Refresh logs" className="text-muted-foreground">
-                <button
-                  onClick={handleRefreshLogs}
-                  disabled={isLoadingLogs}
-                  className="text-sky-blue hover:text-sky-blue-bright flex items-center"
-                >
-                  <RotateCwIcon className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
-                </button>
-              </Tooltip>
-            </div>
-            <div className="p-4">
-              {isLoadingLogs ? (
-                <div className="flex items-center justify-center py-4">
-                  <CircularProgress size={20} className="mr-2" />
-                  <span>Loading...</span>
-                </div>
-              ) : (
-                <div className="max-h-96 overflow-y-auto">
-                  <LogFilter logs={logs.join('')} />
-                </div>
-              )}
-            </div>
-          </Card>
-        </div>
-      </div>
+      )}
     </Layout>
   );
 }
