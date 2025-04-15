@@ -1306,7 +1306,7 @@ class Resources:
             if elem is not None:
                 override_configs.set_nested(key, elem)
 
-        override_configs = dict(override_configs)
+        override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
