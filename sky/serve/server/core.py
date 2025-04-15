@@ -4,16 +4,16 @@ import re
 import signal
 import tempfile
 import threading
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Optional, Set, Tuple, TYPE_CHECKING, Union
 
 import colorama
 
 import sky
 from sky import backends
+from sky import core
 from sky import exceptions
 from sky import execution
 from sky import sky_logging
-from sky import core
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.clouds.service_catalog import common as service_catalog_common
@@ -28,8 +28,12 @@ from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
 from sky.utils import rich_utils
+from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import ux_utils
+
+if TYPE_CHECKING:
+    from sky.backends import cloud_vm_ray_backend
 
 logger = sky_logging.init_logger(__name__)
 
@@ -132,6 +136,7 @@ def _maybe_restart_controller(
 
     assert handle is not None, (controller_status, refresh)
     return handle
+
 
 @usage_lib.entrypoint
 def up(
@@ -848,16 +853,24 @@ def tail_logs(
 
 
 @usage_lib.entrypoint
-def sync_down_logs(service_name: str,
-                   *,
-                   targets: Union[ServiceComponentOrStr,
-                                  List[ServiceComponentOrStr], None] = None,
-                   replica_ids: Optional[List[int]] = None,
-                   refresh: bool = False) -> str:
+def sync_down_logs(
+    service_name: str,
+    *,
+    local_dir: str,
+    targets: Union[ServiceComponentOrStr, List[ServiceComponentOrStr],
+                   None] = None,
+    replica_ids: Optional[List[int]] = None,
+    refresh: bool = False,
+) -> str:
     """Sync down logs from the controller for the given service.
+
+    This function is called by the server endpoint. It gathers logs from the
+    controller, load balancer, and/or replicas and places them in a directory
+    under the user's log space on the API server filesystem.
 
     Args:
         service_name: The name of the service to download logs from.
+        local_dir: The local directory to save the logs to.
         targets: Which component(s) to download logs for. If None or empty,
             means download all logs (controller, load-balancer, all replicas).
             Can be a string (e.g. "controller"), or a `ServiceComponent` object,
@@ -872,9 +885,17 @@ def sync_down_logs(service_name: str,
             replicas will be downloaded.
 
     Returns:
-        The parent directory of the downloaded logs.
+        A dict mapping component names to local paths where the logs were synced
+        down to.
+
+    Raises:
+        RuntimeError: If fails to gather logs or fails to rsync from the
+          controller.
+        sky.exceptions.ClusterNotUpError: If the controller is not up.
+        ValueError: Arguments not valid.
     """
     # Step 0) get the controller handle
+    controller_type = controller_utils.Controllers.SKY_SERVE_CONTROLLER
     handle = _maybe_restart_controller(
         refresh=refresh,
         stopped_message=(
@@ -930,15 +951,11 @@ def sync_down_logs(service_name: str,
                 for rid in replica_ids
             })
 
-    local_service_dir = serve_utils.generate_remote_service_dir_name(
-        service_name)
-    local_base = pathlib.Path(local_service_dir).expanduser()
-    local_base.mkdir(exist_ok=True)
-
     def sync_down_logs_by_target(target: serve_utils.ServiceComponentTarget):
         component = target.component
         # We need to set one side of the pipe to a logs stream, and the other
         # side to a file.
+        log_path = str(pathlib.Path(local_dir) / f'{target}.log')
         stream_logs_code: str
 
         if component == serve_utils.ServiceComponent.CONTROLLER:
@@ -964,9 +981,9 @@ def sync_down_logs(service_name: str,
                             stream_logs=False,
                             process_stream=False,
                             ssh_mode=command_runner.SshMode.INTERACTIVE,
-                            log_path=str(local_base / f'{target}.log'))
+                            log_path=log_path)
 
     subprocess_utils.run_in_parallel(sync_down_logs_by_target,
                                      list(normalized_targets))
 
-    return local_service_dir
+    return local_dir

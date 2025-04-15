@@ -372,18 +372,19 @@ def tail_logs(service_name: str,
 
 @usage_lib.entrypoint
 @server_common.check_server_healthy_or_start
-def sync_down_logs(
-        service_name: str,
-        *,
-        targets: Optional[Union[str, 'serve_utils.ServiceComponent', List[Union[
-            str, 'serve_utils.ServiceComponent']]]] = None,
-        replica_ids: Optional[List[int]] = None) -> server_common.RequestId:
-    """Sync down logs from the controller for the given service.
+def sync_down_logs(service_name: str,
+                   local_dir: str,
+                   *,
+                   targets: Optional[Union[
+                       str, 'serve_utils.ServiceComponent',
+                       List[Union[str,
+                                  'serve_utils.ServiceComponent']]]] = None,
+                   replica_ids: Optional[List[int]] = None,
+                   refresh: bool = False) -> None:
+    """Sync down logs from the service components to a local directory.
 
-    This function:
-      1) Directly streams controller and load balancer logs to the local machine
-      2) Uses direct 2-layer rsync for replica logs without unifying logs on the
-        controller
+    This function syncs logs from the specified service components (controller,
+    load balancer, replicas) via the API server to a specified local directory.
 
     Args:
         service_name: The name of the service to download logs from.
@@ -399,6 +400,8 @@ def sync_down_logs(
             when target includes `ServiceComponent.REPLICA`. If target includes
             `ServiceComponent.REPLICA` but this is None/empty, logs for all
             replicas will be downloaded.
+        local_dir: Local directory to sync down logs to. Defaults to
+            `~/sky_logs`.
 
     Raises:
         RuntimeError: If fails to gather logs or fails to rsync from the
@@ -406,14 +409,25 @@ def sync_down_logs(
         sky.exceptions.ClusterNotUpError: If the controller is not up.
         ValueError: Arguments not valid.
     """
+    # Avoid circular import.
+    from sky.client import sdk  # pylint: disable=import-outside-toplevel
+
     body = payloads.ServeDownloadLogsBody(
         service_name=service_name,
+        # No need to set here, since the server will override it
+        # to a directory on the API server.
+        local_dir=local_dir,
         targets=targets,
         replica_ids=replica_ids,
+        refresh=refresh,
     )
     response = requests.post(
         f'{server_common.get_server_url()}/serve/sync-down-logs',
         json=json.loads(body.model_dump_json()),
         timeout=(5, None),
     )
-    return server_common.get_request_id(response)
+    remote_dir = sdk.stream_and_get(server_common.get_request_id(response))
+
+    # Download from API server paths to the client's local_dir
+    client_common.download_logs_from_api_server([remote_dir], remote_dir,
+                                                local_dir)

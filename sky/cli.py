@@ -28,6 +28,7 @@ import datetime
 import functools
 import getpass
 import os
+import pathlib
 import shlex
 import shutil
 import subprocess
@@ -4836,12 +4837,22 @@ def serve_logs(
                 serve_lib.ServiceComponent.REPLICA,
             ]
 
-        request_id = serve_lib.sync_down_logs(service_name,
-                                              targets=targets_to_sync,
-                                              replica_ids=list(replica_ids),
-                                              refresh=refresh)
-        local_path = sdk.stream_and_get(request_id)
-        click.echo(f'Logs downloaded to {local_path}')
+        timestamp = sky_logging.get_run_timestamp()
+        log_dir = (pathlib.Path(constants.SKY_LOGS_DIRECTORY) / 'service' /
+                   f'{service_name}_{timestamp}').expanduser()
+        log_dir.mkdir(parents=True, exist_ok=True)
+
+        with rich_utils.client_status(
+                ux_utils.spinner_message('Downloading service logs')):
+            serve_lib.sync_down_logs(service_name,
+                                     local_dir=str(log_dir),
+                                     targets=targets_to_sync,
+                                     replica_ids=list(replica_ids),
+                                     refresh=refresh)
+        style = colorama.Style
+        fore = colorama.Fore
+        logger.info(f'{fore.CYAN}Service {service_name} logs: '
+                    f'{log_dir}{style.RESET_ALL}')
         return
 
     # Tailing requires exactly one target.
