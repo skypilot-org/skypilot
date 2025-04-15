@@ -9,8 +9,8 @@ History:
    file path resolution (by os.path.expanduser) when construct the file
    mounts. This bug will cause the created workder nodes located in different
    compartment and VCN than the header node if user specifies compartment_id
-   in the sky config file, because the ~/.sky/config.yaml is not sync-ed to the
-   remote machine.
+   in the sky config file, because the ~/.sky/config.yaml is not
+   sync-ed to the remote machine.
    The workaround is set the sky config file path using ENV before running
    the sky launch: export SKYPILOT_CONFIG=/home/ubuntu/.sky/config.yaml
  - Hysun He (hysun.he@oracle.com) @ Oct 12, 2024:
@@ -396,7 +396,21 @@ class OCI(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's compute service."""
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        OCI's storage service."""
+        # TODO(seungjin): Implement separate check for
+        # if the user has access to OCI Object Storage.
+        return cls._check_credentials()
+
+    @classmethod
+    def _check_credentials(cls) -> Tuple[bool, Optional[str]]:
         """Checks if the user has access credentials to this cloud."""
 
         short_credential_help_str = (

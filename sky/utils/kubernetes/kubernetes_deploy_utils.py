@@ -8,6 +8,7 @@ from typing import List, Optional
 from sky import check as sky_check
 from sky import sky_logging
 from sky.backends import backend_utils
+from sky.clouds import cloud as sky_cloud
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.skylet import constants
 from sky.skylet import log_lib
@@ -23,7 +24,8 @@ def deploy_remote_cluster(ip_list: List[str],
                           ssh_user: str,
                           ssh_key: str,
                           cleanup: bool,
-                          context_name: Optional[str] = None):
+                          context_name: Optional[str] = None,
+                          password: Optional[str] = None):
     success = False
     path_to_package = os.path.dirname(__file__)
     up_script_path = os.path.join(path_to_package, 'deploy_remote_cluster.sh')
@@ -46,6 +48,8 @@ def deploy_remote_cluster(ip_list: List[str],
                           f'{ssh_user} {key_file.name}')
         if context_name is not None:
             deploy_command += f' {context_name}'
+        if password is not None:
+            deploy_command += f' --password {password}'
         if cleanup:
             deploy_command += ' --cleanup'
 
@@ -167,7 +171,9 @@ def deploy_local_cluster(gpus: bool):
                                f'\nError: {stderr}')
     # Run sky check
     with rich_utils.safe_status('[bold cyan]Running sky check...'):
-        sky_check.check(clouds=['kubernetes'], quiet=True)
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=['kubernetes'])
     if cluster_created:
         # Prepare completion message which shows CPU and GPU count
         # Get number of CPUs

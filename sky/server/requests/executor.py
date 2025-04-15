@@ -18,17 +18,15 @@ The number of the workers is determined by the system resources.
 
 See the [README.md](../README.md) for detailed architecture of the executor.
 """
-import concurrent.futures
 import contextlib
-import dataclasses
 import enum
 import multiprocessing
 import os
 import queue as queue_lib
 import signal
 import sys
+import threading
 import time
-import traceback
 import typing
 from typing import Any, Callable, Generator, List, Optional, TextIO, Tuple
 
@@ -41,13 +39,16 @@ from sky import skypilot_config
 from sky.server import common as server_common
 from sky.server import constants as server_constants
 from sky.server.requests import payloads
+from sky.server.requests import preconditions
+from sky.server.requests import process
 from sky.server.requests import requests as api_requests
+from sky.server.requests.queues import local_queue
 from sky.server.requests.queues import mp_queue
 from sky.skylet import constants
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import subprocess_utils
 from sky.utils import timeline
-from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
     import types
@@ -100,20 +101,21 @@ _MIN_LONG_WORKERS = 1
 # workers so at least 2 workers are needed to ensure responsiveness.
 _MIN_SHORT_WORKERS = 2
 
+# Default number of burstable workers for local API server. A heuristic number
+# that is large enough for most local cases.
+# TODO(aylei): the number of burstable workers should be auto-tuned based on the
+# system usage stats.
+_BURSTABLE_WORKERS_FOR_LOCAL = 1024
+
 
 class QueueBackend(enum.Enum):
+    # Local queue backend serves queues in each process locally, which has
+    # lower resource usage but the consumer must be in the same process, i.e.
+    # this only works in single-process mode.
+    LOCAL = 'local'
+    # Multi-process queue backend starts a dedicated process for serving queues.
     MULTIPROCESSING = 'multiprocessing'
     # TODO(zhwu): we can add redis backend in the future.
-
-
-@dataclasses.dataclass
-class RequestWorker:
-    id: int
-    # The type of queue this worker works on.
-    schedule_type: api_requests.ScheduleType
-
-    def __str__(self) -> str:
-        return f'Worker(id={self.id}, schedule_type={self.schedule_type.value})'
 
 
 class RequestQueue:
@@ -127,9 +129,12 @@ class RequestQueue:
                  backend: Optional[QueueBackend] = None) -> None:
         self.name = schedule_type.value
         self.backend = backend
-        assert (backend is None or
-                backend == QueueBackend.MULTIPROCESSING), backend
-        self.queue = mp_queue.get_queue(self.name)
+        if backend == QueueBackend.MULTIPROCESSING:
+            self.queue = mp_queue.get_queue(self.name)
+        elif backend == QueueBackend.LOCAL:
+            self.queue = local_queue.get_queue(self.name)
+        else:
+            raise RuntimeError(f'Invalid queue backend: {backend}')
 
     def put(self, request: Tuple[str, bool]) -> None:
         """Put and request to the queue.
@@ -158,6 +163,104 @@ class RequestQueue:
 
 
 queue_backend = QueueBackend.MULTIPROCESSING
+
+
+def executor_initializer(proc_group: str):
+    setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
+                              f'{multiprocessing.current_process().pid}')
+
+
+class RequestWorker:
+    """A worker that polls requests from the queue and runs them.
+
+    The worker can run at least `garanteed_parallelism` requests in parallel.
+    If there are more resources available, it can spin up extra workers up to
+    `garanteed_parallelism + burstable_parallelism`.
+    """
+
+    # The type of queue this worker works on.
+    schedule_type: api_requests.ScheduleType
+    # The least number of requests that this worker can run in parallel.
+    garanteed_parallelism: int
+    # The extra number of requests that this worker can run in parallel
+    # if there are available CPU/memory resources.
+    burstable_parallelism: int = 0
+
+    def __init__(self,
+                 schedule_type: api_requests.ScheduleType,
+                 garanteed_parallelism: int,
+                 burstable_parallelism: int = 0) -> None:
+        self.schedule_type = schedule_type
+        self.garanteed_parallelism = garanteed_parallelism
+        self.burstable_parallelism = burstable_parallelism
+
+    def __str__(self) -> str:
+        return f'Worker(schedule_type={self.schedule_type.value})'
+
+    def process_request(self, executor: process.BurstableExecutor,
+                        queue: RequestQueue) -> None:
+        try:
+            request_element = queue.get()
+            if request_element is None:
+                time.sleep(0.1)
+                return
+            request_id, ignore_return_value = request_element
+            request = api_requests.get_request(request_id)
+            assert request is not None, f'Request with ID {request_id} is None'
+            if request.status == api_requests.RequestStatus.CANCELLED:
+                return
+            logger.info(f'[{self}] Submitting request: {request_id}')
+            # Start additional process to run the request, so that it can be
+            # cancelled when requested by a user.
+            # TODO(zhwu): since the executor is reusing the request process,
+            # multiple requests can share the same process pid, which may cause
+            # issues with SkyPilot core functions if they rely on the exit of
+            # the process, such as subprocess_daemon.py.
+            executor.submit_until_success(_request_execution_wrapper,
+                                          request_id, ignore_return_value)
+
+            logger.info(f'[{self}] Submitted request: {request_id}')
+        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
+            # Catch any other exceptions to avoid crashing the worker process.
+            logger.error(
+                f'[{self}] Error processing request: '
+                f'{request_id if "request_id" in locals() else ""} '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
+
+    def run(self) -> None:
+        # Handle the SIGTERM signal to abort the executor process gracefully.
+        proc_group = f'{self.schedule_type.value}'
+        if threading.current_thread() is threading.main_thread():
+            signal.signal(signal.SIGTERM, _sigterm_handler)
+            setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
+        queue = _get_queue(self.schedule_type)
+
+        # Use concurrent.futures.ProcessPoolExecutor instead of
+        # multiprocessing.Pool because the former is more efficient with the
+        # support of lazy creation of worker processes.
+        # We use executor instead of individual multiprocessing.Process to avoid
+        # the overhead of forking a new process for each request, which can be
+        # about 1s delay.
+        try:
+            executor = process.BurstableExecutor(
+                garanteed_workers=self.garanteed_parallelism,
+                burst_workers=self.burstable_parallelism,
+                initializer=executor_initializer,
+                initargs=(proc_group,))
+            while True:
+                self.process_request(executor, queue)
+        # TODO(aylei): better to distinct between KeyboardInterrupt and SIGTERM.
+        except KeyboardInterrupt:
+            pass
+        finally:
+            # In most cases, here we receive either ctrl-c in foreground
+            # execution or SIGTERM on server exiting. Gracefully exit the
+            # worker process and the executor.
+            # TODO(aylei): worker may also be killed by system daemons like
+            # OOM killer, crash the API server or recreate the worker process
+            # to avoid broken state in such cases.
+            logger.info(f'[{self}] Worker process interrupted')
+            executor.shutdown()
 
 
 @annotations.lru_cache(scope='global', maxsize=None)
@@ -219,6 +322,10 @@ def _restore_output(original_stdout: int, original_stderr: int) -> None:
     os.close(original_stderr)
 
 
+def _sigterm_handler(signum: int, frame: Optional['types.FrameType']) -> None:
+    raise KeyboardInterrupt
+
+
 def _request_execution_wrapper(request_id: str,
                                ignore_return_value: bool) -> None:
     """Wrapper for a request execution.
@@ -230,12 +337,8 @@ def _request_execution_wrapper(request_id: str,
     3. Redirect the stdout and stderr of the execution to log file;
     4. Handle the SIGTERM signal to abort the request gracefully.
     """
-
-    def sigterm_handler(signum: int,
-                        frame: Optional['types.FrameType']) -> None:
-        raise KeyboardInterrupt
-
-    signal.signal(signal.SIGTERM, sigterm_handler)
+    # Handle the SIGTERM signal to abort the request processing gracefully.
+    signal.signal(signal.SIGTERM, _sigterm_handler)
 
     pid = multiprocessing.current_process().pid
     logger.info(f'Running request {request_id} with pid {pid}')
@@ -259,16 +362,16 @@ def _request_execution_wrapper(request_id: str,
                 f.flush()
         except KeyboardInterrupt:
             logger.info(f'Request {request_id} cancelled by user')
+            # Kill all children processes related to this request.
+            # Each executor handles a single request, so we can safely kill all
+            # children processes related to this request.
+            # This is required as python does not pass the KeyboardInterrupt
+            # to the threads that are not main thread.
+            subprocess_utils.kill_children_processes()
             _restore_output(original_stdout, original_stderr)
             return
         except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            with ux_utils.enable_traceback():
-                stacktrace = traceback.format_exc()
-            setattr(e, 'stacktrace', stacktrace)
-            with api_requests.update_request(request_id) as request_task:
-                assert request_task is not None, request_id
-                request_task.status = api_requests.RequestStatus.FAILED
-                request_task.set_error(e)
+            api_requests.set_request_failed(request_id, e)
             _restore_output(original_stdout, original_stderr)
             logger.info(f'Request {request_id} failed due to '
                         f'{common_utils.format_exception(e)}')
@@ -283,16 +386,37 @@ def _request_execution_wrapper(request_id: str,
             logger.info(f'Request {request_id} finished')
 
 
-def schedule_request(request_id: str,
-                     request_name: str,
-                     request_body: payloads.RequestBody,
-                     func: Callable[P, Any],
-                     request_cluster_name: Optional[str] = None,
-                     ignore_return_value: bool = False,
-                     schedule_type: api_requests.ScheduleType = api_requests.
-                     ScheduleType.LONG,
-                     is_skypilot_system: bool = False) -> None:
-    """Enqueue a request to the request queue."""
+def schedule_request(
+        request_id: str,
+        request_name: str,
+        request_body: payloads.RequestBody,
+        func: Callable[P, Any],
+        request_cluster_name: Optional[str] = None,
+        ignore_return_value: bool = False,
+        schedule_type: api_requests.ScheduleType = (
+            api_requests.ScheduleType.LONG),
+        is_skypilot_system: bool = False,
+        precondition: Optional[preconditions.Precondition] = None) -> None:
+    """Enqueue a request to the request queue.
+
+    Args:
+        request_id: ID of the request.
+        request_name: Name of the request type, e.g. "sky.launch".
+        request_body: The request body containing parameters and environment
+            variables.
+        func: The function to execute when the request is processed.
+        request_cluster_name: The name of the cluster associated with this
+            request, if any.
+        ignore_return_value: If True, the return value of the function will be
+            ignored.
+        schedule_type: The type of scheduling to use for this request, refer to
+            `api_requests.ScheduleType` for more details.
+        is_skypilot_system: Denote whether the request is from SkyPilot system.
+        precondition: If a precondition is provided, the request will only be
+            scheduled for execution when the precondition is met (returns True).
+            The precondition is waited asynchronously and does not block the
+            caller.
+    """
     user_id = request_body.env_vars[constants.USER_ID_ENV_VAR]
     if is_skypilot_system:
         user_id = server_constants.SKYPILOT_SYSTEM_USER_ID
@@ -314,101 +438,90 @@ def schedule_request(request_id: str,
         return
 
     request.log_path.touch()
-    input_tuple = (request_id, ignore_return_value)
 
-    logger.info(f'Queuing request: {request_id}')
-    _get_queue(schedule_type).put(input_tuple)
+    def enqueue():
+        input_tuple = (request_id, ignore_return_value)
+        logger.info(f'Queuing request: {request_id}')
+        _get_queue(schedule_type).put(input_tuple)
 
-
-def executor_initializer(proc_group: str):
-    setproctitle.setproctitle(f'SkyPilot:executor:{proc_group}:'
-                              f'{multiprocessing.current_process().pid}')
-
-
-def request_worker(worker: RequestWorker, max_parallel_size: int) -> None:
-    """Worker for the requests.
-
-    Args:
-        max_parallel_size: Maximum number of parallel jobs this worker can run.
-    """
-    proc_group = f'{worker.schedule_type.value}-{worker.id}'
-    setproctitle.setproctitle(f'SkyPilot:worker:{proc_group}')
-    queue = _get_queue(worker.schedule_type)
-
-    def process_request(executor: concurrent.futures.ProcessPoolExecutor):
-        try:
-            request_element = queue.get()
-            if request_element is None:
-                time.sleep(0.1)
-                return
-            request_id, ignore_return_value = request_element
-            request = api_requests.get_request(request_id)
-            assert request is not None, f'Request with ID {request_id} is None'
-            if request.status == api_requests.RequestStatus.CANCELLED:
-                return
-            logger.info(f'[{worker}] Submitting request: {request_id}')
-            # Start additional process to run the request, so that it can be
-            # cancelled when requested by a user.
-            # TODO(zhwu): since the executor is reusing the request process,
-            # multiple requests can share the same process pid, which may cause
-            # issues with SkyPilot core functions if they rely on the exit of
-            # the process, such as subprocess_daemon.py.
-            future = executor.submit(_request_execution_wrapper, request_id,
-                                     ignore_return_value)
-
-            if worker.schedule_type == api_requests.ScheduleType.LONG:
-                try:
-                    future.result(timeout=None)
-                except Exception as e:  # pylint: disable=broad-except
-                    logger.error(f'[{worker}] Request {request_id} failed: {e}')
-                logger.info(f'[{worker}] Finished request: {request_id}')
-            else:
-                logger.info(f'[{worker}] Submitted request: {request_id}')
-        except KeyboardInterrupt:
-            # Interrupt the worker process will stop request execution, but
-            # the SIGTERM request should be respected anyway since it might
-            # be explicitly sent by user.
-            # TODO(aylei): crash the API server or recreate the worker process
-            # to avoid broken state.
-            logger.error(f'[{worker}] Worker process interrupted')
-            with ux_utils.print_exception_no_traceback():
-                raise
-        except (Exception, SystemExit) as e:  # pylint: disable=broad-except
-            # Catch any other exceptions to avoid crashing the worker process.
-            logger.error(
-                f'[{worker}] Error processing request {request_id}: '
-                f'{common_utils.format_exception(e, use_bracket=True)}')
-
-    # Use concurrent.futures.ProcessPoolExecutor instead of multiprocessing.Pool
-    # because the former is more efficient with the support of lazy creation of
-    # worker processes.
-    # We use executor instead of individual multiprocessing.Process to avoid
-    # the overhead of forking a new process for each request, which can be about
-    # 1s delay.
-    with concurrent.futures.ProcessPoolExecutor(
-            max_workers=max_parallel_size,
-            initializer=executor_initializer,
-            initargs=(proc_group,)) as executor:
-        while True:
-            process_request(executor)
+    if precondition is not None:
+        # Wait async to avoid blocking caller.
+        precondition.wait_async(on_condition_met=enqueue)
+    else:
+        enqueue()
 
 
 def start(deploy: bool) -> List[multiprocessing.Process]:
-    """Start the request workers."""
+    """Start the request workers.
+
+    Request workers run in background, schedule the requests and delegate the
+    request execution to executor processes. We have different assumptions for
+    the resources in different deployment modes, which leads to different
+    worker setups:
+
+    - Deployment mode (deploy=True), we assume the resources are dedicated to
+      the API server and the resources will be tuned for serious use cases, so:
+      - Use multiprocessing queue backend and dedicated workers processes to
+        avoid GIL contention.
+      - Parallelism (number of executor processes) is fixed and executor
+        processes have same lifecycle with the server, which ensures
+        best-effort cache reusing and stable resources consumption.
+      - Reject to start in low resource environments, to avoid flaky
+        deployments.
+    - Local mode (deploy=False), we assume the server is running in a shared
+      environment (e.g. laptop) and users typically do not pay attention to
+      the resource setup of the server. Moreover, existing users may expect
+      some consistent behaviors with old versions, i.e. before API server was
+      introduced, so:
+      - The max number of long-running executor processes are limited, to avoid
+        high memory consumption when the server is idle.
+      - Allow burstable workers to handle requests when all long-running
+        workers are busy, which mimics the behavior of local sky CLI before
+        API server was introduced.
+      - Works in low resources environments, and further reduce the memory
+        consumption in low resource environments.
+
+    Note that there is still significant overhead for SDK users when migrate to
+    local API server. Since the users are free to run sky operations in Threads
+    when using SDK but all client operations will occupy at least one worker
+    process after API server was introduced.
+    """
     # Determine the job capacity of the workers based on the system resources.
     cpu_count = common_utils.get_cpu_count()
     mem_size_gb = common_utils.get_mem_size_gb()
     mem_size_gb = max(0, mem_size_gb - server_constants.MIN_AVAIL_MEM_GB)
+    # Runs in low resource mode if the available memory is less than
+    # server_constants.MIN_AVAIL_MEM_GB.
     max_parallel_for_long = _max_long_worker_parallism(cpu_count,
                                                        mem_size_gb,
                                                        local=not deploy)
     max_parallel_for_short = _max_short_worker_parallism(
         mem_size_gb, max_parallel_for_long)
-    logger.info(
-        f'SkyPilot API server will start {max_parallel_for_long} workers for '
-        f'long requests and will allow at max '
-        f'{max_parallel_for_short} short requests in parallel.')
-
+    if mem_size_gb < server_constants.MIN_AVAIL_MEM_GB:
+        # Permanent worker process may have significant memory consumption
+        # (~350MB per worker) after running commands like `sky check`, so we
+        # don't start any permanent workers in low resource local mode. This
+        # mimics the behavior of local sky CLI before API server was
+        # introduced, where the CLI will start new process everytime and
+        # never reject to start due to resource constraints.
+        # Note that the refresh daemon will still occupy one worker
+        # permanently because it never exits.
+        max_parallel_for_long = 0
+        max_parallel_for_short = 0
+        logger.warning(
+            'SkyPilot API server will run in low resource mode because '
+            'the available memory is less than '
+            f'{server_constants.MIN_AVAIL_MEM_GB}GB.')
+    else:
+        logger.info(
+            f'SkyPilot API server will start {max_parallel_for_long} workers '
+            f'for long requests and will allow at max '
+            f'{max_parallel_for_short} short requests in parallel.')
+    if not deploy:
+        # For local mode, use local queue backend since we only run 1 uvicorn
+        # worker in local mode.
+        global queue_backend
+        queue_backend = QueueBackend.LOCAL
     sub_procs = []
     # Setup the queues.
     if queue_backend == QueueBackend.MULTIPROCESSING:
@@ -427,24 +540,37 @@ def start(deploy: bool) -> List[multiprocessing.Process]:
             target=mp_queue.start_queue_manager, args=(queue_names, port))
         queue_server.start()
         sub_procs.append(queue_server)
-        mp_queue.wait_for_queues_to_be_ready(queue_names, port=port)
+        mp_queue.wait_for_queues_to_be_ready(queue_names,
+                                             queue_server,
+                                             port=port)
+    elif queue_backend == QueueBackend.LOCAL:
+        # No setup is needed for local queue backend.
+        pass
+    else:
+        # Should be checked earlier, but just in case.
+        raise RuntimeError(f'Invalid queue backend: {queue_backend}')
 
     logger.info('Request queues created')
 
-    for worker_id in range(max_parallel_for_long):
-        worker = RequestWorker(id=worker_id,
-                               schedule_type=api_requests.ScheduleType.LONG)
-        worker_proc = multiprocessing.Process(target=request_worker,
-                                              args=(worker, 1))
-        worker_proc.start()
-        sub_procs.append(worker_proc)
+    def run_worker_in_background(worker: RequestWorker):
+        # Thread dispatcher is sufficient for current scale, refer to
+        # tests/load_tests/test_queue_dispatcher.py for more details.
+        # Use daemon thread for automatic cleanup.
+        thread = threading.Thread(target=worker.run, daemon=True)
+        thread.start()
+
+    burstable_parallelism = _BURSTABLE_WORKERS_FOR_LOCAL if not deploy else 0
+    # Start a worker for long requests.
+    long_worker = RequestWorker(schedule_type=api_requests.ScheduleType.LONG,
+                                garanteed_parallelism=max_parallel_for_long,
+                                burstable_parallelism=burstable_parallelism)
+    run_worker_in_background(long_worker)
 
     # Start a worker for short requests.
-    worker = RequestWorker(id=1, schedule_type=api_requests.ScheduleType.SHORT)
-    worker_proc = multiprocessing.Process(target=request_worker,
-                                          args=(worker, max_parallel_for_short))
-    worker_proc.start()
-    sub_procs.append(worker_proc)
+    short_worker = RequestWorker(schedule_type=api_requests.ScheduleType.SHORT,
+                                 garanteed_parallelism=max_parallel_for_short,
+                                 burstable_parallelism=burstable_parallelism)
+    run_worker_in_background(short_worker)
     return sub_procs
 
 

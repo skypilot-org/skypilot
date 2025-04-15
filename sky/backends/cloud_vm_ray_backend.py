@@ -35,9 +35,11 @@ from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.clouds.utils import gcp_utils
 from sky.data import data_utils
@@ -60,6 +62,7 @@ from sky.utils import command_runner
 from sky.utils import common
 from sky.utils import common_utils
 from sky.utils import controller_utils
+from sky.utils import env_options
 from sky.utils import log_utils
 from sky.utils import message_utils
 from sky.utils import registry
@@ -621,15 +624,41 @@ class RayCodeGen:
         options_str = ', '.join(options)
         logger.debug('Added Task with options: '
                      f'{options_str}')
+        # Script to block completion of a job until all storage mounted with
+        # CACHED_MOUNT mode is uploaded to remote.
+        rclone_flush_script = textwrap.dedent(f"""\
+
+        if [ $(findmnt -t fuse.rclone --noheading | wc -l) -gt 0 ]; then
+            flushed=0
+            # extra second on top of --vfs-cache-poll-interval to
+            # avoid race condition between rclone log line creation and this check.
+            sleep 1
+            while [ $flushed -eq 0 ]; do
+                # sleep for the same interval as --vfs-cache-poll-interval
+                sleep {constants.RCLONE_CACHE_REFRESH_INTERVAL}
+                flushed=1
+                for file in {constants.RCLONE_LOG_DIR}/*; do
+                    exitcode=0
+                    tac $file | grep "vfs cache: cleaned:" -m 1 | grep "in use 0, to upload 0, uploading 0" -q || exitcode=$?
+                    if [ $exitcode -ne 0 ]; then
+                        echo "skypilot: cached mount is still uploading to remote"
+                        flushed=0
+                        break
+                    fi
+                done
+            done
+            echo "skypilot: cached mount uploaded complete"
+        fi""")
         self._code += [
             sky_env_vars_dict_str,
             textwrap.dedent(f"""\
         script = {bash_script!r}
+        rclone_flush_script = {rclone_flush_script!r}
         if run_fn is not None:
             script = run_fn({gang_scheduling_id}, gang_scheduling_id_to_ip)
 
-
         if script is not None:
+            script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
             # Backward compatibility: Environment starting with `SKY_` is
             # deprecated. Remove it in v0.9.0.
@@ -773,32 +802,6 @@ class FailoverCloudErrorHandlerV1:
             raise e
 
     @staticmethod
-    def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
-                        launchable_resources: 'resources_lib.Resources',
-                        region: 'clouds.Region',
-                        zones: Optional[List['clouds.Zone']], stdout: str,
-                        stderr: str):
-        del region, zones  # Unused.
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout,
-            stderr,
-            is_error_str_known=lambda x: 'LambdaCloudError:' in x.strip())
-        messages = '\n  '.join(errors)
-        style = colorama.Style
-        logger.warning(f'  {style.DIM}{messages}{style.RESET_ALL}')
-        _add_to_blocked_resources(blocked_resources,
-                                  launchable_resources.copy(zone=None))
-
-        # Sometimes, LambdaCloudError will list available regions.
-        for e in errors:
-            if e.find('Regions with capacity available:') != -1:
-                for r in service_catalog.regions('lambda'):
-                    if e.find(r.name) == -1:
-                        _add_to_blocked_resources(
-                            blocked_resources,
-                            launchable_resources.copy(region=r.name, zone=None))
-
-    @staticmethod
     def _scp_handler(blocked_resources: Set['resources_lib.Resources'],
                      launchable_resources: 'resources_lib.Resources',
                      region: 'clouds.Region',
@@ -845,32 +848,6 @@ class FailoverCloudErrorHandlerV1:
         for zone in zones:  # type: ignore[union-attr]
             _add_to_blocked_resources(blocked_resources,
                                       launchable_resources.copy(zone=zone.name))
-
-    # Apr, 2023 by Hysun(hysun.he@oracle.com): Added support for OCI
-    @staticmethod
-    def _oci_handler(blocked_resources: Set['resources_lib.Resources'],
-                     launchable_resources: 'resources_lib.Resources',
-                     region: 'clouds.Region',
-                     zones: Optional[List['clouds.Zone']], stdout: str,
-                     stderr: str):
-        known_service_errors = [
-            'NotAuthorizedOrNotFound', 'CannotParseRequest', 'InternalError',
-            'LimitExceeded', 'NotAuthenticated'
-        ]
-        errors = FailoverCloudErrorHandlerV1._handle_errors(
-            stdout, stderr, lambda x: 'VcnSubnetNotFound' in x.strip() or
-            ('oci.exceptions.ServiceError' in x.strip() and any(
-                known_err in x.strip() for known_err in known_service_errors)))
-        logger.warning(f'Got error(s) in {region.name}:')
-        messages = '\n\t'.join(errors)
-        style = colorama.Style
-        logger.warning(f'{style.DIM}\t{messages}{style.RESET_ALL}')
-
-        if zones is not None:
-            for zone in zones:
-                _add_to_blocked_resources(
-                    blocked_resources,
-                    launchable_resources.copy(zone=zone.name))
 
     @staticmethod
     def update_blocklist_on_error(
@@ -1122,6 +1099,38 @@ class FailoverCloudErrorHandlerV2:
                 _add_to_blocked_resources(
                     blocked_resources,
                     launchable_resources.copy(zone=zone.name))
+
+    @staticmethod
+    def _lambda_handler(blocked_resources: Set['resources_lib.Resources'],
+                        launchable_resources: 'resources_lib.Resources',
+                        region: 'clouds.Region',
+                        zones: Optional[List['clouds.Zone']], error: Exception):
+        output = str(error)
+        # Sometimes, lambda cloud error will list available regions.
+        if output.find('Regions with capacity available:') != -1:
+            for r in service_catalog.regions('lambda'):
+                if output.find(r.name) == -1:
+                    _add_to_blocked_resources(
+                        blocked_resources,
+                        launchable_resources.copy(region=r.name, zone=None))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
+
+    @staticmethod
+    def _aws_handler(blocked_resources: Set['resources_lib.Resources'],
+                     launchable_resources: 'resources_lib.Resources',
+                     region: 'clouds.Region',
+                     zones: Optional[List['clouds.Zone']],
+                     error: Exception) -> None:
+        logger.info(f'AWS handler error: {error}')
+        # Block AWS if the credential has expired.
+        if isinstance(error, exceptions.InvalidCloudCredentials):
+            _add_to_blocked_resources(
+                blocked_resources, resources_lib.Resources(cloud=clouds.AWS()))
+        else:
+            FailoverCloudErrorHandlerV2._default_handler(
+                blocked_resources, launchable_resources, region, zones, error)
 
     @staticmethod
     def _default_handler(blocked_resources: Set['resources_lib.Resources'],
@@ -1453,6 +1462,17 @@ class RetryingVmProvisioner(object):
                 # does not have nodes labeled with GPU types.
                 logger.info(f'{e}')
                 continue
+            except exceptions.InvalidCloudCredentials as e:
+                # Failed due to invalid cloud credentials.
+                logger.warning(f'{common_utils.format_exception(e)}')
+                # We should block the entire cloud for invalid cloud credentials
+                _add_to_blocked_resources(
+                    self._blocked_resources,
+                    to_provision.copy(region=None, zone=None))
+                raise exceptions.ResourcesUnavailableError(
+                    f'Failed to provision on cloud {to_provision.cloud} due to '
+                    f'invalid cloud credentials: '
+                    f'{common_utils.format_exception(e)}')
             except exceptions.InvalidCloudConfigs as e:
                 # Failed due to invalid user configs in ~/.sky/config.yaml.
                 logger.warning(f'{common_utils.format_exception(e)}')
@@ -2016,7 +2036,8 @@ class RetryingVmProvisioner(object):
         # is running. Here we check the enabled clouds and expiring credentials
         # and raise a warning to the user.
         if task.is_controller_task():
-            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                sky_cloud.CloudCapability.COMPUTE)
             expirable_clouds = backend_utils.get_expirable_clouds(
                 enabled_clouds)
 
@@ -2045,10 +2066,10 @@ class RetryingVmProvisioner(object):
                                (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
-                    assert (clouds.CloudImplementationFeatures.STOP
-                            in requested_features), requested_features
-                    requested_features.remove(
-                        clouds.CloudImplementationFeatures.STOP)
+                    # If autostop is disabled in config, the feature may not be
+                    # requested, so use discard() instead of remove().
+                    requested_features.discard(
+                        clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
                 to_provision.cloud.check_features_are_supported(
@@ -2809,7 +2830,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name: str,
         retry_until_up: bool = False,
         skip_unnecessary_provisioning: bool = False,
-    ) -> Optional[CloudVmRayResourceHandle]:
+    ) -> Tuple[Optional[CloudVmRayResourceHandle], bool]:
         """Provisions the cluster, or re-provisions an existing cluster.
 
         Use the SKYPILOT provisioner if it's supported by the cloud, otherwise
@@ -2949,7 +2970,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                             failover_history=e.failover_history) from None
             if dryrun:
                 record = global_user_state.get_cluster_from_name(cluster_name)
-                return record['handle'] if record is not None else None
+                return record['handle'] if record is not None else None, False
 
             if config_dict['provisioning_skipped']:
                 # Skip further provisioning.
@@ -2960,7 +2981,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 record = global_user_state.get_cluster_from_name(cluster_name)
                 assert record is not None and record['handle'] is not None, (
                     cluster_name, record)
-                return record['handle']
+                return record['handle'], True
 
             if 'provision_record' in config_dict:
                 # New provisioner is used here.
@@ -3002,7 +3023,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                 self._update_after_cluster_provisioned(
                     handle, to_provision_config.prev_handle, task,
                     prev_cluster_status, lock_path, config_hash)
-                return handle
+                return handle, False
 
             cluster_config_file = config_dict['ray']
             handle = config_dict['handle']
@@ -3074,7 +3095,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             self._update_after_cluster_provisioned(
                 handle, to_provision_config.prev_handle, task,
                 prev_cluster_status, lock_path, config_hash)
-            return handle
+            return handle, False
 
     def _open_ports(self, handle: CloudVmRayResourceHandle) -> None:
         cloud = handle.launched_resources.cloud
@@ -3415,7 +3436,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         mkdir_code = (f'{cd} && mkdir -p {remote_log_dir} && '
                       f'touch {remote_log_path}')
         encoded_script = shlex.quote(codegen)
-        create_script_code = (f'{{ echo {encoded_script} > {script_path}; }}')
+        create_script_code = f'{{ echo {encoded_script} > {script_path}; }}'
         job_submit_cmd = (
             # JOB_CMD_IDENTIFIER is used for identifying the process retrieved
             # with pid is the same driver process.
@@ -3665,8 +3686,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # should be higher priority than the cluster requests, and we should
             # release the lock from other requests.
             exclude_request_to_kill = 'sky.down' if terminate else 'sky.stop'
-            requests_lib.kill_cluster_requests(handle.cluster_name,
-                                               exclude_request_to_kill)
+            try:
+                # TODO(zhwu): we should get rid of this when it is being called
+                # internally without involving an API server, e.g., when a
+                # controller is trying to terminate a cluster.
+                requests_lib.kill_cluster_requests(handle.cluster_name,
+                                                   exclude_request_to_kill)
+            except Exception as e:  # pylint: disable=broad-except
+                # We allow the failure to kill other launch requests, because
+                # it is not critical to the cluster teardown.
+                logger.warning(
+                    'Failed to kill other launch requests for the '
+                    f'cluster {handle.cluster_name}: '
+                    f'{common_utils.format_exception(e, use_bracket=True)}')
             try:
                 with filelock.FileLock(
                         lock_path,
@@ -4063,8 +4095,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # the cluster is terminated/stopped. Otherwise, it will be quite
         # confusing to see the cluster restarted immediately after it is
         # terminated/stopped, when there is a pending launch request.
-        requests_lib.kill_cluster_requests(handle.cluster_name,
-                                           exclude_request_to_kill)
+        try:
+            # TODO(zhwu): we should get rid of this when it is being called
+            # internally without involving an API server, e.g., when a
+            # controller is trying to terminate a cluster.
+            requests_lib.kill_cluster_requests(handle.cluster_name,
+                                               exclude_request_to_kill)
+        except Exception as e:  # pylint: disable=broad-except
+            # We allow the failure to kill other launch requests, because
+            # it is not critical to the cluster teardown.
+            logger.warning(
+                'Failed to kill other launch requests for the '
+                f'cluster {handle.cluster_name}: '
+                f'{common_utils.format_exception(e, use_bracket=True)}')
         cluster_status_fetched = False
         if refresh_cluster_status:
             try:
@@ -4289,7 +4332,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         cluster_name_on_cloud = handle.cluster_name_on_cloud
         cloud = handle.launched_resources.cloud
 
-        if (terminate and handle.launched_resources.is_image_managed is True):
+        if terminate and handle.launched_resources.is_image_managed is True:
             # Delete the image when terminating a "cloned" cluster, i.e.,
             # whose image is created by SkyPilot (--clone-disk-from)
             logger.debug(f'Deleting image {handle.launched_resources.image_id}')
@@ -4391,7 +4434,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # If cluster_yaml is None, the cluster should ensured to be terminated,
         # so we don't need to do the double check.
         if handle.cluster_yaml is not None:
-            _detect_abnormal_non_terminated_nodes(handle)
+            try:
+                _detect_abnormal_non_terminated_nodes(handle)
+            except exceptions.ClusterStatusFetchingError as e:
+                if purge:
+                    msg = common_utils.format_exception(e, use_bracket=True)
+                    logger.warning(
+                        'Failed abnormal non-terminated nodes cleanup. '
+                        'Skipping and cleaning up as purge is set. '
+                        f'Details: {msg}')
+                    logger.debug(f'Full exception details: {msg}',
+                                 exc_info=True)
+                else:
+                    raise
 
         if not terminate or remove_from_db:
             global_user_state.remove_cluster(handle.cluster_name,
@@ -4416,7 +4471,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            (clouds.Kubernetes, clouds.RunPod)) and not down and
                     idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
-                # Kubernetes and RunPod clusters.
+                # Kubernetes and RunPod clusters, because autostop() will
+                # skip the supported feature check. Non-controller k8s/runpod
+                # clusters will have already errored out.
                 controller = controller_utils.Controllers.from_name(
                     handle.cluster_name)
                 assert (controller is not None), handle.cluster_name
@@ -4427,6 +4484,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # For SkyServe controllers on Kubernetes: override autostop
                     # behavior to force autodown (instead of no-op)
                     # to avoid dangling controllers.
+
+                    # down = False is the default, but warn the user in case
+                    # they have explicitly specified it.
+                    config_override_down = skypilot_config.get_nested(
+                        (controller.value.controller_type, 'controller',
+                         'autostop', 'down'), None)
+                    if config_override_down is False:  # will not match None
+                        logger.warning(
+                            'SkyServe controller autodown is disabled in the '
+                            '~/.sky/config.yaml configuration file '
+                            '(serve.controller.autostop.down_when_idle), but '
+                            'it is force enabled for Kubernetes clusters.')
+
                     down = True
                 else:
                     logger.info('Auto-stop is not supported for Kubernetes '
@@ -4842,7 +4912,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         # Handle cases where `storage_mounts` is None. This occurs when users
         # initiate a 'sky start' command from a Skypilot version that predates
         # the introduction of the `storage_mounts_metadata` feature.
-        if not storage_mounts:
+        if storage_mounts is None:
             return
 
         # Process only mount mode objects here. COPY mode objects have been
@@ -4851,10 +4921,11 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
         storage_mounts = {
             path: storage_mount
             for path, storage_mount in storage_mounts.items()
-            if storage_mount.mode == storage_lib.StorageMode.MOUNT
+            if storage_mount.mode in storage_lib.MOUNTABLE_STORAGE_MODES
         }
 
-        # Handle cases when there aren't any Storages with MOUNT mode.
+        # Handle cases when there aren't any Storages with either MOUNT or
+        # MOUNT_CACHED mode.
         if not storage_mounts:
             return
         start = time.time()
@@ -4884,7 +4955,13 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             # Get the first store and use it to mount
             store = list(storage_obj.stores.values())[0]
             assert store is not None, storage_obj
-            mount_cmd = store.mount_command(dst)
+            if storage_obj.mode == storage_lib.StorageMode.MOUNT:
+                mount_cmd = store.mount_command(dst)
+                action_message = 'Mounting'
+            else:
+                assert storage_obj.mode == storage_lib.StorageMode.MOUNT_CACHED
+                mount_cmd = store.mount_cached_command(dst)
+                action_message = 'Mounting cached mode'
             src_print = (storage_obj.source
                          if storage_obj.source else storage_obj.name)
             if isinstance(src_print, list):
@@ -4896,7 +4973,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     target=dst,
                     cmd=mount_cmd,
                     run_rsync=False,
-                    action_message='Mounting',
+                    action_message=action_message,
                     log_path=log_path,
                     # Need to source bashrc, as the cloud specific CLI or SDK
                     # may require PATH in bashrc.
@@ -4915,12 +4992,23 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                                  f' to an empty or non-existent path.')
                     raise RuntimeError(error_msg) from None
                 else:
-                    # Strip the command (a big heredoc) from the exception
-                    raise exceptions.CommandError(
-                        e.returncode,
-                        command='to mount',
-                        error_msg=e.error_msg,
-                        detailed_reason=e.detailed_reason) from None
+                    # By default, raising an error caused from mounting_utils
+                    # shows a big heredoc as part of it. Here, we want to
+                    # conditionally show the heredoc only if SKYPILOT_DEBUG
+                    # is set
+                    if env_options.Options.SHOW_DEBUG_INFO.get():
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason)
+                    else:
+                        # Strip the command (a big heredoc) from the exception
+                        raise exceptions.CommandError(
+                            e.returncode,
+                            command='to mount',
+                            error_msg=e.error_msg,
+                            detailed_reason=e.detailed_reason) from None
 
         end = time.time()
         logger.debug(f'Storage mount sync took {end - start} seconds.')
@@ -4938,7 +5026,7 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
             return
         storage_mounts_metadata = {}
         for dst, storage_obj in storage_mounts.items():
-            if storage_obj.mode != storage_lib.StorageMode.MOUNT:
+            if storage_obj.mode not in storage_lib.MOUNTABLE_STORAGE_MODES:
                 # Skip non-mount storage objects, as there is no need to
                 # reconstruct them during cluster restart.
                 continue

@@ -6,7 +6,7 @@ import getpass
 import os
 import tempfile
 import typing
-from typing import Any, Dict, Iterable, List, Optional, Set
+from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 import uuid
 
 import colorama
@@ -19,6 +19,7 @@ from sky import resources
 from sky import sky_logging
 from sky import skypilot_config
 from sky.adaptors import cloudflare
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import gcp
 from sky.data import data_utils
 from sky.data import storage as storage_lib
@@ -71,6 +72,7 @@ class _ControllerSpec:
     default_hint_if_non_existent: str
     connection_error_hint: str
     default_resources_config: Dict[str, Any]
+    default_autostop_config: Dict[str, Any]
 
     @property
     def decline_down_when_failed_to_fetch_status_hint(self) -> str:
@@ -117,7 +119,8 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No in-progress managed jobs.',
         connection_error_hint=(
             'Failed to connect to jobs controller, please try again later.'),
-        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES)
+        default_resources_config=managed_job_constants.CONTROLLER_RESOURCES,
+        default_autostop_config=managed_job_constants.CONTROLLER_AUTOSTOP)
     SKY_SERVE_CONTROLLER = _ControllerSpec(
         controller_type='serve',
         name='serve controller',
@@ -147,7 +150,8 @@ class Controllers(enum.Enum):
         default_hint_if_non_existent='No live services.',
         connection_error_hint=(
             'Failed to connect to serve controller, please try again later.'),
-        default_resources_config=serve_constants.CONTROLLER_RESOURCES)
+        default_resources_config=serve_constants.CONTROLLER_RESOURCES,
+        default_autostop_config=serve_constants.CONTROLLER_AUTOSTOP)
 
     @classmethod
     def from_name(cls, name: Optional[str]) -> Optional['Controllers']:
@@ -215,7 +219,15 @@ def _get_cloud_dependencies_installation_commands(
     commands.append(f'echo -en "\\r{step_prefix}uv{empty_str}" &&'
                     f'{constants.SKY_UV_INSTALL_CMD} >/dev/null 2>&1')
 
-    for cloud in sky_check.get_cached_enabled_clouds_or_refresh():
+    enabled_compute_clouds = set(
+        sky_check.get_cached_enabled_clouds_or_refresh(
+            sky_cloud.CloudCapability.COMPUTE))
+    enabled_storage_clouds = set(
+        sky_check.get_cached_enabled_clouds_or_refresh(
+            sky_cloud.CloudCapability.STORAGE))
+    enabled_clouds = enabled_compute_clouds.union(enabled_storage_clouds)
+
+    for cloud in enabled_clouds:
         cloud_python_dependencies: List[str] = copy.deepcopy(
             dependencies.extras_require[cloud.canonical_name()])
 
@@ -275,7 +287,7 @@ def _get_cloud_dependencies_installation_commands(
         python_packages.update(cloud_python_dependencies)
 
     if (cloudflare.NAME
-            in storage_lib.get_cached_enabled_storage_clouds_or_refresh()):
+            in storage_lib.get_cached_enabled_storage_cloud_names_or_refresh()):
         python_packages.update(dependencies.extras_require['cloudflare'])
 
     packages_string = ' '.join([f'"{package}"' for package in python_packages])
@@ -431,6 +443,11 @@ def shared_controller_vars_to_fill(
         env_options.Options.SKIP_CLOUD_IDENTITY_CHECK.env_key: '1',
         # Disable minimize logging to get more details on the controller.
         env_options.Options.MINIMIZE_LOGGING.env_key: '0',
+        # Make sure the clusters launched by the controller are marked as
+        # launched with a remote API server if the controller is launched
+        # with a remote API server.
+        constants.USING_REMOTE_API_SERVER_ENV_VAR: str(
+            common_utils.get_using_remote_api_server()),
     })
     if skypilot_config.loaded():
         # Only set the SKYPILOT_CONFIG env var if the user has a config file.
@@ -585,6 +602,40 @@ def get_controller_resources(
     if not result:
         return {controller_resources_to_use}
     return result
+
+
+def get_controller_autostop_config(
+        controller: Controllers) -> Tuple[Optional[int], bool]:
+    """Get the autostop config for the controller.
+
+    Returns:
+      A tuple of (idle_minutes_to_autostop, down), which correspond to the
+      values passed to execution.launch().
+    """
+    controller_autostop_config_copied: Dict[str, Any] = copy.copy(
+        controller.value.default_autostop_config)
+    if skypilot_config.loaded():
+        custom_controller_autostop_config = skypilot_config.get_nested(
+            (controller.value.controller_type, 'controller', 'autostop'), None)
+        if custom_controller_autostop_config is False:
+            # Disabled with `autostop: false` in config.
+            # To indicate autostop is disabled, we return None for
+            # idle_minutes_to_autostop.
+            return None, False
+        elif custom_controller_autostop_config is True:
+            # Enabled with default values. There is no change in behavior, but
+            # this is included by for completeness, since `False` is valid.
+            pass
+        elif custom_controller_autostop_config is not None:
+            # We have specific config values.
+            # Override the controller autostop config with the ones specified in
+            # the config.
+            assert isinstance(custom_controller_autostop_config, dict)
+            controller_autostop_config_copied.update(
+                custom_controller_autostop_config)
+
+    return (controller_autostop_config_copied['idle_minutes'],
+            controller_autostop_config_copied['down'])
 
 
 def _setup_proxy_command_on_controller(
@@ -800,6 +851,16 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     else:
         (store_type, bucket_name, sub_path, storage_account_name, region) = (
             storage_lib.StoreType.get_fields_from_store_url(bucket_wth_prefix))
+        cloud_str = store_type.to_cloud()
+        if (cloud_str not in storage_lib.
+                get_cached_enabled_storage_cloud_names_or_refresh()):
+            with ux_utils.print_exception_no_traceback():
+                raise ValueError(
+                    f'`{task_type}.bucket` is specified in SkyPilot config '
+                    f'with {bucket_wth_prefix}, but {cloud_str} is not '
+                    'enabled. Please avoid specifying the bucket or enable the '
+                    f'cloud by: sky check {cloud_str}')
+
         if storage_account_name is not None:
             store_kwargs['storage_account_name'] = storage_account_name
         if region is not None:
@@ -892,7 +953,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
                 name=bucket_name,
                 source=local_fm_path,
                 persistent=False,
-                mode=storage_lib.StorageMode.MOUNT,
+                mode=storage_lib.DEFAULT_STORAGE_MODE,
                 stores=stores,
                 _is_sky_managed=not bucket_wth_prefix,
                 _bucket_sub_path=file_mounts_tmp_subpath)
@@ -1001,7 +1062,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
     # it was handled in step 6.
     updated_mount_storages = {}
     for storage_path, storage_obj in task.storage_mounts.items():
-        if (storage_obj.mode == storage_lib.StorageMode.MOUNT and
+        if (storage_obj.mode in storage_lib.MOUNTABLE_STORAGE_MODES and
                 not storage_obj.source):
             # Construct source URL with first store type and storage name
             # E.g., s3://my-storage-name
@@ -1019,7 +1080,7 @@ def maybe_translate_local_file_mounts_and_sync_up(task: 'task_lib.Task',
             new_storage = storage_lib.Storage.from_yaml_config({
                 'source': source,
                 'persistent': storage_obj.persistent,
-                'mode': storage_lib.StorageMode.MOUNT.value,
+                'mode': storage_obj.mode.value,
                 # We enable force delete to allow the controller to delete
                 # the object store in case persistent is set to False.
                 '_force_delete': True

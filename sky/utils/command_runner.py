@@ -29,6 +29,8 @@ RSYNC_DISPLAY_OPTION = '-Pavz'
 # Note that "-" is mandatory for rsync and means all patterns in the ignore
 # files are treated as *exclude* patterns.  Non-exclude patterns, e.g., "!
 # do_not_exclude" doesn't work, even though git allows it.
+# TODO(cooperc): Avoid using this, and prefer utils in storage_utils instead for
+# consistency between bucket upload and rsync.
 RSYNC_FILTER_SKYIGNORE = f'--filter=\'dir-merge,- {constants.SKY_IGNORE_FILE}\''
 RSYNC_FILTER_GITIGNORE = f'--filter=\'dir-merge,- {constants.GIT_IGNORE_FILE}\''
 # The git exclude file to support.
@@ -531,8 +533,8 @@ class SSHCommandRunner(CommandRunner):
         if port_forward is not None:
             for local, remote in port_forward:
                 logger.info(
-                    f'Forwarding port {local} to port {remote} on localhost.')
-                ssh += ['-NL', f'{remote}:localhost:{local}']
+                    f'Forwarding local port {local} to remote port {remote}.')
+                ssh += ['-NL', f'{local}:localhost:{remote}']
         if self._docker_ssh_proxy_command is not None:
             docker_ssh_proxy_command = self._docker_ssh_proxy_command(ssh)
         else:

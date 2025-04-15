@@ -14,10 +14,8 @@ from typing import Dict, Generator, Iterable
 import uuid
 import zipfile
 
-import httpx
-import requests
-
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.data import storage_utils
 from sky.server import common as server_common
@@ -29,8 +27,14 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import httpx
+    import requests
+
     import sky
     import sky.dag as dag_lib
+else:
+    httpx = adaptors_common.LazyImport('httpx')
+    requests = adaptors_common.LazyImport('requests')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -71,7 +75,8 @@ def download_logs_from_api_server(
     body = payloads.DownloadBody(folder_paths=list(paths_on_api_server),)
     response = requests.post(f'{server_common.get_server_url()}/download',
                              json=json.loads(body.model_dump_json()),
-                             stream=True)
+                             stream=True,
+                             cookies=server_common.get_api_cookie_jar())
     if response.status_code == 200:
         remote_home_path = response.headers.get('X-Home-Path')
         assert remote_home_path is not None, response.headers
@@ -143,7 +148,7 @@ class FileChunkIterator:
 
 @dataclasses.dataclass
 class UploadChunkParams:
-    client: httpx.Client
+    client: 'httpx.Client'
     upload_id: str
     chunk_index: int
     total_chunks: int
@@ -172,7 +177,8 @@ def _upload_chunk_with_retry(params: UploadChunkParams) -> None:
                 },
                 content=FileChunkIterator(f, _UPLOAD_CHUNK_BYTES,
                                           params.chunk_index),
-                headers={'Content-Type': 'application/octet-stream'})
+                headers={'Content-Type': 'application/octet-stream'},
+                cookies=server_common.get_api_cookie_jar())
             if response.status_code == 200:
                 data = response.json()
                 status = data.get('status')

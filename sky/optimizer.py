@@ -16,6 +16,7 @@ from sky import resources as resources_lib
 from sky import sky_logging
 from sky import task as task_lib
 from sky.adaptors import common as adaptors_common
+from sky.clouds import cloud as sky_cloud
 from sky.usage import usage_lib
 from sky.utils import common
 from sky.utils import env_options
@@ -368,7 +369,8 @@ class Optimizer:
                 # mention "kubernetes cluster" and/instead of "catalog"
                 # in the error message.
                 enabled_clouds = (
-                    sky_check.get_cached_enabled_clouds_or_refresh())
+                    sky_check.get_cached_enabled_clouds_or_refresh(
+                        sky_cloud.CloudCapability.COMPUTE))
                 if clouds.cloud_in_iterable(clouds.Kubernetes(),
                                             enabled_clouds):
                     if any(orig_resources.cloud is None
@@ -710,7 +712,7 @@ class Optimizer:
         if message_data:
             metric = 'COST ($)' if minimize_cost else 'TIME (s)'
             table = _create_table(['SOURCE', 'TARGET', 'SIZE (GB)', metric])
-            table.add_rows(reversed(message_data))
+            table.add_rows(list(reversed(message_data)))
             logger.info(f'Egress plan:\n{table}\n')
 
     @staticmethod
@@ -1137,50 +1139,6 @@ class DummyCloud(clouds.Cloud):
     pass
 
 
-def _make_launchables_for_valid_region_zones(
-    launchable_resources: resources_lib.Resources
-) -> List[resources_lib.Resources]:
-    assert launchable_resources.is_launchable()
-    # In principle, all provisioning requests should be made at the granularity
-    # of a single zone. However, for on-demand instances, we batch the requests
-    # to the zones in the same region in order to leverage the region-level
-    # provisioning APIs of AWS and Azure. This way, we can reduce the number of
-    # API calls, and thus the overall failover time. Note that this optimization
-    # does not affect the user cost since the clouds charge the same prices for
-    # on-demand instances in the same region regardless of the zones. On the
-    # other hand, for spot instances, we do not batch the requests because the
-    # "AWS" spot prices may vary across zones.
-    # For GCP, we do not batch the requests because GCP reservation system is
-    # zone based. Therefore, price estimation is potentially different across
-    # zones.
-
-    # NOTE(woosuk): GCP does not support region-level provisioning APIs. Thus,
-    # while we return per-region resources here, the provisioner will still
-    # issue the request for one zone at a time.
-    # NOTE(woosuk): If we support Azure spot instances, we should batch the
-    # requests since Azure spot prices are region-level.
-    # TODO(woosuk): Batch the per-zone AWS spot instance requests if they are
-    # in the same region and have the same price.
-    # TODO(woosuk): A better design is to implement batching at a higher level
-    # (e.g., in provisioner or optimizer), not here.
-    launchables = []
-    regions = launchable_resources.get_valid_regions_for_launchable()
-    for region in regions:
-        if (launchable_resources.use_spot and region.zones is not None or
-                launchable_resources.cloud.optimize_by_zone()):
-            # Spot instances.
-            # Do not batch the per-zone requests.
-            for zone in region.zones:
-                launchables.append(
-                    launchable_resources.copy(region=region.name,
-                                              zone=zone.name))
-        else:
-            # On-demand instances.
-            # Batch the requests at the granularity of a single region.
-            launchables.append(launchable_resources.copy(region=region.name))
-    return launchables
-
-
 def _filter_out_blocked_launchable_resources(
         launchable_resources: Iterable[resources_lib.Resources],
         blocked_resources: Iterable[resources_lib.Resources]):
@@ -1206,6 +1164,7 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
         dag: The DAG specified by a user.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     global_disabled_clouds: Set[str] = set()
@@ -1223,10 +1182,12 @@ def _check_specified_clouds(dag: 'dag_lib.Dag') -> None:
             all_clouds_specified.add(cloud_str)
 
         # Explicitly check again to update the enabled cloud list.
-        sky_check.check(quiet=True,
-                        clouds=list(clouds_need_recheck -
-                                    global_disabled_clouds))
+        sky_check.check_capability(sky_cloud.CloudCapability.COMPUTE,
+                                   quiet=True,
+                                   clouds=list(clouds_need_recheck -
+                                               global_disabled_clouds))
         enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+            capability=sky_cloud.CloudCapability.COMPUTE,
             raise_if_no_cloud_access=True)
         disabled_clouds = (clouds_need_recheck -
                            {str(c) for c in enabled_clouds})
@@ -1268,6 +1229,7 @@ def _fill_in_launchable_resources(
         a cloud that is not enabled.
     """
     enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+        capability=sky_cloud.CloudCapability.COMPUTE,
         raise_if_no_cloud_access=True)
 
     launchable: Dict[resources_lib.Resources, List[resources_lib.Resources]] = (
@@ -1306,7 +1268,8 @@ def _fill_in_launchable_resources(
                 cheapest = feasible_resources.resources_list[0]
                 # Generate region/zone-specified resources.
                 launchable[resources].extend(
-                    _make_launchables_for_valid_region_zones(cheapest))
+                    resources_utils.make_launchables_for_valid_region_zones(
+                        cheapest))
                 cloud_candidates[cloud] = feasible_resources.resources_list
             else:
                 all_fuzzy_candidates.update(
@@ -1328,13 +1291,17 @@ def _fill_in_launchable_resources(
                                 f'{colorama.Style.RESET_ALL}')
                 else:
                     if resources.cpus is not None:
-                        logger.info('Try specifying a different CPU count, '
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different CPU count, '
                                     'or add "+" to the end of the CPU count '
-                                    'to allow for larger instances.')
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                     if resources.memory is not None:
-                        logger.info('Try specifying a different memory size, '
+                        logger.info(f'{colorama.Fore.LIGHTBLACK_EX}'
+                                    '- Try specifying a different memory size, '
                                     'or add "+" to the end of the memory size '
-                                    'to allow for larger instances.')
+                                    'to allow for larger instances.'
+                                    f'{colorama.Style.RESET_ALL}')
                 for cloud, hint in hints.items():
                     logger.info(f'{repr(cloud)}: {hint}')
 

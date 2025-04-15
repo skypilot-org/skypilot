@@ -26,6 +26,7 @@ import pytest
 from smoke_tests import smoke_tests_utils
 
 import sky
+from sky import skypilot_config
 from sky.skylet import constants
 
 
@@ -36,7 +37,7 @@ def test_aws_images():
     test = smoke_tests_utils.Test(
         'aws_images',
         [
-            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml && exit 1 || true',
             f'sky launch -y -c {name} examples/minimal.yaml',
@@ -56,7 +57,7 @@ def test_gcp_images():
     test = smoke_tests_utils.Test(
         'gcp_images',
         [
-            f'sky launch -y -c {name} --image-id skypilot:gpu-debian-10 --cloud gcp tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:gpu-debian-10 --cloud gcp tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
             f'sky launch -c {name} --image-id skypilot:cpu-debian-10 --cloud gcp tests/test_yamls/minimal.yaml && exit 1 || true',
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
@@ -76,9 +77,9 @@ def test_azure_images():
     test = smoke_tests_utils.Test(
         'azure_images',
         [
-            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-2204 --cloud azure tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:gpu-ubuntu-2204 --cloud azure tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -c {name} --image-id skypilot:v1-ubuntu-2004 --cloud azure tests/test_yamls/minimal.yaml && exit 1 || true',
+            f'sky launch -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:v1-ubuntu-2004 --cloud azure tests/test_yamls/minimal.yaml && exit 1 || true',
             f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
@@ -97,7 +98,7 @@ def test_aws_image_id_dict():
         'aws_image_id_dict',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             f'sky exec {name} examples/per_region_images.yaml',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 1 --status',
@@ -116,7 +117,7 @@ def test_gcp_image_id_dict():
         'gcp_image_id_dict',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} tests/test_yamls/gcp_per_region_images.yaml',
             f'sky exec {name} "ls ~"',
             f'sky logs {name} 1 --status',
@@ -139,9 +140,9 @@ def test_aws_image_id_dict_region():
             #       us-west-2: skypilot:gpu-ubuntu-1804
             #       us-east-2: skypilot:gpu-ubuntu-2004
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} --region us-east-1 examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-1 examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-2 examples/per_region_images.yaml',
             # Should success because the image id match for the region.
             f'sky launch -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
@@ -172,9 +173,9 @@ def test_gcp_image_id_dict_region():
         'gcp_image_id_dict_region',
         [
             # Use region to filter image_id dict.
-            f'sky launch -y -c {name} --region us-east1 tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --region us-east1 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --region us-west3 tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky launch -y -c {name} --region us-west3 {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the region.
             f'sky launch -c {name} --cloud gcp --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
             f'sky exec {name} --cloud gcp --image-id projects/ubuntu-os-cloud/global/images/ubuntu-1804-bionic-v20230112 tests/test_yamls/minimal.yaml',
@@ -209,11 +210,11 @@ def test_aws_image_id_dict_zone():
             #       us-west-2: skypilot:gpu-ubuntu-1804
             #       us-east-2: skypilot:gpu-ubuntu-2004
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --zone us-east-1b examples/per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --zone us-east-1b {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --zone us-east-2a examples/per_region_images.yaml',
+            f'sky launch -y -c {name} --zone us-east-2a {smoke_tests_utils.LOW_RESOURCE_ARG} examples/per_region_images.yaml',
             # Should success because the image id match for the zone.
-            f'sky launch -y -c {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-2004 examples/minimal.yaml',
             # Fail due to image id mismatch.
             f'sky exec {name} --image-id skypilot:gpu-ubuntu-1804 examples/minimal.yaml && exit 1 || true',
@@ -243,11 +244,11 @@ def test_gcp_image_id_dict_zone():
         'gcp_image_id_dict_zone',
         [
             # Use zone to filter image_id dict.
-            f'sky launch -y -c {name} --zone us-east1-a tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
+            f'sky launch -y -c {name} --zone us-east1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml && exit 1 || true',
             f'sky status | grep {name} && exit 1 || true',  # Ensure the cluster is not created.
-            f'sky launch -y -c {name} --zone us-central1-a tests/test_yamls/gcp_per_region_images.yaml',
+            f'sky launch -y -c {name} --zone us-central1-a {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/gcp_per_region_images.yaml',
             # Should success because the image id match for the zone.
-            f'sky launch -y -c {name} --cloud gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
             f'sky exec {name} --cloud gcp --image-id skypilot:cpu-debian-10 tests/test_yamls/minimal.yaml',
             # Fail due to image id mismatch.
             f'sky exec {name} --cloud gcp --image-id skypilot:gpu-debian-10 tests/test_yamls/minimal.yaml && exit 1 || true',
@@ -328,9 +329,9 @@ def test_gcp_mig():
         'gcp_mig',
         [
             smoke_tests_utils.launch_cluster_for_cloud_cmd('gcp', name),
-            f'sky launch -y -c {name} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --gpus t4 --num-nodes 2 --image-id skypilot:gpu-debian-10 --cloud gcp --region {region} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 1 --status',  # Ensure the job succeeded.
-            f'sky launch -y -c {name} tests/test_yamls/minimal.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} tests/test_yamls/minimal.yaml',
             f'sky logs {name} 2 --status',
             f'sky logs {name} --status | grep "Job 2: SUCCEEDED"',  # Equivalent.
             # Check MIG exists.
@@ -360,7 +361,7 @@ def test_gcp_mig():
         ],
         f'sky down -y {name} && {smoke_tests_utils.down_cluster_for_cloud_cmd(name)}',
         env={
-            'SKYPILOT_CONFIG': 'tests/test_yamls/use_mig_config.yaml',
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/use_mig_config.yaml',
             constants.SKY_API_SERVER_URL_ENV_VAR:
                 sky.server.common.get_server_url()
         })
@@ -390,7 +391,7 @@ def test_gcp_force_enable_external_ips():
 
     test_commands = [
         is_on_gcp_command,
-        f'sky launch -y -c {name} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
+        f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud gcp --cpus 2 tests/test_yamls/minimal.yaml',
         # Check network of vm is "default"
         (f'gcloud compute instances list --filter=name~"{name}" --format='
          '"value(networkInterfaces.network)" | grep "networks/default"'),
@@ -400,15 +401,16 @@ def test_gcp_force_enable_external_ips():
         ),
         f'sky down -y {name}',
     ]
-    skypilot_config = 'tests/test_yamls/force_enable_external_ips_config.yaml'
-    test = smoke_tests_utils.Test('gcp_force_enable_external_ips',
-                                  test_commands,
-                                  f'sky down -y {name}',
-                                  env={
-                                      'SKYPILOT_CONFIG': skypilot_config,
-                                      constants.SKY_API_SERVER_URL_ENV_VAR:
-                                          sky.server.common.get_server_url()
-                                  })
+    skypilot_config_file = 'tests/test_yamls/force_enable_external_ips_config.yaml'
+    test = smoke_tests_utils.Test(
+        'gcp_force_enable_external_ips',
+        test_commands,
+        f'sky down -y {name}',
+        env={
+            skypilot_config.ENV_VAR_SKYPILOT_CONFIG: skypilot_config_file,
+            constants.SKY_API_SERVER_URL_ENV_VAR:
+                sky.server.common.get_server_url()
+        })
     smoke_tests_utils.run_one_test(test)
 
 
@@ -419,7 +421,7 @@ def test_image_no_conda():
         'image_no_conda',
         [
             # Use image id dict.
-            f'sky launch -y -c {name} --region us-east-2 examples/per_region_images.yaml',
+            f'sky launch -y -c {name} {smoke_tests_utils.LOW_RESOURCE_ARG} --region us-east-2 examples/per_region_images.yaml',
             f'sky logs {name} 1 --status',
             f'sky stop {name} -y',
             f'sky start {name} -y',
@@ -433,11 +435,14 @@ def test_image_no_conda():
 
 @pytest.mark.no_fluidstack  # FluidStack does not support stopping instances in SkyPilot implementation
 @pytest.mark.no_kubernetes  # Kubernetes does not support stopping instances
-@pytest.mark.no_nebius  # Nebius does not support autostop
+@pytest.mark.no_nebius  # Nebius does not support autodown
 def test_custom_default_conda_env(generic_cloud: str):
+    timeout = 80
+    if generic_cloud == 'azure':
+        timeout *= 3
     name = smoke_tests_utils.get_cluster_name()
     test = smoke_tests_utils.Test('custom_default_conda_env', [
-        f'sky launch -c {name} -y --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
+        f'sky launch -c {name} -y {smoke_tests_utils.LOW_RESOURCE_ARG} --cloud {generic_cloud} tests/test_yamls/test_custom_default_conda_env.yaml',
         f'sky status -r {name} | grep "UP"',
         f'sky logs {name} 1 --status',
         f'sky logs {name} 1 --no-follow | grep -E "myenv\\s+\\*"',
@@ -447,7 +452,7 @@ def test_custom_default_conda_env(generic_cloud: str):
         smoke_tests_utils.get_cmd_wait_until_cluster_status_contains(
             cluster_name=name,
             cluster_status=[sky.ClusterStatus.STOPPED],
-            timeout=80),
+            timeout=timeout),
         f'sky start -y {name}',
         f'sky logs {name} 2 --no-follow | grep -E "myenv\\s+\\*"',
         f'sky exec {name} tests/test_yamls/test_custom_default_conda_env.yaml',

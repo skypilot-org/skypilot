@@ -10,6 +10,7 @@ from sky import clouds
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.clouds import cloud as sky_cloud
 from sky.clouds import service_catalog
 from sky.provision import docker_utils
 from sky.provision.kubernetes import utils as kubernetes_utils
@@ -17,6 +18,7 @@ from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -677,6 +679,7 @@ class Resources:
             # cloud corresponds to region/zone, errors out.
             valid_clouds = []
             enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                sky_cloud.CloudCapability.COMPUTE,
                 raise_if_no_cloud_access=True)
             cloud_to_errors = {}
             for cloud in enabled_clouds:
@@ -796,6 +799,7 @@ class Resources:
             # If cloud not specified
             valid_clouds = []
             enabled_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                sky_cloud.CloudCapability.COMPUTE,
                 raise_if_no_cloud_access=True)
             for cloud in enabled_clouds:
                 if cloud.instance_type_exists(self._instance_type):
@@ -991,6 +995,7 @@ class Resources:
         else:
             at_least_one_cloud_supports_ports = False
             for cloud in sky_check.get_cached_enabled_clouds_or_refresh(
+                    sky_cloud.CloudCapability.COMPUTE,
                     raise_if_no_cloud_access=True):
                 try:
                     cloud.check_features_are_supported(
@@ -1020,7 +1025,8 @@ class Resources:
         else:
             # If no specific cloud is set, validate label against ALL clouds.
             # The label will be dropped if invalid for any one of the cloud
-            validated_clouds = sky_check.get_cached_enabled_clouds_or_refresh()
+            validated_clouds = sky_check.get_cached_enabled_clouds_or_refresh(
+                sky_cloud.CloudCapability.COMPUTE)
         invalid_table = log_utils.create_table(['Label', 'Reason'])
         for key, value in self._labels.items():
             for cloud in validated_clouds:
@@ -1285,6 +1291,22 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
+
+        current_override_configs = self._cluster_config_overrides
+        if self._cluster_config_overrides is None:
+            current_override_configs = {}
+        new_override_configs = override.pop('_cluster_config_overrides', {})
+        overlaid_configs = skypilot_config.overlay_skypilot_config(
+            original_config=config_utils.Config(current_override_configs),
+            override_configs=new_override_configs,
+        )
+        override_configs = config_utils.Config()
+        for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+            elem = overlaid_configs.get_nested(key, None)
+            if elem is not None:
+                override_configs.set_nested(key, elem)
+
+        override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1310,8 +1332,7 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
-            _cluster_config_overrides=override.pop(
-                '_cluster_config_overrides', self._cluster_config_overrides),
+            _cluster_config_overrides=override_configs,
         )
         assert not override
         return resources

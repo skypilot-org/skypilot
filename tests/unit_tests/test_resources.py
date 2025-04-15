@@ -8,6 +8,7 @@ import pytest
 from sky import clouds
 from sky import global_user_state
 from sky import skypilot_config
+from sky.clouds import cloud as sky_cloud
 from sky.resources import Resources
 from sky.utils import resources_utils
 
@@ -97,7 +98,8 @@ def test_kubernetes_labels_resources():
 
 
 def test_no_cloud_labels_resources():
-    global_user_state.set_enabled_clouds(['aws', 'gcp'])
+    global_user_state.set_enabled_clouds(['aws', 'gcp'],
+                                         sky_cloud.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
     }
@@ -110,7 +112,8 @@ def test_no_cloud_labels_resources():
 
 
 def test_no_cloud_labels_resources_single_enabled_cloud():
-    global_user_state.set_enabled_clouds(['aws'])
+    global_user_state.set_enabled_clouds(['aws'],
+                                         sky_cloud.CloudCapability.COMPUTE)
     allowed_labels = {
         **GLOBAL_VALID_LABELS,
         'domain/key': 'value',  # Valid for AWS
@@ -130,7 +133,9 @@ def test_no_cloud_labels_resources_single_enabled_cloud():
             return_value='fake-image')
 @mock.patch.object(clouds.aws, 'DEFAULT_SECURITY_GROUP_NAME', 'fake-default-sg')
 def test_aws_make_deploy_variables(*mocks) -> None:
-    os.environ['SKYPILOT_CONFIG'] = './tests/test_yamls/test_aws_config.yaml'
+    os.environ[
+        skypilot_config.
+        ENV_VAR_SKYPILOT_CONFIG] = './tests/test_yamls/test_aws_config.yaml'
     importlib.reload(skypilot_config)
 
     cloud = clouds.AWS()

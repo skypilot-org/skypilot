@@ -9,7 +9,7 @@ import sys
 from typing import Dict, List
 
 install_requires = [
-    'wheel',
+    'wheel<0.46.0',  # https://github.com/skypilot-org/skypilot/issues/5153
     'cachetools',
     # NOTE: ray requires click>=7.0.
     'click >= 7.0',
@@ -53,6 +53,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
+    'omegaconf>=2.4.0dev3,<2.5',
 ]
 
 local_ray = [
@@ -120,7 +121,10 @@ extras_require: Dict[str, List[str]] = {
     # https://github.com/googleapis/google-api-python-client/commit/f6e9d3869ed605b06f7cbf2e8cf2db25108506e6
     'gcp': ['google-api-python-client>=2.69.0', 'google-cloud-storage'],
     'ibm': [
-        'ibm-cloud-sdk-core', 'ibm-vpc', 'ibm-platform-services', 'ibm-cos-sdk'
+        'ibm-cloud-sdk-core',
+        'ibm-vpc',
+        'ibm-platform-services>=0.48.0',
+        'ibm-cos-sdk',
     ] + local_ray,
     'docker': ['docker'] + local_ray,
     'lambda': [],  # No dependencies needed for lambda
@@ -128,7 +132,7 @@ extras_require: Dict[str, List[str]] = {
     'scp': local_ray,
     'oci': ['oci'] + local_ray,
     # Kubernetes 32.0.0 has an authentication bug: https://github.com/kubernetes-client/python/issues/2333 # pylint: disable=line-too-long
-    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0'],
+    'kubernetes': ['kubernetes>=20.0.0,!=32.0.0', 'websockets'],
     'remote': remote,
     # For the container registry auth api. Reference:
     # https://github.com/runpod/runpod-python/releases/tag/1.6.1
@@ -147,7 +151,9 @@ extras_require: Dict[str, List[str]] = {
         # docs instead.
         # 'vsphere-automation-sdk @ git+https://github.com/vmware/vsphere-automation-sdk-python.git@v8.0.1.0' pylint: disable=line-too-long
     ],
-    'nebius': ['nebius>=0.2.0',]
+    'nebius': [
+        'nebius>=0.2.0',
+    ] + aws_dependencies
 }
 
 # Nebius needs python3.10. If python 3.9 [all] will not install nebius

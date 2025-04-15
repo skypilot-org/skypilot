@@ -282,7 +282,6 @@ You can use normal loops in bash or Python to iterate over possible hyperparamte
                 sky.jobs.launch(
                   task,
                   name=f'train-job{job_idx}',
-                  retry_until_up=True,
                 )
               )
               job_idx += 1
@@ -309,7 +308,7 @@ Job statuses can be checked via ``sky jobs queue``:
   ...
 
 
-With Config Files
+With config files
 ~~~~~~~~~~~~~~~~~
 
 For more control, you can also create specific env var config files.

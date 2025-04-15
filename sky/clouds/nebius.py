@@ -1,5 +1,6 @@
 """ Nebius Cloud. """
 import logging
+import os
 import typing
 from typing import Dict, Iterator, List, Optional, Tuple, Union
 
@@ -17,7 +18,34 @@ _CREDENTIAL_FILES = [
     nebius.NEBIUS_TENANT_ID_FILENAME,
     nebius.NEBIUS_IAM_TOKEN_FILENAME,
     nebius.NEBIUS_PROJECT_ID_FILENAME,
+    nebius.NEBIUS_CREDENTIALS_FILENAME
 ]
+
+_INDENT_PREFIX = '    '
+
+
+def nebius_profile_in_aws_cred_and_config() -> bool:
+    """Checks if Nebius Object Storage profile is set in aws credentials
+    and profile."""
+
+    credentials_path = os.path.expanduser('~/.aws/credentials')
+    nebius_profile_exists_in_credentials = False
+    if os.path.isfile(credentials_path):
+        with open(credentials_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if f'[{nebius.NEBIUS_PROFILE_NAME}]' in line:
+                    nebius_profile_exists_in_credentials = True
+
+    config_path = os.path.expanduser('~/.aws/config')
+    nebius_profile_exists_in_config = False
+    if os.path.isfile(config_path):
+        with open(config_path, 'r', encoding='utf-8') as file:
+            for line in file:
+                if f'[profile {nebius.NEBIUS_PROFILE_NAME}]' in line:
+                    nebius_profile_exists_in_config = True
+
+    return (nebius_profile_exists_in_credentials and
+            nebius_profile_exists_in_config)
 
 
 @registry.CLOUD_REGISTRY.register
@@ -25,10 +53,8 @@ class Nebius(clouds.Cloud):
     """Nebius GPU Cloud"""
     _REPR = 'Nebius'
     _CLOUD_UNSUPPORTED_FEATURES = {
-        clouds.CloudImplementationFeatures.AUTO_TERMINATE:
-            ('Autodown and Autostop not supported. Can\'t delete disk.'),
-        # Autostop functionality can be implemented, but currently,
-        # there is only a single flag for both autostop and autodown.
+        clouds.CloudImplementationFeatures.AUTODOWN:
+            ('Autodown not supported. Can\'t delete OS disk.'),
         clouds.CloudImplementationFeatures.SPOT_INSTANCE:
             ('Spot is not supported, as Nebius API does not implement spot.'),
         clouds.CloudImplementationFeatures.CLONE_DISK_FROM_CLUSTER:
@@ -249,18 +275,21 @@ class Nebius(clouds.Cloud):
                                                  fuzzy_candidate_list, None)
 
     @classmethod
-    def check_credentials(cls) -> Tuple[bool, Optional[str]]:
-        """ Verify that the user has valid credentials for Nebius. """
+    def _check_compute_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to
+        Nebius's compute service."""
         logging.debug('Nebius cloud check credentials')
-        token = nebius.get_iam_token()
-        token_msg = ('    Credentials can be set up by running: \n'\
-                    f'        $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n')  # pylint: disable=line-too-long
-        tenant_msg = ('   Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
-                      f'        $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
-                      '   Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
-                      f'        $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
-        if token is None:
-            return False, f'{token_msg}'
+        token_cred_msg = (
+            f'{_INDENT_PREFIX}Credentials can be set up by running: \n'
+            f'{_INDENT_PREFIX}  $ nebius iam get-access-token > {nebius.NEBIUS_IAM_TOKEN_PATH} \n'  # pylint: disable=line-too-long
+            f'{_INDENT_PREFIX} or generate  ~/.nebius/credentials.json')
+
+        tenant_msg = (f'{_INDENT_PREFIX}Copy your tenat ID from the web console and save it to file \n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ echo $NEBIUS_TENANT_ID_PATH > {nebius.NEBIUS_TENANT_ID_PATH} \n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX} Or if you have 1 tenant you can run:\n'  # pylint: disable=line-too-long
+                      f'{_INDENT_PREFIX}  $ nebius --format json iam whoami|jq -r \'.user_profile.tenants[0].tenant_id\' > {nebius.NEBIUS_TENANT_ID_PATH} \n')  # pylint: disable=line-too-long
+        if not nebius.is_token_or_cred_file_exist():
+            return False, f'{token_cred_msg}'
         sdk = nebius.sdk()
         tenant_id = nebius.get_tenant_id()
         if tenant_id is None:
@@ -272,15 +301,44 @@ class Nebius(clouds.Cloud):
         except nebius.request_error() as e:
             return False, (
                 f'{e.status} \n'  # First line is indented by 4 spaces
-                f'{token_msg}'
+                f'{token_cred_msg}'
                 f'{tenant_msg}')
         return True, None
 
+    @classmethod
+    def _check_storage_credentials(cls) -> Tuple[bool, Optional[str]]:
+        """Checks if the user has access credentials to Nebius Object Storage.
+
+        Returns:
+            A tuple of a boolean value and a hint message where the bool
+            is True when credentials needed for Nebius Object Storage is set.
+            It is False when either of those are not set, which would hint
+            with a string on unset credential.
+        """
+        hints = None
+        if not nebius_profile_in_aws_cred_and_config():
+            hints = (f'[{nebius.NEBIUS_PROFILE_NAME}] profile '
+                     'is not set in ~/.aws/credentials.')
+        if hints:
+            hints += ' Run the following commands:'
+            if not nebius_profile_in_aws_cred_and_config():
+                hints += (
+                    f'\n{_INDENT_PREFIX}  $ pip install boto3'
+                    f'\n{_INDENT_PREFIX}  $ aws configure --profile nebius')
+            hints += (
+                f'\n{_INDENT_PREFIX}For more info: '
+                'https://docs.skypilot.co/en/latest/getting-started/installation.html#nebius'  # pylint: disable=line-too-long
+            )
+        return (False, hints) if hints else (True, hints)
+
     def get_credential_file_mounts(self) -> Dict[str, str]:
-        return {
+        credential_file_mounts = {
             f'~/.nebius/{filename}': f'~/.nebius/{filename}'
             for filename in _CREDENTIAL_FILES
         }
+        credential_file_mounts['~/.aws/credentials'] = '~/.aws/credentials'
+        credential_file_mounts['~/.aws/config'] = '~/.aws/config'
+        return credential_file_mounts
 
     @classmethod
     def get_current_user_identity(cls) -> Optional[List[str]]:

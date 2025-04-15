@@ -17,13 +17,13 @@ from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
 import colorama
 import filelock
-import psutil
 from typing_extensions import Literal
 
 from sky import backends
 from sky import exceptions
 from sky import global_user_state
 from sky import sky_logging
+from sky.adaptors import common as adaptors_common
 from sky.backends import backend_utils
 from sky.jobs import constants as managed_job_constants
 from sky.jobs import scheduler
@@ -40,8 +40,12 @@ from sky.utils import subprocess_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import psutil
+
     import sky
     from sky import dag as dag_lib
+else:
+    psutil = adaptors_common.LazyImport('psutil')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -125,6 +129,11 @@ def get_job_status(backend: 'backends.CloudVmRayBackend',
     FAILED_SETUP or CANCELLED.
     """
     handle = global_user_state.get_handle_from_cluster_name(cluster_name)
+    if handle is None:
+        # This can happen if the cluster was preempted and background status
+        # refresh already noticed and cleaned it up.
+        logger.info(f'Cluster {cluster_name} not found.')
+        return None
     assert isinstance(handle, backends.CloudVmRayResourceHandle), handle
     status = None
     try:
@@ -735,6 +744,10 @@ def stream_logs_by_id(job_id: int, follow: bool = True) -> Tuple[str, int]:
         managed_job_status = managed_job_state.get_status(job_id)
         assert managed_job_status is not None, job_id
 
+    if not follow and not managed_job_status.is_terminal():
+        # The job is not in terminal state and we are not following,
+        # just return.
+        return '', exceptions.JobExitCode.SUCCEEDED
     logger.info(
         ux_utils.finishing_message(f'Managed job finished: {job_id} '
                                    f'(status: {managed_job_status.value}).'))
@@ -914,6 +927,10 @@ def load_managed_job_queue(payload: str) -> List[Dict[str, Any]]:
     jobs = message_utils.decode_payload(payload)
     for job in jobs:
         job['status'] = managed_job_state.ManagedJobStatus(job['status'])
+        if 'user_hash' in job and job['user_hash'] is not None:
+            # Skip jobs that do not have user_hash info.
+            # TODO(cooperc): Remove check before 0.12.0.
+            job['user_name'] = global_user_state.get_user(job['user_hash']).name
     return jobs
 
 
@@ -1043,16 +1060,21 @@ def format_job_table(
     def get_user_column_values(task: Dict[str, Any]) -> List[str]:
         user_values: List[str] = []
         if show_user:
+            user_name = '-'  # default value
 
-            user_name = '-'
-            user_hash = task.get('user_hash', None)
-            if user_hash:
-                user = global_user_state.get_user(user_hash)
-                user_name = user.name if user.name else '-'
+            task_user_name = task.get('user_name', None)
+            task_user_hash = task.get('user_hash', None)
+            if task_user_name is not None:
+                user_name = task_user_name
+            elif task_user_hash is not None:
+                # Fallback to the user hash if we are somehow missing the name.
+                user_name = task_user_hash
+
             user_values = [user_name]
 
             if show_all:
-                user_values.append(user_hash if user_hash is not None else '-')
+                user_values.append(
+                    task_user_hash if task_user_hash is not None else '-')
 
         return user_values
 

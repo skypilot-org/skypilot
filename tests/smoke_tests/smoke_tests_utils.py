@@ -1,18 +1,23 @@
+import contextlib
 import enum
 import inspect
 import os
+import re
 import shlex
 import subprocess
 import sys
 import tempfile
-from typing import Dict, List, NamedTuple, Optional, Sequence, Set
+from typing import Dict, List, NamedTuple, Optional, Sequence, Set, Tuple
 import uuid
 
 import colorama
 import pytest
+from smoke_tests.docker import docker_utils
+import yaml
 
 import sky
 from sky import serve
+from sky import skypilot_config
 from sky.clouds import AWS
 from sky.clouds import GCP
 from sky.skylet import constants
@@ -39,6 +44,33 @@ STORAGE_SETUP_COMMANDS = [
     '[ ! -e ~/tmp-workdir/circle-link ] && ln -s ~/tmp-workdir/ ~/tmp-workdir/circle-link || true',
     'touch ~/.ssh/id_rsa.pub'
 ]
+
+LOW_RESOURCE_ARG = '--cpus 2+ --memory 4+'
+LOW_RESOURCE_PARAM = {
+    'cpus': '2+',
+    'memory': '4+',
+}
+LOW_CONTROLLER_RESOURCE_ENV = {
+    skypilot_config.ENV_VAR_SKYPILOT_CONFIG: 'tests/test_yamls/low_resource_sky_config.yaml',
+}
+LOW_CONTROLLER_RESOURCE_OVERRIDE_CONFIG = {
+    'jobs': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    },
+    'serve': {
+        'controller': {
+            'resources': {
+                'cpus': '2+',
+                'memory': '4+'
+            }
+        }
+    }
+}
 
 # Get the job queue, and print it once on its own, then print it again to
 # use with grep by the caller.
@@ -83,6 +115,20 @@ _WAIT_UNTIL_CLUSTER_STATUS_CONTAINS = (
     'echo "Waiting for cluster status to become {cluster_status}, current status: $current_status"; '
     'sleep 10; '
     'done')
+
+
+def get_cloud_specific_resource_config(generic_cloud: str):
+    # Kubernetes (EKS) requires more resources to avoid flakiness.
+    # Only some EKS tests use this function - specifically those that previously
+    # failed with low resources. Other EKS tests that work fine with low resources
+    # don't need to call this function.
+    if generic_cloud == 'kubernetes':
+        resource_arg = ""
+        env = None
+    else:
+        resource_arg = LOW_RESOURCE_ARG
+        env = LOW_CONTROLLER_RESOURCE_ENV
+    return resource_arg, env
 
 
 def get_cmd_wait_until_cluster_status_contains(
@@ -206,6 +252,28 @@ def get_cmd_wait_until_managed_job_status_contains_matching_job_name(
         timeout=timeout)
 
 
+_WAIT_UNTIL_JOB_STATUS_SUCCEEDED = (
+    'start_time=$SECONDS; '
+    'while true; do '
+    'if (( $SECONDS - $start_time > {timeout} )); then '
+    '  echo "Timeout after {timeout} seconds waiting for job to succeed"; exit 1; '
+    'fi; '
+    'if sky logs {cluster_name} {job_id} --status | grep "SUCCEEDED"; then '
+    '  echo "Job {job_id} succeeded."; break; '
+    'fi; '
+    'echo "Waiting for job {job_id} to succeed..."; '
+    'sleep 10; '
+    'done')
+
+
+def get_cmd_wait_until_job_status_succeeded(cluster_name: str,
+                                            job_id: str,
+                                            timeout: int = 30):
+    return _WAIT_UNTIL_JOB_STATUS_SUCCEEDED.format(cluster_name=cluster_name,
+                                                   job_id=job_id,
+                                                   timeout=timeout)
+
+
 DEFAULT_CMD_TIMEOUT = 15 * 60
 
 
@@ -250,6 +318,17 @@ def get_cluster_name() -> str:
     return f'{test_name}-{test_id}'
 
 
+def is_eks_cluster() -> bool:
+    cmd = 'kubectl config view --minify -o jsonpath='\
+          '{.clusters[0].cluster.server}' \
+          ' | grep -q "eks\.amazonaws\.com"'
+    result = subprocess.run(cmd,
+                            shell=True,
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    return result.returncode == 0
+
+
 def terminate_gcp_replica(name: str, zone: str, replica_id: int) -> str:
     cluster_name = serve.generate_replica_cluster_name(name, replica_id)
     name_on_cloud = common_utils.make_cluster_name_on_cloud(
@@ -283,6 +362,30 @@ def run_one_test(test: Test) -> None:
     env_dict = os.environ.copy()
     if test.env:
         env_dict.update(test.env)
+
+    # Create a temporary config file with API server config only if running with remote server
+    if 'PYTEST_SKYPILOT_REMOTE_SERVER_TEST' in os.environ:
+        temp_config = tempfile.NamedTemporaryFile(mode='w',
+                                                  suffix='.yaml',
+                                                  delete=False)
+        if skypilot_config.ENV_VAR_SKYPILOT_CONFIG in env_dict:
+            # Read the original config
+            with open(env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG],
+                      'r') as f:
+                config = yaml.safe_load(f)
+        else:
+            config = {}
+        config['api_server'] = {
+            'endpoint': docker_utils.get_api_server_endpoint_inside_docker()
+        }
+        test.echo(
+            f'Overriding API server endpoint: {config["api_server"]["endpoint"]}'
+        )
+        yaml.dump(config, temp_config)
+        temp_config.close()
+        # Update the environment variable to use the temporary file
+        env_dict[skypilot_config.ENV_VAR_SKYPILOT_CONFIG] = temp_config.name
+
     for command in test.commands:
         write(f'+ {command}\n')
         flush()
@@ -332,6 +435,7 @@ def run_one_test(test: Test) -> None:
             stderr=subprocess.STDOUT,
             timeout=10 * 60,  # 10 mins
             shell=True,
+            env=env_dict,
         )
 
     if proc.returncode:
@@ -467,7 +571,9 @@ def launch_cluster_for_cloud_cmd(cloud: str, test_cluster_name: str) -> str:
     if sky.server.common.is_api_server_local():
         return 'true'
     else:
-        return (f'sky launch -y -c {cluster_name} --cloud {cloud} --async')
+        return (
+            f'sky launch -y -c {cluster_name} --cloud {cloud} {LOW_RESOURCE_ARG} --async'
+        )
 
 
 def run_cloud_cmd_on_cluster(test_cluster_name: str,
@@ -499,3 +605,40 @@ def down_cluster_for_cloud_cmd(test_cluster_name: str) -> str:
         return 'true'
     else:
         return f'sky down -y {cluster_name}'
+
+
+def _increase_initial_delay_seconds(original_cmd: str,
+                                    factor: float = 2) -> Tuple[str, str]:
+    yaml_file = re.search(r'\s([^ ]+\.yaml)', original_cmd).group(1)
+    with open(yaml_file, 'r') as f:
+        yaml_content = f.read()
+    original_initial_delay_seconds = re.search(r'initial_delay_seconds: (\d+)',
+                                               yaml_content).group(1)
+    new_initial_delay_seconds = int(original_initial_delay_seconds) * factor
+    yaml_content = re.sub(
+        r'initial_delay_seconds: \d+',
+        f'initial_delay_seconds: {new_initial_delay_seconds}', yaml_content)
+    f = tempfile.NamedTemporaryFile('w', suffix='.yaml', delete=False)
+    f.write(yaml_content)
+    f.flush()
+    return f.name, original_cmd.replace(yaml_file, f.name)
+
+
+@contextlib.contextmanager
+def increase_initial_delay_seconds_for_slow_cloud(cloud: str):
+    """Increase initial delay seconds for slow clouds to reduce flakiness and failure during setup."""
+
+    def _context_func(original_cmd: str, factor: float = 2):
+        if cloud != 'kubernetes':
+            return original_cmd
+        file_name, new_cmd = _increase_initial_delay_seconds(
+            original_cmd, factor)
+        files.append(file_name)
+        return new_cmd
+
+    files = []
+    try:
+        yield _context_func
+    finally:
+        for file in files:
+            os.unlink(file)

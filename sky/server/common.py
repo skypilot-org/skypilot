@@ -3,6 +3,7 @@
 import dataclasses
 import enum
 import functools
+from http.cookiejar import MozillaCookieJar
 import json
 import os
 import pathlib
@@ -15,12 +16,11 @@ import uuid
 
 import colorama
 import filelock
-import pydantic
-import requests
 
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.data import data_utils
 from sky.server import constants as server_constants
 from sky.skylet import constants
@@ -31,7 +31,13 @@ from sky.utils import rich_utils
 from sky.utils import ux_utils
 
 if typing.TYPE_CHECKING:
+    import pydantic
+    import requests
+
     from sky import dag as dag_lib
+else:
+    pydantic = adaptors_common.LazyImport('pydantic')
+    requests = adaptors_common.LazyImport('requests')
 
 DEFAULT_SERVER_URL = 'http://127.0.0.1:46580'
 AVAILBLE_LOCAL_API_SERVER_HOSTS = ['0.0.0.0', 'localhost', '127.0.0.1']
@@ -45,6 +51,11 @@ API_SERVER_CMD = '-m sky.server.server'
 # server is restarted.
 API_SERVER_CLIENT_DIR = pathlib.Path('~/.sky/api_server/clients')
 RETRY_COUNT_ON_TIMEOUT = 3
+
+# The maximum time to wait for the API server to start, set to a conservative
+# value that unlikely to reach since the server might be just starting slowly
+# (e.g. in high contention env) and we will exit eagerly if server exit.
+WAIT_APISERVER_START_TIMEOUT_SEC = 60
 
 SKY_CLIENT_TOO_OLD_WARNING = (
     f'{colorama.Fore.YELLOW}Your SkyPilot client is too old: '
@@ -87,6 +98,18 @@ class ApiServerInfo:
     api_version: ApiVersion
 
 
+def get_api_cookie_jar() -> requests.cookies.RequestsCookieJar:
+    """Returns the cookie jar used by the client to access the API server."""
+    cookie_file = os.environ.get(server_constants.API_COOKIE_FILE_ENV_VAR)
+    cookie_jar = requests.cookies.RequestsCookieJar()
+    if cookie_file and os.path.exists(cookie_file):
+        cookie_path = pathlib.Path(cookie_file).expanduser().resolve()
+        file_cookie_jar = MozillaCookieJar(cookie_path)
+        file_cookie_jar.load()
+        cookie_jar.update(file_cookie_jar)
+    return cookie_jar
+
+
 @annotations.lru_cache(scope='global')
 def get_server_url(host: Optional[str] = None) -> str:
     endpoint = DEFAULT_SERVER_URL
@@ -124,7 +147,9 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     server_url = endpoint if endpoint is not None else get_server_url()
     while time_out_try_count <= RETRY_COUNT_ON_TIMEOUT:
         try:
-            response = requests.get(f'{server_url}/api/health', timeout=2.5)
+            response = requests.get(f'{server_url}/api/health',
+                                    timeout=2.5,
+                                    cookies=get_api_cookie_jar())
             if response.status_code == 200:
                 try:
                     result = response.json()
@@ -162,7 +187,7 @@ def get_api_server_status(endpoint: Optional[str] = None) -> ApiServerInfo:
     return ApiServerInfo(status=ApiServerStatus.UNHEALTHY, api_version=None)
 
 
-def handle_request_error(response: requests.Response) -> None:
+def handle_request_error(response: 'requests.Response') -> None:
     if response.status_code != 200:
         with ux_utils.print_exception_no_traceback():
             raise RuntimeError(
@@ -172,7 +197,7 @@ def handle_request_error(response: requests.Response) -> None:
                 f'{response.text}')
 
 
-def get_request_id(response: requests.Response) -> RequestId:
+def get_request_id(response: 'requests.Response') -> RequestId:
     handle_request_error(response)
     request_id = response.headers.get('X-Request-ID')
     if request_id is None:
@@ -191,7 +216,8 @@ def _start_api_server(deploy: bool = False,
     server_url = get_server_url(host)
     assert server_url in AVAILABLE_LOCAL_API_SERVER_URLS, (
         f'server url {server_url} is not a local url')
-    with rich_utils.client_status('Starting SkyPilot API server'):
+    with rich_utils.client_status('Starting SkyPilot API server, '
+                                  f'view logs at {constants.API_SERVER_LOGS}'):
         logger.info(f'{colorama.Style.DIM}Failed to connect to '
                     f'SkyPilot API server at {server_url}. '
                     'Starting a local server.'
@@ -228,14 +254,16 @@ def _start_api_server(deploy: bool = False,
         # If this is called from a CLI invocation, we need
         # start_new_session=True so that SIGINT on the CLI will not also kill
         # the API server.
-        subprocess.Popen(cmd, shell=True, start_new_session=True)
+        proc = subprocess.Popen(cmd, shell=True, start_new_session=True)
 
-        # Wait for the server to start until timeout.
-        # Conservative upper time bound for starting the server based on
-        # profiling.
-        timeout_sec = 12
         start_time = time.time()
         while True:
+            # Check if process has exited
+            if proc.poll() is not None:
+                with ux_utils.print_exception_no_traceback():
+                    raise RuntimeError(
+                        'SkyPilot API server process exited unexpectedly.\n'
+                        f'View logs at: {constants.API_SERVER_LOGS}')
             api_server_info = get_api_server_status()
             assert api_server_info.status != ApiServerStatus.VERSION_MISMATCH, (
                 f'API server version mismatch when starting the server. '
@@ -243,7 +271,7 @@ def _start_api_server(deploy: bool = False,
                 f'Client version: {server_constants.API_VERSION}')
             if api_server_info.status == ApiServerStatus.HEALTHY:
                 break
-            elif time.time() - start_time >= timeout_sec:
+            elif time.time() - start_time >= WAIT_APISERVER_START_TIMEOUT_SEC:
                 with ux_utils.print_exception_no_traceback():
                     raise RuntimeError(
                         'Failed to start SkyPilot API server at '
@@ -434,7 +462,7 @@ def api_server_user_logs_dir_prefix(
     return API_SERVER_CLIENT_DIR / user_hash / 'sky_logs'
 
 
-def request_body_to_params(body: pydantic.BaseModel) -> Dict[str, Any]:
+def request_body_to_params(body: 'pydantic.BaseModel') -> Dict[str, Any]:
     return {
         k: v for k, v in body.model_dump(mode='json').items() if v is not None
     }
@@ -464,3 +492,19 @@ def reload_for_new_request(client_entrypoint: Optional[str],
     # necessary because the logger is initialized before the environment
     # variables are set, such as SKYPILOT_DEBUG.
     sky_logging.reload_logger()
+
+
+def clear_local_api_server_database() -> None:
+    """Removes the local API server database.
+
+    The CLI can call this during cleanup of a local API server, or the API
+    server can call it during startup.
+    """
+    # Remove the database for requests including any files starting with
+    # api.constants.API_SERVER_REQUEST_DB_PATH
+    db_path = os.path.expanduser(server_constants.API_SERVER_REQUEST_DB_PATH)
+    for extension in ['', '-shm', '-wal']:
+        try:
+            os.remove(f'{db_path}{extension}')
+        except FileNotFoundError:
+            logger.debug(f'Database file {db_path}{extension} not found.')

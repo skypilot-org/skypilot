@@ -1,19 +1,25 @@
 """Kubernetes network provisioning utils."""
 import os
 import time
+import typing
 from typing import Dict, List, Optional, Tuple, Union
-
-import jinja2
-import yaml
 
 import sky
 from sky import exceptions
 from sky import sky_logging
 from sky import skypilot_config
+from sky.adaptors import common as adaptors_common
 from sky.adaptors import kubernetes
 from sky.provision.kubernetes import utils as kubernetes_utils
 from sky.utils import kubernetes_enums
 from sky.utils import ux_utils
+
+if typing.TYPE_CHECKING:
+    import jinja2
+    import yaml
+else:
+    jinja2 = adaptors_common.LazyImport('jinja2')
+    yaml = adaptors_common.LazyImport('yaml')
 
 logger = sky_logging.init_logger(__name__)
 
@@ -194,9 +200,10 @@ def create_or_replace_namespaced_service(
                                         _request_timeout=kubernetes.API_TIMEOUT)
 
 
-def delete_namespaced_service(namespace: str, service_name: str) -> None:
+def delete_namespaced_service(context: Optional[str], namespace: str,
+                              service_name: str) -> None:
     """Deletes a service resource."""
-    core_api = kubernetes.core_api()
+    core_api = kubernetes.core_api(context)
 
     try:
         core_api.delete_namespaced_service(

@@ -105,7 +105,7 @@ def launch(
 
         local_to_controller_file_mounts = {}
 
-        if storage_lib.get_cached_enabled_storage_clouds_or_refresh():
+        if storage_lib.get_cached_enabled_storage_cloud_names_or_refresh():
             for task_ in dag.tasks:
                 controller_utils.maybe_translate_local_file_mounts_and_sync_up(
                     task_, task_type='jobs')
@@ -144,6 +144,9 @@ def launch(
         controller_resources = controller_utils.get_controller_resources(
             controller=controller_utils.Controllers.JOBS_CONTROLLER,
             task_resources=sum([list(t.resources) for t in dag.tasks], []))
+        controller_idle_minutes_to_autostop, controller_down = (
+            controller_utils.get_controller_autostop_config(
+                controller=controller_utils.Controllers.JOBS_CONTROLLER))
 
         vars_to_fill = {
             'remote_user_yaml_path': remote_user_yaml_path,
@@ -157,6 +160,7 @@ def launch(
             'modified_catalogs':
                 service_catalog_common.get_modified_catalog_file_mounts(),
             'dashboard_setup_cmd': managed_job_constants.DASHBOARD_SETUP_CMD,
+            'dashboard_user_id': common.SERVER_ID,
             **controller_utils.shared_controller_vars_to_fill(
                 controller_utils.Controllers.JOBS_CONTROLLER,
                 remote_user_config_path=remote_user_config_path,
@@ -184,14 +188,15 @@ def launch(
         # Launch with the api server's user hash, so that sky status does not
         # show the owner of the controller as whatever user launched it first.
         with common.with_server_user_hash():
-            return execution.launch(task=controller_task,
-                                    cluster_name=controller_name,
-                                    stream_logs=stream_logs,
-                                    idle_minutes_to_autostop=skylet_constants.
-                                    CONTROLLER_IDLE_MINUTES_TO_AUTOSTOP,
-                                    retry_until_up=True,
-                                    fast=True,
-                                    _disable_controller_check=True)
+            return execution.launch(
+                task=controller_task,
+                cluster_name=controller_name,
+                stream_logs=stream_logs,
+                idle_minutes_to_autostop=controller_idle_minutes_to_autostop,
+                down=controller_down,
+                retry_until_up=True,
+                fast=True,
+                _disable_controller_check=True)
 
 
 def queue_from_kubernetes_pod(
@@ -305,10 +310,9 @@ def _maybe_restart_controller(
     with rich_utils.safe_status(
             ux_utils.spinner_message('Starting dashboard...')):
         runner = handle.get_command_runners()[0]
-        user_hash = common_utils.get_user_hash()
         runner.run(
             f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={user_hash!r}; '
+            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
             f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
             stream_logs=True,
         )
@@ -341,6 +345,8 @@ def queue(refresh: bool,
                 'status': (sky.jobs.ManagedJobStatus) of the job,
                 'cluster_resources': (str) resources of the cluster,
                 'region': (str) region of the cluster,
+                'user_name': (Optional[str]) job creator's user name,
+                'user_hash': (str) job creator's user hash,
             }
         ]
     Raises:

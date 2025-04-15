@@ -12,7 +12,7 @@ The SkyPilot API server is packaged as a Helm chart which deploys a Kubernetes i
 Prerequisites
 -------------
 
-* A Kubernetes cluster with ports 30050 and 30051 available for NodePort services
+* A Kubernetes cluster with LoadBalancer or NodePort service support
 * `Helm <https://helm.sh/docs/intro/install/>`_
 * `kubectl <https://kubernetes.io/docs/tasks/tools/>`_
 
@@ -27,19 +27,19 @@ Step 1: Create a namespace and add Helm repository
 
 The API server will be deployed in a namespace of your choice. You can either create the namespace manually:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ NAMESPACE=skypilot
-    $ kubectl create namespace $NAMESPACE
+    NAMESPACE=skypilot
+    kubectl create namespace $NAMESPACE
 
 Or let Helm create it automatically by adding the ``--create-namespace`` flag to the helm install command in Step 3.
 
 Next, add the SkyPilot Helm repository:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ helm repo add skypilot https://helm.skypilot.co
-    $ helm repo update
+    helm repo add skypilot https://helm.skypilot.co
+    helm repo update
 
 Step 2: Configure cloud accounts
 --------------------------------
@@ -53,28 +53,28 @@ Following tabs describe how to configure credentials for different clouds on the
         :sync: kubernetes-creds-tab
 
         By default, SkyPilot will automatically use the same Kubernetes cluster as the API server:
-        
+
         * To disable this behavior, set ``kubernetesCredentials.useApiServerCluster=false`` in the Helm chart values.
         * When running in the same cluster, tasks are launched in the same namespace as the API server. To use a different namespace for tasks, set ``kubernetesCredentials.inclusterNamespace=<namespace>`` when deploying the API server.
 
         To use a kubeconfig file to authenticate to other clusters, first create a Kubernetes secret with the kubeconfig file:
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ NAMESPACE=skypilot
-            $ kubectl create secret generic kube-credentials \
-            $   -n $NAMESPACE \
-            $   --from-file=config=~/.kube/config
+            NAMESPACE=skypilot
+            kubectl create secret generic kube-credentials \
+              -n $NAMESPACE \
+              --from-file=config=~/.kube/config
 
 
         Once the secret is created, set ``kubernetesCredentials.useKubeconfig=true`` and ``kubernetesCredentials.kubeconfigSecretName`` in the Helm chart values to use the kubeconfig file for authentication:
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            $   --set kubernetesCredentials.useKubeconfig=true \
-            $   --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
-            $   --set kubernetesCredentials.useApiServerCluster=true
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --set kubernetesCredentials.useKubeconfig=true \
+              --set kubernetesCredentials.kubeconfigSecretName=kube-credentials \
+              --set kubernetesCredentials.useApiServerCluster=true
 
 
         .. tip::
@@ -82,9 +82,9 @@ Following tabs describe how to configure credentials for different clouds on the
             If you are using a kubeconfig file that contains `exec-based authentication <https://kubernetes.io/docs/reference/access-authn-authz/authentication/#configuration>`_ (e.g., GKE's default ``gke-gcloud-auth-plugin`` based authentication), you will need to strip the path information from the ``command`` field in the exec configuration.
             You can use the ``exec_kubeconfig_converter.py`` script to do this.
 
-            .. code-block:: console
+            .. code-block:: bash
 
-                $ python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
+                python -m sky.utils.kubernetes.exec_kubeconfig_converter --input ~/.kube/config --output ~/.kube/config.converted
 
             Then create the Kubernetes secret with the converted kubeconfig file ``~/.kube/config.converted``.
 
@@ -94,7 +94,7 @@ Following tabs describe how to configure credentials for different clouds on the
 
             You can also set both ``useKubeconfig`` and ``useApiServerCluster`` at the same time to configure the API server to use an external Kubernetes cluster in addition to the API server's own cluster.
 
-    
+
     .. tab-item:: AWS
         :sync: aws-creds-tab
 
@@ -102,22 +102,22 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Create a Kubernetes secret with your AWS credentials:
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ NAMESPACE=skypilot
-            $ kubectl create secret generic aws-credentials \
-            $   -n $NAMESPACE \
-            $   --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
-            $   --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
+            NAMESPACE=skypilot
+            kubectl create secret generic aws-credentials \
+              -n $NAMESPACE \
+              --from-literal=aws_access_key_id=YOUR_ACCESS_KEY_ID \
+              --from-literal=aws_secret_access_key=YOUR_SECRET_ACCESS_KEY
 
         Replace ``YOUR_ACCESS_KEY_ID`` and ``YOUR_SECRET_ACCESS_KEY`` with your actual AWS credentials.
 
         When installing or upgrading the Helm chart, enable AWS credentials by setting ``awsCredentials.enabled=true``.
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
-    
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel --set awsCredentials.enabled=true
+
     .. tab-item:: GCP
         :sync: gcp-creds-tab
 
@@ -125,23 +125,23 @@ Following tabs describe how to configure credentials for different clouds on the
 
         Once you have the JSON key for your service account, create a Kubernetes secret to store it:
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ NAMESPACE=skypilot
-            $ kubectl create secret generic gcp-credentials \
-            $   -n $NAMESPACE \
-            $   --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
+            NAMESPACE=skypilot
+            kubectl create secret generic gcp-credentials \
+              -n $NAMESPACE \
+              --from-file=gcp-cred.json=YOUR_SERVICE_ACCOUNT_JSON_KEY.json
 
         When installing or upgrading the Helm chart, enable GCP credentials by setting ``gcpCredentials.enabled=true`` and ``gcpCredentials.projectId`` to your project ID:
 
-        .. code-block:: console
+        .. code-block:: bash
 
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            $   --set gcpCredentials.enabled=true \
-            $   --set gcpCredentials.projectId=YOUR_PROJECT_ID
+            helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+              --set gcpCredentials.enabled=true \
+              --set gcpCredentials.projectId=YOUR_PROJECT_ID
 
         Replace ``YOUR_PROJECT_ID`` with your actual GCP project ID.
-    
+
     .. tab-item:: Other clouds
         :sync: other-clouds-tab
 
@@ -152,7 +152,7 @@ Following tabs describe how to configure credentials for different clouds on the
         Support for configuring other clouds through secrets is coming soon!
 
 
-Step 3: Deploy the API Server Helm Chart
+Step 3: Deploy the API server Helm chart
 ----------------------------------------
 
 Install the SkyPilot Helm chart with the following command:
@@ -161,16 +161,18 @@ Install the SkyPilot Helm chart with the following command:
    Note that helm requires --devel flag to use any version marked with pre-release flags (e.g., 1.0.0-dev.YYYYMMDD in our versioning).
    TODO: We should add a tab for stable release and a tab for nightly release once we have a stable release with API server.
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ NAMESPACE=skypilot
-    $ WEB_USERNAME=skypilot
-    $ WEB_PASSWORD=yourpassword
-    $ AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-    $   --namespace $NAMESPACE \
-    $   --create-namespace \
-    $   --set ingress.authCredentials=$AUTH_STRING
+    # The following variables will be used throughout the guide
+    NAMESPACE=skypilot
+    RELEASE_NAME=skypilot
+    WEB_USERNAME=skypilot
+    WEB_PASSWORD=yourpassword
+    AUTH_STRING=$(htpasswd -nb $WEB_USERNAME $WEB_PASSWORD)
+    helm upgrade --install $RELEASE_NAME skypilot/skypilot-nightly --devel \
+      --namespace $NAMESPACE \
+      --create-namespace \
+      --set ingress.authCredentials=$AUTH_STRING
 
 The ``--namespace`` flag specifies which namespace to deploy the API server in, and ``--create-namespace`` will create the namespace if it doesn't exist.
 
@@ -186,14 +188,24 @@ If you configured any cloud credentials in the previous step, make sure to enabl
 
     If you already have a Kubernetes secret containing basic auth credentials, you can use it directly by setting ``ingress.authSecret`` instead of ``ingress.authCredentials``:
 
-    .. code-block:: console
+    .. code-block:: bash
 
-        $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-        $   --namespace $NAMESPACE \
-        $   --create-namespace \
-        $   --set ingress.authSecret=my-existing-auth-secret
+        helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+          --namespace $NAMESPACE \
+          --create-namespace \
+          --set ingress.authSecret=my-existing-auth-secret
 
     The secret must be in the same namespace as the API server and must contain a key named ``auth`` with the basic auth credentials in htpasswd format.
+
+After the API server is deployed, you can inspect the API server pod status with:
+
+.. code-block:: bash
+
+    kubectl get pods -n $NAMESPACE -l app=${RELEASE_NAME}-api --watch
+
+You should see the pod is initializing and finally becomes running and ready. If not, refer to :ref:`sky-api-server-troubleshooting-helm` to diagnose the issue.
+
+.. _sky-get-api-server-url:
 
 Step 4: Get the API server URL
 ------------------------------
@@ -204,16 +216,45 @@ Our default of using a NodePort service is the recommended way to expose the API
 
 .. tab-set::
 
-    .. tab-item:: NodePort (Default)
-        :sync: nodeport-tab
+    .. tab-item:: LoadBalancer (Default)
+        :sync: loadbalancer-tab
 
-        1. Make sure ports 30050 and 30051 are open on your nodes.
-
-        2. Fetch the ingress controller URL with:
+        Fetch the ingress controller URL:
 
         .. code-block:: console
 
-            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
+            $ HOST=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${HOST}
+            $ echo $ENDPOINT
+            http://skypilot:yourpassword@1.1.1.1
+
+        .. tip::
+
+            If you're using a Kubernetes cluster without LoadBalancer support, you may get an empty IP address in the output above.
+            In that case, use the NodePort option instead.
+
+        .. tip::
+
+            For fine-grained control over the LoadBalancer service, refer to the `helm values of ingress-nginx <https://artifacthub.io/packages/helm/ingress-nginx/ingress-nginx#values>`_. Note that all values should be put under ``ingress-nginx.`` prefix since the ingress-nginx chart is installed as a subchart.
+
+    .. tab-item:: NodePort
+        :sync: nodeport-tab
+
+        1. Select two ports on your nodes that are not in use and allow network inbound traffic to them. 30050 and 30051 will be used in this example.
+
+        2. Upgrade the API server to use NodePort, and set the node ports to the selected ports:
+
+        .. code-block:: bash
+
+            $ helm upgrade -n $NAMESPACE $RELEASE_NAME skypilot/skypilot-nightly --devel \
+              --set ingress-nginx.controller.service.type=NodePort \
+              --set ingress-nginx.controller.service.nodePorts.http=30050 \
+              --set ingress-nginx.controller.service.nodePorts.https=30051
+
+        3. Fetch the ingress controller URL with:
+
+        .. code-block:: console
+
             $ NODE_PORT=$(kubectl get svc ${RELEASE_NAME}-ingress-controller-np -n $NAMESPACE -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')
             $ NODE_IP=$(kubectl get nodes -o jsonpath='{ $.items[0].status.addresses[?(@.type=="ExternalIP")].address }')
             $ ENDPOINT=http://${WEB_USERNAME}:${WEB_PASSWORD}@${NODE_IP}:${NODE_PORT}
@@ -221,40 +262,12 @@ Our default of using a NodePort service is the recommended way to expose the API
             http://skypilot:yourpassword@1.1.1.1:30050
 
         .. tip::
-            
-            You can customize the node ports with ``--set ingress.httpNodePort=<port> --set ingress.httpsNodePort=<port>`` to the helm upgrade command. 
-            
-            If set to null, Kubernetes will assign random ports in the NodePort range (default 30000-32767). Make sure to open these ports on your nodes.
+
+            You can also omit ``ingress-nginx.controller.service.nodePorts.http`` and ``ingress-nginx.controller.service.nodePorts.https`` to use random ports in the NodePort range (default 30000-32767). Make sure these ports are open on your nodes if you do so.
 
         .. tip::
 
             To avoid frequent IP address changes on nodes by your cloud provider, you can attach a static IP address to your nodes (`instructions for GKE <https://cloud.google.com/compute/docs/ip-addresses/configure-static-external-ip-address>`_) and use it as the ``NODE_IP`` in the command above.
-
-    .. tab-item:: LoadBalancer
-        :sync: loadbalancer-tab
-
-        .. warning::
-
-            Using LoadBalancer service type may not support SSH access to SkyPilot clusters. Only use this option if you do not need SSH access.
-
-
-        1. Deploy the API server with LoadBalancer configuration:
-
-        .. code-block:: console
-
-            $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-            $   --set ingress.httpNodePort=null \
-            $   --set ingress.httpsNodePort=null \
-            $   --set ingress-nginx.controller.service.type=LoadBalancer
-
-        2. Fetch the ingress controller URL:
-
-        .. code-block:: console
-
-            $ RELEASE_NAME=skypilot  # This should match the name used in helm install/upgrade
-            $ ENDPOINT=$(kubectl get svc ${RELEASE_NAME}-ingress-nginx-controller -n $NAMESPACE -o jsonpath='http://{.status.loadBalancer.ingress[0].ip}')
-            $ echo $ENDPOINT
-            http://1.1.1.1
 
 
 Step 5: Test the API server
@@ -279,19 +292,19 @@ Uninstall
 
 To uninstall the API server, run:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ helm uninstall skypilot -n skypilot
+    helm uninstall skypilot -n skypilot
 
 This will delete the API server and all associated resources.
 
-Other Notes
+Other notes
 -----------
 
-Fault Tolerance and State Persistence
+Fault tolerance and state persistence
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-The skypilot API server is designed to be fault tolerant. If the API server pod is terminated, the Kubernetes will automatically create a new pod to replace it. 
+The skypilot API server is designed to be fault tolerant. If the API server pod is terminated, the Kubernetes will automatically create a new pod to replace it.
 
 To retain state during pod termination, we use a persistent volume claim. The persistent volume claim is backed by a PersistentVolume that is created by the Helm chart.
 
@@ -329,9 +342,9 @@ For example, to use a specific storage class and increase the storage size:
 
 Apply the configuration using:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+    helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
 
 Additional setup for EKS
@@ -353,41 +366,41 @@ Once the EBS CSI driver is installed, the default ``gp2`` storage class will be 
 
 .. _sky-api-server-config:
 
-Setting the SkyPilot Config
+Setting the SkyPilot config
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 The Helm chart supports setting the global SkyPilot config YAML file on the API server. The config file is mounted as ``~/.sky/config.yaml`` in the API server container.
 
 To set the config file, pass ``--set-file apiService.config=path/to/your/config.yaml`` to the ``helm`` command:
 
-.. code-block:: console
+.. code-block:: bash
 
     # Create the config.yaml file
-    $ cat <<EOF > config.yaml
-    $ admin_policy: admin_policy_examples.AddLabelsPolicy
-    $ 
-    $ jobs:
-    $   controller:
-    $     resources:
-    $         cpus: 2+
-    $ 
-    $ allowed_clouds:
-    $   - aws
-    $   - kubernetes
-    $ 
-    $ kubernetes:
-    $   allowed_contexts:
-    $     - my-context
-    $     - my-other-context
-    $ EOF
+    cat <<EOF > config.yaml
+    admin_policy: admin_policy_examples.AddLabelsPolicy
+
+    jobs:
+      controller:
+        resources:
+            cpus: 2+
+
+    allowed_clouds:
+      - aws
+      - kubernetes
+
+    kubernetes:
+      allowed_contexts:
+        - my-context
+        - my-other-context
+    EOF
 
     # Install the API server with the config file
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
-    $   --set-file apiService.config=config.yaml
+    helm upgrade --install skypilot skypilot/skypilot-nightly --devel \
+      --set-file apiService.config=config.yaml
 
 You can also directly set config values in the ``values.yaml`` file.
 
-Setting an Admin Policy
+Setting an admin policy
 ^^^^^^^^^^^^^^^^^^^^^^^
 
 The Helm chart supports installing an admin policy before the API server starts.
@@ -407,15 +420,41 @@ To do so, set ``apiService.preDeployHook`` to the commands you want to run. For 
 
 Then apply the values.yaml file using the `-f` flag when running the helm upgrade command:
 
-.. code-block:: console
+.. code-block:: bash
 
-    $ helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
+    helm upgrade --install skypilot skypilot/skypilot-nightly --devel -f values.yaml
 
+.. _sky-migrate-legacy-service:
+
+Migrate from legacy NodePort service
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you are upgrading from an early 0.8.0 nightly with a previously deployed NodePort service (named ``${RELEASE_NAME}-ingress-controller-np``), an error will be raised to ask for migration. In addition, a new service will be created to expose the API server (using ``LoadBalancer`` service type by default). You can choose any of the following options to proceed the upgrade process based on your needs:
+
+- Keep the legacy NodePort service and gradually migrate to the new LoadBalancer service:
+
+  Add ``--set ingress.nodePortEnabled=true`` to your ``helm upgrade`` command to keep the legacy NodePort service. Existing clients can continue to use the previous NodePort service. After all clients have been migrated to the new service, you can disable the legacy NodePort service by adding ``--set ingress.nodePortEnabled=false`` to the ``helm upgrade`` command.
+
+- Disable the legacy NodePort service:
+
+  Add ``--set ingress.nodePortEnabled=false`` to your ``helm upgrade`` command to disable the legacy NodePort service. Clients will need to use the new service to connect to the API server.
+
+.. note::
+
+    Make sure there is no clients using the NodePort service before disabling it.
+
+.. note::
+
+    Refer to :ref:`sky-get-api-server-url` for how to customize and/or connect to the new service.
 
 .. _sky-api-server-cloud-deploy:
 
 Alternative: Deploy on cloud VMs
 --------------------------------
+
+.. note::
+
+    VM deployment does not offer failover and graceful upgrading supports. We recommend to use Helm deployment :ref:`sky-api-server-deploy` in production environments.
 
 You can also deploy the API server directly on cloud VMs using an existing SkyPilot installation.
 
@@ -424,22 +463,24 @@ Step 1: Use SkyPilot to deploy the API server on a cloud VM
 
 Write the SkyPilot API server YAML file and use ``sky launch`` to deploy the API server:
 
-.. code-block:: console
+.. Do not use ``console`` here because that will break the indentation of the YAML file during copy paste.
+
+.. code-block:: bash
 
     # Write the YAML to a file
-    $ cat <<EOF > skypilot-api-server.yaml
-    $ resources:
-    $     cpus: 8+
-    $     memory: 16+
-    $     ports: 46580
-    $     image_id: docker:berkeleyskypilot/skypilot-nightly:latest
+    cat <<EOF > skypilot-api-server.yaml
+    resources:
+      cpus: 8+
+      memory: 16+
+      ports: 46580
+      image_id: docker:berkeleyskypilot/skypilot-nightly:latest
 
-    $ run: |
-    $   sky api start --deploy
-    $ EOF
+    run: |
+      sky api start --deploy
+    EOF
 
     # Deploy the API server
-    $ sky launch -c api-server skypilot-api-server.yaml
+    sky launch -c api-server skypilot-api-server.yaml
 
 Step 2: Get the API server URL
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

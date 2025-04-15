@@ -1,20 +1,22 @@
 apiService:
   image: berkeleyskypilot/skypilot-nightly:latest
-  # Number of replicas to deploy - replicas > 1 is not well tested, and requires 
+  # Number of replicas to deploy - replicas > 1 is not well tested, and requires
   # a PVC that supports ReadWriteMany (see accessMode in storage section below).
   replicas: 1
   preDeployHook: |-
     # Run commands before deploying the API server, e.g. installing an admin
     # policy. Remember to set the admin policy in the config section below.
     echo "Pre-deploy hook"
-    
+
     # Uncomment the following lines to install the admin policy
-    
+
     # echo "Installing admin policy"
     # pip install git+https://github.com/michaelvll/admin-policy-examples
 
-  
+
   # Set config.yaml content on the API server
+  # Updating this value will take tens of seconds to take effect on the API server.
+  # You can verify config updates on the server by exec-ing into the pod and running `cat ~/.sky/config.yaml`
   config: null
   # config: |
   #   admin_policy: admin_policy_examples.AddLabelsPolicy
@@ -33,19 +35,22 @@ apiService:
   #     - aws
   #     - kubernetes
 
+  # Skip resource check for the API server, not recommended for production deployment
+  skipResourceCheck: false
   # Set resource requests and limits for the API server
+  resources:
+    # Request a moderate amount of resources for an remote API server by default, which meets the
+    # basic requirements for team usage at medium scale.
+    requests:
+      cpu: "4"
+      memory: "8Gi"
+      # Additional resource types like ephemeral-storage can be specified here
   # TODO: Setting limits causes issues with the API server. For now we advise
   # not to set limits.
-  resources: null
-  # resources:
-  #   requests:
-  #     cpu: "1"
-  #     memory: "2Gi"
-  #   limits:
-  #     cpu: "2"
-  #     memory: "4Gi"
-  #     # Additional resource types like ephemeral-storage can be specified here
-  
+  # limits:
+  #  cpu: "4"
+  #  memory: "8Gi"
+
   # [Internal] Enable developer mode for SkyPilot
   skypilotDev: false
 
@@ -76,23 +81,45 @@ ingress:
   authCredentials: "username:$apr1$encrypted_password"
   # The base path of API server, you may use differenet path to expose multiple API server through a unified ingress-controller
   path: '/'
-  # GKE load balancer used for ingress does not work with websocket connections
-  # (required for our k8s SSH tunneling), in such case NodePort should be enabled
-  # to exposes the ingress controller.
-  # Note: nodePort svc will only be created when both ingress.nodePortEnabled=true AND ingress-nginx.enabled=true
-  nodePortEnabled: true
+
+  # Whether enable an additional NodePort service for the ingress controller
+  # Default to null for backward compatibility:
+  # - For existing deployments, error out and ask users to set ingress.nodePortEnabled explicitly
+  # - For new deployments, disable the NodePort service, equivalent to ingress.nodePortEnabled=false
+  # So, for deployments that use default values, upgrade from 0.8.0 nightly will:
+  # - Ask users to set ingress.nodePortEnabled explicitly
+  # - Create a new LoadBalancer endpoint since ingress-nginx.controller.service.type is now default to LoadBalancer
+  # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and swtich to ingress-nginx.controller.service.type
+  # if you are upgrading from 0.8.0 nightly.
+  # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
+  # TODO(aylei): document the migration steps in v0.9.0 release note and remove these fields
+  nodePortEnabled: null
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
+  # Deprecated: use ingress-nginx.controller.service.nodePorts.http instead
   httpNodePort: 30050 # Set to null to automatically assign a random port
+  # Deprecated: use ingress-nginx.controller.service.nodePorts.https instead
   httpsNodePort: 30051 # Set to null to automatically assign a random port
 
 ingress-nginx:
   enabled: true
   controller:
     service:
-      # Use ClusterIP here to disable the LoadBalancer created by nginx. 
-      # If not using NodePort, set this to LoadBalancer.
-      type: ClusterIP  
+      type: LoadBalancer
+      # Default annotations for the ingress controller service. We want an L4 loadbalancer by default for maximum compatibility,
+      # especially for websocket SSH tunneling. Different cloud providers may require different annotations.
+      # Annotations with no side effects are aggregated below to simplify the usage.
+      annotations:
+        # For AWS service reconciled by cloud-controller-manager, use NLB by default.
+        # If you are using AWS Load Balancer Controller, refer to the following doc to configure annotations:
+        # https://kubernetes-sigs.github.io/aws-load-balancer-controller/latest/guide/service/annotations/
+        service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+        # For GKE, use backend service-based external passthrough Network Load Balancer as per best practices.
+        # Ref: https://cloud.google.com/kubernetes-engine/docs/concepts/service-load-balancer#load_balancer_types
+        cloud.google.com/l4-rbs: "enabled"
+        # For Azure, override the healthz check protocol to TCP probe to avoid HTTP auth issues.
+        service.beta.kubernetes.io/port_443_health-probe_protocol: "TCP"
+        service.beta.kubernetes.io/port_80_health-probe_protocol: "TCP"
     config:
       http-snippet: |
         map $http_upgrade $connection_upgrade {
@@ -101,12 +128,81 @@ ingress-nginx:
         }
 
 rbac:
+  # If false, the serviceaccount and rbac policies will not be created. An external service account is expected in this case.
+  create: true
+  # If not specified, the service account name will be generated by the chart.
+  serviceAccountName: ""
   # Configure the RBAC permissions for the SkyPilot API server
-  rules:
-    # Default configuration with full access - override for restricted environments
-    - apiGroups: ["*"]
-      resources: ["*"]
-      verbs: ["*"]
+  # TODO(aylei): Do not setup rbac policies when rbac.kubernetesCredentials.userKubeconfig=true
+  # Addtional grantedNamespaces other than the release namespace (where API server is deployed).
+  # Different namespaces may need different permissions, but it would be complex and error-prone to manage rules for each namespace.
+  # Instead, we aggregate all the permissions needed across namespaces and grant them to all the namespaces listed.
+  grantedNamespaces:
+  - namespace: "skypilot-system"
+  # Namespace-scoped rules that are granted to the release namespace and rbac.grantedNamespaces.
+  namespaceRules:
+    # Required for managing pods and their lifecycle
+    - apiGroups: [ "" ]
+      resources: [ "pods", "pods/status", "pods/exec", "pods/portforward" ]
+      verbs: [ "*" ]
+    # Required for managing services for SkyPilot Pods
+    - apiGroups: [ "" ]
+      resources: [ "services" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for managing SSH keys
+    - apiGroups: [ "" ]
+      resources: [ "secrets" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for granting namespaced permissions to SkyPilot Pods and SkyPilot system components.
+    # TODO(aylei): This is too permissive, consider passing existing roles instead.
+    - apiGroups: [ "rbac.authorization.k8s.io" ]
+      resources: [ "roles", "rolebindings" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for managing SkyPilot system DaemonSets
+    - apiGroups: [ "apps" ]
+      resources: [ "daemonsets" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for managing configmaps for smarter-device-manager
+    # TODO(aylei): Remove this after we deprecate smarter-device-manager
+    - apiGroups: [ "" ]
+      resources: [ "configmaps" ]
+      verbs: [ "get", "list", "watch", "create" ]
+    # Required for managing service accounts for SkyPilot Pods and SkyPilot system components.
+    - apiGroups: [ "" ]
+      resources: [ "serviceaccounts" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
+    # Required for getting reason when Pod scheduling fails.
+    - apiGroups: [ "" ]
+      resources: [ "events" ]
+      verbs: [ "get", "list", "watch" ]
+  # Cluster-scoped rules for API server.
+  clusterRules:
+    # Required for managing skypilot-system namespace, which hosts skypilot system components like smarter-device-manager.
+    - apiGroups: [ "" ]
+      resources: [ "namespaces" ]
+      resourceNames: [ "skypilot-system" ]
+      verbs: [ "get", "list", "watch", "create" ]
+    # Required for getting node resources.
+    - apiGroups: [ "" ]
+      resources: [ "nodes" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for querying GPUs.
+    - apiGroups: [ "" ]
+      resources: [ "pods" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for autodetecting runtime classes
+    - apiGroups: [ "node.k8s.io" ]
+      resources: [ "runtimeclasses" ]
+      verbs: [ "get", "list", "watch" ]
+    # Required for exposing services.
+    - apiGroups: [ "networking.k8s.io" ]
+      resources: [ "ingressclasses" ]
+      verbs: [ "get", "list", "watch" ]
+    # TODO(aylei): This is too permissive, consider passing existing roles instead.
+    # Required for granting cluster permissions to SkyPilot Pods.
+    - apiGroups: [ "rbac.authorization.k8s.io" ]
+      resources: [ "clusterroles", "clusterrolebindings" ]
+      verbs: [ "get", "list", "watch", "create", "update", "patch", "delete" ]
 
 kubernetesCredentials:
   # Enable/disable using the API server's cluster for workloads
@@ -125,3 +221,17 @@ gcpCredentials:
   enabled: false
   # TODO(romilb): This can be made optional by using the project in the key json by default.
   projectId: null
+
+
+# Set securityContext for the api pod
+podSecurityContext: {}
+
+# Set securityContext for the api container inside the api pod
+securityContext:
+  capabilities:
+    drop:
+    - ALL
+  allowPrivilegeEscalation: false
+
+# Set the runtime class
+runtimeClassName:

@@ -79,10 +79,11 @@ def _load_config(context: Optional[str] = None):
                     '    If you were running a local Kubernetes '
                     'cluster, run `sky local up` to start the cluster.')
             else:
+                kubeconfig_path = os.environ.get('KUBECONFIG', '~/.kube/config')
                 err_str = (
                     f'Failed to load Kubernetes configuration for {context!r}. '
                     'Please check if your kubeconfig file exists at '
-                    f'~/.kube/config and is valid.\n{suffix}')
+                    f'{kubeconfig_path} and is valid.\n{suffix}')
             err_str += '\nTo disable Kubernetes for SkyPilot: run `sky check`.'
             with ux_utils.print_exception_no_traceback():
                 raise ValueError(err_str) from None
@@ -143,6 +144,13 @@ def node_api(context: Optional[str] = None):
 def apps_api(context: Optional[str] = None):
     _load_config(context)
     return kubernetes.client.AppsV1Api()
+
+
+@_api_logging_decorator('urllib3', logging.ERROR)
+@annotations.lru_cache(scope='request')
+def batch_api(context: Optional[str] = None):
+    _load_config(context)
+    return kubernetes.client.BatchV1Api()
 
 
 @_api_logging_decorator('urllib3', logging.ERROR)

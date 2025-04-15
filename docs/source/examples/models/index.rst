@@ -7,6 +7,8 @@ Models
    DeepSeek-R1 <deepseek-r1>
    DeepSeek-R1 Distilled <deepseek-r1-distilled>
    DeepSeek-Janus <deepseek-janus>
+   Gemma 3 <gemma3>
+   Llama 4 <llama-4>
    Llama 3.2 <llama-3_2>
    Llama 3.1 <llama-3_1>
    Llama 3 <llama-3>
