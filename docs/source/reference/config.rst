@@ -28,12 +28,15 @@ Below is the configuration syntax and some example values. See detailed explanat
 
   :ref:`jobs <config-yaml-jobs>`:
     :ref:`bucket <config-yaml-jobs-bucket>`: s3://my-bucket/
-    :ref:`controller <config-yaml-jobs-controller>`:
-      resources:  # same spec as 'resources' in a task YAML
+    controller:
+      :ref:`resources <config-yaml-jobs-controller-resources>`:  # same spec as 'resources' in a task YAML
         cloud: gcp
         region: us-central1
         cpus: 4+  # number of vCPUs, max concurrent spot jobs = 2 * cpus
         disk_size: 100
+      :ref:`autostop <config-yaml-jobs-controller-autostop>`:
+        idle_minutes: 10
+        down: false  # dangerous to enable!
 
   :ref:`docker <config-yaml-docker>`:
     :ref:`run_options <config-yaml-docker-run-options>`:
@@ -176,9 +179,10 @@ Supported bucket types:
     # bucket: cos://<region>/<bucket>
 
 .. _config-yaml-jobs-controller:
+.. _config-yaml-jobs-controller-resources:
 
-``jobs.controller``
-~~~~~~~~~~~~~~~~~~~
+``jobs.controller.resources``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Configure resources for the managed jobs controller.
 
@@ -198,6 +202,36 @@ Example:
         cpus: 4+
         memory: 8x
         disk_size: 50
+
+.. _config-yaml-jobs-controller-autostop:
+
+``jobs.controller.autostop``
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Configure autostop for the managed jobs controller.
+
+By default, the jobs controller is autostopped after 10 minutes, except for on Kubernetes, where it is not supported.
+
+Example:
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Disable autostop.
+      autostop: false
+
+.. code-block:: yaml
+
+  jobs:
+    controller:
+      # Enable autostop with custom config.
+      autostop:
+        # Default values:
+        idle_minutes: 10  # Set time to idle autostop/autodown.
+        # Warning - down: true could lead to leaks if SkyPilot crashes!
+        down: false  # Use autodown.
+
 
 .. _config-yaml-allowed-clouds:
 
