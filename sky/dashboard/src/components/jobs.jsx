@@ -156,12 +156,13 @@ export function ManagedJobsTable({
   const [pageSize, setPageSize] = useState(10);
   const [expandedRowId, setExpandedRowId] = useState(null);
   const expandedRowRef = useRef(null);
-  const [selectedStatus, setSelectedStatus] = useState('All');
+  const [selectedStatuses, setSelectedStatuses] = useState([]);
   const [statusCounts, setStatusCounts] = useState({});
   const [controllerStopped, setControllerStopped] = useState(false);
   const [controllerLaunching, setControllerLaunching] = useState(false);
   const [isRestarting, setIsRestarting] = useState(false);
   const [activeTab, setActiveTab] = useState('active');
+  const [showAllMode, setShowAllMode] = useState(true);
   const [confirmationModal, setConfirmationModal] = useState({
     isOpen: false,
     title: '',
@@ -264,7 +265,8 @@ export function ManagedJobsTable({
 
   // Reset status filter when activeTab changes
   useEffect(() => {
-    setSelectedStatus('All');
+    setSelectedStatuses([]);
+    setShowAllMode(true); // Default to show all mode when changing tabs
   }, [activeTab]);
 
   const requestSort = (key) => {
@@ -316,37 +318,53 @@ export function ManagedJobsTable({
 
   // Helper function to determine if a status should be highlighted
   const isStatusHighlighted = (status) => {
-    if (selectedStatus === 'All') {
-      return statusGroups[activeTab].includes(status);
+    // If we have selected statuses, highlight only those statuses
+    if (selectedStatuses.length > 0) {
+      return selectedStatuses.includes(status);
     }
-    return status === selectedStatus;
+    
+    // If no statuses are selected, highlight all statuses in the active tab
+    return statusGroups[activeTab].includes(status);
   };
 
-  // Filter data based on active tab and selected status
+  // Filter data based on selected statuses and active tab
   const filteredData = React.useMemo(() => {
-    return data.filter((item) => {
-      const matchesActiveTab = statusGroups[activeTab].includes(item.status);
-      if (selectedStatus === 'All') {
-        return matchesActiveTab;
-      }
-      return item.status === selectedStatus;
-    });
-  }, [data, activeTab, selectedStatus]);
+    // If specific statuses are selected, show jobs with any of those statuses
+    if (selectedStatuses.length > 0) {
+      return data.filter(item => selectedStatuses.includes(item.status));
+    }
+    
+    // If no statuses are selected but we're in "show all" mode, show all jobs of the active tab
+    if (showAllMode) {
+      return data.filter(item => statusGroups[activeTab].includes(item.status));
+    }
+    
+    // If no statuses are selected and we're not in "show all" mode, show no jobs
+    return [];
+  }, [data, activeTab, selectedStatuses, showAllMode]);
 
   // Handle status selection
   const handleStatusClick = (status) => {
-    if (status === selectedStatus) {
-      setSelectedStatus('All');
-    } else {
-      setSelectedStatus(status);
-      // Update activeTab based on the selected status
-      if (status !== 'All') {
-        if (statusGroups.active.includes(status)) {
-          setActiveTab('active');
-        } else if (statusGroups.finished.includes(status)) {
-          setActiveTab('finished');
-        }
+    // Toggle the clicked status without affecting others
+    if (selectedStatuses.includes(status)) {
+      // If the status is already selected, unselect it
+      const newSelectedStatuses = selectedStatuses.filter(s => s !== status);
+      
+      if (newSelectedStatuses.length === 0) {
+        // When deselecting the last selected status, go back to "show all" mode
+        // for the current active tab (active/finished)
+        setShowAllMode(true);
+        setSelectedStatuses([]);
+      } else {
+        setSelectedStatuses(newSelectedStatuses);
+        // We're not in "show all" mode if there are specific statuses selected
+        setShowAllMode(false);
       }
+    } else {
+      // Add the clicked status to the selected statuses
+      setSelectedStatuses([...selectedStatuses, status]);
+      // We're not in "show all" mode if there are specific statuses selected
+      setShowAllMode(false);
     }
   };
 
@@ -384,87 +402,73 @@ export function ManagedJobsTable({
   return (
     <div className="relative">
       <div className="flex flex-col space-y-4 mb-4">
-        {/* Activeness Filter */}
-        <div className="flex items-center text-sm">
-          <span className="mr-2 text-sm font-medium">Activeness:</span>
-          <div className="flex space-x-2">
-            <button
-              onClick={() => setActiveTab('active')}
-              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                activeTab === 'active'
-                  ? 'bg-green-50 text-green-700'
-                  : 'bg-gray-50 text-gray-600 hover:bg-green-50 hover:text-green-700'
-              }`}
-            >
-              <span>ACTIVE</span>
-              <span
-                className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-              >
-                {counts.active}
-              </span>
-            </button>
-            <button
-              onClick={() => setActiveTab('finished')}
-              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                activeTab === 'finished'
-                  ? 'bg-blue-50 text-blue-700'
-                  : 'bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-700'
-              }`}
-            >
-              <span>FINISHED</span>
-              <span
-                className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-              >
-                {counts.finished}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        {/* Status Filter */}
-        <div className="flex items-center text-sm">
-          <span className="mr-2 text-sm font-medium">Status:</span>
-          <div className="flex flex-wrap gap-2">
+        {/* Combined Status Filter */}
+        <div className="flex flex-wrap items-center text-sm mb-4">
+          <span className="mr-2 text-sm font-medium">Statuses:</span>
+          <div className="flex flex-wrap gap-2 items-center">
             {loading && (
               <div className="flex items-center">
                 <CircularProgress size={12} className="mr-2" />
               </div>
             )}
             {!loading && data.length === 0 && !isInitialLoad && (
-              <button
-                onClick={() => handleStatusClick('All')}
-                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                  selectedStatus === 'All'
-                    ? 'bg-sky-50 text-sky-700'
-                    : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
-                }`}
-              >
-                <span>ALL</span>
-                <span
-                  className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                >
-                  {0}
-                </span>
-              </button>
+              <span className="text-gray-500 mr-2">No jobs found</span>
             )}
             {Object.entries(statusCounts).map(([status, count]) => (
               <button
                 key={status}
                 onClick={() => handleStatusClick(status)}
                 className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                  isStatusHighlighted(status)
+                  isStatusHighlighted(status) || selectedStatuses.includes(status)
                     ? getBadgeStyle(status)
                     : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
                 }`}
               >
                 <span>{status}</span>
                 <span
-                  className={`text-xs ${isStatusHighlighted(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                  className={`text-xs ${isStatusHighlighted(status) || selectedStatuses.includes(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
                 >
                   {count}
                 </span>
               </button>
             ))}
+            {data.length > 0 && (
+              <div className="flex items-center ml-2 gap-2">
+                <span className="text-gray-500">(</span>
+                <button
+                  onClick={() => {
+                    // When showing all active jobs, clear all selected statuses
+                    setActiveTab('active');
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                  }}
+                  className={`text-sm font-medium ${
+                    activeTab === 'active' && showAllMode
+                      ? 'text-green-700 underline'
+                      : 'text-gray-600 hover:text-green-700 hover:underline'
+                  }`}
+                >
+                  show all active jobs
+                </button>
+                <span className="text-gray-500 mx-1">|</span>
+                <button
+                  onClick={() => {
+                    // When showing all finished jobs, clear all selected statuses
+                    setActiveTab('finished');
+                    setSelectedStatuses([]);
+                    setShowAllMode(true);
+                  }}
+                  className={`text-sm font-medium ${
+                    activeTab === 'finished' && showAllMode
+                      ? 'text-blue-700 underline'
+                      : 'text-gray-600 hover:text-blue-700 hover:underline'
+                  }`}
+                >
+                  show all finished jobs
+                </button>
+                <span className="text-gray-500">)</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -782,7 +786,7 @@ function getBadgeStyle(status) {
     case 'FAILED':
       return 'bg-red-50 text-red-700';
     case 'CANCELLED':
-      return 'bg-rose-50 text-rose-700';
+      return 'bg-yellow-50 text-yellow-700';
     case 'RECOVERING':
       return 'bg-orange-50 text-orange-700';
     case 'SUBMITTED':
@@ -790,7 +794,7 @@ function getBadgeStyle(status) {
     case 'STARTING':
       return 'bg-cyan-50 text-cyan-700';
     case 'CANCELLING':
-      return 'bg-rose-50 text-rose-700';
+      return 'bg-yellow-50 text-yellow-700';
     case 'FAILED_SETUP':
       return 'bg-pink-50 text-pink-700';
     case 'FAILED_PRECHECKS':
@@ -1021,7 +1025,7 @@ function status2Icon(status) {
       );
     case 'CANCELLED':
       return (
-        <span className={`${badgeClasses} bg-rose-50 text-rose-700`}>
+        <span className={`${badgeClasses} bg-yellow-50 text-yellow-700`}>
           <SquareIcon className="w-2 h-2 mr-2" />
           CANCELLED
         </span>
@@ -1049,7 +1053,7 @@ function status2Icon(status) {
       );
     case 'CANCELLING':
       return (
-        <span className={`${badgeClasses} bg-rose-50 text-rose-700`}>
+        <span className={`${badgeClasses} bg-yellow-50 text-yellow-700`}>
           <CircleIcon className="w-2 h-2 mr-2" />
           CANCELLING
         </span>
