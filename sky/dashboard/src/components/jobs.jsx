@@ -417,21 +417,28 @@ export function ManagedJobsTable({
         <div className="flex items-center text-sm">
           <span className="mr-2 text-sm font-medium">Status:</span>
           <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => handleStatusClick('All')}
-              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                selectedStatus === 'All'
-                  ? 'bg-sky-50 text-sky-700'
-                  : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
-              }`}
-            >
-              <span>ALL</span>
-              <span
-                className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+            {loading && (
+              <div className="flex items-center">
+                <CircularProgress size={12} className="mr-2" />
+              </div>
+            )}
+            {!loading && data.length === 0 && !isInitialLoad && (
+              <button
+                onClick={() => handleStatusClick('All')}
+                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                  selectedStatus === 'All'
+                    ? 'bg-sky-50 text-sky-700'
+                    : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
+                }`}
               >
-                {Object.values(statusCounts).reduce((a, b) => a + b, 0)}
-              </span>
-            </button>
+                <span>ALL</span>
+                <span
+                  className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                >
+                  {0}
+                </span>
+              </button>
+            )}
             {Object.entries(statusCounts).map(([status, count]) => (
               <button
                 key={status}
