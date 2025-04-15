@@ -880,6 +880,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
             clouds.Azure,
             clouds.DO,
             clouds.Nebius,
+            clouds.Hyperstack,
     )):
         config = auth.configure_ssh_info(config)
     elif isinstance(cloud, clouds.GCP):
@@ -897,7 +898,7 @@ def _add_auth_to_cluster_config(cloud: clouds.Cloud, cluster_config_file: str):
     elif isinstance(cloud, clouds.Fluidstack):
         config = auth.setup_fluidstack_authentication(config)
     else:
-        assert False, cloud
+        assert False, f'{cloud} - adding authentication to cluster config not implemented.'
     common_utils.dump_yaml(cluster_config_file, config)
 
 
