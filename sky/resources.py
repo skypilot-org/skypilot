@@ -18,6 +18,7 @@ from sky.skylet import constants
 from sky.utils import accelerator_registry
 from sky.utils import annotations
 from sky.utils import common_utils
+from sky.utils import config_utils
 from sky.utils import log_utils
 from sky.utils import registry
 from sky.utils import resources_utils
@@ -1290,6 +1291,22 @@ class Resources:
     def copy(self, **override) -> 'Resources':
         """Returns a copy of the given Resources."""
         use_spot = self.use_spot if self._use_spot_specified else None
+
+        current_override_configs = self._cluster_config_overrides
+        if self._cluster_config_overrides is None:
+            current_override_configs = {}
+        new_override_configs = override.pop('_cluster_config_overrides', {})
+        overlaid_configs = skypilot_config.overlay_skypilot_config(
+            original_config=config_utils.Config(current_override_configs),
+            override_configs=new_override_configs,
+        )
+        override_configs = config_utils.Config()
+        for key in constants.OVERRIDEABLE_CONFIG_KEYS_IN_TASK:
+            elem = overlaid_configs.get_nested(key, None)
+            if elem is not None:
+                override_configs.set_nested(key, elem)
+
+        override_configs = dict(override_configs) if override_configs else None
         resources = Resources(
             cloud=override.pop('cloud', self.cloud),
             instance_type=override.pop('instance_type', self.instance_type),
@@ -1315,8 +1332,7 @@ class Resources:
             _is_image_managed=override.pop('_is_image_managed',
                                            self._is_image_managed),
             _requires_fuse=override.pop('_requires_fuse', self._requires_fuse),
-            _cluster_config_overrides=override.pop(
-                '_cluster_config_overrides', self._cluster_config_overrides),
+            _cluster_config_overrides=override_configs,
         )
         assert not override
         return resources

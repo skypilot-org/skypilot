@@ -53,7 +53,9 @@ import copy
 import os
 import pprint
 import typing
-from typing import Any, Dict, Iterator, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
+
+from omegaconf import OmegaConf
 
 from sky import exceptions
 from sky import sky_logging
@@ -164,18 +166,18 @@ def _get_config_file_path(envvar: str) -> Optional[str]:
     return None
 
 
-def _validate_config(config: Dict[str, Any], config_path: str) -> None:
+def _validate_config(config: Dict[str, Any], config_source: str) -> None:
     """Validates the config."""
     common_utils.validate_schema(
         config,
         schemas.get_config_schema(),
-        f'Invalid config YAML ({config_path}). See: '
+        f'Invalid config YAML from ({config_source}). See: '
         'https://docs.skypilot.co/en/latest/reference/config.html. '  # pylint: disable=line-too-long
         'Error: ',
         skip_none=False)
 
 
-def _overlay_skypilot_config(
+def overlay_skypilot_config(
         original_config: Optional[config_utils.Config],
         override_configs: Optional[config_utils.Config]) -> config_utils.Config:
     """Overlays the override configs on the original configs."""
@@ -296,7 +298,7 @@ def _reload_config_hierarchical() -> None:
     # layer the configs on top of each other based on priority
     overlaid_client_config: config_utils.Config = config_utils.Config()
     for override in overrides:
-        overlaid_client_config = _overlay_skypilot_config(
+        overlaid_client_config = overlay_skypilot_config(
             original_config=overlaid_client_config, override_configs=override)
     logger.debug(f'final config: {overlaid_client_config}')
     _dict = overlaid_client_config
@@ -361,3 +363,54 @@ def override_skypilot_config(
     finally:
         _dict = original_config
         _config_overridden = False
+
+
+def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
+    """Composes the skypilot CLI config.
+    CLI config can either be:
+    - A path to a config file
+    - A comma-separated list of key-value pairs
+    """
+
+    if not cli_config:
+        return config_utils.Config()
+
+    config_source = 'CLI'
+    maybe_config_path = os.path.expanduser(cli_config)
+    try:
+        if os.path.isfile(maybe_config_path):
+            config_source = maybe_config_path
+            # cli_config is a path to a config file
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.load(maybe_config_path))
+        else:  # cli_config is a comma-separated list of key-value pairs
+            variables: List[str] = []
+            variables = cli_config.split(',')
+            parsed_config = OmegaConf.to_object(
+                OmegaConf.from_dotlist(variables))
+        _validate_config(parsed_config, config_source)
+    except ValueError as e:
+        raise ValueError(f'Invalid config override: {cli_config}. '
+                         f'Check if config file exists or if the dotlist '
+                         f'is formatted as: key1=value1,key2=value2') from e
+    logger.debug('CLI overrides config syntax check passed.')
+
+    return parsed_config
+
+
+def apply_cli_config(cli_config: Optional[str]) -> Dict[str, Any]:
+    """Applies the CLI provided config.
+    SAFETY:
+    This function directly modifies the global _dict variable.
+    This is considered fine in CLI context because the program will exit after
+    a single CLI command is executed.
+    Args:
+        cli_config: A path to a config file or a comma-separated
+        list of key-value pairs.
+    """
+    global _dict
+    parsed_config = _compose_cli_config(cli_config)
+    logger.debug(f'applying following CLI overrides: {parsed_config}')
+    _dict = overlay_skypilot_config(original_config=_dict,
+                                    override_configs=parsed_config)
+    return parsed_config
