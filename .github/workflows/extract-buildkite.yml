@@ -20,9 +20,13 @@ jobs:
     steps:
       - name: Extract build number
         id: extract
+        env:
+          JSON_DATA: ${{ inputs.json_data }}
         run: |
-          # Write the JSON to a temporary file to avoid shell interpretation issues
-          echo '${{ inputs.json_data }}' > response.json
+          # Use printf to avoid shell interpretation
+          printf '%s' "$JSON_DATA" > response.json
+
+          # Extract the build number using jq
           build_number=$(jq -r '.number' response.json)
           echo "build_number=$build_number" >> $GITHUB_OUTPUT
           rm response.json
