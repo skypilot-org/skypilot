@@ -72,7 +72,7 @@ jobs:
       - name: Check the file in dist/
         run: |
           ls -lart dist/
-          pip install --target dist dist/skypilot-1.0.0.dev0-py3-none-any.whl          
+          pip install --target dist dist/skypilot_nightly-1.0.0.dev20250415-py3-none-any.whl
           ls -lart dist/sky/dashboard/out
       # - name: Upload distribution artifacts
       #   uses: actions/upload-artifact@v4
