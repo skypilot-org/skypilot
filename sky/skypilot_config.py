@@ -390,15 +390,9 @@ def _compose_cli_config(cli_config: Optional[str],) -> config_utils.Config:
                 OmegaConf.from_dotlist(variables))
         _validate_config(parsed_config, config_source)
     except ValueError as e:
-        if '=' in cli_config:
-            # treat the config as an attempt at a dotlist.
-            raise ValueError(f'Invalid config override: {cli_config}. '
-                             f'{str(e)}') from e
-        else:
-            # treat the config as a path to a (missing) config file.
-            raise ValueError(f'Invalid config file: {cli_config}. '
-                             'Does the config file exist?') from e
-
+        raise ValueError(f'Invalid config override: {cli_config}. '
+                         f'Check if config file exists or if the dotlist '
+                         f'is formatted as: key1=value1,key2=value2') from e
     logger.debug('CLI overrides config syntax check passed.')
 
     return parsed_config
