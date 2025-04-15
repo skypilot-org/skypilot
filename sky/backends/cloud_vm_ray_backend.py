@@ -35,6 +35,7 @@ from sky import optimizer
 from sky import provision as provision_lib
 from sky import resources as resources_lib
 from sky import sky_logging
+from sky import skypilot_config
 from sky import task as task_lib
 from sky.backends import backend_utils
 from sky.backends import wheel_utils
@@ -2065,9 +2066,9 @@ class RetryingVmProvisioner(object):
                                (clouds.Kubernetes, clouds.RunPod)) and
                         controller_utils.Controllers.from_name(cluster_name)
                         is not None):
-                    assert (clouds.CloudImplementationFeatures.AUTOSTOP
-                            in requested_features), requested_features
-                    requested_features.remove(
+                    # If autostop is disabled in config, the feature may not be
+                    # requested, so use discard() instead of remove().
+                    requested_features.discard(
                         clouds.CloudImplementationFeatures.AUTOSTOP)
 
                 # Skip if to_provision.cloud does not support requested features
@@ -4470,7 +4471,9 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                            (clouds.Kubernetes, clouds.RunPod)) and not down and
                     idle_minutes_to_autostop >= 0):
                 # We should hit this code path only for the controllers on
-                # Kubernetes and RunPod clusters.
+                # Kubernetes and RunPod clusters, because autostop() will
+                # skip the supported feature check. Non-controller k8s/runpod
+                # clusters will have already errored out.
                 controller = controller_utils.Controllers.from_name(
                     handle.cluster_name)
                 assert (controller is not None), handle.cluster_name
@@ -4481,6 +4484,19 @@ class CloudVmRayBackend(backends.Backend['CloudVmRayResourceHandle']):
                     # For SkyServe controllers on Kubernetes: override autostop
                     # behavior to force autodown (instead of no-op)
                     # to avoid dangling controllers.
+
+                    # down = False is the default, but warn the user in case
+                    # they have explicitly specified it.
+                    config_override_down = skypilot_config.get_nested(
+                        (controller.value.controller_type, 'controller',
+                         'autostop', 'down'), None)
+                    if config_override_down is False:  # will not match None
+                        logger.warning(
+                            'SkyServe controller autodown is disabled in the '
+                            '~/.sky/config.yaml configuration file '
+                            '(serve.controller.autostop.down_when_idle), but '
+                            'it is force enabled for Kubernetes clusters.')
+
                     down = True
                 else:
                     logger.info('Auto-stop is not supported for Kubernetes '
