@@ -44,6 +44,7 @@ import {
 import { handleJobAction } from '@/data/connectors/jobs';
 import { ConfirmationModal } from '@/components/elements/modals';
 import { isJobController } from '@/data/utils';
+import { StatusBadge, getStatusStyle } from '@/components/elements/StatusBadge';
 
 // Format duration from seconds to a readable format
 export function formatDuration(durationInSeconds) {
@@ -574,7 +575,7 @@ export function ManagedJobsTable({
                       <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                       <TableCell>{formatDuration(item.job_duration)}</TableCell>
                       <TableCell>
-                        <Status2Icon status={item.status} />
+                        <StatusBadge status={item.status} />
                       </TableCell>
                       <TableCell>{item.resources}</TableCell>
                       <TableCell>{item.cluster}</TableCell>
@@ -771,36 +772,7 @@ export function ManagedJobsTable({
 
 // Helper function to get status-specific styling
 function getBadgeStyle(status) {
-  switch (status) {
-    case 'RUNNING':
-      return 'bg-green-50 text-green-700';
-    case 'PENDING':
-      return 'bg-yellow-50 text-yellow-700';
-    case 'SUCCEEDED':
-      return 'bg-blue-50 text-blue-700';
-    case 'FAILED':
-      return 'bg-red-50 text-red-700';
-    case 'CANCELLED':
-      return 'bg-yellow-50 text-yellow-700';
-    case 'RECOVERING':
-      return 'bg-orange-50 text-orange-700';
-    case 'SUBMITTED':
-      return 'bg-indigo-50 text-indigo-700';
-    case 'STARTING':
-      return 'bg-cyan-50 text-cyan-700';
-    case 'CANCELLING':
-      return 'bg-yellow-50 text-yellow-700';
-    case 'FAILED_SETUP':
-      return 'bg-pink-50 text-pink-700';
-    case 'FAILED_PRECHECKS':
-      return 'bg-red-50 text-red-700';
-    case 'FAILED_NO_RESOURCE':
-      return 'bg-red-50 text-red-700';
-    case 'FAILED_CONTROLLER':
-      return 'bg-red-50 text-red-700';
-    default:
-      return 'bg-gray-100 text-gray-800';
-  }
+  return getStatusStyle(status);
 }
 
 export function formatLogs(str) {
@@ -984,118 +956,6 @@ export function LogFilter({ logs, controller = false }) {
         dangerouslySetInnerHTML={{ __html: formatLogs(filteredLogs) }}
       />
     </div>
-  );
-}
-
-function status2Icon(status) {
-  const badgeClasses = 'inline-flex items-center px-2 py-1 rounded-full';
-  switch (status) {
-    case 'RUNNING':
-      return (
-        <span className={`${badgeClasses} bg-green-50 text-green-700`}>
-          <FilledCircleIcon className="w-2 h-2 mr-2" />
-          RUNNING
-        </span>
-      );
-    case 'PENDING':
-      return (
-        <span className={`${badgeClasses} bg-yellow-50 text-yellow-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          PENDING
-        </span>
-      );
-    case 'SUCCEEDED':
-      return (
-        <span className={`${badgeClasses} bg-blue-50 text-blue-700`}>
-          <TickIcon className="w-2 h-2 mr-2" />
-          SUCCEEDED
-        </span>
-      );
-    case 'FAILED':
-      return (
-        <span className={`${badgeClasses} bg-red-50 text-red-700`}>
-          <SquareIcon className="w-2 h-2 mr-2" />
-          FAILED
-        </span>
-      );
-    case 'CANCELLED':
-      return (
-        <span className={`${badgeClasses} bg-yellow-50 text-yellow-700`}>
-          <SquareIcon className="w-2 h-2 mr-2" />
-          CANCELLED
-        </span>
-      );
-    case 'RECOVERING':
-      return (
-        <span className={`${badgeClasses} bg-orange-50 text-orange-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          RECOVERING
-        </span>
-      );
-    case 'SUBMITTED':
-      return (
-        <span className={`${badgeClasses} bg-indigo-50 text-indigo-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          SUBMITTED
-        </span>
-      );
-    case 'STARTING':
-      return (
-        <span className={`${badgeClasses} bg-cyan-50 text-cyan-700`}>
-          <CircularProgress size={12} className="w-2 h-2 mr-2" />
-          STARTING
-        </span>
-      );
-    case 'CANCELLING':
-      return (
-        <span className={`${badgeClasses} bg-yellow-50 text-yellow-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          CANCELLING
-        </span>
-      );
-    case 'FAILED_SETUP':
-      return (
-        <span className={`${badgeClasses} bg-pink-50 text-pink-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          FAILED_SETUP
-        </span>
-      );
-    case 'FAILED_PRECHECKS':
-      return (
-        <span className={`${badgeClasses} bg-red-50 text-red-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          FAILED_PRECHECKS
-        </span>
-      );
-    case 'FAILED_NO_RESOURCE':
-      return (
-        <span className={`${badgeClasses} bg-red-50 text-red-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          FAILED_NO_RESOURCE
-        </span>
-      );
-    case 'FAILED_CONTROLLER':
-      return (
-        <span className={`${badgeClasses} bg-red-50 text-red-700`}>
-          <CircleIcon className="w-2 h-2 mr-2" />
-          FAILED_CONTROLLER
-        </span>
-      );
-    default:
-      return (
-        <span className={`${badgeClasses} bg-gray-100 text-gray-800`}>
-          <FilledCircleIcon className="w-3 h-3 mr-1" />
-          {status}
-        </span>
-      );
-  }
-}
-
-export function Status2Icon({ status }) {
-  return (
-    <Tooltip content={status} className="text-muted-foreground text-sm">
-      <span>{status2Icon(status)}</span>
-    </Tooltip>
   );
 }
 
@@ -1343,7 +1203,7 @@ export function ClusterJobs({ clusterName, clusterJobData, loading }) {
                     <TableCell>{relativeTime(item.submitted_at)}</TableCell>
                     <TableCell>{formatDuration(item.job_duration)}</TableCell>
                     <TableCell>
-                      <Status2Icon status={item.status} />
+                      <StatusBadge status={item.status} />
                     </TableCell>
                     <TableCell>{item.resources}</TableCell>
                     <TableCell className="flex content-center items-center">

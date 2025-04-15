@@ -33,6 +33,7 @@ import {
   SSHInstructionsModal,
   VSCodeInstructionsModal,
 } from '@/components/elements/modals';
+import { StatusBadge } from '@/components/elements/StatusBadge';
 
 export function Clusters() {
   const [loading, setLoading] = useState(false);
@@ -265,7 +266,7 @@ export function ClusterTable({
                 return (
                   <TableRow key={index}>
                     <TableCell>
-                      <Status2Icon status={item.status} />
+                      <StatusBadge status={item.status} />
                     </TableCell>
                     <TableCell>
                       <Link
@@ -393,55 +394,6 @@ export function ClusterTable({
         </div>
       )}
     </div>
-  );
-}
-
-function status2Icon(status) {
-  const badgeClasses = 'inline-flex items-center px-2 py-1 rounded-full';
-  switch (status) {
-    case 'LAUNCHING':
-      return (
-        <span className={`${badgeClasses} bg-blue-100 text-sky-blue`}>
-          <CircularProgress size={12} className="w-3 h-3 mr-1" />
-          LAUNCHING
-        </span>
-      );
-    case 'RUNNING':
-      return (
-        <span className={`${badgeClasses} bg-green-100 text-green-800`}>
-          <FilledCircleIcon className="w-3 h-3 mr-1" />
-          RUNNING
-        </span>
-      );
-    case 'STOPPED':
-      return (
-        <span className={`${badgeClasses} bg-yellow-100 text-yellow-800`}>
-          <PauseIcon className="w-3 h-3 mr-1" />
-          STOPPED
-        </span>
-      );
-    case 'TERMINATED':
-      return (
-        <span className={`${badgeClasses} bg-gray-100 text-gray-800`}>
-          <SquareIcon className="w-3 h-3 mr-1" />
-          TERMINATED
-        </span>
-      );
-    default:
-      return (
-        <span className={`${badgeClasses} bg-gray-100 text-gray-800`}>
-          <FilledCircleIcon className="w-3 h-3 mr-1" />
-          {status}
-        </span>
-      );
-  }
-}
-
-export function Status2Icon({ status }) {
-  return (
-    <Tooltip content={status}>
-      <span>{status2Icon(status)}</span>
-    </Tooltip>
   );
 }
 

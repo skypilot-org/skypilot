@@ -9,7 +9,8 @@ import { CustomTooltip as Tooltip } from '@/components/utils';
 import { RotateCwIcon } from 'lucide-react';
 import { CircularProgress } from '@mui/material';
 import { streamClusterJobLogs } from '@/data/connectors/clusters';
-import { Status2Icon, LogFilter } from '@/components/jobs';
+import { StatusBadge } from '@/components/elements/StatusBadge';
+import { LogFilter } from '@/components/jobs';
 
 // Custom header component with buttons inline
 function JobHeader({
@@ -193,11 +194,9 @@ export function JobDetailPage() {
                     <div className="text-base mt-1">{jobData.user}</div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">
-                      Status
-                    </div>
+                    <div className="text-gray-600 font-medium text-sm">Status</div>
                     <div className="text-base mt-1">
-                      <Status2Icon status={jobData.status} />
+                      <StatusBadge status={jobData.status} />
                     </div>
                   </div>
                   {jobData.resources && (

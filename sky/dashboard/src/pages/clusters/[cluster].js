@@ -4,7 +4,8 @@ import { ClusterJobs } from '@/components/jobs';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import Link from 'next/link';
-import { Status2Actions, Status2Icon } from '@/components/clusters';
+import { Status2Actions } from '@/components/clusters';
+import { StatusBadge } from '@/components/elements/StatusBadge';
 import { Card } from '@/components/ui/card';
 import { useClusterDetails } from '@/data/connectors/clusters';
 import { RotateCwIcon } from 'lucide-react';
@@ -147,13 +148,9 @@ function ActiveTab({ clusterData, clusterJobData, loading }) {
                 <div className="text-gray-600 font-medium text-base">User</div>
                 <div className="text-base mt-1">{clusterData.user}</div>
               </div>
-              <div>
-                <div className="text-gray-600 font-medium text-base">
-                  Status
-                </div>
-                <div className="text-base mt-1">
-                  <Status2Icon status={clusterData.status} />
-                </div>
+              <div className="flex items-center space-x-4 mb-6">
+                <span className="text-sm">Status:</span>
+                <StatusBadge status={clusterData.status} />
               </div>
               <div>
                 <div className="text-gray-600 font-medium text-base">

@@ -1,15 +1,25 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { CircularProgress } from '@mui/material';
 import { useRouter } from 'next/router';
 import { Layout } from '@/components/elements/layout';
 import { Card } from '@/components/ui/card';
 import { useManagedJobDetails } from '@/data/connectors/jobs';
-import { Status2Icon } from '@/components/jobs';
 import Link from 'next/link';
 import { RotateCwIcon } from 'lucide-react';
 import { CustomTooltip as Tooltip } from '@/components/utils';
 import { LogFilter, formatLogs } from '@/components/jobs';
 import { streamManagedJobLogs } from '@/data/connectors/jobs';
+import { StatusBadge } from '@/components/elements/StatusBadge';
+import { getJobDetails } from '@/data/connectors/jobs';
+import { relativeTime } from '@/components/utils';
+import { ArrowLeft } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs';
 
 function JobDetails() {
   const router = useRouter();
@@ -401,9 +411,9 @@ function JobDetailsContent({
         <div className="text-base mt-1">{jobData.user}</div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">Status</div>
-        <div className="text-base mt-1">
-          <Status2Icon status={jobData.status} />
+        <div className="text-sm font-medium text-gray-600">Status</div>
+        <div className="mt-1">
+          <StatusBadge status={jobData.status} />
         </div>
       </div>
       <div>
