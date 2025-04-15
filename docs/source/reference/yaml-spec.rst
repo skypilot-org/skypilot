@@ -865,10 +865,10 @@ OR
 .. _task-spec-config:
 
 ``config``
-~~~~~~~
+~~~~~~~~~~
 
 Any configuration options to apply to the task.
-See :ref:`config-yaml` for supported fields.
+See the :ref:`configuration page <config-client-job-task-yaml>` for supported fields.
 
 Example:
 

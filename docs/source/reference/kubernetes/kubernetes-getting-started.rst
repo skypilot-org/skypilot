@@ -304,7 +304,7 @@ For example, to set custom environment variables and use GPUDirect RDMA, you can
 
 .. tip::
 
-    As an alternative to setting ``pod_config`` globally, you can also set it on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <task-yaml-experimental>`.
+    As an alternative to setting ``pod_config`` globally, you can also set it on a per-task basis directly in your task YAML with the ``config_overrides`` :ref:`field <config-client-job-task-yaml>`.
 
     .. code-block:: yaml
 

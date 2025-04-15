@@ -152,7 +152,7 @@ SkyPilot allows you to launch resources via DWS by specifying the ``gcp.managed_
 
 See :ref:`config-yaml` for more details.
 
-In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <task-yaml-experimental>`):
+In case you want to specify the DWS configuration for each job/cluster, you can also specify the configuration in the SkyPilot task YAML (see :ref:`here <config-client-job-task-yaml>`):
 
 .. code-block:: yaml
 

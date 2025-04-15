@@ -5,24 +5,30 @@ Advanced Configuration
 
 You can pass **optional configuration** to SkyPilot.
 
-Any configuration provided does not affect existing clusters.
+Any new configuration provided does not affect existing clusters.
 
-Sources
--------
+Configuration sources
+---------------------
 
-**Client-side configuration sources, in order of precedence**
+Client-side configuration sources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. note::
 
-  Client-side configuration sources take precedence over server-side configuration sources.
   ``allowed_clouds`` and ``admin_policy`` are ignored if specified in client configuration sources.
 
-1. CLI argument
-When using SkyPilot CLI, you can pass optional configuration arguments to the CLI using the ``--config`` flag.
+.. _config-client-cli-flag:
+
+**CLI flag**
+
+You can pass configuration arguments to the CLI using the ``--config`` flag.
+
 ``--config`` flag can either be a path to a YAML file meeting configuration, or a dotlist of key-value pairs.
-See :ref:`Syntax <syntax>` section for supported fields.
+
+Example:
 
 .. code-block:: bash
+
   # pass a config file
   sky launch --config my_config.yaml ...
   # pass individual config options
@@ -31,15 +37,21 @@ See :ref:`Syntax <syntax>` section for supported fields.
   sky launch --config 'kubernetes.allowed_contexts=[context1,context2]' ...
   sky launch --config 'aws.labels={"map-migrated": "my-value", "Owner": "user-unique-name"}' ...
 
-1. Job / Task YAML
-When using a YAML file to launch a job or a task, you can specify an inline configuration options in the YAML file.
+.. _config-client-job-task-yaml:
 
-Following fields are supported in task YAML configuration options:
-- :ref:`docker.run_options <config-yaml-docker-run-options>`
-- :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
-- :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`
-- :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
-- :ref:`gcp.managed_instance_group <config-yaml-gcp-managed-instance-group>`
+**Job / Task YAML**
+
+You can specify inline configuration options in task or job YAML files.
+
+Following fields are supported in task or job YAML inline configuration:
+
+* :ref:`docker.run_options <config-yaml-docker-run-options>`
+* :ref:`nvidia_gpus.disable_ecc <config-yaml-nvidia-gpus-disable-ecc>`
+* :ref:`kubernetes.pod_config <config-yaml-kubernetes-pod-config>`
+* :ref:`kubernetes.provision_timeout <config-yaml-kubernetes-provision-timeout>`
+* :ref:`gcp.managed_instance_group <config-yaml-gcp-managed-instance-group>`
+
+Example:
 
 .. code-block:: yaml
 
@@ -55,37 +67,60 @@ Following fields are supported in task YAML configuration options:
     nvidia_gpus:
       disable_ecc: ...
 
-1. Project Configuration
-SkyPilot looks for ``$pwd/.sky.yaml`` to configure project-level defaults.
-To change the location of the project configuration file, set the ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
-See :ref:`Syntax <syntax>` section for supported fields.
+.. _config-client-project-config:
 
-1. User Configuration
-SkyPilot looks for ``~/.sky/config.yaml`` to configure user-level defaults.
-To change the location of the user configuration file, set the ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
-See :ref:`Syntax <syntax>` section for supported fields.
+**Project Configuration**
 
-**Server-side configuration sources, in order of precedence**
+SkyPilot looks for ``$pwd/.sky.yaml`` to find project configuration.
 
-1. Project Configuration
-SkyPilot looks for ``$pwd/.sky.yaml`` to configure project-level defaults.
-To change the location of the project configuration file, set the ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
-See :ref:`Syntax <syntax>` section for supported fields.
+To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
 
-1. User Configuration
-SkyPilot looks for ``~/.sky/config.yaml`` to configure user-level defaults.
-To change the location of the user configuration file, set the ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
-See :ref:`Syntax <syntax>` section for supported fields.
+.. _config-client-user-config:
+
+**User Configuration**
+
+SkyPilot looks for ``~/.sky/config.yaml`` to find user configuration.
+
+To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
+
+Server-side configuration sources
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. _config-server-project-config:
+
+**Project Configuration**
+
+SkyPilot looks for ``$pwd/.sky.yaml`` to find project configuration.
+
+To specify a different file, set ``SKYPILOT_PROJECT_CONFIG`` environment variable to the desired path.
+
+.. _config-server-user-config:
+
+**User Configuration**
+
+SkyPilot looks for ``~/.sky/config.yaml`` to find user configuration.
+
+To specify a different file, set ``SKYPILOT_USER_CONFIG`` environment variable to the desired path.
 
 
-Configuration Overrides
-----------------------
+Configuration overrides
+-----------------------
 
-If the same configuration field is specified in multiple configuration sources, configuration is combined according to precedence.
+If the same configuration field is specified in multiple configuration sources, configuration is combined according to following precedence:
 
-If a client has the following user-level config file:
+**TODO change this to an actual diagram about config precedence**
+
+.. image:: ../images/skypilot-abstractions-long-2.png
+    :width: 90%
+    :align: center
+
+
+| Example:
+
+If a SkyPilot server is configured with the following user-level config file:
+
 .. code-block:: yaml
-  # user config specified in ~/.sky/config.yaml
+
   kubernetes:
     allowed_contexts: [context1, context2]
     provision_timeout: 600
@@ -95,9 +130,10 @@ If a client has the following user-level config file:
       Owner: user-unique-name
 
 And the following project-level config file:
+
 .. code-block:: yaml
-  # project config specified in $pwd/.sky.yaml
-  # project config has precedence over user config
+
+  # project-level config has precedence over user-level config
   kubernetes:
     allowed_contexts: [context3, context4]
     provision_timeout: 300
@@ -106,7 +142,9 @@ And the following project-level config file:
       Owner: project-unique-name
 
 The combined configuration is:
+
 .. code-block:: yaml
+
   kubernetes:
     # lists are overridden by config sources with higher precedence
     allowed_contexts: [context3, context4]
@@ -117,6 +155,8 @@ The combined configuration is:
       labels:
         map-migrated: my-value
         Owner: project-unique-name
+
+.. _config-yaml-syntax:
 
 Syntax
 ------
