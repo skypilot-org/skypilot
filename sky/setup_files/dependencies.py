@@ -53,8 +53,7 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'omegaconf',
-    'fugue >= 0.9.0',
+    'omegaconf>=2.4.0dev3,<2.5',
 ]
 
 local_ray = [
