@@ -112,14 +112,39 @@ def _recursive_update(
         disallowed_override_keys: Optional[List[Tuple[str,
                                                       ...]]] = None) -> Config:
     """Recursively updates base configuration with override configuration"""
+
+    def _update_k8s_config(
+        base_config: Config,
+        override_config: Dict[str, Any],
+        allowed_override_keys: Optional[List[Tuple[str, ...]]] = None,
+        disallowed_override_keys: Optional[List[Tuple[str,
+                                                      ...]]] = None) -> Config:
+        """Updates the top-level k8s config with the override config."""
+        for key, value in override_config.items():
+            (next_allowed_override_keys, next_disallowed_override_keys
+            ) = _check_allowed_and_disallowed_override_keys(
+                key, allowed_override_keys, disallowed_override_keys)
+            if key in ['custom_metadata', 'pod_config'] and key in base_config:
+                merge_k8s_configs(base_config[key], value,
+                                  next_allowed_override_keys,
+                                  next_disallowed_override_keys)
+            elif (isinstance(value, dict) and key in base_config and
+                  isinstance(base_config[key], dict)):
+                _recursive_update(base_config[key], value,
+                                  next_allowed_override_keys,
+                                  next_disallowed_override_keys)
+            else:
+                base_config[key] = value
+        return base_config
+
     for key, value in override_config.items():
         (next_allowed_override_keys, next_disallowed_override_keys
         ) = _check_allowed_and_disallowed_override_keys(
             key, allowed_override_keys, disallowed_override_keys)
         if key == 'kubernetes' and key in base_config:
-            merge_k8s_configs(base_config[key], value,
-                              next_allowed_override_keys,
-                              next_disallowed_override_keys)
+            _update_k8s_config(base_config[key], value,
+                               next_allowed_override_keys,
+                               next_disallowed_override_keys)
         elif (isinstance(value, dict) and key in base_config and
               isinstance(base_config[key], dict)):
             _recursive_update(base_config[key], value,
