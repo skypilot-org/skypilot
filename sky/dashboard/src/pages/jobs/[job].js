@@ -95,7 +95,7 @@ function JobDetails() {
     setIsRefreshing(true);
     try {
       // Trigger job data refresh
-      setRefreshTrigger(prev => prev + 1);
+      setRefreshTrigger((prev) => prev + 1);
       // Wait a short time to show the refresh indicator
       await new Promise((resolve) => setTimeout(resolve, 1000));
     } catch (error) {
@@ -107,11 +107,11 @@ function JobDetails() {
 
   // Individual refresh handlers for logs
   const handleLogsRefresh = () => {
-    setLogsRefreshKey(prev => prev + 1);
+    setLogsRefreshKey((prev) => prev + 1);
   };
 
   const handleControllerLogsRefresh = () => {
-    setControllerLogsRefreshKey(prev => prev + 1);
+    setControllerLogsRefreshKey((prev) => prev + 1);
   };
 
   if (!router.isReady) {
@@ -139,7 +139,10 @@ function JobDetails() {
         </div>
 
         <div className="text-sm flex items-center">
-          {(loading || isRefreshing || isLoadingLogs || isLoadingControllerLogs) && (
+          {(loading ||
+            isRefreshing ||
+            isLoadingLogs ||
+            isLoadingControllerLogs) && (
             <div className="flex items-center mr-4">
               <CircularProgress size={15} className="mt-0" />
               <span className="ml-2 text-gray-500">Loading...</span>
@@ -189,13 +192,18 @@ function JobDetails() {
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Logs</h3>
-                <Tooltip content="Refresh logs" className="text-muted-foreground">
+                <Tooltip
+                  content="Refresh logs"
+                  className="text-muted-foreground"
+                >
                   <button
                     onClick={handleLogsRefresh}
                     disabled={isLoadingLogs}
                     className="text-sky-blue hover:text-sky-blue-bright flex items-center"
                   >
-                    <RotateCwIcon className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                    <RotateCwIcon
+                      className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                    />
                   </button>
                 </Tooltip>
               </div>
@@ -218,13 +226,18 @@ function JobDetails() {
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
                 <h3 className="text-lg font-semibold">Controller Logs</h3>
-                <Tooltip content="Refresh controller logs" className="text-muted-foreground">
+                <Tooltip
+                  content="Refresh controller logs"
+                  className="text-muted-foreground"
+                >
                   <button
                     onClick={handleControllerLogsRefresh}
                     disabled={isLoadingControllerLogs}
                     className="text-sky-blue hover:text-sky-blue-bright flex items-center"
                   >
-                    <RotateCwIcon className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`} />
+                    <RotateCwIcon
+                      className={`w-4 h-4 ${isLoadingControllerLogs ? 'animate-spin' : ''}`}
+                    />
                   </button>
                 </Tooltip>
               </div>
@@ -257,7 +270,7 @@ function JobDetailsContent({
   setIsLoadingLogs,
   setIsLoadingControllerLogs,
   isLoadingLogs,
-  isLoadingControllerLogs
+  isLoadingControllerLogs,
 }) {
   const [logs, setLogs] = useState([]);
   const [controllerLogs, setControllerLogs] = useState([]);

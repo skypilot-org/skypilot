@@ -76,7 +76,7 @@ export function JobDetailPage() {
   const [isRefreshingLogs, setIsRefreshingLogs] = useState(false);
 
   const handleRefreshLogs = () => {
-    setIsRefreshingLogs(prev => !prev);
+    setIsRefreshingLogs((prev) => !prev);
     setLogs([]);
   };
 
@@ -112,7 +112,7 @@ export function JobDetailPage() {
   // Handle manual refresh
   const handleManualRefresh = async () => {
     setIsRefreshing(true);
-    setIsRefreshingLogs(prev => !prev);
+    setIsRefreshingLogs((prev) => !prev);
     setLogs([]);
     try {
       if (refreshData) {
@@ -175,34 +175,51 @@ export function JobDetailPage() {
               <div className="p-4">
                 <div className="grid grid-cols-2 gap-6">
                   <div>
-                    <div className="text-gray-600 font-medium text-base">Job ID</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Job ID
+                    </div>
                     <div className="text-base mt-1">{jobData.id}</div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">Job Name</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Job Name
+                    </div>
                     <div className="text-base mt-1">{jobData.job}</div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">User</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      User
+                    </div>
                     <div className="text-base mt-1">{jobData.user}</div>
                   </div>
                   <div>
-                    <div className="text-gray-600 font-medium text-base">Status</div>
+                    <div className="text-gray-600 font-medium text-base">
+                      Status
+                    </div>
                     <div className="text-base mt-1">
                       <Status2Icon status={jobData.status} />
                     </div>
                   </div>
                   {jobData.resources && (
                     <div>
-                      <div className="text-gray-600 font-medium text-base">Resources</div>
-                      <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Resources
+                      </div>
+                      <div className="text-base mt-1">
+                        {jobData.resources || 'N/A'}
+                      </div>
                     </div>
                   )}
                   {jobData.cluster && (
                     <div>
-                      <div className="text-gray-600 font-medium text-base">Cluster</div>
+                      <div className="text-gray-600 font-medium text-base">
+                        Cluster
+                      </div>
                       <div className="text-base mt-1">
-                        <Link href={`/clusters/${jobData.cluster}`} className="text-sky-blue hover:underline">
+                        <Link
+                          href={`/clusters/${jobData.cluster}`}
+                          className="text-sky-blue hover:underline"
+                        >
                           {jobData.cluster}
                         </Link>
                       </div>
@@ -218,13 +235,18 @@ export function JobDetailPage() {
             <Card>
               <div className="flex items-center justify-between px-4 pt-4">
                 <h2 className="text-lg font-semibold">Logs</h2>
-                <Tooltip content="Refresh logs" className="text-muted-foreground">
+                <Tooltip
+                  content="Refresh logs"
+                  className="text-muted-foreground"
+                >
                   <button
                     onClick={handleRefreshLogs}
                     disabled={isLoadingLogs}
                     className="text-sky-blue hover:text-sky-blue-bright flex items-center"
                   >
-                    <RotateCwIcon className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+                    <RotateCwIcon
+                      className={`w-4 h-4 ${isLoadingLogs ? 'animate-spin' : ''}`}
+                    />
                   </button>
                 </Tooltip>
               </div>

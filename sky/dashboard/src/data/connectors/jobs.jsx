@@ -192,7 +192,10 @@ export async function streamManagedJobLogs({
   const result = await Promise.race([fetchPromise, timeoutPromise]);
   // If we timed out, just return silently without throwing an error
   if (result.timeout) {
-    showToast(`Log request for job ${jobId} timed out after ${timeout}ms`, 'error');
+    showToast(
+      `Log request for job ${jobId} timed out after ${timeout}ms`,
+      'error'
+    );
     return;
   }
 }
