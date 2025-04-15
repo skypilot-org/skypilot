@@ -53,8 +53,8 @@ install_requires = [
     'aiofiles',
     'httpx',
     'setproctitle',
-    'antlr4-python3-runtime == 4.9.3',
-    'omegaconf == 2.3.0',
+    'omegaconf',
+    'fugue >= 0.9.0',
 ]
 
 local_ray = [
