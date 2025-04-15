@@ -71,7 +71,7 @@ jobs:
           commit: "${{ github.sha }}"
           message: "nightly-build-pypi"
           ignore_pipeline_branch_filter: true
-          build_env_vars: '{"ARGS": "--aws -k test_minimal"}'
+          build_env_vars: '{"ARGS": "--aws"}'
 
   extract-build-number:
     needs: nightly-build-pypi
