@@ -88,12 +88,12 @@ def main():
         print('Both load balancers have been launched successfully.')
     else:
         print('Skipping load balancer launch.')
-        sky_sgl_enhanced_ip, sgl_ip = None, None
-        for c in ct:
-            if c['name'] == sky_sgl_enhanced_cluster:
-                sky_sgl_enhanced_ip = c['handle'].head_ip
-            elif c['name'] == sgl_cluster:
-                sgl_ip = c['handle'].head_ip
+    sky_sgl_enhanced_ip, sgl_ip = None, None
+    for c in ct:
+        if c['name'] == sky_sgl_enhanced_cluster:
+            sky_sgl_enhanced_ip = c['handle'].head_ip
+        elif c['name'] == sgl_cluster:
+            sgl_ip = c['handle'].head_ip
 
     endpoints = [
         f'{sgl_ip}:9001', f'{sky_sgl_enhanced_ip}:9002',

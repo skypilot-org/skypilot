@@ -92,15 +92,18 @@ def launch_cluster(replica_id: int,
                 r.copy(**resources_override) for r in resources
             ]
             task.set_resources(type(resources)(overrided_resources))
-        # Sort resources by string representation and select one based on
-        # replica_id. TODO(tian): Hack. Fix it.
-        sorted_resources = sorted(
-            str(r.to_yaml_config()) for r in task.resources)
-        selected_idx = replica_id % len(sorted_resources)
-        task.set_resources([
-            r for r in task.resources
-            if str(r.to_yaml_config()) == sorted_resources[selected_idx]
-        ])
+        selected_idx = (replica_id - 1) % len(task.resources)
+        if isinstance(task.resources, set):
+            # Sort resources by string representation and select one based on
+            # replica_id. TODO(tian): Hack. Fix it.
+            sorted_resources = sorted(
+                str(r.to_yaml_config()) for r in task.resources)
+            task.set_resources([
+                r for r in task.resources
+                if str(r.to_yaml_config()) == sorted_resources[selected_idx]
+            ])
+        else:
+            task.set_resources([task.resources[selected_idx]])
         task.update_envs({serve_constants.REPLICA_ID_ENV_VAR: str(replica_id)})
 
         logger.info(f'Launching replica (id: {replica_id}) cluster '
