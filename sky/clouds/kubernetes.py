@@ -47,8 +47,6 @@ class Kubernetes(clouds.Cloud):
     SKY_SSH_KEY_SECRET_NAME = 'sky-ssh-keys'
     SKY_SSH_JUMP_NAME = 'sky-ssh-jump-pod'
 
-    LEGACY_SINGLETON_REGION = 'kubernetes'
-
     # Limit the length of the cluster name to avoid exceeding the limit of 63
     # characters for Kubernetes resources. We limit to 42 characters (63-21) to
     # allow additional characters for creating ingress services to expose ports.
@@ -753,12 +751,6 @@ class Kubernetes(clouds.Cloud):
             instance_type)
 
     def validate_region_zone(self, region: Optional[str], zone: Optional[str]):
-        if region == self.LEGACY_SINGLETON_REGION:
-            # For backward compatibility, we allow the region to be set to the
-            # legacy singleton region.
-            # TODO: Remove this after 0.9.0.
-            return region, zone
-
         if region == kubernetes.in_cluster_context_name():
             # If running incluster, we set region to IN_CLUSTER_REGION
             # since there is no context name available.
