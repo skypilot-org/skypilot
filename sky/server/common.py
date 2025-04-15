@@ -59,25 +59,28 @@ RETRY_COUNT_ON_TIMEOUT = 3
 WAIT_APISERVER_START_TIMEOUT_SEC = 60
 
 VERSION_INFO = (
+    f'{colorama.Style.RESET_ALL}'
+    f'{colorama.Style.DIM}'
     'client version: v{client_version} (API version: v{client_api_version})\n'
-    'server version: v{server_version} (API version: v{server_api_version})')
+    'server version: v{server_version} (API version: v{server_api_version})'
+    f'{colorama.Style.RESET_ALL}')
 LOCAL_SERVER_VERSION_MISMATCH_WARNING = (
     f'{colorama.Fore.YELLOW}Client and local API server version mismatch:\n'
     '{version_info}\n'
-    'Please restart the SkyPilot API server with:\n'
+    f'{colorama.Fore.YELLOW}Please restart the SkyPilot API server with:\n'
     'sky api stop; sky api start'
     f'{colorama.Style.RESET_ALL}')
 CLIENT_TOO_OLD_WARNING = (
     f'{colorama.Fore.YELLOW}Your SkyPilot client is too old:\n'
     '{version_info}\n'
-    'Upgrade your client with:\n'
+    f'{colorama.Fore.YELLOW}Upgrade your client with:\n'
     '{command}'
     f'{colorama.Style.RESET_ALL}')
 REMOTE_SERVER_TOO_OLD_WARNING = (
     f'{colorama.Fore.YELLOW}SkyPilot API server is too old:\n'
     '{version_info}\n'
-    'Contact your administrator to upgrade the remote API server or '
-    'downgrade your local client with:\n'
+    f'{colorama.Fore.YELLOW}Contact your administrator to upgrade the '
+    'remote API server or downgrade your local client with:\n'
     '{command}\n'
     f'{colorama.Style.RESET_ALL}')
 RESTART_LOCAL_API_SERVER_HINT = ('Restart the SkyPilot API server with: '
