@@ -92,7 +92,7 @@ ingress:
   # It is recommended to keep only one endpoint by explicitly setting ingress.nodePortEnabled=false and swtich to ingress-nginx.controller.service.type
   # if you are upgrading from 0.8.0 nightly.
   # Deprecated: use ingress-nginx.controller.service.type=NodePort instead
-  # TODO(aylei): document the migration steps in v0.9.0 release note and remove these fields
+  # TODO(aylei): remove these fields in v0.10.0
   nodePortEnabled: null
   # Specific nodePort to use for the ingress controller
   # If not set, Kubernetes will assign random ports in the NodePort range (default 30000-32767)
