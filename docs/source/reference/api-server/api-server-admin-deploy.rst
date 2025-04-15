@@ -452,6 +452,10 @@ If you are upgrading from an early 0.8.0 nightly with a previously deployed Node
 Alternative: Deploy on cloud VMs
 --------------------------------
 
+.. note::
+
+    VM deployment does not offer failover and graceful upgrading supports. We recommend to use Helm deployment :ref:`sky-api-server-deploy` in production environments.
+
 You can also deploy the API server directly on cloud VMs using an existing SkyPilot installation.
 
 Step 1: Use SkyPilot to deploy the API server on a cloud VM
