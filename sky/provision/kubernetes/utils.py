@@ -3024,7 +3024,7 @@ def get_gpu_resource_key():
     return os.getenv('CUSTOM_GPU_RESOURCE_KEY', default=GPU_RESOURCE_KEY)
 
 
-def _get_kubeconfig_path():
+def _get_kubeconfig_path() -> str:
     """Get the stored path from KUBECONFIG env var
     Currently, specifying multiple KUBECONFIG paths in the envvar is not
     allowed, hence will raise a ValueError.
