@@ -606,24 +606,35 @@ def update_job_status(job_ids: List[int],
                         f'INIT job {job_id} is stale, setting to FAILED_DRIVER')
                     status = JobStatus.FAILED_DRIVER
 
-            if _is_job_driver_process_running(job_pid, job_id):
+            # job_pid is 0 if the job is not submitted yet.
+            # job_pid is -1 if the job is submitted with SkyPilot older than
+            # #4318, using ray job submit. We skip the checking for those
+            # jobs.
+            if job_pid > 0:
+                if _is_job_driver_process_running(job_pid, job_id):
+                    status = JobStatus.PENDING
+                else:
+                    # By default, if the job driver process does not exist,
+                    # the actual SkyPilot job is one of the following:
+                    # 1. Still pending to be submitted.
+                    # 2. Submitted and finished.
+                    # 3. Driver failed without correctly setting the job
+                    #    status in the job table.
+                    # Although we set the status to FAILED_DRIVER, it can be
+                    # overridden to PENDING if the job is not submitted, or
+                    # any other terminal status if the job driver process
+                    # finished correctly.
+                    failed_driver_transition_message = (
+                        f'Job {job_id} driver process is not running, but '
+                        'the job state is not in terminal states, setting '
+                        'it to FAILED_DRIVER')
+                    status = JobStatus.FAILED_DRIVER
+            elif job_pid < 0:
+                # TODO(zhwu): Backward compatibility, remove after 0.10.0.
+                # We set the job status to PENDING instead of actually
+                # checking ray job status and let the status in job table
+                # take effect in the later max.
                 status = JobStatus.PENDING
-            else:
-                # By default, if the job driver process does not exist,
-                # the actual SkyPilot job is one of the following:
-                # 1. Still pending to be submitted.
-                # 2. Submitted and finished.
-                # 3. Driver failed without correctly setting the job
-                #    status in the job table.
-                # Although we set the status to FAILED_DRIVER, it can be
-                # overridden to PENDING if the job is not submitted, or
-                # any other terminal status if the job driver process
-                # finished correctly.
-                failed_driver_transition_message = (
-                    f'Job {job_id} driver process is not running, but '
-                    'the job state is not in terminal states, setting '
-                    'it to FAILED_DRIVER')
-                status = JobStatus.FAILED_DRIVER
 
             pending_job = _get_pending_job(job_id)
             if pending_job is not None:
@@ -869,7 +880,18 @@ def cancel_jobs_encoded_results(jobs: Optional[List[int]],
                 # We don't have to start a daemon to forcefully kill the process
                 # as our job driver process will clean up the underlying
                 # child processes.
-
+            elif job['pid'] < 0:
+                try:
+                    # TODO(zhwu): Backward compatibility, remove after 0.10.0.
+                    # The job was submitted with ray job submit before #4318.
+                    job_client = _create_ray_job_submission_client()
+                    job_client.stop_job(_make_ray_job_id(job['job_id']))
+                except RuntimeError as e:
+                    # If the request to the job server fails, we should not
+                    # set the job to CANCELLED.
+                    if 'does not exist' not in str(e):
+                        logger.warning(str(e))
+                        continue
             # Get the job status again to avoid race condition.
             job_status = get_status_no_lock(job['job_id'])
             if job_status in [
