@@ -230,6 +230,10 @@ def main():
     parser.add_argument('--context',
                         type=str,
                         help='the context to use for the Kubernetes cluster.')
+    parser.add_argument('--async',
+                        dest='async_completion',
+                        action='store_true',
+                        help='do not wait for the GPU labeling to complete.')
     args = parser.parse_args()
     context = None
     if args.context:
@@ -244,7 +248,7 @@ def main():
     if args.cleanup:
         cleanup(context=context)
     else:
-        label(context=context)
+        label(context=context, wait_for_completion=not args.async_completion)
 
 
 if __name__ == '__main__':
