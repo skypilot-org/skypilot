@@ -3025,7 +3025,8 @@ def get_gpu_resource_key():
 
 
 def _get_kubeconfig_path() -> str:
-    """Get the stored path from KUBECONFIG env var
+    """Get the path to the kubeconfig file.
+    Parses `KUBECONFIG` env var if present, else uses the default path.
     Currently, specifying multiple KUBECONFIG paths in the envvar is not
     allowed, hence will raise a ValueError.
     """
