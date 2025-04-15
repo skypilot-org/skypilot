@@ -339,6 +339,14 @@ export function ManagedJobsTable({
       setSelectedStatus('All');
     } else {
       setSelectedStatus(status);
+      // Update activeTab based on the selected status
+      if (status !== 'All') {
+        if (statusGroups.active.includes(status)) {
+          setActiveTab('active');
+        } else if (statusGroups.finished.includes(status)) {
+          setActiveTab('finished');
+        }
+      }
     }
   };
 
