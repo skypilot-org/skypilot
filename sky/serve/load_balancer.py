@@ -175,6 +175,9 @@ class ClientPool:
         self._lock: asyncio.Lock = asyncio.Lock()
         self._use_ie_queue_indicator = use_ie_queue_indicator
 
+    async def re_init_lock(self):
+        self._lock = asyncio.Lock()
+
     async def background_task(self):
         await self._load_balancing_policy.background_task()
 
@@ -920,16 +923,17 @@ class SkyServeLoadBalancer:
                                        for result in conf_results)
                 if total_queue_size <= 0:
                     continue
+                self_num_replicas = len(self._replica_pool.ready_replicas())
                 total_num_replicas = sum(
-                    result.num_replicas for result in conf_results) + len(
-                        self._replica_pool.ready_replicas())
+                    result.num_replicas
+                    for result in conf_results) + self_num_replicas
                 if total_num_replicas <= 0:
                     continue
                 fair_share = total_queue_size // total_num_replicas - sum(
                     (await self._replica_pool.active_requests()).values())
                 if fair_share <= 0:
                     continue
-                fair_share_remaining = fair_share
+                fair_share_remaining = fair_share * self_num_replicas
                 for target, conf_result in zip(steal_targets, conf_results):
                     if fair_share_remaining <= 0:
                         break
@@ -1048,8 +1052,8 @@ class SkyServeLoadBalancer:
                     result = await self._lb_pool.select_replica(
                         entry.request, return_matched_rate=True)
                 except starlette_requests.ClientDisconnect as e:
-                    await self._request_queue.get_and_remove(i)
                     i -= 1
+                    await self._request_queue.get_and_remove(i)
                     entry.set_failed_on(e)
                     continue
                 if isinstance(result, tuple):
@@ -1201,6 +1205,9 @@ class SkyServeLoadBalancer:
             self._loop = asyncio.get_running_loop()
             self._workload_steal_session = aiohttp.ClientSession()
             self._request_queue = QueueWithLock(self._max_queue_size)
+
+            await self._lb_pool.re_init_lock()
+            await self._replica_pool.re_init_lock()
 
             # Register controller synchronization task
             self._tasks.append(
