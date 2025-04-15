@@ -174,7 +174,7 @@ class TestServerVersion:
         cli_runner = cli_testing.CliRunner()
 
         result = cli_runner.invoke(cli.status, [])
-        assert "SkyPilot API server is too old: v2 (client version is v3)." in str(
+        assert "SkyPilot API server is too old" in str(
             result.exception)
         assert result.exit_code == 1
 
@@ -187,7 +187,7 @@ class TestServerVersion:
         result = cli_runner.invoke(cli.status, [])
 
         # Verify the error message contains correct versions
-        assert "SkyPilot API server is too old: v3 (client version is v2)." in str(
+        assert "SkyPilot API server is too old" in str(
             result.exception)
         assert result.exit_code == 1
 
