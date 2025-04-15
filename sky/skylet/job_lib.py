@@ -1008,7 +1008,7 @@ class JobLibCodeGen:
             # Print cancelled IDs. Caller should parse by decoding.
             'print(cancelled, flush=True)',
         ]
-        # TODO(zhwu): Backward compatibility, remove after 0.10.0.
+        # TODO(zhwu): Backward compatibility, remove after 0.12.0.
         if user_hash is None:
             code = [
                 (f'cancelled = job_lib.cancel_jobs_encoded_results('
