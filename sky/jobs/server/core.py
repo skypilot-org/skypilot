@@ -35,6 +35,7 @@ from sky.utils import status_lib
 from sky.utils import subprocess_utils
 from sky.utils import timeline
 from sky.utils import ux_utils
+from sky.utils import controller_utils
 
 if typing.TYPE_CHECKING:
     import sky
@@ -271,54 +272,6 @@ def queue_from_kubernetes_pod(
     return jobs
 
 
-def _maybe_restart_controller(
-        refresh: bool, stopped_message: str, spinner_message: str
-) -> 'cloud_vm_ray_backend.CloudVmRayResourceHandle':
-    """Restart controller if refresh is True and it is stopped."""
-    jobs_controller_type = controller_utils.Controllers.JOBS_CONTROLLER
-    if refresh:
-        stopped_message = ''
-    try:
-        handle = backend_utils.is_controller_accessible(
-            controller=jobs_controller_type, stopped_message=stopped_message)
-    except exceptions.ClusterNotUpError as e:
-        if not refresh:
-            raise
-        handle = None
-        controller_status = e.cluster_status
-
-    if handle is not None:
-        return handle
-
-    sky_logging.print(f'{colorama.Fore.YELLOW}'
-                      f'Restarting {jobs_controller_type.value.name}...'
-                      f'{colorama.Style.RESET_ALL}')
-
-    rich_utils.force_update_status(
-        ux_utils.spinner_message(f'{spinner_message} - restarting '
-                                 'controller'))
-    handle = core.start(cluster_name=jobs_controller_type.value.cluster_name)
-    # Make sure the dashboard is running when the controller is restarted.
-    # We should not directly use execution.launch() and have the dashboard cmd
-    # in the task setup because since we are using detached_setup, it will
-    # become a job on controller which messes up the job IDs (we assume the
-    # job ID in controller's job queue is consistent with managed job IDs).
-    with rich_utils.safe_status(
-            ux_utils.spinner_message('Starting dashboard...')):
-        runner = handle.get_command_runners()[0]
-        runner.run(
-            f'export '
-            f'{skylet_constants.USER_ID_ENV_VAR}={common.SERVER_ID!r}; '
-            f'{managed_job_constants.DASHBOARD_SETUP_CMD}',
-            stream_logs=True,
-        )
-    controller_status = status_lib.ClusterStatus.UP
-    rich_utils.force_update_status(ux_utils.spinner_message(spinner_message))
-
-    assert handle is not None, (controller_status, refresh)
-    return handle
-
-
 @usage_lib.entrypoint
 def queue(refresh: bool,
           skip_finished: bool = False,
@@ -350,11 +303,13 @@ def queue(refresh: bool,
             does not exist.
         RuntimeError: if failed to get the managed jobs with ssh.
     """
-    handle = _maybe_restart_controller(refresh,
-                                       stopped_message='No in-progress '
-                                       'managed jobs.',
-                                       spinner_message='Checking '
-                                       'managed jobs')
+    handle = controller_utils.maybe_restart_controller(
+        controller_utils.Controllers.JOBS_CONTROLLER,
+        refresh,
+        stopped_message='No in-progress '
+        'managed jobs.',
+        spinner_message='Checking '
+        'managed jobs')
     backend = backend_utils.get_backend_from_handle(handle)
     assert isinstance(backend, backends.CloudVmRayBackend)
 
@@ -490,7 +445,8 @@ def tail_logs(name: Optional[str], job_id: Optional[int], follow: bool,
         job_name_or_id_str = f'-n {name}'
     else:
         job_name_or_id_str = ''
-    handle = _maybe_restart_controller(
+    handle = controller_utils.maybe_restart_controller(
+        controller_utils.Controllers.JOBS_CONTROLLER,
         refresh,
         stopped_message=(
             f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
@@ -518,7 +474,8 @@ def start_dashboard_forwarding(refresh: bool = False) -> Tuple[int, int]:
     logger.info('Starting dashboard')
     hint = ('Dashboard is not available if jobs controller is not up. Run '
             'a managed job first or run: sky jobs queue --refresh')
-    handle = _maybe_restart_controller(
+    handle = controller_utils.maybe_restart_controller(
+        controller_utils.Controllers.JOBS_CONTROLLER,
         refresh=refresh,
         stopped_message=hint,
         spinner_message='Checking jobs controller')
@@ -587,7 +544,8 @@ def download_logs(
         job_name_or_id_str = f'-n {name}'
     else:
         job_name_or_id_str = ''
-    handle = _maybe_restart_controller(
+    handle = controller_utils.maybe_restart_controller(
+        controller_utils.Controllers.JOBS_CONTROLLER,
         refresh,
         stopped_message=(
             f'{jobs_controller_type.value.name.capitalize()} is stopped. To '
