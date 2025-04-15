@@ -375,88 +375,84 @@ export function ManagedJobsTable({
 
   return (
     <div className="relative">
-      <Card>
-        <div className="p-4">
-          <div className="flex flex-col space-y-4">
-            {/* Activeness Filter */}
-            <div className="flex items-center text-sm">
-              <span className="mr-2 text-sm font-medium">Activeness:</span>
-              <div className="flex space-x-2">
-                <button
-                  onClick={() => setActiveTab('active')}
-                  className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                    activeTab === 'active'
-                      ? 'bg-green-50 text-green-700'
-                      : 'bg-gray-50 text-gray-600 hover:bg-green-50 hover:text-green-700'
-                  }`}
-                >
-                  <span>ACTIVE</span>
-                  <span
-                    className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
-                    {counts.active}
-                  </span>
-                </button>
-                <button
-                  onClick={() => setActiveTab('finished')}
-                  className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                    activeTab === 'finished'
-                      ? 'bg-blue-50 text-blue-700'
-                      : 'bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-700'
-                  }`}
-                >
-                  <span>FINISHED</span>
-                  <span
-                    className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
-                    {counts.finished}
-                  </span>
-                </button>
-              </div>
-            </div>
-
-            {/* Status Filter */}
-            <div className="flex items-center text-sm">
-              <span className="mr-2 text-sm font-medium">Status:</span>
-              <div className="flex flex-wrap gap-2">
-                <button
-                  onClick={() => handleStatusClick('All')}
-                  className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                    selectedStatus === 'All'
-                      ? 'bg-sky-50 text-sky-700'
-                      : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
-                  }`}
-                >
-                  <span>ALL</span>
-                  <span
-                    className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                  >
-                    {Object.values(statusCounts).reduce((a, b) => a + b, 0)}
-                  </span>
-                </button>
-                {Object.entries(statusCounts).map(([status, count]) => (
-                  <button
-                    key={status}
-                    onClick={() => handleStatusClick(status)}
-                    className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
-                      isStatusHighlighted(status)
-                        ? getBadgeStyle(status)
-                        : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
-                    }`}
-                  >
-                    <span>{status}</span>
-                    <span
-                      className={`text-xs ${isStatusHighlighted(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
-                    >
-                      {count}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
+      <div className="flex flex-col space-y-4 mb-4">
+        {/* Activeness Filter */}
+        <div className="flex items-center text-sm">
+          <span className="mr-2 text-sm font-medium">Activeness:</span>
+          <div className="flex space-x-2">
+            <button
+              onClick={() => setActiveTab('active')}
+              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                activeTab === 'active'
+                  ? 'bg-green-50 text-green-700'
+                  : 'bg-gray-50 text-gray-600 hover:bg-green-50 hover:text-green-700'
+              }`}
+            >
+              <span>ACTIVE</span>
+              <span
+                className={`text-xs ${activeTab === 'active' ? 'bg-green-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+              >
+                {counts.active}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab('finished')}
+              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                activeTab === 'finished'
+                  ? 'bg-blue-50 text-blue-700'
+                  : 'bg-gray-50 text-gray-600 hover:bg-blue-50 hover:text-blue-700'
+              }`}
+            >
+              <span>FINISHED</span>
+              <span
+                className={`text-xs ${activeTab === 'finished' ? 'bg-blue-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+              >
+                {counts.finished}
+              </span>
+            </button>
           </div>
         </div>
-      </Card>
+
+        {/* Status Filter */}
+        <div className="flex items-center text-sm">
+          <span className="mr-2 text-sm font-medium">Status:</span>
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={() => handleStatusClick('All')}
+              className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                selectedStatus === 'All'
+                  ? 'bg-sky-50 text-sky-700'
+                  : 'bg-gray-50 text-gray-600 hover:bg-sky-50 hover:text-sky-700'
+              }`}
+            >
+              <span>ALL</span>
+              <span
+                className={`text-xs ${selectedStatus === 'All' ? 'bg-sky-100' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+              >
+                {Object.values(statusCounts).reduce((a, b) => a + b, 0)}
+              </span>
+            </button>
+            {Object.entries(statusCounts).map(([status, count]) => (
+              <button
+                key={status}
+                onClick={() => handleStatusClick(status)}
+                className={`px-3 py-1 rounded-full flex items-center space-x-2 ${
+                  isStatusHighlighted(status)
+                    ? getBadgeStyle(status)
+                    : 'bg-gray-50 text-gray-600 hover:bg-gray-100'
+                }`}
+              >
+                <span>{status}</span>
+                <span
+                  className={`text-xs ${isStatusHighlighted(status) ? 'bg-white/50' : 'bg-gray-200'} px-1.5 py-0.5 rounded`}
+                >
+                  {count}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      </div>
 
       <Card>
         <Table>
