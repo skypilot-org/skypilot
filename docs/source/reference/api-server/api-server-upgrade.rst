@@ -48,7 +48,7 @@ Step 2: Upgrade the API server and clients
     If you choose not to perform cordon and drain, upgrade has the following behaviors:
     
     * Upgrading the API server will interrupt any pending and ongoing requests on the API server, e.g., ongoining ``sky launch``. Clients can recover ongoing requests by running the same commands again after the new API server starts.
-    * Upgrading only the server or only the client may break the compatibility between them.
+    * Upgrading only the server or only the client may break compatibility between them. In this case, an error will be raised on the client side, with a hint to upgrade the client to the same version as the server.
 
 Upgrade the clients:
 
@@ -76,7 +76,7 @@ Optionally, you can watch the upgrade progress with:
     skypilot-demo-api-server-cf4896bdf-62c96   0/1     Running           0          27s
     skypilot-demo-api-server-cf4896bdf-62c96   1/1     Running           0          50s
 
-The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. The cordon will be removed automatically after the upgrade.
+The upgraded API server is ready to serve requests after the pod becomes running and the ``READY`` column shows ``1/1``. If the API server was cordoned previously, the cordon will be removed automatically after the upgrade.
 
 Step 3: Verify the upgrade
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
