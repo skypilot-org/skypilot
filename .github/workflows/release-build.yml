@@ -150,7 +150,7 @@ jobs:
       organization: "skypilot-1"
       pipeline: "full-smoke-tests-run"
       build_number: ${{ needs.extract-smoke-tests.outputs.build_number }}
-      timeout_minutes: 180
+      timeout_minutes: 240
       fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
