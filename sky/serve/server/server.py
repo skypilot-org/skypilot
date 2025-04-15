@@ -1,13 +1,17 @@
 """Rest APIs for SkyServe."""
 
+import pathlib
+
 import fastapi
 
 from sky import sky_logging
 from sky.serve.server import core
+from sky.server import common as server_common
 from sky.server import stream_utils
 from sky.server.requests import executor
 from sky.server.requests import payloads
 from sky.server.requests import requests as api_requests
+from sky.skylet import constants
 from sky.utils import common
 
 logger = sky_logging.init_logger(__name__)
@@ -117,11 +121,21 @@ async def download_logs(
     request: fastapi.Request,
     download_logs_body: payloads.ServeDownloadLogsBody,
 ) -> None:
+    user_hash = download_logs_body.env_vars[constants.USER_ID_ENV_VAR]
+    timestamp = sky_logging.get_run_timestamp()
+    logs_dir_on_api_server = (
+        pathlib.Path(server_common.api_server_user_logs_dir_prefix(user_hash)) /
+        'service' / f'{download_logs_body.service_name}_{timestamp}')
+    logs_dir_on_api_server.mkdir(parents=True, exist_ok=True)
+    # We should reuse the original request body, so that the env vars, such as
+    # user hash, are kept the same.
+    download_logs_body.local_dir = str(logs_dir_on_api_server)
     executor.schedule_request(
         request_id=request.state.request_id,
         request_name='serve.sync_down_logs',
         request_body=download_logs_body,
         func=core.sync_down_logs,
-        schedule_type=api_requests.ScheduleType.LONG,
+        schedule_type=api_requests.ScheduleType.LONG
+        if download_logs_body.refresh else api_requests.ScheduleType.SHORT,
         request_cluster_name=common.SKY_SERVE_CONTROLLER_NAME,
     )
