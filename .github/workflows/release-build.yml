@@ -15,9 +15,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       test_branch: ${{ steps.commit_changes.outputs.test_branch }}
-      smoke_test_build_number: ${{ steps.extract_smoke_test.outputs.smoke_test_build_number }}
-      quicktest_core_build_number: ${{ steps.extract_quicktest.outputs.quicktest_core_build_number }}
-      release_test_build_number: ${{ steps.extract_release_test.outputs.release_test_build_number }}
+      smoke_tests_json: ${{ steps.trigger_smoke_tests.outputs.json }}
+      quicktest_json: ${{ steps.trigger_quicktest_core.outputs.json }}
+      release_test_json: ${{ steps.trigger_release_tests.outputs.json }}
       release_version: ${{ steps.determine_version.outputs.release_version }}
     steps:
       - name: Clone repository
@@ -99,13 +99,6 @@ jobs:
           message: "Release ${{ steps.determine_version.outputs.release_version }}"
           ignore_pipeline_branch_filter: true
 
-      # Extract build number from response JSON
-      - name: Extract smoke tests build number
-        id: extract_smoke_test
-        run: |
-          build_number=$(echo '${{ steps.trigger_smoke_tests.outputs.json }}' | jq -r '.number')
-          echo "smoke_test_build_number=$build_number" >> $GITHUB_OUTPUT
-
       # Trigger Buildkite quicktest-core
       - name: Trigger Quicktest Core
         id: trigger_quicktest_core
@@ -119,13 +112,6 @@ jobs:
           ignore_pipeline_branch_filter: true
           build_env_vars: '{"ARGS": "--base-branch ${{ steps.find_release_branch.outputs.base_branch }}"}'
 
-      # Extract build number from response JSON
-      - name: Extract quicktest core build number
-        id: extract_quicktest
-        run: |
-          build_number=$(echo '${{ steps.trigger_quicktest_core.outputs.json }}' | jq -r '.number')
-          echo "quicktest_core_build_number=$build_number" >> $GITHUB_OUTPUT
-
       # Trigger Buildkite release tests
       - name: Trigger Release Tests
         id: trigger_release_tests
@@ -138,39 +124,51 @@ jobs:
           message: "Release ${{ steps.determine_version.outputs.release_version }}"
           ignore_pipeline_branch_filter: true
 
-      # Extract build number from response JSON
-      - name: Extract release tests build number
-        id: extract_release_test
-        run: |
-          build_number=$(echo '${{ steps.trigger_release_tests.outputs.json }}' | jq -r '.number')
-          echo "release_test_build_number=$build_number" >> $GITHUB_OUTPUT
+  # Call extract-buildkite workflow for each job
+  extract-smoke-tests:
+    needs: release-build
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.release-build.outputs.smoke_tests_json }}
+
+  extract-quicktest:
+    needs: release-build
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.release-build.outputs.quicktest_json }}
+
+  extract-release-test:
+    needs: release-build
+    uses: ./.github/workflows/extract-buildkite.yml
+    with:
+      json_data: ${{ needs.release-build.outputs.release_test_json }}
 
   wait-for-smoke-tests:
-    needs: release-build
+    needs: [release-build, extract-smoke-tests]
     uses: ./.github/workflows/wait-for-buildkite.yml
     with:
       organization: "skypilot-1"
       pipeline: "full-smoke-tests-run"
-      build_number: ${{ needs.release-build.outputs.smoke_test_build_number }}
-      timeout_minutes: 180
+      build_number: ${{ needs.extract-smoke-tests.outputs.build_number }}
+      timeout_minutes: 240
       fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   wait-for-quicktest-core:
-    needs: release-build
+    needs: [release-build, extract-quicktest]
     uses: ./.github/workflows/wait-for-buildkite.yml
     with:
       organization: "skypilot-1"
       pipeline: "quicktest-core"
-      build_number: ${{ needs.release-build.outputs.quicktest_core_build_number }}
+      build_number: ${{ needs.extract-quicktest.outputs.build_number }}
       timeout_minutes: 180
       fail_on_buildkite_failure: false
     secrets:
       BUILDKITE_TOKEN: ${{ secrets.BUILDKITE_TOKEN }}
 
   create-pr:
-    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core]
+    needs: [release-build, wait-for-smoke-tests, wait-for-quicktest-core, extract-release-test]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
@@ -183,9 +181,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TEST_BRANCH: ${{ needs.release-build.outputs.test_branch }}
           RELEASE_VERSION: ${{ needs.release-build.outputs.release_version }}
-          SMOKE_TEST_BUILD: ${{ needs.release-build.outputs.smoke_test_build_number }}
-          QUICKTEST_BUILD: ${{ needs.release-build.outputs.quicktest_core_build_number }}
-          RELEASE_TEST_BUILD: ${{ needs.release-build.outputs.release_test_build_number }}
+          SMOKE_TEST_BUILD: ${{ needs.extract-smoke-tests.outputs.build_number }}
+          QUICKTEST_BUILD: ${{ needs.extract-quicktest.outputs.build_number }}
+          RELEASE_TEST_BUILD: ${{ needs.extract-release-test.outputs.build_number }}
         run: |
           RELEASE_BRANCH="releases/${RELEASE_VERSION}"
 
