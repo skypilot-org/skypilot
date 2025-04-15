@@ -440,16 +440,6 @@ class RayCodeGen:
                 plural = 's' if {num_nodes} > 1 else ''
                 node_str = f'{num_nodes} node{{plural}}'
 
-                # We have this `INFO: Tip:` message only for backward
-                # compatibility, because if a cluster has the old SkyPilot version,
-                # it relies on this message to start log streaming.
-                # This message will be skipped for new clusters, because we use
-                # start_streaming_at for the `Waiting for task resources on`
-                # message.
-                # TODO: Remove this message in v0.9.0.
-                message = ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}INFO: '
-                           'Tip: use Ctrl-C to exit log streaming, not kill '
-                           'the job.{colorama.Style.RESET_ALL}\\n')
                 message += ('{ux_utils.INDENT_SYMBOL}{colorama.Style.DIM}'
                             'Waiting for task resources on '
                            f'{{node_str}}.{colorama.Style.RESET_ALL}')
@@ -608,9 +598,6 @@ class RayCodeGen:
             textwrap.dedent(f"""\
             sky_env_vars_dict = {{}}
             sky_env_vars_dict['{constants.SKYPILOT_NODE_IPS}'] = job_ip_list_str
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_NODE_IPS'] = job_ip_list_str
             sky_env_vars_dict['{constants.SKYPILOT_NUM_NODES}'] = len(job_ip_rank_list)
             """)
         ]
@@ -659,9 +646,6 @@ class RayCodeGen:
         if script is not None:
             script += rclone_flush_script
             sky_env_vars_dict['{constants.SKYPILOT_NUM_GPUS_PER_NODE}'] = {int(math.ceil(num_gpus))!r}
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_NUM_GPUS_PER_NODE'] = {int(math.ceil(num_gpus))!r}
 
             ip = gang_scheduling_id_to_ip[{gang_scheduling_id!r}]
             rank = job_ip_rank_map[ip]
@@ -678,14 +662,8 @@ class RayCodeGen:
                 name_str = f'{{node_name}}, rank={{rank}},'
                 log_path = os.path.expanduser(os.path.join({log_dir!r}, f'{{rank}}-{{node_name}}.log'))
             sky_env_vars_dict['{constants.SKYPILOT_NODE_RANK}'] = rank
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_NODE_RANK'] = rank
 
             sky_env_vars_dict['SKYPILOT_INTERNAL_JOB_ID'] = {self.job_id}
-            # Backward compatibility: Environment starting with `SKY_` is
-            # deprecated. Remove it in v0.9.0.
-            sky_env_vars_dict['SKY_INTERNAL_JOB_ID'] = {self.job_id}
 
             futures.append(run_bash_command_with_log \\
                     .options(name=name_str, {options_str}) \\
