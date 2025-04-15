@@ -401,16 +401,11 @@ export function ManagedJobsTable({
 
   return (
     <div className="relative">
-      <div className="flex flex-col space-y-4 mb-4">
+      <div className="flex flex-col space-y-1 mb-1">
         {/* Combined Status Filter */}
-        <div className="flex flex-wrap items-center text-sm mb-4">
+        <div className="flex flex-wrap items-center text-sm mb-1">
           <span className="mr-2 text-sm font-medium">Statuses:</span>
           <div className="flex flex-wrap gap-2 items-center">
-            {loading && (
-              <div className="flex items-center">
-                <CircularProgress size={12} className="mr-2" />
-              </div>
-            )}
             {!loading && data.length === 0 && !isInitialLoad && (
               <span className="text-gray-500 mr-2">No jobs found</span>
             )}
