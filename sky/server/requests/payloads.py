@@ -32,12 +32,19 @@ else:
 
 logger = sky_logging.init_logger(__name__)
 
+# These non-skypilot environment variables will be updated from the local
+# environment on each request.
+external_env_vars = [
+    'AWS_PROFILE',
+]
+
 
 @annotations.lru_cache(scope='global')
 def request_body_env_vars() -> dict:
     env_vars = {}
     for env_var in os.environ:
-        if env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX):
+        if (env_var.startswith(constants.SKYPILOT_ENV_VAR_PREFIX) or
+                env_var in external_env_vars):
             env_vars[env_var] = os.environ[env_var]
     env_vars[constants.USER_ID_ENV_VAR] = common_utils.get_user_hash()
     env_vars[constants.USER_ENV_VAR] = os.getenv(constants.USER_ENV_VAR,
