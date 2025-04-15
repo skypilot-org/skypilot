@@ -724,6 +724,7 @@ def get_config_schema():
         # Validation may fail if $schema is included.
         if k != '$schema'
     }
+    resources_schema['properties'].pop('ports')
     autostop_schema = {
         'anyOf': [
             {
@@ -765,7 +766,7 @@ def get_config_schema():
                 'type': 'string',
                 'pattern': '^(https|s3|gs|r2|cos)://.+',
                 'required': [],
-            },
+            }
         }
     }
     cloud_configs = {
