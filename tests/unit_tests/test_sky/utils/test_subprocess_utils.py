@@ -67,8 +67,9 @@ def test_single_process(mock_startable, mock_sleep):
     mock_sleep.assert_not_called()
 
 
-def test_multiple_processes(mock_startable, mock_sleep):
+def test_multiple_processes(mock_startable, mock_sleep, mock_cpu_count):
     """Test with multiple processes."""
+    mock_cpu_count.return_value = 16
     processes = [mock_startable() for _ in range(5)]
 
     subprocess_utils.slow_start_processes(processes)
