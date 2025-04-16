@@ -407,32 +407,23 @@ function JobDetailsContent({
         <div className="text-base mt-1">{jobData.name}</div>
       </div>
       <div>
-        <div className="text-gray-600 font-medium text-base">User</div>
-        <div className="text-base mt-1">{jobData.user}</div>
-      </div>
-      <div>
-        <div className="text-sm font-medium text-gray-600">Status</div>
-        <div className="mt-1">
+        <div className="text-gray-600 font-medium text-base">Status</div>
+        <div className="text-base mt-1">
           <StatusBadge status={jobData.status} />
         </div>
+      </div>
+      <div>
+        <div className="text-gray-600 font-medium text-base">User</div>
+        <div className="text-base mt-1">{jobData.user}</div>
       </div>
       <div>
         <div className="text-gray-600 font-medium text-base">Resources</div>
         <div className="text-base mt-1">{jobData.resources || 'N/A'}</div>
       </div>
-      {jobData.cluster && (
-        <div>
-          <div className="text-gray-600 font-medium text-base">Cluster</div>
-          <div className="text-base mt-1">
-            <Link
-              href={`/clusters/${jobData.cluster}`}
-              className="text-sky-blue hover:underline"
-            >
-              {jobData.cluster}
-            </Link>
-          </div>
-        </div>
-      )}
+      <div>
+        <div className="text-gray-600 font-medium text-base">Cluster</div>
+        <div className="text-base mt-1">{jobData.cluster || '-'}</div>
+      </div>
     </div>
   );
 }

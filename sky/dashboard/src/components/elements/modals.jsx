@@ -64,7 +64,7 @@ export function SSHInstructionsModal({ isOpen, onClose, cluster }) {
 
           <div>
             <h3 className="text-sm font-medium mb-2">Additional Information</h3>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-sm text-secondary-foreground">
               Make sure to run{' '}
               <code className="text-sm">sky status {cluster}</code> first to
               have SkyPilot set up the SSH access.
