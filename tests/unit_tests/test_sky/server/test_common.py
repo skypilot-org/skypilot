@@ -23,7 +23,8 @@ def mock_all_dependencies():
         }
 
 
-def test_reload_config_for_new_request(mock_all_dependencies, tmp_path, monkeypatch):
+def test_reload_config_for_new_request(mock_all_dependencies, tmp_path,
+                                       monkeypatch):
     """Test basic functionality with all parameters provided."""
     config_path = tmp_path / 'config.yaml'
     config_path.write_text('''
@@ -38,7 +39,8 @@ allowed_clouds:
         client_command='test_cmd',
         using_remote_api_server=False,
     )
-    assert skypilot_config.get_nested(keys=('allowed_clouds',), default_value=None) == ['aws']
+    assert skypilot_config.get_nested(keys=('allowed_clouds',),
+                                      default_value=None) == ['aws']
     config_path.write_text('''
 allowed_clouds:
   - gcp
@@ -48,4 +50,5 @@ allowed_clouds:
         client_command='test_cmd',
         using_remote_api_server=False,
     )
-    assert skypilot_config.get_nested(keys=('allowed_clouds',), default_value=None) == ['gcp']
+    assert skypilot_config.get_nested(keys=('allowed_clouds',),
+                                      default_value=None) == ['gcp']
