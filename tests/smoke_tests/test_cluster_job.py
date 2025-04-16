@@ -1884,7 +1884,8 @@ def test_min_gpt_kubernetes():
                                        'main.py trainer_config.max_epochs=1')
 
     # Replace any accelerator type with T4 using regex pattern
-    modified_content = re.sub(r'accelerators:\s*\w+', 'accelerators: T4',
+    # This pattern will match any characters after "accelerators:" until the end of the line
+    modified_content = re.sub(r'accelerators:\s*[^\n]+', 'accelerators: T4',
                               modified_content)
 
     # Create a temporary YAML file with the modified content
