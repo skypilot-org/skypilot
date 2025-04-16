@@ -1815,7 +1815,7 @@ def api_login(endpoint: Optional[str] = None) -> None:
     config_path = pathlib.Path(
         skypilot_config.get_user_config_path()).expanduser()
     with filelock.FileLock(config_path.with_suffix('.lock')):
-        if not skypilot_config.loaded():
+        if not config_path.exists():
             config_path.touch()
             config = {'api_server': {'endpoint': endpoint}}
         else:
