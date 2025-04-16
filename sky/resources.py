@@ -1354,11 +1354,18 @@ class Resources:
         return features
 
     @staticmethod
-    def apply_resource_config_aliases(
-            config: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        """Mutatively applies overriding aliases to the passed in config."""
+    def apply_resource_config_aliases(config: Optional[Dict[str, Any]]) -> None:
+        """Mutatively applies overriding aliases to the passed in config.
+
+        Note: Nested aliases are not supported.
+        The preferred way to support nested aliases would be to cast
+        the parsed resource config dictionary to a config_utils.Config object
+        and use the get_, set_, and pop_ nested methods accordingly.
+        However, this approach comes at a significant memory cost as get_
+        and pop_nested create deep copies of the config.
+        """
         if not config:
-            return config
+            return
 
         for alias, canonical in RESOURCE_CONFIG_ALIASES.items():
             if alias in config:
@@ -1368,7 +1375,6 @@ class Resources:
                         f'and {canonical} in config.')
                 config[canonical] = config[alias]
                 del config[alias]
-        return config
 
     @classmethod
     def from_yaml_config(
