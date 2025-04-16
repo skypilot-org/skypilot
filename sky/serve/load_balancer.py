@@ -54,17 +54,23 @@ class StealEntry:
     matched_rate: float
     matched_length: int
     matched_steal_target: bool
+    queue_idx: int
 
     def __lt__(self, other: 'StealEntry') -> bool:
         if self.matched_steal_target:
             if not other.matched_steal_target:
                 return True
+            # If both are steal targets, prioritize the one with higher
+            # match rate.
             return self.matched_rate > other.matched_rate
         if other.matched_steal_target:
             return False
+        # Prioritize requests in the end of the queue if both
+        # are not steal targets.
+        return self.queue_idx > other.queue_idx
         # For non-steal target, we want to keep the high match rate requests
         # to be stolen.
-        return self.matched_rate < other.matched_rate
+        # return self.matched_rate < other.matched_rate
 
 
 @dataclasses.dataclass
@@ -1066,7 +1072,7 @@ class SkyServeLoadBalancer:
                     matched_rate = -1.0
                     matched_length = -1
                 steal_entry = StealEntry(entry.id, matched_rate, matched_length,
-                                         lb == source_lb_url)
+                                         lb == source_lb_url, i)
                 steal_entries.append(steal_entry)
 
             logger.info(
