@@ -19,6 +19,52 @@ def test_nested_config(monkeypatch) -> None:
     }
 
 
+def test_recursive_update_k8s_config():
+    base_config = {
+        'kubernetes': {
+            'allowed_contexts': ['base1', 'base2'],
+            'pod_config': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'cpu': '1',
+                            'memory': '1Gi'
+                        },
+                        'requests': {
+                            'cpu': '0.5'
+                        }
+                    }
+                }]
+            }
+        }
+    }
+    override_config = {
+        'kubernetes': {
+            'allowed_contexts': ['override1', 'override2'],
+            'pod_config': {
+                'containers': [{
+                    'resources': {
+                        'limits': {
+                            'memory': '2Gi',
+                        },
+                        'requests': {
+                            'memory': '1Gi'
+                        }
+                    }
+                }]
+            }
+        }
+    }
+
+    config_utils._recursive_update(base_config, override_config)
+    assert base_config['kubernetes']['allowed_contexts'] == [
+        'override1', 'override2'
+    ]
+    container = base_config['kubernetes']['pod_config']['containers'][0]
+    assert container['resources']['limits'] == {'cpu': '1', 'memory': '2Gi'}
+    assert container['resources']['requests'] == {'cpu': '0.5', 'memory': '1Gi'}
+
+
 def test_merge_k8s_configs_with_container_resources():
     """Test merging Kubernetes configs with container resource specifications."""
     base_config = {
