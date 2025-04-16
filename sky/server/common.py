@@ -436,9 +436,6 @@ def reload_for_new_request(client_entrypoint: Optional[str],
                            client_command: Optional[str],
                            using_remote_api_server: bool):
     """Reload modules, global variables, and usage message for a new request."""
-    # Make sure the logger takes the new environment variables. This is
-    # necessary because the logger is initialized before the environment
-    # variables are set, such as SKYPILOT_DEBUG.
     # This should be called first to make sure the logger is up-to-date.
     sky_logging.reload_logger()
 
