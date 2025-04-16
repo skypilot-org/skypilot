@@ -26,4 +26,4 @@ run: |
     --master_addr=$MASTER_ADDR \
     --master_port=8008 \
     --node_rank=${SKYPILOT_NODE_RANK} \
-    main.py
+    main.py || exit 1
