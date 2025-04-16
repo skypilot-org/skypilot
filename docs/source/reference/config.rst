@@ -208,9 +208,11 @@ Example:
 ``jobs.controller.autostop``
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Configure autostop for the managed jobs controller.
+Configure :ref:`autostop <auto-stop>` for the managed jobs controller.
 
-By default, the jobs controller is autostopped after 10 minutes, except for on Kubernetes, where it is not supported.
+By default, the jobs controller is autostopped after 10 minutes, except on Kubernetes and RunPod, where it is not supported. The controller will be automatically started when a new job is launched.
+
+If you want the controller to automatically terminate instead of autostopping, set ``down: true``. Use this with caution: ``down: true`` can leak clusters if SkyPilot crashes and all job logs will be lost when the controller is terminated.
 
 Example:
 
@@ -229,8 +231,7 @@ Example:
       autostop:
         # Default values:
         idle_minutes: 10  # Set time to idle autostop/autodown.
-        # Warning - down: true could lead to leaks if SkyPilot crashes!
-        down: false  # Use autodown.
+        down: false  # Terminate instead of stopping. Caution: setting this to true will cause logs to be lost and could lead to resource leaks if SkyPilot crashes.
 
 
 .. _config-yaml-allowed-clouds:
