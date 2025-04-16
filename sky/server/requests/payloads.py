@@ -6,7 +6,6 @@ with the backend functions. The benefit of having the default values in the
 payloads is that a user can find the default values in the Restful API docs.
 """
 import getpass
-import json
 import os
 import typing
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -56,20 +55,9 @@ def get_override_skypilot_config_from_client() -> Dict[str, Any]:
     """Returns the override configs from the client."""
     config = skypilot_config.to_dict()
     # Remove the API server config, as we should not specify the SkyPilot
-    # server endpoint on the server side. This avoids the warning below.
+    # server endpoint on the server side. This avoids the warning at
+    # server-side.
     config.pop_nested(('api_server',), default_value=None)
-    ignored_key_values = {}
-    for nested_key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
-        value = config.pop_nested(nested_key, default_value=None)
-        if value is not None:
-            ignored_key_values['.'.join(nested_key)] = value
-    if ignored_key_values:
-        logger.debug(f'The following keys ({json.dumps(ignored_key_values)}) '
-                     'are specified in the client SkyPilot config at '
-                     f'{skypilot_config.loaded_config_path()!r}. '
-                     'This will be ignored. If you want to specify it, '
-                     'please modify it on server side or contact your '
-                     'administrator.')
     return config
 
 

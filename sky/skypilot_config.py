@@ -50,6 +50,7 @@ then:
 """
 import contextlib
 import copy
+import json
 import os
 import pprint
 import threading
@@ -341,10 +342,26 @@ def override_skypilot_config(
         yield
         return
     original_config = _dict
+    override_configs = config_utils.Config(override_configs)
+    disallowed_diff_keys = []
+    for key in constants.SKIPPED_CLIENT_OVERRIDE_KEYS:
+        value = override_configs.pop_nested(key, default_value=None)
+        if (value is not None and
+                value != original_config.get_nested(key, default_value=None)):
+            disallowed_diff_keys.append(key)
+    # Only warn if there is a diff in disallowed override keys, as the client
+    # use the same config file when connecting to a local server.
+    if disallowed_diff_keys:
+        logger.warning(
+            f'The following keys ({json.dumps(disallowed_diff_keys)}) have '
+            'different values in the client SkyPilot config with the server '
+            'and will be ignored. Remove these keys to disable this warning. '
+            'If you want to specify it, please modify it on server side or '
+            'contact your administrator.')
     config = _dict.get_nested(
         keys=tuple(),
         default_value=None,
-        override_configs=override_configs,
+        override_configs=dict(override_configs),
         allowed_override_keys=None,
         disallowed_override_keys=constants.SKIPPED_CLIENT_OVERRIDE_KEYS)
     try:
@@ -366,7 +383,7 @@ def override_skypilot_config(
                 '=== SkyPilot config on API server ===\n'
                 f'{common_utils.dump_yaml_str(dict(original_config))}\n'
                 '=== Your local SkyPilot config ===\n'
-                f'{common_utils.dump_yaml_str(override_configs)}\n'
+                f'{common_utils.dump_yaml_str(dict(override_configs))}\n'
                 f'Details: {e}') from e
     finally:
         _dict = original_config
