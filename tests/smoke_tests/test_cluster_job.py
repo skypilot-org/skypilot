@@ -1889,15 +1889,15 @@ def test_min_gpt_kubernetes():
                               modified_content)
 
     # Create a temporary YAML file with the modified content
-    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as tmp:
-        tmp.write(modified_content)
-        tmp_yaml_path = tmp.name
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.yaml') as f:
+        f.write(modified_content)
+        f.flush()
 
         test = smoke_tests_utils.Test(
             'min_gpt_kubernetes',
             [
                 # Use the temporary YAML file instead of the original
-                f'sky launch -y -c {name} {tmp_yaml_path} --cloud kubernetes',
+                f'sky launch -y -c {name} --cloud kubernetes {f.name}',
                 f'sky logs {name} 1 --status',
             ],
             f'sky down -y {name}',
