@@ -210,9 +210,9 @@ def merge_k8s_configs(
                 merge_k8s_configs(base_config[key][0], value[0],
                                   next_allowed_override_keys,
                                   next_disallowed_override_keys)
-            elif key in ['volumes', 'volumeMounts']:
-                # If the key is 'volumes' or 'volumeMounts', we search for
-                # item with the same name and merge it.
+            elif key in ['volumes', 'volumeMounts', 'initContainers']:
+                # If the key is 'volumes', 'volumeMounts', or 'initContainers',
+                # we search for item with the same name and merge it.
                 for new_volume in value:
                     new_volume_name = new_volume.get('name')
                     if new_volume_name is not None:
@@ -223,10 +223,6 @@ def merge_k8s_configs(
                             merge_k8s_configs(destination_volume, new_volume)
                         else:
                             base_config[key].append(new_volume)
-            elif key in ['initContainers']:
-                # initContainers is a list with no merge key, so we just
-                # replace the base_config list with the override list.
-                base_config[key] = value
             else:
                 base_config[key].extend(value)
         else:
