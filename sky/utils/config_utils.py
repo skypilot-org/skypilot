@@ -223,6 +223,10 @@ def merge_k8s_configs(
                             merge_k8s_configs(destination_volume, new_volume)
                         else:
                             base_config[key].append(new_volume)
+            elif key in ['initContainers']:
+                # initContainers is a list with no merge key, so we just
+                # replace the base_config list with the override list.
+                base_config[key] = value
             else:
                 base_config[key].extend(value)
         else:
