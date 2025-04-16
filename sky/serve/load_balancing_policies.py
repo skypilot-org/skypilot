@@ -3,7 +3,7 @@ import collections
 import random
 import threading
 import typing
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Set
 
 from sky import sky_logging
 
@@ -35,8 +35,7 @@ class LoadBalancingPolicy:
         LB_POLICIES[name] = cls
         if default:
             global DEFAULT_LB_POLICY
-            assert DEFAULT_LB_POLICY is None, (
-                'Only one policy can be default.')
+            assert DEFAULT_LB_POLICY is None, 'Only one policy can be default.'
             DEFAULT_LB_POLICY = name
 
     @classmethod
@@ -58,8 +57,9 @@ class LoadBalancingPolicy:
     def set_ready_replicas(self, ready_replicas: List[str]) -> None:
         raise NotImplementedError
 
-    def select_replica(self, request: 'fastapi.Request') -> Optional[str]:
-        replica = self._select_replica(request)
+    def select_replica(self, request: 'fastapi.Request',
+                       disabled_replicas: Set[str]) -> Optional[str]:
+        replica = self._select_replica(request, disabled_replicas)
         if replica is not None:
             logger.info(f'Selected replica {replica} '
                         f'for request {_request_repr(request)}')
@@ -70,7 +70,8 @@ class LoadBalancingPolicy:
 
     # TODO(tian): We should have an abstract class for Request to
     # compatible with all frameworks.
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_replicas: Set[str]) -> Optional[str]:
         raise NotImplementedError
 
     def pre_execute_hook(self, replica_url: str,
@@ -99,13 +100,16 @@ class RoundRobinPolicy(LoadBalancingPolicy, name='round_robin'):
         self.ready_replicas = ready_replicas
         self.index = 0
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_replicas: Set[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
-        ready_replica_url = self.ready_replicas[self.index]
-        self.index = (self.index + 1) % len(self.ready_replicas)
-        return ready_replica_url
+        while True:
+            ready_replica_url = self.ready_replicas[self.index]
+            self.index = (self.index + 1) % len(self.ready_replicas)
+            if ready_replica_url not in disabled_replicas:
+                return ready_replica_url
 
 
 class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
@@ -127,13 +131,20 @@ class LeastLoadPolicy(LoadBalancingPolicy, name='least_load', default=True):
             for replica in ready_replicas:
                 self.load_map[replica] = self.load_map.get(replica, 0)
 
-    def _select_replica(self, request: 'fastapi.Request') -> Optional[str]:
+    def _select_replica(self, request: 'fastapi.Request',
+                        disabled_replicas: Set[str]) -> Optional[str]:
         del request  # Unused.
         if not self.ready_replicas:
             return None
         with self.lock:
-            return min(self.ready_replicas,
-                       key=lambda replica: self.load_map.get(replica, 0))
+            ready_replicas = sorted(
+                self.ready_replicas,
+                key=lambda replica: self.load_map.get(replica, 0))
+            return next(
+                (replica for replica in ready_replicas
+                 if replica not in disabled_replicas),
+                None,
+            )
 
     def pre_execute_hook(self, replica_url: str,
                          request: 'fastapi.Request') -> None:
