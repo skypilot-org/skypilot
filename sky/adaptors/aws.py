@@ -28,7 +28,6 @@ This is informed by the following boto3 docs:
 
 # pylint: disable=import-outside-toplevel
 
-import functools
 import logging
 import threading
 import time
@@ -67,6 +66,7 @@ def _thread_local_lru_cache(maxsize=32):
     # Create thread-local storage for the LRU cache
     local_cache = _ThreadLocalLRUCache(maxsize)
     return local_cache.cache
+
 
 def _assert_kwargs_builtin_type(kwargs):
     assert all(isinstance(v, (int, float, str)) for v in kwargs.values()), (
