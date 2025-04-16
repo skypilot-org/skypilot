@@ -533,6 +533,7 @@ def test_get_override_skypilot_config_from_client(mock_to_dict, mock_logger):
         # Verify disallowed keys are not trimmed at client-side
         assert result['aws']['security_group'] == 'test-sg'
 
+
 def test_override_skypilot_config(monkeypatch, tmp_path):
     """Test that override_skypilot_config properly restores config and cleans up."""
     os.environ.pop(skypilot_config.ENV_VAR_SKYPILOT_CONFIG, None)
@@ -741,6 +742,7 @@ def test_hierarchical_config(monkeypatch, tmp_path):
     assert skypilot_config.get_nested(('allowed_clouds',),
                                       None) == ['azure', 'kubernetes']
 
+
 @mock.patch('sky.skylet.constants.SKIPPED_CLIENT_OVERRIDE_KEYS',
             [('aws', 'vpc_name')])
 def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
@@ -753,23 +755,15 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
         monkeypatch.setattr(skypilot_config, '_USER_CONFIG_PATH', config_path)
         skypilot_config.safe_reload_config()
 
-        same_configs = {
-            'aws': {
-                'vpc_name': f'{VPC_NAME}',
-            }
-        }
+        same_configs = {'aws': {'vpc_name': f'{VPC_NAME}',}}
         with skypilot_config.override_skypilot_config(same_configs):
-            # No warning should be logged when the override config 
+            # No warning should be logged when the override config
             # is the same as the original config
             mock_logger.warning.assert_not_called()
-        
-        override_configs = {
-            'aws': {
-                'vpc_name': 'override-vpc',
-            }
-        }
+
+        override_configs = {'aws': {'vpc_name': 'override-vpc',}}
         with skypilot_config.override_skypilot_config(override_configs):
-            # Warning should be logged when the override config 
+            # Warning should be logged when the override config
             # is different from the original config
             mock_logger.warning.assert_called_once_with(
                 'The following keys ([["aws", "vpc_name"]]) have different '
@@ -777,4 +771,3 @@ def test_override_skypilot_config_with_disallowed_keys(monkeypatch, tmp_path):
                 'be ignored. Remove these keys to disable this warning. If you '
                 'want to specify it, please modify it on server side or contact '
                 'your administrator.')
-
